@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS: Settings = {
   effort: "medium",
   passes: 1,
   outputStyle: "default",
+  workStyle: "practical",
 };
 
 type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon" | "plugins">> & {

@@ -3,6 +3,7 @@ import { join, resolve, dirname } from "node:path";
 import { platform, machine, homedir, hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { getConfigDir, resolveGitRepository } from "@openharness/core";
+import type { WorkStyle } from "@openharness/core";
 import { loadLocalRules } from "@openharness/personalization";
 import {
   describeHostShellLauncher,
@@ -53,7 +54,8 @@ Carefully consider the reversibility and blast radius of actions. For hard-to-re
  - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
 
 # Tone and style
- - Be concise. Lead with the answer, not the reasoning.
+ - Be practical, calm, and technically direct. Treat the user as a capable collaborator.
+ - Be concise. Lead with the outcome, not a transcript of your reasoning.
  - When referencing code, include file_path:line_number for easy navigation.
  - If you can say it in one sentence, don't use three.`;
 
@@ -166,6 +168,28 @@ export function getDefaultIdentity(): string {
 
 export function getInvariantGuidance(): string {
   return INVARIANT_GUIDANCE;
+}
+
+export function buildWorkStyleSection(style: WorkStyle = "practical"): string {
+  if (style === "efficient") {
+    return `# Work Style: Efficient
+
+- Prefer immediate execution over conversational progress updates.
+- Do not send a preamble before routine tool use.
+- Do not narrate file reads, searches, commands, edits, or validation steps.
+- Send an intermediate user-visible message only when user input or approval is required, a blocker prevents progress, or an important risk must be communicated.
+- When the task is complete, send a concise final answer with the outcome, validation performed, and any remaining issue.
+- This communication style does not reduce investigation, implementation, validation, safety, or permission requirements.`;
+  }
+
+  return `# Work Style: Practical
+
+- For a multi-step task that requires tools, send one short user-visible update before the first tool call of the current user request. Acknowledge the request and state the first meaningful step in one or two sentences.
+- This is a task-level preamble, not tool-by-tool narration. Send it at most once before the first tool call for the current request.
+- Do not send another update merely because you are about to call another tool. Group related investigation, implementation, and validation tools without narrating each call.
+- Send another brief progress update only when the approach materially changes, a meaningful milestone finishes, a blocker or risk changes what happens next, user input is required, or a long-running task has had no visible update for a substantial period.
+- Keep updates concrete and continue working after sending them. Send a separate final answer when the task is complete.
+- This communication style does not reduce investigation, implementation, validation, safety, or permission requirements.`;
 }
 
 export async function getEnvironmentInfo(cwd?: string): Promise<EnvironmentInfo> {
@@ -660,6 +684,7 @@ export async function buildRuntimeSystemPrompt(
     /** Current permission mode; drives the permission-mode guidance section. */
     permissionMode?: PromptPermissionMode;
     fastMode?: boolean;
+    workStyle?: WorkStyle;
     effort?: string;
     passes?: number;
     /**
@@ -692,6 +717,7 @@ export async function buildPromptLayers(
     cwd?: string;
     permissionMode?: PromptPermissionMode;
     fastMode?: boolean;
+    workStyle?: WorkStyle;
     effort?: string;
     passes?: number;
     memoryContent?: string;
@@ -713,6 +739,7 @@ export async function buildPromptLayers(
 
   // Permission-mode guidance (default when unspecified, mirroring Python).
   stable.push(buildPermissionModeSection(options.permissionMode ?? "default"));
+  stable.push(buildWorkStyleSection(options.workStyle ?? "practical"));
 
   if (options.fastMode) {
     stable.push("# Session Mode\nFast mode is enabled. Prefer concise replies, minimal tool use, and quicker progress.");

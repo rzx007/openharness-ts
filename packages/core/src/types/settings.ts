@@ -134,6 +134,9 @@ export interface CustomProviderSettings {
   source?: "models.dev";
 }
 
+/** Controls how much user-visible progress the agent reports while working. */
+export type WorkStyle = "practical" | "efficient";
+
 export interface Settings {
   apiKey?: string;
   model: string;
@@ -157,6 +160,7 @@ export interface Settings {
   daemon?: DaemonConfig;
   theme?: string;
   outputStyle?: string;
+  workStyle?: WorkStyle;
   fastMode?: boolean;
   effort?: "low" | "medium" | "high";
   passes?: number;

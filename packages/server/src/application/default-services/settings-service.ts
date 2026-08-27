@@ -27,6 +27,7 @@ const RUNTIME_RESTART_KEYS = new Set([
   "maxTurns",
   "effort",
   "fastMode",
+  "workStyle",
 ]);
 
 export function createDefaultSettingsService(
@@ -39,6 +40,13 @@ export function createDefaultSettingsService(
     },
     async patch(patch) {
       await readCurrentSettings(ref);
+      if (
+        "workStyle" in patch &&
+        patch.workStyle !== "practical" &&
+        patch.workStyle !== "efficient"
+      ) {
+        throw new Error("Unknown work style. Use practical or efficient.");
+      }
       let effectivePatch = patch;
       if (typeof patch.path === "string" && "value" in patch) {
         const coerced = coerceConfigValue(patch.path, String(patch.value));

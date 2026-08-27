@@ -72,6 +72,7 @@ export type {
   FeishuChannelSettings,
   CustomProviderSettings,
   CustomProviderModelSettings,
+  WorkStyle,
 } from "./types/settings";
 
 export type { UsageSnapshot, CostTracker as ICostTracker } from "./types/usage";

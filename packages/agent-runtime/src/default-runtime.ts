@@ -207,6 +207,7 @@ export async function createOpenHarnessRuntime(
       customPrompt: settings.systemPrompt,
       cwd,
       permissionMode: mode,
+      workStyle: settings.workStyle,
       fastMode: configuration.fastMode ?? settings.fastMode,
       effort: configuration.effort ?? settings.effort,
       passes: settings.passes,

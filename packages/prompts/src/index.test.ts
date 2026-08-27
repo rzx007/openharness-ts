@@ -14,6 +14,7 @@ import {
   formatEnvironmentSection,
   buildRuntimeSystemPrompt,
   buildPermissionModeSection,
+  buildWorkStyleSection,
   buildDelegationSection,
   getEnvironmentInfo,
   loadSoulMd,
@@ -217,6 +218,23 @@ describe("CLAUDE.md upward traversal", () => {
 
 });
 
+describe("buildWorkStyleSection", () => {
+  it("keeps practical updates task-scoped instead of narrating every tool", () => {
+    const section = buildWorkStyleSection("practical");
+    expect(section).toContain("# Work Style: Practical");
+    expect(section).toContain("at most once before the first tool call");
+    expect(section).toContain("not tool-by-tool narration");
+    expect(section).toContain("Do not send another update merely because");
+  });
+
+  it("makes efficient mode execute without routine progress narration", () => {
+    const section = buildWorkStyleSection("efficient");
+    expect(section).toContain("# Work Style: Efficient");
+    expect(section).toContain("Do not send a preamble before routine tool use");
+    expect(section).toContain("does not reduce investigation");
+  });
+});
+
 describe("buildRuntimeSystemPrompt", () => {
   let emptyDir: string;
 
@@ -232,6 +250,13 @@ describe("buildRuntimeSystemPrompt", () => {
     const result = await buildRuntimeSystemPrompt({ cwd: emptyDir });
     expect(result).toContain("# Current Permission Mode");
     expect(result).toContain("Default permission mode is enabled");
+    expect(result).toContain("# Work Style: Practical");
+  });
+
+  it("uses the selected work style", async () => {
+    const result = await buildRuntimeSystemPrompt({ cwd: emptyDir, workStyle: "efficient" });
+    expect(result).toContain("# Work Style: Efficient");
+    expect(result).not.toContain("# Work Style: Practical");
   });
 
   it("permission-mode section changes with the mode", async () => {

@@ -25,6 +25,16 @@ describe("daemon settings", () => {
   it("keeps automatic daemon startup off by default", async () => {
     expect((await loadSettings()).daemon).toEqual({ autoStart: false });
     expect((await loadSettings()).plugins).toEqual({ enabled: true });
+    expect((await loadSettings()).workStyle).toBe("practical");
+  });
+
+  it("loads an explicit efficient work style", async () => {
+    writeFileSync(join(configDir, "settings.json"), JSON.stringify({
+      _formatVersion: 1,
+      workStyle: "efficient",
+    }));
+
+    expect((await loadSettings()).workStyle).toBe("efficient");
   });
 
   it("merges the plugin master switch with project and CLI precedence", async () => {

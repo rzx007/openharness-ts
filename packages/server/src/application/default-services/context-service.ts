@@ -40,6 +40,7 @@ export function createDefaultContextService(ref: DaemonSettingsRef): ContextServ
         customPrompt: settings.systemPrompt,
         cwd,
         permissionMode: settings.permission.mode,
+        workStyle: settings.workStyle,
         fastMode: settings.fastMode,
         effort: settings.effort,
         passes: settings.passes,

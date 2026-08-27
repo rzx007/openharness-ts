@@ -147,6 +147,25 @@ describe("default daemon application services", () => {
     expect(result.restartRuntimes).toBe(true);
   });
 
+  it("updates work style and requests runtime restart", async () => {
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "anthropic" as const,
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        workStyle: "practical" as const,
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    const result = await settings.patch({ workStyle: "efficient" });
+
+    expect(ref.current.workStyle).toBe("efficient");
+    expect(result.restartRuntimes).toBe(true);
+    await expect(settings.patch({ workStyle: "chatty" })).rejects.toThrow("Unknown work style");
+  });
+
   it("resolves a built-in provider model when patching provider without a model", async () => {
     const ref = {
       current: {
