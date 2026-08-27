@@ -231,11 +231,9 @@ async function writeAll(handle: FileHandle, chunk: Uint8Array): Promise<void> {
 }
 
 async function readWithAbort(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: AttachmentStreamReader,
   signal?: AbortSignal,
-): Promise<
-  Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>
-> {
+): Promise<AttachmentStreamReadResult> {
   if (!signal) return reader.read();
   throwIfAborted(signal);
   let abort: (() => void) | undefined;
@@ -251,6 +249,14 @@ async function readWithAbort(
   } finally {
     if (abort) signal.removeEventListener("abort", abort);
   }
+}
+
+type AttachmentStreamReadResult =
+  | { done: false; value: Uint8Array }
+  | { done: true; value?: Uint8Array };
+
+interface AttachmentStreamReader {
+  read(): Promise<AttachmentStreamReadResult>;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
