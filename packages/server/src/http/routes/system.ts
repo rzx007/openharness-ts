@@ -17,7 +17,11 @@ import type {
   SettingsService,
 } from "../../application/index.js";
 import type { DaemonControlService } from "../../application/control/index.js";
-import type { ServerCapabilities } from "@openharness/protocol";
+import {
+  DEFAULT_ATTACHMENT_LIMITS,
+  type AttachmentLimits,
+  type ServerCapabilities,
+} from "@openharness/protocol";
 
 export interface SystemRoutesContext {
   version?: string;
@@ -34,6 +38,7 @@ export interface SystemRoutesContext {
     | "listProjectionDiagnostics"
   >;
   capabilities?: ServerCapabilities;
+  attachmentLimits?: AttachmentLimits;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
@@ -54,6 +59,11 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
               durableChannels: 1,
               backup: 1,
               retention: 1,
+              attachments: 1,
+            },
+            attachments: {
+              limits: context.attachmentLimits ?? DEFAULT_ATTACHMENT_LIMITS,
+              uploadModes: ["single"],
             },
           } satisfies ServerCapabilities),
       ),

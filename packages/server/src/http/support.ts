@@ -50,7 +50,10 @@ export const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
 };
 export const CORS_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
-export const CORS_HEADERS = "authorization, content-type, last-event-id, x-openharness-trace-id";
+export const CORS_HEADERS =
+  "authorization, content-type, last-event-id, x-openharness-filename, x-openharness-trace-id, range, if-none-match";
+export const CORS_EXPOSE_HEADERS =
+  "x-openharness-trace-id, content-range, content-disposition, etag, accept-ranges";
 
 export function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);

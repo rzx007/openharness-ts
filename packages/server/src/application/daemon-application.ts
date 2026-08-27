@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { AgentBackgroundShellHost, Settings } from "@openharness/core";
 import {
@@ -10,8 +10,10 @@ import {
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
-import type { SessionRecord } from "@openharness/protocol";
+import type { AttachmentLimits, SessionRecord } from "@openharness/protocol";
 import {
+  AttachmentApplicationService,
+  AttachmentBlobStore,
   closeExecutionRuntimes,
   executeAutoDream,
   getChildAgentExecutionRegistry,
@@ -66,6 +68,9 @@ import { ApplicationRetentionService } from "./retention/application-retention-s
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
+  attachmentRoot?: string;
+  attachmentLimits?: Partial<AttachmentLimits>;
+  attachments?: AttachmentApplicationService;
   /** 只有默认 Node 组装应设为 true；外部注入的 Store 默认由调用方关闭。 */
   ownsStore?: boolean;
   settings?: Settings;
@@ -89,6 +94,7 @@ export interface DaemonApplicationOptions {
  */
 export interface DurableAgentApplication {
   readonly store: SessionStore;
+  readonly attachments: AttachmentApplicationService;
   readonly sessions: SessionApplicationService;
   readonly queries: SessionQueryService;
   readonly permissions: StorePermissionBroker;
@@ -117,6 +123,7 @@ export interface DurableAgentApplication {
  */
 export class DaemonApplication implements DurableAgentApplication {
   readonly store: SessionStore;
+  readonly attachments: AttachmentApplicationService;
   readonly permissions: StorePermissionBroker;
   readonly backgroundShells: BackgroundShellService;
   readonly sessions: SessionApplicationService;
@@ -173,6 +180,15 @@ export class DaemonApplication implements DurableAgentApplication {
     }, options.ownerHeartbeatMs ?? 5_000);
     this.ownerHeartbeat.unref?.();
     try {
+      this.attachments =
+        options.attachments ??
+        new AttachmentApplicationService({
+          store,
+          blobs: new AttachmentBlobStore({
+            root: options.attachmentRoot ?? join(dirname(store.path), "attachments"),
+          }),
+          limits: options.attachmentLimits,
+        });
       // 上次进程可能是被杀掉的：内存里的 Agent/进程都没了，store 里却还挂着 running。
       // 先把这些半截状态结掉，再对外服务，免得窗口以为还在跑。
       recoverProjectionSettlements(store);
@@ -590,8 +606,10 @@ export class DaemonApplication implements DurableAgentApplication {
        * 4. 提供后台进程相关的查询和操作接口
        */
       // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
-      this.startupRecovery = this.backgroundShells
-        .reconcileActiveTasks(DAEMON_RESTART_TASK_REASON)
+      this.startupRecovery = Promise.all([
+        this.attachments.recover(),
+        this.backgroundShells.reconcileActiveTasks(DAEMON_RESTART_TASK_REASON),
+      ])
         .then(() => recoverInterruptedWorkflows({ workflows: this.workflows }))
         .then(
           () => {

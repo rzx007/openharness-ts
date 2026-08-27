@@ -1,8 +1,12 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
-import { SessionStore } from "@openharness/services";
+import {
+  SessionStore,
+  type AttachmentApplicationService,
+} from "@openharness/services";
 import type { Settings } from "@openharness/core";
+import type { AttachmentLimits } from "@openharness/protocol";
 
 import type { CommandCatalogProvider } from "../commands/commands.js";
 import type { DurableAgentApplication } from "../application/daemon-application.js";
@@ -32,12 +36,14 @@ import {
 } from "../shared/observability.js";
 import {
   CORS_HEADERS,
+  CORS_EXPOSE_HEADERS,
   CORS_METHODS,
   errorResponse,
   normalizeAllowedOrigins,
   type JsonRecord,
 } from "./support.js";
 import { createAuthRoutes } from "./routes/auth.js";
+import { createAttachmentRoutes } from "./routes/attachment.js";
 import { createBackgroundShellRoutes } from "./routes/background-shell.js";
 import { createChannelRoutes } from "./routes/channel.js";
 import { createScheduleRoutes } from "./routes/schedules.js";
@@ -86,6 +92,9 @@ export interface OpenHarnessServerOptions {
   allowedOrigins?: string[];
   store?: SessionStore;
   storePath?: string;
+  attachmentRoot?: string;
+  attachmentLimits?: Partial<AttachmentLimits>;
+  attachments?: AttachmentApplicationService;
   /** 已组装好的应用。传入后，HTTP Server 默认不负责关闭它。 */
   application?: DurableAgentApplication;
   /** 仅在传入 application 时生效；明确让 HTTP Server 随自身一起关闭应用。 */
@@ -145,6 +154,9 @@ export class OpenHarnessHttpServer {
       createDefaultNodeApplication({
         store: options.store,
         storePath: options.storePath,
+        attachmentRoot: options.attachmentRoot,
+        attachmentLimits: options.attachmentLimits,
+        attachments: options.attachments,
         ownsStore: true,
         settings: options.settings,
         getSettings: options.getSettings,
@@ -276,7 +288,7 @@ export class OpenHarnessHttpServer {
         "access-control-allow-origin": origin,
         "access-control-allow-methods": CORS_METHODS,
         "access-control-allow-headers": CORS_HEADERS,
-        "access-control-expose-headers": TRACE_ID_HEADER,
+        "access-control-expose-headers": CORS_EXPOSE_HEADERS,
         "access-control-max-age": "600",
         vary: "Origin",
       };
@@ -308,7 +320,12 @@ export class OpenHarnessHttpServer {
         providerService: this.services.provider,
         modelService: this.services.model,
         control: this.application.control,
+        attachmentLimits: this.application.attachments.limits,
       }),
+    );
+    this.app.route(
+      "/attachments",
+      createAttachmentRoutes(this.application.attachments),
     );
     this.app.route(
       "/memory",

@@ -40,6 +40,7 @@ import {
   getDetachedProcessSupervisor,
   SessionStore,
 } from "@openharness/services";
+import { DEFAULT_ATTACHMENT_LIMITS } from "@openharness/protocol";
 import type {
   CreateDaemonAgent,
   CreateDaemonAgentContext,
@@ -559,6 +560,13 @@ describe("OpenHarnessHttpServer", () => {
       queries: {},
       permissions: {},
       backgroundShells: {},
+      attachments: {
+        limits: DEFAULT_ATTACHMENT_LIMITS,
+        import: vi.fn(),
+        get: vi.fn(),
+        openContent: vi.fn(),
+        delete: vi.fn(),
+      },
       maintenance: {},
       schedules: {},
       control: { runtimeSnapshot },
@@ -589,6 +597,141 @@ describe("OpenHarnessHttpServer", () => {
     });
     await server.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("serves durable authenticated attachments and recovers interrupted imports", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-attachments-e2e-"));
+    const storePath = join(dir, "sessions.db");
+    const token = "attachment-secret";
+    const attachmentLimits = {
+      ...DEFAULT_ATTACHMENT_LIMITS,
+      maxBytesPerFile: 1_024,
+      resumableThresholdBytes: 512,
+    };
+    const interruptedStore = new SessionStore({ path: storePath });
+    interruptedStore.createImportingAttachment({
+      id: "att_interrupted",
+      displayName: "interrupted.bin",
+      stagingName: "att_interrupted.part",
+      createdAt: 1,
+    });
+    interruptedStore.close();
+
+    let first: OpenHarnessHttpServer | undefined;
+    let second: OpenHarnessHttpServer | undefined;
+    try {
+      first = new OpenHarnessHttpServer({
+        storePath,
+        token,
+        attachmentLimits,
+        logger: () => {},
+      });
+      const firstListen = await first.listen();
+
+      const capabilities = await fetch(`${firstListen.url}/capabilities`);
+      expect(capabilities.status).toBe(200);
+      await expect(capabilities.json()).resolves.toMatchObject({
+        features: { attachments: 1 },
+        attachments: {
+          limits: attachmentLimits,
+          uploadModes: ["single"],
+        },
+      });
+      expect(first.store.getAttachment("att_interrupted")).toMatchObject({
+        status: "failed",
+        failureCode: "attachment_storage_failed",
+      });
+
+      const pdf = new TextEncoder().encode("%PDF-1.7\nsame bytes");
+      const unauthorizedUpload = await fetch(`${firstListen.url}/attachments`, {
+        method: "POST",
+        headers: { "x-openharness-filename": "report.pdf" },
+        body: pdf,
+      });
+      expect(unauthorizedUpload.status).toBe(401);
+
+      const upload = async (displayName: string) => {
+        const response = await fetch(`${firstListen.url}/attachments`, {
+          method: "POST",
+          headers: {
+            ...auth(token),
+            "content-type": "image/png",
+            "x-openharness-filename": encodeURIComponent(displayName),
+          },
+          body: pdf,
+        });
+        expect(response.status).toBe(201);
+        return (await response.json()) as {
+          id: string;
+          displayName: string;
+          mediaType: string;
+          sizeBytes: number;
+          sha256: string;
+          status: string;
+        };
+      };
+      const uploaded = await upload("报告.pdf");
+      const duplicate = await upload("副本.pdf");
+      expect(uploaded).toMatchObject({
+        displayName: "报告.pdf",
+        mediaType: "application/pdf",
+        sizeBytes: pdf.byteLength,
+        status: "ready",
+      });
+      expect(duplicate.sha256).toBe(uploaded.sha256);
+      expect(
+        existsSync(
+          join(
+            dir,
+            "attachments",
+            "blobs",
+            uploaded.sha256.slice(0, 2),
+            uploaded.sha256,
+          ),
+        ),
+      ).toBe(true);
+
+      const unauthorizedRead = await fetch(
+        `${firstListen.url}/attachments/${uploaded.id}`,
+      );
+      expect(unauthorizedRead.status).toBe(401);
+
+      const ranged = await fetch(
+        `${firstListen.url}/attachments/${uploaded.id}/content`,
+        { headers: { ...auth(token), range: "bytes=1-3" } },
+      );
+      expect(ranged.status).toBe(206);
+      expect(ranged.headers.get("content-range")).toBe(
+        `bytes 1-3/${pdf.byteLength}`,
+      );
+      expect(new Uint8Array(await ranged.arrayBuffer())).toEqual(
+        pdf.subarray(1, 4),
+      );
+
+      await first.close();
+      first = undefined;
+      second = new OpenHarnessHttpServer({
+        storePath,
+        token,
+        attachmentLimits,
+        logger: () => {},
+      });
+      const secondListen = await second.listen();
+      const restored = await fetch(
+        `${secondListen.url}/attachments/${uploaded.id}`,
+        { headers: auth(token) },
+      );
+      expect(restored.status).toBe(200);
+      await expect(restored.json()).resolves.toMatchObject({
+        id: uploaded.id,
+        sha256: uploaded.sha256,
+        status: "ready",
+      });
+    } finally {
+      await first?.close();
+      await second?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("aggregates application, listener, and SSE close failures after attempting every stage", async () => {
@@ -1145,6 +1288,12 @@ describe("OpenHarnessHttpServer", () => {
         expect(preflight.headers.get("access-control-allow-headers")).toContain(
           "x-openharness-trace-id",
         );
+        expect(preflight.headers.get("access-control-allow-headers")).toContain(
+          "x-openharness-filename",
+        );
+        expect(preflight.headers.get("access-control-allow-headers")).toContain(
+          "range",
+        );
 
         const allowed = await fetch(`${baseUrl}/health`, {
           headers: { origin: "https://desk.example" },
@@ -1155,6 +1304,15 @@ describe("OpenHarnessHttpServer", () => {
         );
         expect(allowed.headers.get("access-control-expose-headers")).toContain(
           "x-openharness-trace-id",
+        );
+        expect(allowed.headers.get("access-control-expose-headers")).toContain(
+          "content-range",
+        );
+        expect(allowed.headers.get("access-control-expose-headers")).toContain(
+          "content-disposition",
+        );
+        expect(allowed.headers.get("access-control-expose-headers")).toContain(
+          "etag",
         );
 
         const denied = await fetch(`${baseUrl}/health`, {
