@@ -10,6 +10,7 @@ import {
 } from "react-resizable-panels"
 
 import { ConversationPane } from "@renderer/components/desktop/conversation-page"
+import { ScopedOperationError } from "@renderer/components/desktop/conversation-page/scoped-operation-errors"
 import { defaultSettingsSection } from "@renderer/components/desktop/settings-page/settings-navigation"
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
@@ -17,7 +18,11 @@ import {
   attachDesktopSessionEvents,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
-import { selectActiveSessionId, selectSessions } from "@renderer/stores/desktop-session/selectors"
+import {
+  selectActiveSessionId,
+  selectProjectOperationError,
+  selectSessions,
+} from "@renderer/stores/desktop-session/selectors"
 import { TitleBar } from "../title-bar"
 import { useDesktopWindowChrome } from "../use-desktop-window-chrome"
 import { MainLayoutContext } from "./main-layout-context"
@@ -48,6 +53,9 @@ export function MainLayout(): React.JSX.Element {
   const sessions = useDesktopSessionStore(selectSessions)
   const activeSessionId = useDesktopSessionStore(selectActiveSessionId)
   const selectedProjectId = useDesktopSessionStore((state) => state.selectedProject?.id ?? null)
+  const selectedProjectOperationError = useDesktopSessionStore((state) =>
+    selectProjectOperationError(state, state.selectedProject?.id ?? null)
+  )
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const refreshSelectedProjectGit = useDesktopSessionStore(
     (state) => state.refreshSelectedProjectGit
@@ -319,7 +327,7 @@ export function MainLayout(): React.JSX.Element {
   )
 
   return (
-    <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-shell text-foreground">
+    <main className="relative flex h-screen min-h-0 flex-col overflow-hidden bg-shell text-foreground">
       <TitleBar
         sidebarOpen={sidebarOpen}
         panelOpen={panelOpen}
@@ -350,6 +358,11 @@ export function MainLayout(): React.JSX.Element {
         onToggleMaximize={toggleMaximize}
         onClose={close}
       />
+      {selectedProjectOperationError ? (
+        <div className="absolute inset-x-4 top-12 z-40 mx-auto w-full max-w-190">
+          <ScopedOperationError error={selectedProjectOperationError} />
+        </div>
+      ) : null}
       <MainLayoutContext.Provider
         value={{
           conversationWorkspace: renderConversationWorkspace(),

@@ -20,7 +20,6 @@ import {
   selectActiveSessionSending,
   selectNewConversationError,
   selectNewConversationSending,
-  selectProjectOperationError,
 } from "@renderer/stores/desktop-session/selectors"
 import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
@@ -68,9 +67,6 @@ function ConversationPane({
   const selectedPermissionMode = useDesktopSessionStore((state) => state.selectedPermissionMode)
   const workspaceMode = useDesktopSessionStore((state) => state.workspaceMode)
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
-  const selectedProjectOperationError = useDesktopSessionStore((state) =>
-    selectProjectOperationError(state, state.selectedProject?.id ?? null)
-  )
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
   const branch = useDesktopSessionStore((state) => state.branch)
   const branches = useDesktopSessionStore((state) => state.branches)
@@ -268,7 +264,6 @@ function ConversationPane({
           selectedProvider={selectedProvider}
           selectedPermissionMode={selectedPermissionMode}
           operationError={newConversationError}
-          projectOperationError={selectedProjectOperationError}
           skillCommands={skillCommands}
           panelOpen={panelOpen}
           onDraftChange={setDraft}
@@ -354,7 +349,6 @@ function ConversationPane({
           ) : (
             <div className="mx-auto mb-5 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-2">
               <ScopedOperationError error={activeSessionError} />
-              <ScopedOperationError error={selectedProjectOperationError} />
               <PendingPromptQueue
                 prompts={pendingPrompts}
                 activeRunId={activeRun?.id}

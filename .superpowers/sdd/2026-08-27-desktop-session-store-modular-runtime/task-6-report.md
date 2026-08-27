@@ -60,3 +60,23 @@
 - 严格 RED/GREEN 聚焦 Vitest：`scoped-operation-errors.test.ts` 与 `selectors.test.ts` 最终 17/17 通过。
 - Desktop 全量 Vitest：35 个测试文件、219 个测试全部通过。
 - Web TypeScript、变更文件 ESLint、`git diff --check` 通过。
+
+## 审查修复第 2 轮：归档会话下的 selected project owner
+
+### RED
+
+- 真实 `MainLayout` 集成回归构造 active archived session 与 selected project failure。修复前 project Alert 仍只在 `ConversationPane` 的非归档 composer 分支，测试 4/4 失败：归档会话无提示、活跃/新会话没有布局 owner、切换项目不能渲染目标错误。
+
+### GREEN
+
+- selected project operation error 上提到与 Sidebar 同生命周期的 `MainLayout`，成为 `_main` 工作区中唯一 owner。
+- `ConversationPane` 和 `NewConversationStart` 已移除 project selector、prop 与 Alert，避免 active/new 页面重复；app scope 继续只由根路由 owner 展示。
+- selector 仍按 `selectedProject.id` 读取 bucket，切换项目不会显示旧项目错误。
+- 复审为 0 Critical / 0 Important / 0 Minor。
+
+### 本轮验证
+
+- 严格 RED 后 GREEN：真实 MainLayout 集成回归 4/4 通过，覆盖归档、活跃、新会话单一展示和项目切换隔离。
+- 相关 selector / scoped error / layout 测试：21/21 通过。
+- Desktop 全量 Vitest：36 个测试文件、223 个测试全部通过。
+- Web TypeScript、变更文件 ESLint、`git diff --check` 通过。

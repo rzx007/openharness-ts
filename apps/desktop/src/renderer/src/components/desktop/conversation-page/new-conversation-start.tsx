@@ -37,7 +37,6 @@ export function NewConversationStart({
   selectedProvider,
   selectedPermissionMode,
   operationError,
-  projectOperationError,
   skillCommands,
   panelOpen,
   onDraftChange,
@@ -66,7 +65,6 @@ export function NewConversationStart({
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
   operationError: string | null
-  projectOperationError: string | null
   skillCommands: ComposerSkillCommand[]
   panelOpen: boolean
   onDraftChange: (value: string) => void
@@ -147,7 +145,6 @@ export function NewConversationStart({
 
         <div className="relative w-full min-w-0">
           <div className="mx-3 mb-2 space-y-2">
-            <ScopedOperationError error={projectOperationError} />
             <ScopedOperationError error={operationError} />
           </div>
           <div className="mx-3 flex h-10 min-w-0 items-center gap-0.5 overflow-hidden rounded-t-2xl bg-muted-foreground/5 px-2.5 pt-1">
