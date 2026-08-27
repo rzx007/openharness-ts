@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopSessionView } from "@shared/session-types"
-import { useDesktopSessionStore } from "../desktop-session-store"
 import { beginOperation, createEmptySessionRuntime } from "./operation-state"
 import {
   selectActiveSessionOpening,
@@ -9,6 +8,9 @@ import {
   selectNewConversationSending,
   selectSessionComposerError,
 } from "./selectors"
+import { resetDesktopSessionStore, sessionRuntime } from "./store-test-fixtures"
+import { useDesktopSessionStore } from "./store"
+import type { DesktopSessionRuntime } from "./types"
 
 function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
   return {
@@ -58,6 +60,10 @@ function resetNewConversationState(): void {
 }
 
 describe("desktop session actions", () => {
+  beforeEach(() => {
+    resetDesktopSessionStore()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -855,5 +861,342 @@ describe("desktop session actions", () => {
 
     resolvePrompt()
     await starting
+  })
+})
+function onlyPendingPromptSubmission(
+  sessionId?: string
+): DesktopSessionRuntime["pendingPromptSubmissions"][string] {
+  const currentSessionId = sessionId ?? useDesktopSessionStore.getState().activeSessionId
+  const submissions = Object.values(
+    currentSessionId
+      ? (
+          useDesktopSessionStore.getState().sessionRuntimes[currentSessionId] ??
+          createEmptySessionRuntime()
+        ).pendingPromptSubmissions
+      : {}
+  )
+  expect(submissions).toHaveLength(1)
+  return submissions[0]!
+}
+
+describe("desktop session store outside-project mode", () => {
+  it("lets the main process allocate the directory for a session without a project id", async () => {
+    const session = {
+      id: "session-outside-project",
+      projectId: "auto-generated-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-08-24\\x1",
+      title: "",
+      model: "deepseek-chat",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const create = vi.fn(async () => session)
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create,
+          open: vi.fn(async () => ({
+            cursor: 0,
+            syncStatus: "connected" as const,
+            session,
+            inputs: [],
+            messages: [],
+            parts: [],
+            runs: [],
+            tasks: [],
+            permissions: [],
+          })),
+          sendPrompt,
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [],
+      archivedSessions: [],
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedModel: "deepseek-chat",
+      selectedProvider: "deepseek",
+      defaultModel: "deepseek-chat",
+      defaultProvider: "deepseek",
+      selectedPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+    })
+
+    await useDesktopSessionStore.getState().startSession("总结今天的安排")
+
+    expect(create).toHaveBeenCalledWith({
+      model: "deepseek-chat",
+      provider: "deepseek",
+      permissionMode: "default",
+    })
+    expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: "session-outside-project",
+      content: "总结今天的安排",
+    })
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      activeSessionId: "session-outside-project",
+      sessions: [
+        {
+          id: "session-outside-project",
+          projectId: "auto-generated-workspace-project",
+          workspaceMode: "outside_project",
+        },
+      ],
+    })
+  })
+
+  it("marks the first prompt as failed when the new session rejects it", async () => {
+    const session = {
+      id: "session-first-prompt-fails",
+      projectId: "auto-generated-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-08-24\\x2",
+      title: "",
+      model: "deepseek-chat",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => ({
+            cursor: 0,
+            syncStatus: "connected" as const,
+            session,
+            inputs: [],
+            messages: [],
+            parts: [],
+            runs: [],
+            tasks: [],
+            permissions: [],
+          })),
+          sendPrompt: vi.fn(async () => {
+            throw new Error("发送失败")
+          }),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [],
+      archivedSessions: [],
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedModel: "deepseek-chat",
+      selectedProvider: "deepseek",
+      defaultModel: "deepseek-chat",
+      defaultProvider: "deepseek",
+      selectedPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+    })
+
+    await expect(useDesktopSessionStore.getState().startSession("第一条消息")).rejects.toThrow(
+      "发送失败"
+    )
+
+    expect(onlyPendingPromptSubmission()).toMatchObject({
+      sessionId: session.id,
+      content: "第一条消息",
+      phase: "failed",
+      error: "发送失败",
+    })
+  })
+
+  it("reconciles local prompt state when reopening a session snapshot", async () => {
+    const view = emptySessionView("session-reopen", 4)
+    view.inputs = [
+      {
+        id: "input-confirmed",
+        sessionId: "session-reopen",
+        seq: 1,
+        delivery: "queue",
+        content: "confirmed",
+        metadata: {},
+        createdAt: 1,
+      },
+    ]
+    view.runs = [
+      {
+        id: "run-finished",
+        sessionId: "session-reopen",
+        inputId: "input-confirmed",
+        status: "interrupted",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ]
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          open: vi.fn(async () => view),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: null,
+      sessionView: null,
+      sessionRuntimes: {
+        "session-reopen": {
+          ...createEmptySessionRuntime(),
+          pendingPromptSubmissions: {
+            "input-confirmed": {
+              id: "input-confirmed",
+              sessionId: "session-reopen",
+              content: "confirmed",
+              createdAt: 1,
+              phase: "accepted",
+              placement: "transcript",
+            },
+          },
+          queuedPromptActions: {
+            "session-reopen:run-finished": {
+              sessionId: "session-reopen",
+              inputId: "input-confirmed",
+              runId: "run-finished",
+              kind: "promote",
+              phase: "acknowledged",
+            },
+          },
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().openSession("session-reopen")
+
+    expect(sessionRuntime("session-reopen").pendingPromptSubmissions).toEqual({})
+    expect(sessionRuntime("session-reopen").queuedPromptActions).toEqual({})
+  })
+
+  it("does not let a late new-session snapshot overwrite a session opened afterward", async () => {
+    const sessionA = emptySessionView("session-a").session
+    const viewA = { ...emptySessionView("session-a", 1), session: sessionA }
+    const viewB = emptySessionView("session-b", 2)
+    let resolveViewA!: (view: DesktopSessionView) => void
+    const open = vi.fn((sessionId: string) =>
+      sessionId === "session-a"
+        ? new Promise<DesktopSessionView>((resolve) => {
+            resolveViewA = resolve
+          })
+        : Promise.resolve(viewB)
+    )
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => sessionA),
+          open,
+          sendPrompt: vi.fn(async () => undefined),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [],
+      archivedSessions: [],
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      selectedModel: "test-model",
+      selectedProvider: null,
+      defaultModel: "test-model",
+      defaultProvider: null,
+      selectedPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+    })
+
+    const starting = useDesktopSessionStore.getState().startSession("start A")
+    await vi.waitFor(() => expect(open).toHaveBeenCalledWith("session-a"))
+    await useDesktopSessionStore.getState().openSession("session-b")
+    resolveViewA(viewA)
+    await starting
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: "session-b",
+      sessionView: { session: { id: "session-b" }, cursor: 2 },
+    })
+  })
+
+  it("keeps the internal xN workspace hidden after opening a session and starting a new one", async () => {
+    const session = {
+      id: "session-outside-project",
+      projectId: "auto-generated-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-08-24\\x1",
+      title: "项目外会话",
+      model: "deepseek-chat",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const close = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          close,
+          open: vi.fn(async () => ({
+            cursor: 0,
+            syncStatus: "connected" as const,
+            session,
+            inputs: [],
+            messages: [],
+            parts: [],
+            runs: [],
+            tasks: [],
+            permissions: [],
+          })),
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      projects: [],
+      sessions: [session],
+      archivedSessions: [],
+      workspaceMode: "project",
+      selectedProject: {
+        id: session.projectId,
+        name: "x1",
+        path: session.cwd,
+        lastOpenedAt: 1,
+        available: true,
+      },
+      defaultModel: "deepseek-chat",
+      defaultProvider: "deepseek",
+      defaultPermissionMode: "default",
+      activeSessionId: null,
+      sessionView: null,
+    })
+
+    await useDesktopSessionStore.getState().openSession(session.id)
+
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      activeSessionId: session.id,
+    })
+
+    await useDesktopSessionStore.getState().startNewConversation()
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      activeSessionId: null,
+      sessionView: null,
+    })
   })
 })
