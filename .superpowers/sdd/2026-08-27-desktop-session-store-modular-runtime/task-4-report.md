@@ -85,3 +85,31 @@
 - `git diff --check` 通过。
 
 审查修复提交：`c7e6124`（`fix(desktop): 防止会话导航 ABA 竞态`）。
+
+## 审查修复第 3 轮
+
+### RED
+
+新增四类确定性回归测试，修复前均暴露问题：
+
+- fork 正在等待时，对当前 primary session 发起 archive 或 delete，IPC 回包前 fork 仍会打开 forked session；
+- archive IPC 失败后，旧 fork 也会重新获得导航资格；
+- 活跃新 session 的 open IPC 失败被公开 `openSession` 吞掉，首条 slash command 仍会被调用；
+- active slash command 的 IPC 失败只写入 runtime operation，尚未迁移的兼容 UI 错误通道仍为空。
+
+### GREEN
+
+- archive/delete 在发起 IPC 前捕获“目标正是当前 primary”的意图并推进 navigation generation。无论成功还是失败，已发起的 fork 都不能再取得旧页面的所有权；成功路径仍按实际当前页面正常清理。
+- 将实际 open 工作收敛为 action 模块内部的 `openPrimarySession`，显式返回 `applied`、`cancelled` 或 `failed`；公开 `openSession` 继续吞掉失败并保持原有调用签名。
+- active create 的 slash command 仅在内部 open 非失败时执行：open 成功可继续，导航取消按带明确 session ID 的后台命令执行且不改回 primary，open 失败则不调用命令。
+- slash command IPC 失败同时保留 `invoke-command` failed operation，并写入现有 `error` 兼容通道；`create-session` 继续保持 acknowledged，不被失败污染。
+
+### 验证
+
+- session actions 定向 Vitest：15/15 通过。
+- 聚焦 Vitest：session actions、session view、旧 store、router 共 60/60 通过。
+- Desktop 全量 `pnpm test`、`pnpm lint` 通过。
+- Web `tsc --noEmit -p tsconfig.web.json --composite false --pretty false` 通过。
+- 相关文件 ESLint 与 `git diff --check` 通过。
+
+审查修复提交：`c1f74ef`（`fix(desktop): 收紧会话打开与删除所有权`）。
