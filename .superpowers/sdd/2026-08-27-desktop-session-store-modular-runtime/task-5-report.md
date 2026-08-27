@@ -79,3 +79,21 @@
 - Desktop 全量 Vitest：33 个测试文件、200 个测试通过。
 - Web TypeScript：`tsc --noEmit -p tsconfig.web.json --composite false` 通过。
 - 本轮修改文件 ESLint、Prettier 与 `git diff --check` 通过。
+
+## 审查修复第 3 轮：后台 create operation 归属
+
+### RED
+
+- create pending 后进入新空白页时，旧 create 在后台完成会把原 `sessionId: null` 的 create operation 直接放入目标 session runtime。因为 SSE 对账只确认同 session operation，该 operation 永久残留。
+
+### GREEN
+
+- 后台迁移分支使用既有 `bindOperationToSession`：先在临时 source runtime 创建原 operation，再以同一稳定 operation ID 绑定到真实 session，最后 acknowledge。首条 submission 保持原有 ID、内容与状态。
+- 新增回归覆盖后台完成时 operation 归属真实 session、当前空白页 runtime 不受污染，以及随后打开目标 session 的 snapshot 会清理该 create operation。
+
+### 本轮验证
+
+- TDD 定向 RED 后 GREEN：`session-actions.test.ts`，20/20 通过。
+- Desktop 全量 Vitest：33 个测试文件、201 个测试通过。
+- Web TypeScript：`tsc --noEmit -p tsconfig.web.json --composite false` 通过。
+- 本轮修改文件 ESLint、Prettier 与 `git diff --check` 通过。

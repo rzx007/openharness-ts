@@ -591,10 +591,12 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               )
             : {
                 source: state.newConversationRuntime,
-                target: beginOperation(
+                target: bindOperationToSession(
+                  beginOperation(createEmptySessionRuntime(), createOperation),
                   state.sessionRuntimes[session.id] ?? createEmptySessionRuntime(),
-                  createOperation
-                ),
+                  promptSubmissionId,
+                  session.id
+                ).target,
               }
           const runtime = firstSubmission
             ? {

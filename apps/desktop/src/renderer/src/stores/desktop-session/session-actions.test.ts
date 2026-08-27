@@ -206,6 +206,55 @@ describe("desktop session actions", () => {
     await newStarting
   })
 
+  it("binds a background create to its session so its later snapshot clears the operation", async () => {
+    const session = emptySessionView("session-background").session
+    let resolveCreate!: (created: DesktopSessionView["session"]) => void
+    const create = vi.fn(
+      () =>
+        new Promise<DesktopSessionView["session"]>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    const open = vi.fn(async (sessionId: string) => emptySessionView(sessionId, 1))
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create,
+          open,
+          sendPrompt: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+        },
+      },
+    })
+    resetNewConversationState()
+
+    const starting = useDesktopSessionStore.getState().startSession("background prompt")
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce())
+    await useDesktopSessionStore.getState().startNewConversation()
+    resolveCreate(session)
+    await starting
+
+    const backgroundRuntime = useDesktopSessionStore.getState().sessionRuntimes[session.id]
+    expect(Object.values(backgroundRuntime?.operations ?? {})).toContainEqual(
+      expect.objectContaining({
+        kind: "create-session",
+        sessionId: session.id,
+        phase: "acknowledged",
+      })
+    )
+    expect(useDesktopSessionStore.getState()).toMatchObject({
+      activeSessionId: null,
+      sending: false,
+      newConversationRuntime: { operations: {} },
+    })
+
+    await useDesktopSessionStore.getState().openSession(session.id)
+
+    expect(
+      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations
+    ).not.toContainEqual(expect.objectContaining({ kind: "create-session" }))
+  })
+
   it("does not let a pending create reclaim a conversation started from another session", async () => {
     const created = emptySessionView("session-created").session
     const source = emptySessionView("session-source").session
