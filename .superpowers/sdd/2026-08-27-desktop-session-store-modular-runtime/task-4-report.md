@@ -62,3 +62,26 @@
 - `git diff --check` 通过。
 
 审查修复提交：`00fcb56`（`fix(desktop): 修复会话动作所有权竞态`）。
+
+## 审查修复第 2 轮
+
+### RED
+
+新增两条确定性回归测试，修复前均失败：
+
+- fork 从 A 发起后，用户依次打开 B 再打开 A，迟到的 fork 仅比较 `activeSessionId` 会误以为仍拥有 A，并额外打开 forked session；
+- 当前页面创建 session 时，open snapshot 若确认了预先建立的 command operation ID，会在 command 执行前将其清掉，随后 invoke 失败无法留下 `invoke-command` failed operation。
+
+### GREEN
+
+- 在 session actions 闭包维护 primary navigation generation。`openSession`、新建/从现有 session 开始会话、拥有新创建页面的 session，以及归档或删除当前页面都会推进 generation。fork 同时捕获 generation 与 active session，回包只在两者都未变化时才导航；因此 A→B→A 不会发生 ABA 抢占。
+- 首条 slash command 不再在 create 成功时预先登记 operation；必要的 primary open 完成后，紧接 `invokeCommand` 前才创建 `invoke-command` operation。这样 snapshot 对账不能先清掉它，成功仍会清除自身，失败只标记该 operation，不污染 create-session。
+
+### 验证
+
+- 聚焦 Vitest：session actions、session view、旧 store、router 共 55/55 通过。
+- Desktop 全量 `pnpm test`、`pnpm lint` 通过。
+- Web `tsc --noEmit -p tsconfig.web.json --composite false --pretty false` 通过。
+- `git diff --check` 通过。
+
+审查修复提交：`c7e6124`（`fix(desktop): 防止会话导航 ABA 竞态`）。
