@@ -80,3 +80,24 @@
 - 相关 selector / scoped error / layout 测试：21/21 通过。
 - Desktop 全量 Vitest：36 个测试文件、223 个测试全部通过。
 - Web TypeScript、变更文件 ESLint、`git diff --check` 通过。
+
+## 审查修复第 3 轮：MainLayout 集成测试真实性
+
+### RED
+
+- 原测试将 `Sidebar`、`ConversationPane` 以及 router 的 `Outlet` 替换为空组件，不能证明三者在同一生产布局树中共同存在。
+- 改造后 router stub 仅承担路由边界职责，并读取 `MainLayoutContext` 挂载真实 workspace；真实 `Sidebar` 与 `ConversationPane` 全部渲染。为验证回归保护，临时移除 `MainLayout` 的 selected-project Alert owner，归档、活跃、新会话和切换项目四项断言均按预期失败（4/4）。
+
+### GREEN
+
+- 集成测试保留真实 `MainLayout`、`Sidebar` 和 `ConversationPane`；只 mock router、面板实现、窗口 chrome、快捷键、utility panel 与主题/store 等外部或重型依赖。
+- 使用完整状态 fixture 覆盖 archived、active、new conversation：每一棵真实树中 selected-project error 都只出现一次。归档断言同时验证只读提示，活跃/新建分别验证真实会话标题与 new conversation composer，三种场景都验证真实 Sidebar 内容。
+- 切换 `selectedProject` 时，旧项目 bucket 不显示、当前项目 bucket 显示；生产逻辑没有改变。
+
+### 本轮验证
+
+- 真实组合的受控 RED 后 GREEN：`main-layout-project-operation-error.test.ts` 4/4 通过。
+- 相关 selector/error/layout 测试：10/10 通过。
+- Desktop 全量 Vitest：36 个测试文件、223 个测试全部通过。
+- Web TypeScript 与变更文件 ESLint 通过。
+- `git diff --check` 通过。
