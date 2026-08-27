@@ -142,4 +142,17 @@ describe("desktop pending prompt state", () => {
     expect(queuedPromptActionConfirmed(view, action)).toBe(true)
     expect(reconcileQueuedPromptActions({ "s1:run-1": action }, view)).toEqual({})
   })
+
+  it("keeps a queued action when the incoming view does not include its run", () => {
+    const action = {
+      sessionId: "s1",
+      inputId: "input-1",
+      runId: "run-missing",
+      kind: "cancel" as const,
+      phase: "pending" as const,
+    }
+
+    expect(reconcileQueuedPromptActions({ "s1:run-missing": action }, emptySessionView("s1")))
+      .toEqual({ "s1:run-missing": action })
+  })
 })

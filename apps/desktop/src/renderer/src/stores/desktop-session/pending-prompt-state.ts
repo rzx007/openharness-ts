@@ -54,7 +54,7 @@ export function reconcileQueuedPromptActions(
     Object.entries(actions).filter(([, action]) => {
       if (action.sessionId !== view.session.id) return true
       const run = view.runs.find((candidate) => candidate.id === action.runId)
-      return run?.status === "pending"
+      return !run || run.status === "pending"
     })
   )
 }
