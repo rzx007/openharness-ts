@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { emptySessionView, resetDesktopSessionStore } from "./store-test-fixtures"
-import { useDesktopSessionStore } from "./store"
+import { attachDesktopSessionEvents, useDesktopSessionStore } from "./store"
 
 beforeEach(() => {
   resetDesktopSessionStore()
@@ -18,6 +18,83 @@ describe("desktop session store composition", () => {
     expect(state.sendMessage).toEqual(expect.any(Function))
     expect(state.promoteQueuedPrompt).toEqual(expect.any(Function))
     expect(state.applySessionUpdate).toEqual(expect.any(Function))
+  })
+})
+
+describe("desktop session store event lifecycle", () => {
+  it("shares subscriptions until the last cleanup and can attach again", () => {
+    const sessionSubscribers = new Set<(view: ReturnType<typeof emptySessionView>) => void>()
+    const daemonSubscribers = new Set<
+      (status: { phase: "ready"; message: string; updatedAt: number }) => void
+    >()
+    const unsubscribeSession = vi.fn()
+    const unsubscribeDaemon = vi.fn()
+    const onUpdated = vi.fn((listener: (view: ReturnType<typeof emptySessionView>) => void) => {
+      sessionSubscribers.add(listener)
+      return () => {
+        unsubscribeSession()
+        sessionSubscribers.delete(listener)
+      }
+    })
+    const onDaemonStatusChanged = vi.fn(
+      (listener: (status: { phase: "ready"; message: string; updatedAt: number }) => void) => {
+        daemonSubscribers.add(listener)
+        return () => {
+          unsubscribeDaemon()
+          daemonSubscribers.delete(listener)
+        }
+      }
+    )
+    const publishSession = (view: ReturnType<typeof emptySessionView>): void => {
+      sessionSubscribers.forEach((listener) => listener(view))
+    }
+    const publishDaemon = (status: {
+      phase: "ready"
+      message: string
+      updatedAt: number
+    }): void => {
+      daemonSubscribers.forEach((listener) => listener(status))
+    }
+    vi.stubGlobal("window", {
+      desktop: { sessions: { onUpdated, onDaemonStatusChanged } },
+    })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+
+    const firstCleanup = attachDesktopSessionEvents()
+    const secondCleanup = attachDesktopSessionEvents()
+
+    expect(onUpdated).toHaveBeenCalledOnce()
+    expect(onDaemonStatusChanged).toHaveBeenCalledOnce()
+
+    publishDaemon({ phase: "ready", message: "connected", updatedAt: 1 })
+    publishSession(emptySessionView("session-1", 1))
+    expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("connected")
+    expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(1)
+
+    firstCleanup()
+    firstCleanup()
+    publishDaemon({ phase: "ready", message: "still connected", updatedAt: 2 })
+    expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("still connected")
+    expect(unsubscribeSession).not.toHaveBeenCalled()
+    expect(unsubscribeDaemon).not.toHaveBeenCalled()
+
+    secondCleanup()
+    publishDaemon({ phase: "ready", message: "detached", updatedAt: 3 })
+    publishSession(emptySessionView("session-1", 3))
+    expect(unsubscribeSession).toHaveBeenCalledOnce()
+    expect(unsubscribeDaemon).toHaveBeenCalledOnce()
+    expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("still connected")
+    expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(1)
+
+    const thirdCleanup = attachDesktopSessionEvents()
+    expect(onUpdated).toHaveBeenCalledTimes(2)
+    expect(onDaemonStatusChanged).toHaveBeenCalledTimes(2)
+    publishDaemon({ phase: "ready", message: "reattached", updatedAt: 4 })
+    expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("reattached")
+
+    thirdCleanup()
+    expect(unsubscribeSession).toHaveBeenCalledTimes(2)
+    expect(unsubscribeDaemon).toHaveBeenCalledTimes(2)
   })
 })
 

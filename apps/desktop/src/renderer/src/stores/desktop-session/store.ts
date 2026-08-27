@@ -3,24 +3,27 @@ import { create } from "zustand"
 import { attachDesktopDaemonStatusEvents, createBootstrapActions } from "./bootstrap-actions"
 import { createInitialState } from "./initial-state"
 import { createProjectActions } from "./project-actions"
+import { createSelectedProjectGitRefreshScheduler } from "./project-git-scheduler"
 import { createPromptActions } from "./prompt-actions"
 import { createQueuedPromptActions } from "./queued-prompt-actions"
 import { createSessionActions } from "./session-actions"
 import { createApplySessionUpdate } from "./session-view-actions"
 import type { DesktopSessionState } from "./types"
 
-const selectedProjectGitRefreshDelayMs = 750
+const selectedProjectGitRefreshScheduler = createSelectedProjectGitRefreshScheduler(
+  (options) => useDesktopSessionStore.getState().refreshSelectedProjectGit(options),
+  750
+)
+let desktopSessionEventSubscriptionCount = 0
+let detachDesktopSessionUpdates: (() => void) | null = null
+let detachDesktopDaemonStatus: (() => void) | null = null
 
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => {
-  let selectedProjectGitRefreshTimer: ReturnType<typeof setTimeout> | null = null
-  const scheduleSelectedProjectGitRefresh = (force: boolean): void => {
-    if (selectedProjectGitRefreshTimer) clearTimeout(selectedProjectGitRefreshTimer)
-    selectedProjectGitRefreshTimer = setTimeout(() => {
-      selectedProjectGitRefreshTimer = null
-      void get().refreshSelectedProjectGit({ force })
-    }, selectedProjectGitRefreshDelayMs)
+  const context = {
+    set,
+    get,
+    scheduleSelectedProjectGitRefresh: selectedProjectGitRefreshScheduler.schedule,
   }
-  const context = { set, get, scheduleSelectedProjectGitRefresh }
 
   return {
     ...createInitialState(),
@@ -34,11 +37,28 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
 })
 
 export function attachDesktopSessionEvents(): () => void {
-  attachDesktopDaemonStatusEvents({
-    set: useDesktopSessionStore.setState,
-    get: useDesktopSessionStore.getState,
-  })
-  return window.desktop.sessions.onUpdated((view) => {
-    useDesktopSessionStore.getState().applySessionUpdate(view)
-  })
+  if (desktopSessionEventSubscriptionCount === 0) {
+    detachDesktopDaemonStatus = attachDesktopDaemonStatusEvents({
+      set: useDesktopSessionStore.setState,
+      get: useDesktopSessionStore.getState,
+    })
+    detachDesktopSessionUpdates = window.desktop.sessions.onUpdated((view) => {
+      useDesktopSessionStore.getState().applySessionUpdate(view)
+    })
+  }
+  desktopSessionEventSubscriptionCount += 1
+
+  let cleanedUp = false
+  return () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    desktopSessionEventSubscriptionCount -= 1
+    if (desktopSessionEventSubscriptionCount > 0) return
+
+    detachDesktopSessionUpdates?.()
+    detachDesktopDaemonStatus?.()
+    detachDesktopSessionUpdates = null
+    detachDesktopDaemonStatus = null
+    selectedProjectGitRefreshScheduler.reset()
+  }
 }

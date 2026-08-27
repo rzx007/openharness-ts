@@ -21,8 +21,6 @@ const initialDaemonStatus: DesktopDaemonStatus = {
   updatedAt: Date.now(),
 }
 
-let daemonStatusEventsAttached = false
-
 export function createInitialDaemonStatus(): DesktopDaemonStatus {
   return initialDaemonStatus
 }
@@ -33,7 +31,6 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
   return {
     async initialize() {
       if (get().loadStatus === "loading" || get().loadStatus === "ready") return
-      attachDesktopDaemonStatusEvents(context)
       const operationId = globalThis.crypto.randomUUID()
       set((state) => ({
         loadStatus: "loading",
@@ -148,10 +145,8 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
   }
 }
 
-export function attachDesktopDaemonStatusEvents(context: DesktopStoreContext): void {
-  if (daemonStatusEventsAttached) return
-  daemonStatusEventsAttached = true
-  window.desktop.sessions.onDaemonStatusChanged((daemonStatus) => {
+export function attachDesktopDaemonStatusEvents(context: DesktopStoreContext): () => void {
+  return window.desktop.sessions.onDaemonStatusChanged((daemonStatus) => {
     context.set({ daemonStatus })
   })
 }
