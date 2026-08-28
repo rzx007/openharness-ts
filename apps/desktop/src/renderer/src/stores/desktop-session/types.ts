@@ -7,6 +7,7 @@ import type {
   DesktopSessionView,
   DesktopWorkspaceMode,
 } from "@shared/session-types"
+import type { DesktopAttachmentSupport } from "@shared/attachment-types"
 import type { StoreApi } from "zustand"
 import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
 
@@ -158,6 +159,7 @@ export interface DesktopSessionState
   sessions: DesktopSessionRecord[]
   archivedSessions: DesktopSessionRecord[]
   models: DesktopModel[]
+  attachmentSupport: DesktopAttachmentSupport
   defaultModel: string | null
   defaultProvider: string | null
   defaultPermissionMode: DesktopPermissionMode

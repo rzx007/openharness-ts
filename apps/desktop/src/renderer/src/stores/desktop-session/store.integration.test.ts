@@ -169,6 +169,7 @@ describe("desktop session store integration races", () => {
         seq: 1,
         delivery: "queue",
         content: "confirmed",
+        attachments: [],
         metadata: {},
         createdAt: 1,
       },

@@ -658,6 +658,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             id: promptSubmissionId,
             sessionId: session.id,
             content: prompt,
+            attachments: [],
           })
           const keepLocalAcknowledgement = get().activeSessionId === session.id
           set((state) => {

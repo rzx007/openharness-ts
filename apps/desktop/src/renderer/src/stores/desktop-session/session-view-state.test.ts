@@ -36,8 +36,9 @@ describe("desktop session view state", () => {
   })
 
   it("ignores a view for a background session", () => {
-    expect(acceptActiveSessionView("s2", emptySessionView("s2", 2), emptySessionView("s1", 3)))
-      .toEqual(emptySessionView("s2", 2))
+    expect(
+      acceptActiveSessionView("s2", emptySessionView("s2", 2), emptySessionView("s1", 3))
+    ).toEqual(emptySessionView("s2", 2))
   })
 
   it("accepts an equal or newer view for the active session", () => {
@@ -100,6 +101,7 @@ describe("desktop session view state", () => {
       seq: 1,
       delivery: "steer",
       content: "first",
+      attachments: [],
       metadata: {},
       createdAt: 1,
     })

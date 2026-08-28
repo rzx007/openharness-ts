@@ -109,6 +109,7 @@ describe("desktop pending prompt state", () => {
       seq: 1,
       delivery: "steer",
       content: "first",
+      attachments: [],
       metadata: {},
       createdAt: 1,
     })
@@ -152,7 +153,8 @@ describe("desktop pending prompt state", () => {
       phase: "pending" as const,
     }
 
-    expect(reconcileQueuedPromptActions({ "s1:run-missing": action }, emptySessionView("s1")))
-      .toEqual({ "s1:run-missing": action })
+    expect(
+      reconcileQueuedPromptActions({ "s1:run-missing": action }, emptySessionView("s1"))
+    ).toEqual({ "s1:run-missing": action })
   })
 })

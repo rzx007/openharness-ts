@@ -52,6 +52,7 @@ describe("desktop session store provider refresh", () => {
 
     expect(useDesktopSessionStore.getState()).toMatchObject({
       models: refreshedBootstrap.models,
+      attachmentSupport: refreshedBootstrap.attachments,
       defaultModel: "deepseek-chat",
       defaultProvider: "deepseek",
       selectedModel: "deepseek-chat",

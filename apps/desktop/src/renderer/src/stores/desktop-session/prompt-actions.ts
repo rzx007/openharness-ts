@@ -76,6 +76,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           id: submission.id,
           sessionId,
           content: prompt,
+          attachments: [],
         })
         const keepLocalAcknowledgement = get().activeSessionId === sessionId
         replaceRuntime(sessionId, (currentRuntime) =>
@@ -151,6 +152,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           sessionId,
           content: prompt,
           sourceMessageId,
+          attachments: [],
         })
         replaceRuntime(sessionId, (currentRuntime) =>
           removeOperation(

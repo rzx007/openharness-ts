@@ -201,6 +201,7 @@ describe("desktop session actions", () => {
       id: expect.any(String),
       sessionId: oldSession.id,
       content: "old prompt",
+      attachments: [],
     })
 
     createResolvers[1]!(newSession)
@@ -1244,6 +1245,7 @@ describe("desktop session store outside-project mode", () => {
       id: expect.any(String),
       sessionId: "session-outside-project",
       content: "总结今天的安排",
+      attachments: [],
     })
     expect(useDesktopSessionStore.getState()).toMatchObject({
       workspaceMode: "outside_project",
@@ -1329,6 +1331,7 @@ describe("desktop session store outside-project mode", () => {
         seq: 1,
         delivery: "queue",
         content: "confirmed",
+        attachments: [],
         metadata: {},
         createdAt: 1,
       },

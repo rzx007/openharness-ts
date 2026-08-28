@@ -34,6 +34,7 @@ function viewContainingInput(
         seq: 1,
         delivery: "queue",
         content: "confirmed",
+        attachments: [],
         metadata: {},
         createdAt: 1,
       },
@@ -384,6 +385,7 @@ describe("desktop session store prompt intent boundaries", () => {
       id: expect.any(String),
       sessionId: "session-1",
       content: "new request",
+      attachments: [],
     })
     expect(editLatestPrompt).not.toHaveBeenCalled()
   })
@@ -539,6 +541,7 @@ describe("desktop session store prompt intent boundaries", () => {
           seq: 1,
           delivery: "queue",
           content: "first request",
+          attachments: [],
           metadata: {},
           createdAt: 1,
         },
@@ -575,6 +578,7 @@ describe("desktop session store prompt intent boundaries", () => {
           seq: 1,
           delivery: "queue",
           content: "confirmed request",
+          attachments: [],
           metadata: {},
           createdAt: 1,
         },
@@ -627,6 +631,7 @@ describe("desktop session store prompt intent boundaries", () => {
       sessionId: "session-1",
       sourceMessageId: "message-1",
       content: "replacement",
+      attachments: [],
     })
   })
 

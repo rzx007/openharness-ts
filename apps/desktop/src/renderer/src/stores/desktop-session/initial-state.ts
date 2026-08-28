@@ -46,6 +46,12 @@ export function createInitialState(): Omit<
     sessions: [],
     archivedSessions: [],
     models: [],
+    attachmentSupport: {
+      daemonSupported: false,
+      interactionEnabled: false,
+      uploadModes: [],
+      limits: null,
+    },
     defaultModel: null,
     defaultProvider: null,
     defaultPermissionMode: "default" as const,

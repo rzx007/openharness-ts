@@ -36,6 +36,12 @@ export const refreshedBootstrap: DesktopBootstrapData = {
   defaultModel: "deepseek-chat",
   defaultProvider: "deepseek",
   defaultPermissionMode: "default",
+  attachments: {
+    daemonSupported: false,
+    interactionEnabled: false,
+    uploadModes: [],
+    limits: null,
+  },
 }
 
 const initialState = useDesktopSessionStore.getState()

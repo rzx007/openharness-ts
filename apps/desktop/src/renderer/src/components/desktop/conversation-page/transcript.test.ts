@@ -27,7 +27,7 @@ describe("visibleTranscriptParts", () => {
 })
 
 function part(
-  type: DesktopSessionPart["type"],
+  type: "text" | "reasoning" | "tool" | "tool_result" | "error" | "log",
   text?: string,
   toolName?: string
 ): DesktopSessionPart {

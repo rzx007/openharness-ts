@@ -14,7 +14,10 @@ import {
   syncEvents,
   type OpenHarnessClientState,
   type ProjectRecord,
+  type SessionAttachmentMessagePartRecord,
+  type SessionMessagePartRecord,
   type SessionRecord,
+  type SessionTransformationMessagePartRecord,
   type SyncEventUpdate,
 } from "@openharness/client"
 import {
@@ -43,6 +46,8 @@ import type {
   DesktopProjectDetails,
   DesktopPermissionMode,
   DesktopSessionRecord,
+  DesktopSessionPart,
+  DesktopStandardSessionPart,
   DesktopSessionView,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
@@ -63,6 +68,7 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
 } from "../../../shared/session-types"
+import { resolveDesktopAttachmentSupport } from "../../../shared/attachment-types"
 import {
   allocateOutsideProjectWorkspace,
   buildOutsideProjectRoot,
@@ -91,11 +97,12 @@ class DesktopSessionService {
    */
   async bootstrap(): Promise<DesktopBootstrapData> {
     const client = await this.getClient()
-    const [settings, providers, allSessions, projectRecords] = await Promise.all([
+    const [settings, providers, allSessions, projectRecords, capabilities] = await Promise.all([
       client.getSettings(),
       client.listModels(),
       client.listSessions({ includeArchived: true, limit: 400 }),
       client.listProjects(),
+      client.capabilities(),
     ])
     const sessions = allSessions
       .filter((session) => session.status !== "archived")
@@ -137,6 +144,10 @@ class DesktopSessionService {
       defaultModel,
       ...(defaultProvider ? { defaultProvider } : {}),
       defaultPermissionMode,
+      attachments: resolveDesktopAttachmentSupport(capabilities, {
+        isPackaged: app.isPackaged,
+        forceEnable: process.env.OPENHARNESS_DESKTOP_ATTACHMENTS === "1",
+      }),
     }
   }
 
@@ -761,11 +772,22 @@ function toDesktopSessionView(
     messages: [...bucket.messages].sort((a, b) => a.seq - b.seq),
     parts: Object.values(bucket.partsByMessageId)
       .flat()
-      .sort((a, b) => a.seq - b.seq),
+      .sort((a, b) => a.seq - b.seq)
+      .map(toDesktopSessionPart),
     runs: Object.values(bucket.runs),
     tasks: Object.values(bucket.tasks),
     permissions: Object.values(bucket.permissions),
   }
+}
+
+function toDesktopSessionPart(part: SessionMessagePartRecord): DesktopSessionPart {
+  if (part.type === "attachment") {
+    return part as SessionAttachmentMessagePartRecord
+  }
+  if (part.type === "transformation") {
+    return part as SessionTransformationMessagePartRecord
+  }
+  return part as DesktopStandardSessionPart
 }
 
 function sortSessions(sessions: DesktopSessionRecord[]): DesktopSessionRecord[] {

@@ -1,3 +1,7 @@
+import type { SessionInputAttachmentRecord } from "@openharness/client"
+
+import type { DesktopAttachmentSupport, DesktopPromptAttachmentInput } from "./attachment-types"
+
 export interface DesktopProject {
   id: string
   name: string
@@ -46,6 +50,7 @@ export interface DesktopSessionInput {
   seq: number
   delivery: "queue" | "steer"
   content: string
+  attachments: SessionInputAttachmentRecord[]
   promotedMessageId?: string
   metadata: Record<string, unknown>
   createdAt: number
@@ -63,12 +68,11 @@ export interface DesktopSessionMessage {
   updatedAt: number
 }
 
-export interface DesktopSessionPart {
+interface DesktopSessionPartBase {
   id: string
   sessionId: string
   messageId: string
   seq: number
-  type: "text" | "reasoning" | "tool" | "tool_result" | "error" | "log"
   status: "pending" | "running" | "completed" | "failed" | "interrupted"
   text?: string
   toolUseId?: string
@@ -80,6 +84,31 @@ export interface DesktopSessionPart {
   createdAt: number
   updatedAt: number
 }
+
+export interface DesktopStandardSessionPart extends DesktopSessionPartBase {
+  type: "text" | "reasoning" | "tool" | "tool_result" | "error" | "log"
+}
+
+export interface DesktopAttachmentSessionPart extends DesktopSessionPartBase {
+  type: "attachment"
+  assetId: string
+  intent: "auto" | "vision" | "ocr" | "document" | "tool_resource" | "workspace_reference"
+  displayName: string
+  mediaType: string
+  sizeBytes: number
+}
+
+export interface DesktopTransformationSessionPart extends DesktopSessionPartBase {
+  type: "transformation"
+  assetId: string
+  kind: "direct" | "document_extract" | "tool_mount"
+  representationId?: string
+  processor?: string
+  transformationError?: string
+}
+
+export type DesktopSessionPart =
+  DesktopStandardSessionPart | DesktopAttachmentSessionPart | DesktopTransformationSessionPart
 
 export interface DesktopSessionRun {
   id: string
@@ -149,6 +178,7 @@ export interface DesktopBootstrapData {
   defaultModel: string
   defaultProvider?: string
   defaultPermissionMode: DesktopPermissionMode
+  attachments: DesktopAttachmentSupport
 }
 
 export interface DesktopProjectDetails {
@@ -214,6 +244,7 @@ export interface SendDesktopPromptInput {
   id: string
   sessionId: string
   content: string
+  attachments: DesktopPromptAttachmentInput[]
 }
 
 export interface InvokeDesktopCommandInput {
@@ -226,6 +257,7 @@ export interface EditLatestDesktopPromptInput {
   sessionId: string
   content: string
   sourceMessageId: string
+  attachments: DesktopPromptAttachmentInput[]
 }
 
 export interface InterruptDesktopSessionInput {
