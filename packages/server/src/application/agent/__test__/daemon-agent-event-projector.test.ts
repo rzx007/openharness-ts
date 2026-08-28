@@ -257,6 +257,48 @@ describe("DaemonAgentEventProjector", () => {
       .rejects.toThrow("Agent input identity conflict");
   });
 
+  it("accepts model-facing content transformed from an admitted attachment input", async () => {
+    const input = {
+      id: "input-1",
+      sessionId: "s1",
+      content: "内容",
+      delivery: "queue",
+      metadata: { origin: { client: "desktop" } },
+      attachments: [{ assetId: "image-1" }],
+    };
+    const store = {
+      transaction: <T>(work: () => T) => work(),
+      getInput: vi.fn(() => input),
+      getRun: vi.fn(() => ({
+        id: "run-1",
+        sessionId: "s1",
+        inputId: input.id,
+        metadata: { attachmentRouting: { status: "completed" } },
+      })),
+    };
+    const events = { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
+      transcriptProjection: {} as any,
+      executionProjector: {} as any,
+      liveChildren: {} as any,
+      events,
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("input.accepted", {
+      content: [
+        { type: "text", text: "内容" },
+        { type: "image", image: "data:image/png;base64,aW1hZ2U=" },
+      ],
+      delivery: "queue",
+      metadata: input.metadata,
+    }, { sessionId: "s1", inputId: input.id, runId: "run-1" }))).resolves.toBeUndefined();
+
+    expect(events.publishSince).toHaveBeenCalled();
+  });
+
   it("rejects reuse of a durable child session by a different child identity", async () => {
     const store = {
       getSession: vi.fn((id) => id === "parent"

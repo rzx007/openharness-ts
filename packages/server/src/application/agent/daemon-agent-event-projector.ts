@@ -255,6 +255,17 @@ export class DaemonAgentEventProjector {
           const queuedRun = typeof promotion?.queuedRunId === "string"
             ? this.context.store.getRun(promotion.queuedRunId)
             : undefined;
+          const executingRun =
+            input.attachments?.length && runId
+              ? this.context.store.getRun(runId)
+              : undefined;
+          const attachmentRouting = isRecord(executingRun?.metadata.attachmentRouting)
+            ? executingRun.metadata.attachmentRouting
+            : undefined;
+          const routedAttachmentExecution =
+            executingRun?.sessionId === sessionId &&
+            executingRun.inputId === inputId &&
+            attachmentRouting?.status === "completed";
           const baseMetadata = { ...metadata };
           delete baseMetadata.promotion;
           const queuedPromptPromotion =
@@ -272,7 +283,7 @@ export class DaemonAgentEventProjector {
             !queuedPromptPromotion &&
             (
               input.sessionId !== sessionId ||
-              input.content !== content ||
+              (!routedAttachmentExecution && input.content !== content) ||
               input.delivery !== event.data.delivery ||
               !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
             )
