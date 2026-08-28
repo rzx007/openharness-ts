@@ -354,6 +354,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     seq: 2,
     delivery: "queue" as const,
     content: "finish interrupted work",
+    attachments: [],
     metadata: {},
     createdAt: 5,
   };
@@ -875,6 +876,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         messages: [message],
         parts: [textPart, toolPart],
         runs: [run, interruptedRun],
+        attempts: [],
         permissions: [permission],
       });
     }
@@ -886,6 +888,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
         messages: [],
         parts: [],
         runs: [],
+        attempts: [],
         permissions: [],
       });
     }
@@ -1643,6 +1646,7 @@ function workflowJobFixture(options: {
         messages: [],
         parts: [],
         runs: [],
+        attempts: [],
         permissions: [],
         tasks: [],
       });
@@ -2608,7 +2612,17 @@ test("useServerSync ignores stale Jobs responses after switching sessions", asyn
     }
     if (requestUrl.pathname.endsWith("/state")) {
       const session = requestUrl.pathname.includes(sessionA.id) ? sessionA : sessionB;
-      return jsonResponse({ cursor: 0, session, inputs: [], messages: [], parts: [], runs: [], permissions: [], tasks: [] });
+      return jsonResponse({
+        cursor: 0,
+        session,
+        inputs: [],
+        messages: [],
+        parts: [],
+        runs: [],
+        attempts: [],
+        permissions: [],
+        tasks: [],
+      });
     }
     if (requestUrl.pathname === "/events") return jsonResponse({ events: [] });
     if (requestUrl.pathname === "/events/stream") return sseResponse([]);
