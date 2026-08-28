@@ -21,6 +21,7 @@ import { cn } from "@renderer/lib/utils"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { parseSelectedSkillCommandDraft } from "./composer-skill-commands"
 import { $createSkillCommandPillNode, SkillCommandPillNode } from "./skill-command-pill-node"
+import { readComposerClipboard } from "./composer-file-input"
 
 function SyncDraftPlugin({
   value,
@@ -100,7 +101,11 @@ function SubmitKeyPlugin({ onSubmit }: { onSubmit: () => void }): null {
   return null
 }
 
-function PlainTextPastePlugin(): null {
+function PlainTextPastePlugin({
+  onPasteFiles,
+}: {
+  onPasteFiles?: (files: readonly File[]) => void
+}): null {
   const [editor] = useLexicalComposerContext()
 
   useEffect(() => {
@@ -109,19 +114,22 @@ function PlainTextPastePlugin(): null {
       (event) => {
         if (!("clipboardData" in event)) return false
 
-        const text = event.clipboardData?.getData("text/plain")
-        if (!text) return false
+        const clipboard = event.clipboardData
+        if (!clipboard) return false
+        const { files, text } = readComposerClipboard(clipboard)
+        if (files.length === 0 && !text) return false
 
         event.preventDefault()
+        if (files.length > 0) onPasteFiles?.(files)
         editor.update(() => {
           const selection = $getSelection()
-          if ($isRangeSelection(selection)) selection.insertRawText(text)
+          if (text && $isRangeSelection(selection)) selection.insertRawText(text)
         })
         return true
       },
       COMMAND_PRIORITY_HIGH
     )
-  }, [editor])
+  }, [editor, onPasteFiles])
 
   return null
 }
@@ -155,6 +163,7 @@ export function RichPromptInput({
   className,
   onChange,
   onSubmit,
+  onPasteFiles,
 }: {
   id: string
   value: string
@@ -165,6 +174,7 @@ export function RichPromptInput({
   className?: string
   onChange: (value: string) => void
   onSubmit: () => void
+  onPasteFiles?: (files: readonly File[]) => void
 }): React.JSX.Element {
   const [isComposing, setIsComposing] = useState(false)
   const minHeight = `${Math.max(rows, 1) * 24 + 24}px`
@@ -218,7 +228,7 @@ export function RichPromptInput({
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
-        <PlainTextPastePlugin />
+        <PlainTextPastePlugin onPasteFiles={onPasteFiles} />
         <SyncDraftPlugin value={value} skillCommands={skillCommands} onChange={onChange} />
         {!isComposing && !disabled ? <SubmitKeyPlugin onSubmit={onSubmit} /> : null}
       </div>

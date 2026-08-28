@@ -1,4 +1,3 @@
-import { IconFilePlus, IconFolderPlus, IconPhotoPlus } from "@tabler/icons-react"
 import { ChevronDown, Mic, ShieldCheck } from "lucide-react"
 import { useState } from "react"
 
@@ -7,6 +6,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui
 import { PlusMenu } from "@renderer/components/ui/plus-menu"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
+import type { DesktopAttachmentDraft } from "@shared/attachment-types"
+import { createComposerAttachmentMenuItems } from "./composer-attachment-menu"
+import { ComposerAttachments } from "./composer-attachments"
+import { readComposerDrop } from "./composer-file-input"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { ModelPicker } from "./model-picker"
@@ -34,6 +37,16 @@ export function Composer({
   onInterrupt,
   onSelectModel,
   onSelectPermissionMode,
+  attachments = [],
+  attachmentInteractionEnabled = false,
+  attachmentReadOnly = false,
+  onPickFiles,
+  onPickImages,
+  onDropFiles,
+  onPasteFiles,
+  onCancelAttachment,
+  onRetryAttachment,
+  onRemoveAttachment,
 }: {
   id: string
   draft: string
@@ -54,6 +67,16 @@ export function Composer({
   onInterrupt?: () => void
   onSelectModel: (model: DesktopModel) => void
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
+  attachments?: readonly DesktopAttachmentDraft[]
+  attachmentInteractionEnabled?: boolean
+  attachmentReadOnly?: boolean
+  onPickFiles?: () => void
+  onPickImages?: () => void
+  onDropFiles?: (files: readonly File[]) => void
+  onPasteFiles?: (files: readonly File[]) => void
+  onCancelAttachment?: (draftId: string) => void
+  onRetryAttachment?: (draftId: string) => void
+  onRemoveAttachment?: (draftId: string) => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
@@ -75,10 +98,29 @@ export function Composer({
         event.preventDefault()
         submit()
       }}
+      onDragOver={(event) => {
+        if (!attachmentInteractionEnabled || !event.dataTransfer.types.includes("Files")) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = "copy"
+      }}
+      onDrop={(event) => {
+        if (!attachmentInteractionEnabled) return
+        const files = readComposerDrop(event.dataTransfer.files)
+        if (files.length === 0) return
+        event.preventDefault()
+        onDropFiles?.(files)
+      }}
     >
       <label htmlFor={id} className="sr-only">
         输入对话内容
       </label>
+      <ComposerAttachments
+        attachments={attachments}
+        readOnly={attachmentReadOnly}
+        onCancel={(draftId) => onCancelAttachment?.(draftId)}
+        onRetry={(draftId) => onRetryAttachment?.(draftId)}
+        onRemove={(draftId) => onRemoveAttachment?.(draftId)}
+      />
       <RichPromptInput
         id={id}
         value={draft}
@@ -89,16 +131,18 @@ export function Composer({
         className={textareaClassName}
         onChange={onDraftChange}
         onSubmit={submit}
+        onPasteFiles={attachmentInteractionEnabled ? onPasteFiles : undefined}
       />
       <SkillCommandMenu draft={draft} commands={skillCommands} onSelect={onDraftChange} />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
         <PlusMenu
-          items={[
-            { id: "file", label: "添加文件", icon: <IconFilePlus className="size-4" /> },
-            { id: "image", label: "添加图片", icon: <IconPhotoPlus className="size-4" /> },
-            { id: "folder", label: "添加文件夹", icon: <IconFolderPlus className="size-4" /> },
-          ]}
+          items={createComposerAttachmentMenuItems()}
+          disabled={!attachmentInteractionEnabled || attachmentReadOnly}
           triggerLabel={{ open: "关闭附件菜单", closed: "添加附件" }}
+          onSelect={({ item }) => {
+            if (item.id === "file") onPickFiles?.()
+            if (item.id === "image") onPickImages?.()
+          }}
         />
         <Popover
           open={activePicker === "permission"}

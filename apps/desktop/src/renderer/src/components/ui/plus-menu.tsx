@@ -26,6 +26,7 @@ const OFFICIAL_TRIPLET = [
 export type PlusMenuItem = {
   id?: string
   label: string
+  description?: string
   icon: ReactNode
   x?: number
   y?: number
@@ -289,6 +290,8 @@ function PlusMenu({
                     size="icon"
                     className={cn("rounded-full", expanded && "bg-popover", itemClassName)}
                     aria-label={item.label}
+                    aria-description={item.description}
+                    title={item.description ? `${item.label}（${item.description}）` : item.label}
                     disabled={disabled || item.disabled}
                     onClick={(event) => handleSelect(item, index, event)}
                   >
