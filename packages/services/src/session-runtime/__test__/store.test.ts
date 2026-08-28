@@ -179,7 +179,7 @@ describe("SessionStore", () => {
         assetId: "att-1",
         kind: "document_extract",
         representationId: "rep-1",
-        processor: "light-ocr",
+        processor: "fixture-processor",
         transformationError: "none",
       });
 
@@ -202,7 +202,7 @@ describe("SessionStore", () => {
           assetId: "att-1",
           kind: "document_extract",
           representationId: "rep-1",
-          processor: "light-ocr",
+          processor: "fixture-processor",
           transformationError: "none",
         }),
       ]);
