@@ -141,9 +141,36 @@ CREATE INDEX `session_input_attachment_asset_idx`
   ON `session_input_attachment` (`asset_id`);
 CREATE INDEX `session_input_attachment_session_idx`
   ON `session_input_attachment` (`session_id`);
+
+ALTER TABLE `session_message_part` ADD `asset_id` text;
+ALTER TABLE `session_message_part` ADD `attachment_intent` text;
+ALTER TABLE `session_message_part` ADD `display_name` text;
+ALTER TABLE `session_message_part` ADD `media_type` text;
+ALTER TABLE `session_message_part` ADD `size_bytes` integer;
+ALTER TABLE `session_message_part` ADD `transformation_kind` text;
+ALTER TABLE `session_message_part` ADD `representation_id` text;
+ALTER TABLE `session_message_part` ADD `processor` text;
+ALTER TABLE `session_message_part` ADD `transformation_error` text;
 ```
 
 `session_id` 是为按会话查询、配额和删除准备的冗余索引字段；写入时必须与所属 input 的 session 一致。
+
+attachment/transformation part 的核心字段使用 `session_message_part` 上的类型化列持久化。它们不能塞进通用 metadata 或借用 tool 的 `input_json/output_json`；metadata 只保存 `inputAttachmentId` 等诊断信息。
+
+### 一条 input 对应多个 run
+
+当前 `session_run.input_id` 带有唯一约束，只允许一条 input 创建一个 run；这与 retry/replay 复用原 input 和附件引用的语义冲突。由于本阶段不兼容旧数据库，直接修改新数据库基线：
+
+- `0000_session_runtime.sql` 中的 `input_id TEXT UNIQUE` 改为 `input_id TEXT`；
+- `schema.ts` 中删除 `session_run_input_unique`，改为普通的 `session_run_input_idx`；
+- `0014_session_input_attachments.sql` 只负责新增引用表，不承担旧表重建；format 1 会在运行任何新 migration 前被拒绝。
+
+Store 提供两个含义明确的查询：
+
+- `listRunsByInput(inputId)` 按 `createdAt + id` 返回该 input 的所有 run；
+- `findOwningRunByInput(inputId)` 返回最早创建的 run，用于 admission 幂等和启动恢复。
+
+retry/replay 创建的后续 run 在 metadata 中保存 `recovery.sourceRunId`。调用方不能再用含义含糊的 `findRunByInput` 猜测需要原 run 还是最新 run。
 
 ### 存储格式 version 2
 
@@ -266,7 +293,7 @@ input 文字非空时生成 text part；每个 ref 按 seq 生成 attachment par
 
 input ref 是唯一真实来源：ref 存在但 part 缺失时，投影修复可以重建 part；part 存在但 ref 不存在时属于一致性错误，不能把孤立 part 当成新引用。
 
-Agent transcript 必须恢复结构化的文字与附件元数据，不能继续只抽取文本。阶段 2 只保留 `assetId`、intent、显示名、类型和大小，不把附件交给 Provider。
+Agent transcript 必须恢复结构化的文字与附件元数据，不能继续只抽取文本。具体返回一个 sidecar（与消息并列的附件索引）结构：`{ messages, attachmentsByMessageId }`。阶段 2 仍只把 `messages` 交给 `agent.loadHistory()`；sidecar 保存 `assetId`、intent、显示名、类型和大小，留给阶段 4 的模型路由读取，不能伪装成 `ImageBlock` 或未知 Provider content part。
 
 文本导出明确列出附件；JSON 导出保留完整结构。阶段 3 再把 attachment part 渲染为缩略图和文件卡片。
 
@@ -282,7 +309,7 @@ run 开始前重新确认 asset、ref 和 Blob 一致性，但不能把已经成
 
 失败 run 的 retry 默认复用原 input 和 refs，只创建新 run。网络 admission 重试使用相同 input ID，并遵守完整 ordered refs 幂等比较。
 
-普通 replay 默认也是原 input 新 run。如果未来提供“复制为新消息”，必须创建新 input 和新 refs，仍然复用 asset，不能重新读取用户原路径。
+普通 replay 默认也是原 input 新 run。现有 interrupted-run resume 接口中的 `id` 在阶段 2 明确表示 recovery run ID；相同 `id + sourceRunId` 返回第一次结果，变化的 source 返回 `409 prompt_id_conflict`。如果未来提供“复制为新消息”，必须创建新 input 和新 refs，仍然复用 asset，不能重新读取用户原路径。
 
 ### Edit
 
