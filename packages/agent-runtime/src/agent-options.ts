@@ -1,6 +1,7 @@
 import type {
   AgentChildBudget,
   AgentBackgroundShellHost,
+  AgentImageToTextHost,
   AgentEffects,
   AgentScheduleEffects,
   PermissionMode,
@@ -28,6 +29,7 @@ export interface AgentHostCapabilities {
   schedules?: AgentScheduleEffects;
   childEnvironment?: AgentChildEnvironmentProvider;
   workflowRepository?: WorkflowRunRepository;
+  imageToText?: AgentImageToTextHost;
 }
 
 /** Opinionated runtime configuration exposed by the programmatic agent API. */

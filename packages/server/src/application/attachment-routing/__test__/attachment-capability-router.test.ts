@@ -38,10 +38,40 @@ function harness() {
 }
 
 describe("AttachmentCapabilityRouter", () => {
-  it.each([
-    ["unknown", "attachment_model_capability_unknown"],
-    ["unsupported", "attachment_model_unsupported"],
-  ] as const)("blocks model image support %s", async (image, code) => {
+  it("routes unsupported image models to an explicit ImageToText resource hint", async () => {
+    const { router, resolveReadyContentPath } = harness();
+    const result = await router.route({
+      text: "读一下票据",
+      attachments: [attachment("receipt", 0)],
+      modelCapabilities: { image: "unsupported" },
+      providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
+      availableTools: ["ImageToText"],
+      imageToTextHostAvailable: true,
+    } as any);
+
+    expect(resolveReadyContentPath).not.toHaveBeenCalled();
+    expect(result.decisions).toEqual([
+      expect.objectContaining({ assetId: "receipt", route: "image_to_text_tool" }),
+    ]);
+    expect(result.content).toEqual([
+      { type: "text", text: "读一下票据" },
+      { type: "text", text: expect.stringContaining("ImageToText") },
+    ]);
+    expect((result.content[1] as { text: string }).text).toContain("receipt");
+  });
+
+  it("blocks OCR fallback before provider execution when ImageToText is filtered out", async () => {
+    const { router } = harness();
+    await expect(router.route({
+      text: "read",
+      attachments: [attachment("receipt", 0)],
+      modelCapabilities: { image: "unsupported" },
+      providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
+      availableTools: [],
+      imageToTextHostAvailable: true,
+    } as any)).rejects.toMatchObject({ code: "attachment_ocr_tool_unavailable" });
+  });
+  it.each(["unknown", "unsupported"] as const)("falls back when model image support is %s", async (image) => {
     const { router, resolveReadyContentPath } = harness();
     await expect(
       router.route({
@@ -52,15 +82,14 @@ describe("AttachmentCapabilityRouter", () => {
           image: "native",
           imageMediaTypes: ["image/png"],
         },
+        availableTools: ["ImageToText"],
+        imageToTextHostAvailable: true,
       }),
-    ).rejects.toMatchObject({ code, assetIds: ["a"], retryable: false });
+    ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
     expect(resolveReadyContentPath).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["unknown", "attachment_provider_capability_unknown"],
-    ["unsupported", "attachment_provider_unsupported"],
-  ] as const)("blocks provider image support %s", async (image, code) => {
+  it.each(["unknown", "unsupported"] as const)("falls back when provider image support is %s", async (image) => {
     const { router } = harness();
     await expect(
       router.route({
@@ -68,11 +97,13 @@ describe("AttachmentCapabilityRouter", () => {
         attachments: [attachment("a", 0)],
         modelCapabilities: { image: "native" },
         providerCapabilities: { image, imageMediaTypes: ["image/png"] },
+        availableTools: ["ImageToText"],
+        imageToTextHostAvailable: true,
       }),
-    ).rejects.toMatchObject({ code, assetIds: ["a"] });
+    ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
   });
 
-  it("blocks unavailable intents and unsupported content before blob I/O", async () => {
+  it("routes explicit OCR and OCR-compatible media without blob I/O", async () => {
     const { router, resolveReadyContentPath } = harness();
     await expect(
       router.route({
@@ -83,8 +114,25 @@ describe("AttachmentCapabilityRouter", () => {
           image: "native",
           imageMediaTypes: ["image/png"],
         },
+        availableTools: ["ImageToText"],
+        imageToTextHostAvailable: true,
       }),
-    ).rejects.toMatchObject({ code: "attachment_intent_unavailable" });
+    ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
+    await expect(
+      router.route({
+        text: "read",
+        attachments: [attachment("bmp", 0, { mediaType: "image/bmp" })],
+        modelCapabilities: { image: "native" },
+        providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
+        availableTools: ["ImageToText"],
+        imageToTextHostAvailable: true,
+      }),
+    ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
+    expect(resolveReadyContentPath).not.toHaveBeenCalled();
+  });
+
+  it("blocks unsupported content before blob I/O", async () => {
+    const { router, resolveReadyContentPath } = harness();
     await expect(
       router.route({
         text: "read",
@@ -101,17 +149,6 @@ describe("AttachmentCapabilityRouter", () => {
         },
       }),
     ).rejects.toMatchObject({ code: "attachment_kind_unsupported" });
-    await expect(
-      router.route({
-        text: "read",
-        attachments: [attachment("bmp", 0, { mediaType: "image/bmp" })],
-        modelCapabilities: { image: "native" },
-        providerCapabilities: {
-          image: "native",
-          imageMediaTypes: ["image/png"],
-        },
-      }),
-    ).rejects.toMatchObject({ code: "attachment_media_type_unsupported" });
     expect(resolveReadyContentPath).not.toHaveBeenCalled();
   });
 

@@ -57,6 +57,7 @@ export function createDefaultToolRegistry(
     schedules?: boolean;
     terminal?: boolean;
     jobs?: boolean;
+    imageToText?: boolean;
     agentDefinitions?: AgentDefinition[];
     workflowRepository?: WorkflowRunRepository;
   } = {},
@@ -112,7 +113,7 @@ export function createDefaultToolRegistry(
   registry.register(readMcpResourceTool);
   registry.register(mcpAuthTool);
   registry.register(lspTool);
-  registry.register(imageToTextTool);
+  if (options.imageToText) registry.register(imageToTextTool);
   registry.register(imageGenerationTool);
   registry.register(feishuPushTool);
   return registry;

@@ -35,6 +35,31 @@ export interface AgentBackgroundShellHost {
   }>;
 }
 
+export type AgentImageToTextInput =
+  | { attachmentId: string }
+  | { imagePath: string }
+  | { imageUrl: string };
+
+export interface AgentImageToTextResult {
+  status: "completed" | "no_text_detected";
+  text: string;
+  assetId: string;
+  representationId: string;
+  processor: "light-ocr";
+  processorVersion: string;
+  cached: boolean;
+  lineCount: number;
+  durationMs: number;
+}
+
+/** Host-owned local OCR boundary. The tool never calls a vision model itself. */
+export interface AgentImageToTextHost {
+  recognize(
+    input: AgentImageToTextInput,
+    context: { cwd: string; sessionId?: string; signal?: AbortSignal },
+  ): Promise<AgentImageToTextResult>;
+}
+
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
@@ -60,6 +85,8 @@ export interface ToolContext {
   jobs?: AgentJobHost;
   /** Host-owned creator for detached shell jobs. */
   backgroundShell?: AgentBackgroundShellHost;
+  /** Host-owned local OCR capability. Omitted when OCR is unavailable. */
+  imageToText?: AgentImageToTextHost;
   agent?: AgentExecutionContext;
 }
 
@@ -67,6 +94,7 @@ export interface ToolResult {
   content: ContentBlock[];
   isError?: boolean;
   failureKind?: ToolFailureKind;
+  metadata?: Record<string, unknown>;
 }
 
 export type ToolFailureKind =

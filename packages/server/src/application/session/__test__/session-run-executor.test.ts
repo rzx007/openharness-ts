@@ -106,7 +106,11 @@ describe("SessionRunExecutor", () => {
       store: store as any,
       agentPool: {
         configured: true,
-        acquireSession: vi.fn(async () => ({ setModel: vi.fn(), submitMessage })),
+        acquireSession: vi.fn(async () => ({
+          setModel: vi.fn(),
+          submitMessage,
+          inspect: () => ({ tools: [{ name: "ImageToText" }], hostCapabilities: ["imageToText"] }),
+        })),
         close: vi.fn(),
       } as any,
       events: { checkpoint: () => 1, publishSince: vi.fn() },
@@ -146,9 +150,12 @@ describe("SessionRunExecutor", () => {
     );
   });
 
-  it("settles a blocked attachment run without acquiring or closing an agent", async () => {
+  it("settles a blocked attachment run after inspecting and then closes the agent", async () => {
     const store = createStore({ attachments: [attachment("asset-1", 0)] });
-    const acquireSession = vi.fn();
+    const acquireSession = vi.fn(async () => ({
+      setModel: vi.fn(),
+      inspect: () => ({ tools: [], hostCapabilities: [] }),
+    }));
     const close = vi.fn();
     const projectAttachmentTransformations = vi.fn();
     const executor = new SessionRunExecutor({
@@ -182,8 +189,8 @@ describe("SessionRunExecutor", () => {
       { signal: new AbortController().signal, registerHandle: vi.fn() },
     );
 
-    expect(acquireSession).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
+    expect(acquireSession).toHaveBeenCalledWith("s1");
+    expect(close).toHaveBeenCalledWith("s1");
     expect(store.updateRun).toHaveBeenCalledWith("run-1", expect.objectContaining({
       status: "failed",
       metadata: expect.objectContaining({

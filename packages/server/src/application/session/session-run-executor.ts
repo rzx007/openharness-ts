@@ -66,16 +66,24 @@ export class SessionRunExecutor {
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
 
+      // 先拿到实际 Agent，路由才能看见 allow/deny 过滤后的工具和真实宿主能力。
+      agentTouched = true;
+      const agent = await this.context.agentPool.acquireSession(sessionId);
+      agent.setModel(readSessionRuntimeConfig(session).model);
+
       let submittedContent: string | ContentBlock[] = admitted.content;
       if (admitted.attachments.length > 0) {
         if (!this.context.resolveCapabilities || !this.context.routeAttachments) {
           throw new Error("attachment routing is not configured");
         }
         const capabilities = await this.context.resolveCapabilities(session);
+        const inspection = agent.inspect();
         const routed = await this.context.routeAttachments({
           text: admitted.content,
           attachments: admitted.attachments,
           ...capabilities,
+          availableTools: inspection.tools.map((tool) => tool.name),
+          imageToTextHostAvailable: inspection.hostCapabilities.includes("imageToText"),
           signal: workContext.signal,
         });
         submittedContent = routed.content;
@@ -96,11 +104,6 @@ export class SessionRunExecutor {
           },
         });
       }
-
-      // 同一 session 复用同一个 agent，这样历史、子 agent、工具上下文能接着用。
-      agentTouched = true;
-      const agent = await this.context.agentPool.acquireSession(sessionId);
-      agent.setModel(readSessionRuntimeConfig(session).model);
 
       // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。
       // 不要让 agent 自己再生成一套 id，否则 SSE 里的 run 和 HTTP 回的 run 会对不上。

@@ -26,6 +26,7 @@ export interface ToolUseEndEvent {
     isError?: boolean;
     failureKind?: import("./tools").ToolFailureKind;
     toolAttemptId?: string;
+    metadata?: Record<string, unknown>;
   };
 }
 

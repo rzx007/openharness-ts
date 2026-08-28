@@ -1,5 +1,10 @@
 import type { StreamingMessageClient } from "./client";
-import type { AgentBackgroundShellHost, McpAuthHost, ToolRegistry } from "./tools";
+import type {
+  AgentBackgroundShellHost,
+  AgentImageToTextHost,
+  McpAuthHost,
+  ToolRegistry,
+} from "./tools";
 import type { PermissionChecker } from "./permissions";
 import type { HookExecutor } from "./hooks";
 import type { ContentBlock, Message } from "./messages";
@@ -393,6 +398,7 @@ export interface QueryEngine {
   setTerminal(terminal: AgentTerminalHost | undefined): void;
   setJobs(jobs: AgentJobHost | undefined): void;
   setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void;
+  setImageToText(imageToText: AgentImageToTextHost | undefined): void;
 }
 
 export interface MemoryRetriever {

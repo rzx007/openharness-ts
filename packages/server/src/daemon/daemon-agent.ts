@@ -13,6 +13,7 @@ import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type {
   AgentScheduleEffects,
   AgentBackgroundShellHost,
+  AgentImageToTextHost,
   AgentEffects,
   AgentEventListener,
   Settings,
@@ -68,6 +69,7 @@ export interface DaemonAgentLoaderOptions {
   createJobHost?(session: SessionRecord): AgentJobHost;
   createBackgroundShellHost?(session: SessionRecord): AgentBackgroundShellHost;
   workflowRepository?: WorkflowRunRepository;
+  imageToText?: AgentImageToTextHost;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
    * 要等 Agent 造好才能建（投影要用 agent.id），但 onEvent 在造 Agent 时就得先挂上。
@@ -136,6 +138,7 @@ export function createDaemonAgentLoader(
         ...(options.workflowRepository
           ? { workflowRepository: options.workflowRepository }
           : {}),
+        ...(options.imageToText ? { imageToText: options.imageToText } : {}),
       },
       ...(options.createEventSink
         ? {

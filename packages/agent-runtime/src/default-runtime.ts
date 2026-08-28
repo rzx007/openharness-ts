@@ -77,6 +77,7 @@ interface OpenHarnessRuntimeOptions {
     terminal?: boolean;
     jobs?: boolean;
     workflowRepository?: WorkflowRunRepository;
+    imageToText?: boolean;
   };
 }
 
@@ -148,6 +149,7 @@ export async function createOpenHarnessRuntime(
     jobs: options.hostCapabilities?.jobs,
     agentDefinitions: options.agentDefinitions,
     workflowRepository: options.hostCapabilities?.workflowRepository,
+    imageToText: options.hostCapabilities?.imageToText,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
