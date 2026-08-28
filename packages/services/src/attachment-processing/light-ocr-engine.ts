@@ -1,4 +1,7 @@
 import type { OcrEngine, OcrResult, RecognizeOptions } from "@arcships/light-ocr";
+import { existsSync } from "node:fs";
+import { createRequire as createNodeRequire } from "node:module";
+import { dirname } from "node:path";
 
 import { LocalOcrError, normalizeLocalOcrError } from "./local-ocr-errors.js";
 
@@ -36,7 +39,10 @@ export class LightOcrEngine {
     this.queueCapacity = options.queueCapacity ?? 4;
     this.createEngine = options.createEngine ?? (async () => {
       const library = await import("@arcships/light-ocr");
-      return await library.createEngine({ queueCapacity: this.queueCapacity });
+      return await library.createEngine({
+        queueCapacity: this.queueCapacity,
+        bundlePath: resolveBundledModelPath(),
+      });
     });
   }
 
@@ -105,3 +111,21 @@ export class LightOcrEngine {
   }
 }
 
+function resolveBundledModelPath(): string {
+  const require = createNodeRequire(import.meta.url);
+  const lightOcrEntry = require.resolve("@arcships/light-ocr");
+  const fromLightOcr = createNodeRequire(lightOcrEntry);
+  const manifest = fromLightOcr.resolve(
+    "@arcships/light-ocr-model-ppocrv6-small/bundle/manifest.json",
+  );
+  let bundlePath = dirname(manifest);
+  const unpacked = bundlePath.replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
+  if (unpacked !== bundlePath && existsSync(unpacked)) bundlePath = unpacked;
+  // light-ocr validates every bundled platform directory. Deep model paths can
+  // exceed Win32's legacy 260-character boundary in pnpm worktrees or Program
+  // Files; the extended-length prefix keeps that validation on the same files.
+  if (process.platform === "win32" && !bundlePath.startsWith("\\\\?\\")) {
+    return `\\\\?\\${bundlePath}`;
+  }
+  return bundlePath;
+}

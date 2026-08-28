@@ -10,9 +10,17 @@ files:
   - package.json
 asarUnpack:
   - resources/**
+  - node_modules/@arcships/light-ocr/**
+  - node_modules/@arcships/light-ocr-model-*/**
   - node_modules/better-sqlite3/prebuilds/**
   - node_modules/node-pty/build/**
   - node_modules/node-pty/prebuilds/**
+  - node_modules/@arcships/light-ocr-runtime/**
+  - node_modules/@arcships/light-ocr-win32-*/**
+  - node_modules/@arcships/light-ocr-linux-*/**
+  - node_modules/@arcships/light-ocr-darwin-*/**
+  - node_modules/@img/**
+  - node_modules/sharp/**
 win:
   executableName: OpenHarness
 nsis:

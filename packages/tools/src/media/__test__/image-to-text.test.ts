@@ -77,4 +77,21 @@ describe("ImageToText", () => {
     expect((result.content[0] as { text: string }).text).toContain("未检测到文字");
     expect((result.content[0] as { text: string }).text).toContain("不能描述图片");
   });
+
+  it("reports the host deadline as a timeout instead of a command failure", async () => {
+    const result = await imageToTextTool.execute(
+      { attachment_id: "slow" },
+      {
+        cwd: "C:/work",
+        imageToText: {
+          recognize: async () => {
+            throw new DOMException("The operation timed out", "TimeoutError");
+          },
+        },
+      } as any,
+    );
+
+    expect(result).toMatchObject({ isError: true, failureKind: "timeout" });
+    expect((result.content[0] as { text: string }).text).toContain("超时");
+  });
 });

@@ -40,11 +40,14 @@ export const imageToTextTool: ToolDefinition = {
       };
     } catch (error) {
       const interrupted = context.abortSignal?.aborted === true;
+      const timedOut = !interrupted && isTimeoutError(error);
       return errorResult(
         interrupted
           ? "ImageToText 本地 OCR 已中断。"
+          : timedOut
+            ? "ImageToText 本地 OCR 超时（60 秒）。"
           : `ImageToText 本地 OCR 失败：${safeErrorMessage(error)}`,
-        interrupted ? "interrupted" : "command",
+        interrupted ? "interrupted" : timedOut ? "timeout" : "command",
       );
     }
   },
@@ -98,13 +101,17 @@ function metadataOf(result: AgentImageToTextResult): Record<string, unknown> {
 
 function errorResult(
   message: string,
-  failureKind: "policy" | "command" | "interrupted",
+  failureKind: "policy" | "command" | "interrupted" | "timeout",
 ) {
   return {
     content: [{ type: "text" as const, text: message }],
     isError: true,
     failureKind,
   };
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === "TimeoutError";
 }
 
 function safeErrorMessage(error: unknown): string {

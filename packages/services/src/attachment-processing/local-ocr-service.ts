@@ -98,10 +98,7 @@ export class LocalOcrService {
     try {
       const normalized = await this.normalize(asset.bytes, asset.mediaType);
       request.signal?.throwIfAborted();
-      const result = await this.options.engine.recognize(normalized.bytes, {
-        signal: request.signal,
-        applyExif: !normalized.normalized,
-      }) as LightOcrRecognition;
+      const result = await this.recognizeWithOneRetry(normalized, request);
       const lines = result.lines.filter((line) => line.text.trim().length > 0);
       const text = lines.map((line) => line.text).join("\n").slice(0, 100_000);
       const durationMs = Math.max(0, this.now() - startedAt);
@@ -125,6 +122,21 @@ export class LocalOcrService {
       const normalized = normalizeLocalOcrError(error);
       this.options.repository.fail(record.id, normalized.code);
       throw normalized;
+    }
+  }
+
+  private async recognizeWithOneRetry(
+    normalized: NormalizedOcrImage,
+    request: LocalOcrRequest,
+  ): Promise<LightOcrRecognition> {
+    const options = { signal: request.signal, applyExif: !normalized.normalized };
+    try {
+      return await this.options.engine.recognize(normalized.bytes, options) as LightOcrRecognition;
+    } catch (error) {
+      const failure = normalizeLocalOcrError(error);
+      if (failure.code !== "ocr_inference_failed" || !failure.retryable) throw failure;
+      request.signal?.throwIfAborted();
+      return await this.options.engine.recognize(normalized.bytes, options) as LightOcrRecognition;
     }
   }
 }
@@ -156,4 +168,3 @@ function fromRecord(record: AttachmentRepresentationRecord, cached: boolean): Lo
     durationMs: typeof record.metadata.durationMs === "number" ? record.metadata.durationMs : 0,
   };
 }
-

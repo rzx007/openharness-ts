@@ -1276,6 +1276,8 @@ daemon 启动时：
 
 ### 阶段 5：本地 OCR 与 ImageToText 改造
 
+> **状态：已完成（2026-08-28）。** 已交付本地 light-ocr、版本化 representation 缓存、能力路由、纯本地 `ImageToText`、三种来源统一导入、可追溯 transcript、OCR 状态 UI、生产默认开放和 Electron 解包产物验证。阶段 6 的 PDF、Office、代码和通用文件处理尚未开始。
+
 #### 目标
 
 把 `ImageToText` 从远程视觉模型工具改造成纯本地 OCR 工具。当主模型不支持图片时，路由器提供受控附件资源和工具提示，由主 Agent 主动发起正常 tool call；工具使用 `light-ocr` 返回文字，不执行图片描述。

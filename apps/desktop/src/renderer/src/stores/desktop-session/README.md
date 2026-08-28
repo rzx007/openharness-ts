@@ -77,7 +77,7 @@
 7. **历史展示。** 权威消息中的 `attachment`/`transformation` part 直接进入 transcript。安全位图缩略图从 daemon 副本读取，并校验媒体类型和真实文件头；SVG、HTML 或伪装内容只显示文件图标。打开和另存为都走专用附件 IPC，不生成 `file://` 或裸下载 URL。
 8. **编辑。** 最近一条用户消息可以只改文字。附件卡片只读，提交时从权威 input 重新取得原有 ordered refs，不从页面反推、不重新上传。
 
-附件草稿不写入 `localStorage`，应用重启后不恢复；已经发送的附件由 daemon 资产和会话引用恢复。当前阶段也不执行模型图片输入、OCR、PDF/Word/文本提取、工具挂载、分片上传、文件夹遍历或 Blob GC。模型不支持图片时调用 `ImageToText` 的降级逻辑属于后续阶段，不在这里提前接线。
+附件草稿不写入 `localStorage`，应用重启后不恢复；已经发送的附件由 daemon 资产和会话引用恢复。支持图片的模型直接接收原生图片；不支持或图片能力未知的模型收到受控附件资源提示，由主 Agent 按需调用 `ImageToText` 做纯本地 OCR。OCR 只能提取可见文字，不能描述图片。PDF/Word/文本提取、工具挂载、分片上传、文件夹遍历和 Blob GC 仍属于后续阶段。
 
 ## 普通发送与排队发送流程
 
@@ -158,7 +158,7 @@ operation 的阶段是 `pending`、`acknowledged`、`failed`。
 11. operation、submission 与 queued action 用稳定 ID 对账。
 12. 成功 operation 会清理；失败状态有明确可见 owner，不能无界积累。
 13. renderer 永远不保存附件真实路径；上传错误也不能包含路径、授权值、source token 或堆栈。
-14. production 构建默认关闭附件交互；开关关闭时 picker、drop、paste 和附件发送入口都不能绕过，但纯文字发送保持原流程。
+14. production 构建在 daemon 声明附件能力时默认开放；`OPENHARNESS_DESKTOP_ATTACHMENTS=0` 关闭时 picker、drop、paste 和附件发送入口都不能绕过，但纯文字发送保持原流程。
 
 ## 测试归属
 

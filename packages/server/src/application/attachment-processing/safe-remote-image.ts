@@ -24,9 +24,10 @@ export async function downloadRemoteImage(
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error("image_url 只允许 HTTP(S) 地址");
     }
-    const addresses = isIP(url.hostname)
-      ? [{ address: url.hostname, family: isIP(url.hostname) as 4 | 6 }]
-      : await lookup(url.hostname, { all: true, verbatim: true });
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    const addresses = isIP(hostname)
+      ? [{ address: hostname, family: isIP(hostname) as 4 | 6 }]
+      : await lookup(hostname, { all: true, verbatim: true });
     const publicAddress = addresses.find((item) => isPublicAddress(item.address));
     if (!publicAddress || addresses.some((item) => !isPublicAddress(item.address))) {
       throw new Error("image_url 不能访问本机或内网地址");
@@ -66,10 +67,21 @@ export function isPublicAddress(address: string): boolean {
     if (normalized === "::" || normalized === "::1") return false;
     if (normalized.startsWith("fc") || normalized.startsWith("fd")) return false;
     if (/^fe[89ab]/.test(normalized)) return false;
-    const mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+    if (/^fe[c-f]/.test(normalized) || normalized.startsWith("ff")) return false;
+    const mapped = mappedIpv4(normalized);
     return mapped ? isPublicAddress(mapped) : true;
   }
   return false;
+}
+
+function mappedIpv4(address: string): string | undefined {
+  const dotted = address.match(/^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  if (dotted) return dotted;
+  const hexadecimal = address.match(/^::(?:ffff:)?([\da-f]{1,4}):([\da-f]{1,4})$/);
+  if (!hexadecimal) return undefined;
+  const high = Number.parseInt(hexadecimal[1]!, 16);
+  const low = Number.parseInt(hexadecimal[2]!, 16);
+  return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
 }
 
 async function get(

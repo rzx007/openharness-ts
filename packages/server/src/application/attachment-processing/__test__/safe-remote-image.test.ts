@@ -14,6 +14,8 @@ describe("safe remote image address policy", () => {
     "fc00::1",
     "fe80::1",
     "::ffff:127.0.0.1",
+    "::ffff:7f00:1",
+    "ff02::1",
   ])("blocks private, local, and mapped address %s", (address) => {
     expect(isPublicAddress(address)).toBe(false);
   });

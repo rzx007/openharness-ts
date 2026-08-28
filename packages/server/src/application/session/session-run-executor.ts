@@ -83,7 +83,7 @@ export class SessionRunExecutor {
           attachments: admitted.attachments,
           ...capabilities,
           availableTools: inspection.tools.map((tool) => tool.name),
-          imageToTextHostAvailable: inspection.hostCapabilities.includes("imageToText"),
+          imageToTextHostAvailable: inspection.hostCapabilities?.includes("imageToText") === true,
           signal: workContext.signal,
         });
         submittedContent = routed.content;

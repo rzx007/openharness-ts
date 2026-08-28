@@ -201,12 +201,18 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@arcships/light-ocr':
+        specifier: 0.5.7
+        version: 0.5.7
       better-sqlite3:
         specifier: ^13.0.2
         version: 13.0.2
       node-pty:
         specifier: ^1.0.0
         version: 1.1.0
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@base-ui/react':
         specifier: ^1.7.0

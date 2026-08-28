@@ -1,6 +1,6 @@
 # 对话附件阶段 5：本地 OCR 与 ImageToText 设计
 
-> 状态：已批准。本文把总路线中已经确认的阶段 5 边界细化为可实现规格；不重新引入远程视觉模型，也不兼容旧的 `ImageToText` 输入或结果。
+> 状态：已实现并验收（2026-08-28）。本文把总路线中已经确认的阶段 5 边界细化为可实现规格；不重新引入远程视觉模型，也不兼容旧的 `ImageToText` 输入或结果。
 
 ## 目标与边界
 
@@ -92,3 +92,10 @@ daemon 拥有一个 `LocalOcrService`，启动不预热，首次调用才创建 
 - tool use/result 关联 representation；retry、fork、replay 复用相同缓存。
 - Desktop 打包入口默认可用，OCR 状态文案和重试入口可见，阶段 4 原生图片与纯文本不回归。
 
+## 验收记录（2026-08-28）
+
+- 真实 `@arcships/light-ocr@0.5.7` 冒烟测试使用 Sharp 动态生成确定性图片，识别出文字、坐标和置信度；测试不下载模型，也不调用远程视觉服务。
+- 全仓 `pnpm test` 首次暴露运行时打包后的 `createRequire` 重名，修复后真实 daemon + SSE 用例单独通过；最终全仓测试重新执行并以零失败为完成门槛。
+- `pnpm check-types` 为 57/57 个任务通过；`pnpm check-docs` 检查 108 个 Markdown 文件通过。根 `pnpm lint` 因仓库没有任何 Turbo `lint` 任务而无法运行，改用定向静态检查和 `git diff --check`，不把脚本缺失描述成 lint 通过。
+- Desktop production build 和 Windows x64 `electron-builder --dir` 通过；解包产物验证确认模型 manifest、light-ocr runtime、`light_ocr_node.node`、PDFium 原生模块、Sharp 原生模块及许可文件均存在。
+- 生产附件入口默认开放；设置 `OPENHARNESS_DESKTOP_ATTACHMENTS=0` 时明确关闭。“添加文件夹”图标和禁用菜单项保留。

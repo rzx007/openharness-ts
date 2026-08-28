@@ -4,6 +4,7 @@ import {
   LocalOcrService,
   type LocalOcrRepresentationRepository,
 } from "../local-ocr-service.js";
+import { LocalOcrError } from "../local-ocr-errors.js";
 
 describe("LocalOcrService", () => {
   it("caches completed OCR by asset hash and processor inputs", async () => {
@@ -96,6 +97,36 @@ describe("LocalOcrService", () => {
       cached: false,
     });
   });
+
+  it("retries one transient inference failure inside the same representation", async () => {
+    const repository = memoryRepository();
+    const recognize = vi.fn()
+      .mockRejectedValueOnce(new LocalOcrError("ocr_inference_failed", "worker busy", true))
+      .mockResolvedValueOnce({
+        lines: [{ text: "retry worked", confidence: 0.9, box: [] }],
+        timing: { totalMs: 3 },
+        modelProfile: "small",
+      });
+    const service = new LocalOcrService({
+      resolveAsset: async () => ({
+        assetId: "retry",
+        sha256: "c".repeat(64),
+        mediaType: "image/png",
+        sizeBytes: 2,
+        bytes: new Uint8Array([1, 2]),
+      }),
+      repository,
+      engine: { recognize, close: async () => undefined },
+      normalize: async (bytes, mediaType) => ({ bytes, mediaType, width: 1, height: 1, normalized: false }),
+      id: () => "rep-retry",
+    });
+
+    await expect(service.recognize({ assetId: "retry" })).resolves.toMatchObject({
+      text: "retry worked",
+      representationId: "rep-retry",
+    });
+    expect(recognize).toHaveBeenCalledTimes(2);
+  });
 });
 
 function memoryRepository(): LocalOcrRepresentationRepository {
@@ -115,4 +146,3 @@ function memoryRepository(): LocalOcrRepresentationRepository {
     fail: (id, error) => { records.set(id, { ...records.get(id), status: "failed", error }); },
   };
 }
-

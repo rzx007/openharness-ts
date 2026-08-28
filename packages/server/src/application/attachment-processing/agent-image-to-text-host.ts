@@ -36,25 +36,27 @@ export class AgentImageToTextHostAdapter implements AgentImageToTextHost {
     input: AgentImageToTextInput,
     context: { cwd: string; sessionId?: string; signal?: AbortSignal },
   ): Promise<AgentImageToTextResult> {
-    context.signal?.throwIfAborted();
+    const timeout = AbortSignal.timeout(60_000);
+    const signal = context.signal ? AbortSignal.any([context.signal, timeout]) : timeout;
+    signal.throwIfAborted();
     let assetId: string;
     if ("attachmentId" in input) {
       assetId = input.attachmentId;
     } else {
       const source = "imagePath" in input
-        ? await this.readLocalFile(resolve(context.cwd, input.imagePath), context.signal)
-        : await this.readRemote(input.imageUrl, context.signal);
+        ? await this.readLocalFile(resolve(context.cwd, input.imagePath), signal)
+        : await this.readRemote(input.imageUrl, signal);
       const asset = await this.options.importAttachment({
         displayName: source.displayName,
         ...(source.declaredMediaType
           ? { declaredMediaType: source.declaredMediaType }
           : {}),
         content: source.content,
-        signal: context.signal,
+        signal,
       });
       assetId = asset.id;
     }
-    const result = await this.options.recognize({ assetId, signal: context.signal });
+    const result = await this.options.recognize({ assetId, signal });
     return { ...result, assetId };
   }
 

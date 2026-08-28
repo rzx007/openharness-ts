@@ -19,7 +19,7 @@ describe("AgentImageToTextHostAdapter", () => {
       { cwd: "C:/repo", sessionId: "s1" },
     )).resolves.toMatchObject({ assetId: "att-1", status: "completed" });
     expect(importAttachment).not.toHaveBeenCalled();
-    expect(recognize).toHaveBeenCalledWith({ assetId: "att-1", signal: undefined });
+    expect(recognize).toHaveBeenCalledWith({ assetId: "att-1", signal: expect.any(AbortSignal) });
   });
 
   it("imports a local path through the attachment service before OCR", async () => {
@@ -36,10 +36,13 @@ describe("AgentImageToTextHostAdapter", () => {
     });
 
     await host.recognize({ imagePath: "images/receipt.png" }, { cwd: "C:/repo" });
-    expect(readLocalFile).toHaveBeenCalledWith(resolve("C:/repo", "images/receipt.png"), undefined);
+    expect(readLocalFile).toHaveBeenCalledWith(
+      resolve("C:/repo", "images/receipt.png"),
+      expect.any(AbortSignal),
+    );
     expect(importAttachment).toHaveBeenCalledWith(expect.objectContaining({
       displayName: "receipt.png",
-      signal: undefined,
+      signal: expect.any(AbortSignal),
     }));
   });
 
@@ -58,7 +61,10 @@ describe("AgentImageToTextHostAdapter", () => {
     });
 
     await host.recognize({ imageUrl: "https://example.com/scan.jpg" }, { cwd: "C:/repo" });
-    expect(downloadRemote).toHaveBeenCalledWith(new URL("https://example.com/scan.jpg"), undefined);
+    expect(downloadRemote).toHaveBeenCalledWith(
+      new URL("https://example.com/scan.jpg"),
+      expect.any(AbortSignal),
+    );
     await expect(host.recognize(
       { imageUrl: "file:///etc/passwd" },
       { cwd: "C:/repo" },
