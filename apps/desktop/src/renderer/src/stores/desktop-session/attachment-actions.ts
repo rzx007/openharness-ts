@@ -36,13 +36,13 @@ export function createAttachmentActions(context: DesktopStoreContext): Attachmen
             taskId,
             sourceToken: candidate.sourceToken,
           })
-        } catch (error) {
+        } catch {
           set((state) =>
             applyUploadEvent(state, scope, {
               type: "failed",
               draftId: candidate.draftId,
               taskId,
-              error: actionError(error),
+              error: actionError(),
             })
           )
         }
@@ -85,13 +85,13 @@ export function createAttachmentActions(context: DesktopStoreContext): Attachmen
       const uploadInput: UploadDesktopAttachmentMemoryInput = { ...input, draftId, taskId }
       try {
         await window.desktop.attachments.uploadClipboardImage(uploadInput)
-      } catch (error) {
+      } catch {
         set((state) =>
           applyUploadEvent(state, scope, {
             type: "failed",
             draftId,
             taskId,
-            error: actionError(error),
+            error: actionError(),
           })
         )
       }
@@ -121,13 +121,13 @@ export function createAttachmentActions(context: DesktopStoreContext): Attachmen
       set((state) => beginUpload(state, scope, draftId, taskId))
       try {
         await window.desktop.attachments.retryUpload({ draftId, taskId })
-      } catch (error) {
+      } catch {
         set((state) =>
           applyUploadEvent(state, scope, {
             type: "failed",
             draftId,
             taskId,
-            error: actionError(error),
+            error: actionError(),
           })
         )
       }
@@ -169,10 +169,10 @@ export function createAttachmentActions(context: DesktopStoreContext): Attachmen
   }
 }
 
-function actionError(error: unknown): DesktopAttachmentError {
+function actionError(): DesktopAttachmentError {
   return {
     code: "attachment_action_failed",
-    message: error instanceof Error ? error.message : "附件操作失败，请重试。",
+    message: "附件操作失败，请重试。",
     retryable: true,
   }
 }

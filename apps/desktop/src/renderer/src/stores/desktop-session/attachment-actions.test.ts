@@ -117,8 +117,20 @@ describe("desktop attachment actions", () => {
   })
 
   it("uses the same draft pipeline for images, dropped files, and clipboard bytes", async () => {
-    const image = { ...candidate, draftId: "draft-image", sourceToken: "source-image" }
-    const dropped = { ...candidate, draftId: "draft-drop", sourceToken: "source-drop" }
+    const image = {
+      ...candidate,
+      draftId: "draft-image",
+      sourceToken: "source-image",
+      displayName: "same.png",
+      declaredMediaType: "image/png",
+    }
+    const dropped = {
+      ...candidate,
+      draftId: "draft-drop",
+      sourceToken: "source-drop",
+      displayName: "same.png",
+      declaredMediaType: "image/png",
+    }
     const startUpload = vi.fn(async (input: { taskId: string }) => ({ taskId: input.taskId }))
     const uploadClipboardImage = vi.fn(async (input: { taskId: string }) => ({
       taskId: input.taskId,
@@ -157,6 +169,26 @@ describe("desktop attachment actions", () => {
         displayName: "clipboard.png",
       })
     )
+
+    for (const draft of drafts) {
+      useDesktopSessionStore.getState().applyAttachmentUploadEvent({
+        type: "success",
+        draftId: draft.draftId,
+        taskId: draft.taskId,
+        assetId: "asset-deduplicated",
+        displayName: draft.displayName,
+        mediaType: "image/png",
+        sizeBytes: draft.sizeBytes,
+      })
+    }
+    const readyDrafts =
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments
+    expect(readyDrafts).toHaveLength(3)
+    expect(readyDrafts).toEqual([
+      expect.objectContaining({ status: "ready", assetId: "asset-deduplicated" }),
+      expect.objectContaining({ status: "ready", assetId: "asset-deduplicated" }),
+      expect.objectContaining({ status: "ready", assetId: "asset-deduplicated" }),
+    ])
   })
 
   it("cancels uploading drafts and discards failed draft sources without deleting an asset", async () => {
@@ -243,5 +275,67 @@ describe("desktop attachment actions", () => {
       useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments
     ).toEqual([])
     expect(deleteUnreferenced).toHaveBeenCalledWith({ assetId: "asset-ready" })
+  })
+
+  it("keeps every attachment entry point disabled when the production capability gate is off", async () => {
+    const pickFiles = vi.fn()
+    const pickImages = vi.fn()
+    const stageDroppedFiles = vi.fn()
+    const uploadClipboardImage = vi.fn()
+    vi.stubGlobal("window", {
+      desktop: {
+        attachments: { pickFiles, pickImages, stageDroppedFiles, uploadClipboardImage },
+      },
+    })
+    useDesktopSessionStore.setState({
+      attachmentSupport: {
+        daemonSupported: true,
+        interactionEnabled: false,
+        uploadModes: ["single"],
+        limits: null,
+      },
+    })
+
+    await useDesktopSessionStore.getState().pickAttachmentFiles("session:a")
+    await useDesktopSessionStore.getState().pickAttachmentImages("session:a")
+    await useDesktopSessionStore.getState().addDroppedAttachments("session:a", [{} as File])
+    await useDesktopSessionStore.getState().addClipboardAttachment("session:a", {
+      bytes: Uint8Array.of(1).buffer,
+      displayName: "clipboard.png",
+      mediaType: "image/png",
+    })
+
+    expect(pickFiles).not.toHaveBeenCalled()
+    expect(pickImages).not.toHaveBeenCalled()
+    expect(stageDroppedFiles).not.toHaveBeenCalled()
+    expect(uploadClipboardImage).not.toHaveBeenCalled()
+    expect(useDesktopSessionStore.getState().composerDraftsByScope["session:a"]).toBeUndefined()
+  })
+
+  it("redacts rejected IPC details before storing a retryable renderer error", async () => {
+    vi.stubGlobal("window", {
+      desktop: {
+        attachments: {
+          pickFiles: vi.fn(async () => [candidate]),
+          startUpload: vi.fn(async () => {
+            throw new Error("Authorization: Bearer secret C:\\private\\report.pdf")
+          }),
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().pickAttachmentFiles("session:a")
+
+    const [draft] =
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments
+    expect(draft).toMatchObject({
+      status: "failed",
+      error: {
+        code: "attachment_action_failed",
+        message: "附件操作失败，请重试。",
+        retryable: true,
+      },
+    })
+    expect(JSON.stringify(draft)).not.toMatch(/Authorization|secret|private/i)
   })
 })

@@ -110,16 +110,16 @@ describe("DesktopAttachmentService source tokens", () => {
 
 describe("DesktopAttachmentService asset actions", () => {
   it("only previews safe bitmap media and enforces the preview byte limit", async () => {
-    const downloadAttachment = vi.fn(async () => new Response(Uint8Array.of(1, 2, 3)))
+    const downloadAttachment = vi.fn(async () => new Response(toArrayBuffer(pngBytes())))
     const getAttachment = vi.fn(async (id: string) => {
       if (id === "unsafe") return readyAsset(id, "page.html", 3, "text/html")
       if (id === "too-large") return readyAsset(id, "huge.png", 2_000_001, "image/png")
-      return readyAsset(id, "image.png", 3, "image/png")
+      return readyAsset(id, "image.png", pngBytes().byteLength, "image/png")
     })
     const service = createService({ getAttachment, downloadAttachment })
 
     await expect(service.readPreview("safe")).resolves.toEqual({
-      bytes: Uint8Array.of(1, 2, 3),
+      bytes: pngBytes(),
       mediaType: "image/png",
     })
     await expect(service.readPreview("unsafe")).rejects.toMatchObject({
@@ -129,6 +129,51 @@ describe("DesktopAttachmentService asset actions", () => {
       code: "attachment_preview_too_large",
     })
     expect(downloadAttachment).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects SVG or HTML bytes disguised with a safe bitmap media type", async () => {
+    const activeContent = new TextEncoder().encode('<svg onload="alert(1)"></svg>')
+    const service = createService({
+      getAttachment: async (id) =>
+        readyAsset(id, "disguised.png", activeContent.byteLength, "image/png"),
+      downloadAttachment: async () => new Response(toArrayBuffer(activeContent)),
+    })
+
+    await expect(service.readPreview("disguised")).rejects.toMatchObject({
+      code: "attachment_preview_unsupported",
+    })
+  })
+
+  it("reads the daemon copy after the original source file has been deleted", async () => {
+    const sourcePath = await temporaryFile("durable.png", pngBytes())
+    let storedBytes = new Uint8Array(new ArrayBuffer(0))
+    let storedAsset = readyAsset("asset-durable", "durable.png", 0, "image/png")
+    const service = createService({
+      uploadAttachment: async (input) => {
+        storedBytes = await consumeBytes(input.body)
+        storedAsset = readyAsset(
+          "asset-durable",
+          input.displayName,
+          storedBytes.byteLength,
+          "image/png"
+        )
+        return storedAsset
+      },
+      getAttachment: async () => storedAsset,
+      downloadAttachment: async () => new Response(toArrayBuffer(storedBytes)),
+    })
+    const [candidate] = await service.stagePaths(17, [sourcePath])
+    await service.startUpload(17, {
+      draftId: candidate!.draftId,
+      sourceToken: candidate!.sourceToken,
+    })
+    await service.whenIdle()
+    await rm(sourcePath, { force: true })
+
+    await expect(service.readPreview("asset-durable")).resolves.toEqual({
+      bytes: pngBytes(),
+      mediaType: "image/png",
+    })
   })
 
   it("opens from its managed temporary directory, cleans it, and saves through a chosen path", async () => {
@@ -304,6 +349,58 @@ describe("DesktopAttachmentService uploads", () => {
     expect(events).not.toContainEqual(expect.objectContaining({ type: "success", taskId }))
   })
 
+  it("aborts every running upload when its window owner is destroyed", async () => {
+    let resolveUpload!: (asset: AttachmentAssetRecord) => void
+    let uploadSignal: AbortSignal | undefined
+    const events: DesktopAttachmentUploadEvent[] = []
+    const service = createService({
+      emit: (_ownerId, event) => events.push(event),
+      uploadAttachment: (input) => {
+        uploadSignal = input.signal
+        return new Promise((resolve) => {
+          resolveUpload = resolve
+        })
+      },
+    })
+    const [candidate] = await service.stagePaths(18, [await temporaryFile("window.txt", "bye")])
+    const { taskId } = await service.startUpload(18, {
+      draftId: candidate!.draftId,
+      sourceToken: candidate!.sourceToken,
+    })
+    await waitUntil(() => uploadSignal !== undefined)
+
+    await service.disposeOwner(18)
+    expect(uploadSignal!.aborted).toBe(true)
+    resolveUpload(readyAsset("asset-too-late", "window.txt", 3))
+    await service.whenIdle()
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "cancelled", taskId }))
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "success", taskId }))
+  })
+
+  it("never exposes upload paths, tokens, authorization values, or stacks in public errors", async () => {
+    const events: DesktopAttachmentUploadEvent[] = []
+    const service = createService({
+      emit: (_ownerId, event) => events.push(event),
+      uploadAttachment: async () => {
+        throw new Error(
+          "Authorization: Bearer secret-token C:\\private\\report.pdf\nstack: internal-location"
+        )
+      },
+    })
+    const [candidate] = await service.stagePaths(19, [await temporaryFile("safe.txt", "safe")])
+    await service.startUpload(19, {
+      draftId: candidate!.draftId,
+      sourceToken: candidate!.sourceToken,
+      taskId: "task-redacted",
+    })
+    await service.whenIdle()
+
+    const serialized = JSON.stringify(events)
+    expect(serialized).toContain("attachment_upload_failed")
+    expect(serialized).not.toMatch(/Authorization|secret-token|private|stack/i)
+  })
+
   it("runs at most three uploads and never opens a queued task cancelled by its owner", async () => {
     const files = await Promise.all(
       Array.from({ length: 5 }, (_, index) => temporaryFile(`queue-${index}.txt`, `${index}`))
@@ -412,14 +509,40 @@ function readyAsset(
 }
 
 async function consume(body: UploadAttachmentInput["body"]): Promise<number> {
+  return (await consumeBytes(body)).byteLength
+}
+
+async function consumeBytes(body: UploadAttachmentInput["body"]): Promise<Uint8Array<ArrayBuffer>> {
   if (!(body instanceof ReadableStream)) throw new Error("expected a ReadableStream")
   const reader = body.getReader()
+  const chunks: Uint8Array[] = []
   let size = 0
   for (;;) {
     const result = await reader.read()
-    if (result.done) return size
+    if (result.done) {
+      const bytes = new Uint8Array(size)
+      let offset = 0
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset)
+        offset += chunk.byteLength
+      }
+      return bytes
+    }
+    chunks.push(result.value)
     size += result.value.byteLength
   }
+}
+
+function pngBytes(): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(new ArrayBuffer(8))
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  return bytes
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength))
+  copy.set(bytes)
+  return copy.buffer
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {

@@ -15,6 +15,8 @@ export interface ComposerDraftState {
   composerDraftsByScope: Record<string, DesktopComposerDraft>
 }
 
+const emptyDraftAttachments: DesktopAttachmentDraft[] = []
+
 export function emptyComposerDraftState(): ComposerDraftState {
   return { composerDraftsByScope: {} }
 }
@@ -31,7 +33,7 @@ export function selectDraftAttachments(
   state: ComposerDraftState,
   scope: string
 ): DesktopAttachmentDraft[] {
-  return state.composerDraftsByScope[scope]?.attachments ?? []
+  return state.composerDraftsByScope[scope]?.attachments ?? emptyDraftAttachments
 }
 
 export function setDraftText(

@@ -118,6 +118,7 @@ afterEach(() => {
 
 function stateWith(overrides: Partial<DesktopSessionState>): DesktopSessionState {
   return {
+    ...initialStoreState,
     appOperations: {},
     activeSessionId: null,
     applySessionUpdate: vi.fn(),
