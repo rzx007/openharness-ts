@@ -52,6 +52,9 @@ export interface StoreMutations {
   deletedMessages: Set<string>;
   deletedParts: Set<string>;
   deletedInputAttachments: Set<string>;
+  deletedInputs: Set<string>;
+  deletedRuns: Set<string>;
+  deletedAttempts: Set<string>;
 }
 
 export const DEFAULT_DELTA_FLUSH_INTERVAL_MS = 150;
@@ -109,6 +112,9 @@ export function emptyMutations(): StoreMutations {
     deletedMessages: new Set(),
     deletedParts: new Set(),
     deletedInputAttachments: new Set(),
+    deletedInputs: new Set(),
+    deletedRuns: new Set(),
+    deletedAttempts: new Set(),
   };
 }
 
@@ -127,6 +133,9 @@ export function cloneMutations(value: StoreMutations): StoreMutations {
     deletedMessages: new Set(value.deletedMessages),
     deletedParts: new Set(value.deletedParts),
     deletedInputAttachments: new Set(value.deletedInputAttachments),
+    deletedInputs: new Set(value.deletedInputs),
+    deletedRuns: new Set(value.deletedRuns),
+    deletedAttempts: new Set(value.deletedAttempts),
   };
 }
 

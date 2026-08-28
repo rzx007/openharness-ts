@@ -1955,6 +1955,244 @@ export class SessionStore {
     });
   }
 
+  createReplayRun(
+    inputId: string,
+    input: { id?: string; metadata?: Record<string, unknown> } = {},
+  ): SessionRunRecord {
+    const sourceInput = this.state.inputs[inputId];
+    if (!sourceInput) throw new Error(`Session input not found: ${inputId}`);
+    if (input.id) {
+      const existing = this.state.runs[input.id];
+      if (existing) {
+        if (
+          existing.sessionId !== sourceInput.sessionId ||
+          existing.inputId !== sourceInput.id
+        ) {
+          throw new Error(`Replay run id is already used: ${input.id}`);
+        }
+        return clone(existing);
+      }
+    }
+    return this.createRun({
+      id: input.id,
+      sessionId: sourceInput.sessionId,
+      inputId: sourceInput.id,
+      metadata: input.metadata,
+    });
+  }
+
+  replaceLatestPromptWithAdmission(input: {
+    sessionId: string;
+    sourceMessageId: string;
+    admission: AdmitPromptWithRunInput;
+    createRun: boolean;
+  }): {
+    transcript: {
+      messages: SessionMessageRecord[];
+      parts: SessionMessagePartRecord[];
+    };
+    input: SessionInputRecord;
+    run?: SessionRunRecord;
+  } {
+    return this.transaction(() => {
+      const session = assertSession(this.state, input.sessionId);
+      const sourceMessage = assertMessage(this.state, input.sourceMessageId);
+      if (
+        sourceMessage.sessionId !== input.sessionId ||
+        sourceMessage.role !== "user"
+      ) {
+        throw new Error("The edit source must be a user message in the session");
+      }
+      const sourceInput = sourceMessage.inputId
+        ? this.state.inputs[sourceMessage.inputId]
+        : undefined;
+      if (!sourceInput || sourceInput.sessionId !== input.sessionId) {
+        throw new Error("The edit source input is unavailable");
+      }
+
+      const removedMessages = Object.values(this.state.messages).filter(
+        (message) =>
+          message.sessionId === input.sessionId &&
+          message.seq >= sourceMessage.seq,
+      );
+      const removedMessageIds = new Set(removedMessages.map((message) => message.id));
+      const removedInputs = Object.values(this.state.inputs).filter(
+        (candidate) =>
+          candidate.sessionId === input.sessionId &&
+          candidate.seq >= sourceInput.seq,
+      );
+      const removedInputIds = new Set(removedInputs.map((candidate) => candidate.id));
+      const removedRuns = Object.values(this.state.runs).filter(
+        (run) =>
+          run.sessionId === input.sessionId &&
+          (removedInputIds.has(run.inputId ?? "") ||
+            removedMessages.some((message) => message.runId === run.id)),
+      );
+      const removedRunIds = new Set(removedRuns.map((run) => run.id));
+
+      for (const [id, part] of Object.entries(this.state.parts)) {
+        if (!removedMessageIds.has(part.messageId)) continue;
+        delete this.state.parts[id];
+        this.mutations.parts.delete(id);
+        this.mutations.deletedParts.add(id);
+        this.dirtyDeltaPartIds.delete(id);
+      }
+      for (const message of removedMessages) {
+        delete this.state.messages[message.id];
+        this.mutations.messages.delete(message.id);
+        this.mutations.deletedMessages.add(message.id);
+      }
+      for (const [id, reference] of Object.entries(this.state.inputAttachments)) {
+        if (!removedInputIds.has(reference.inputId)) continue;
+        delete this.state.inputAttachments[id];
+        this.mutations.inputAttachments.delete(id);
+        this.mutations.deletedInputAttachments.add(id);
+      }
+      for (const [id, attempt] of Object.entries(this.state.attempts)) {
+        if (!removedRunIds.has(attempt.runId)) continue;
+        delete this.state.attempts[id];
+        this.mutations.attempts.delete(id);
+        this.mutations.deletedAttempts.add(id);
+      }
+      for (const run of removedRuns) {
+        delete this.state.runs[run.id];
+        this.mutations.runs.delete(run.id);
+        this.mutations.deletedRuns.add(run.id);
+      }
+      for (const candidate of removedInputs) {
+        delete this.state.inputs[candidate.id];
+        this.mutations.inputs.delete(candidate.id);
+        this.mutations.deletedInputs.add(candidate.id);
+      }
+      this.refreshSessionStatus(session);
+
+      const transcript = {
+        messages: this.listMessages(input.sessionId),
+        parts: this.listMessageParts(input.sessionId),
+      };
+      this.appendEventInMemory({
+        type: "session.transcript.replaced",
+        sessionId: input.sessionId,
+        payload: { messages: transcript.messages, parts: transcript.parts },
+      });
+      const admitted = input.createRun
+        ? this.admitPromptWithRun(input.admission)
+        : { input: this.admitPrompt(input.admission.prompt) };
+      return { transcript, ...admitted };
+    });
+  }
+
+  forkSessionWithHistory(input: {
+    sourceSessionId: string;
+    beforeMessageId?: string;
+    afterMessageId?: string;
+    session: CreateSessionInput;
+  }): SessionRecord {
+    return this.transaction(() => {
+      const source = assertSession(this.state, input.sourceSessionId);
+      const sourceMessages = this.listMessages(source.id);
+      const beforeMessage = input.beforeMessageId
+        ? sourceMessages.find((message) => message.id === input.beforeMessageId)
+        : undefined;
+      const afterMessage = input.afterMessageId
+        ? sourceMessages.find((message) => message.id === input.afterMessageId)
+        : undefined;
+      if (input.beforeMessageId && !beforeMessage) {
+        throw new Error("Fork point not found");
+      }
+      if (input.afterMessageId && !afterMessage) {
+        throw new Error("Fork point not found");
+      }
+      const beforeSeq = beforeMessage?.seq ?? Number.POSITIVE_INFINITY;
+      const afterSeq = afterMessage?.seq ?? Number.POSITIVE_INFINITY;
+      const copiedMessages = sourceMessages.filter(
+        (message) => message.seq < beforeSeq && message.seq <= afterSeq,
+      );
+      const sourceParts = this.listMessageParts(source.id);
+      const fork = this.createSession({
+        ...input.session,
+        parentId: source.id,
+      });
+      const inputIdMap = new Map<string, string>();
+      const attachmentReferenceIdMap = new Map<string, string>();
+
+      for (const message of copiedMessages) {
+        if (!message.inputId || inputIdMap.has(message.inputId)) continue;
+        const sourceInput = this.state.inputs[message.inputId];
+        if (!sourceInput) continue;
+        const copiedInput = this.admitPrompt({
+          sessionId: fork.id,
+          delivery: sourceInput.delivery,
+          content: sourceInput.content,
+          attachments: sourceInput.attachments.map((attachment) => ({
+            assetId: attachment.assetId,
+            intent: attachment.intent,
+            displayName: attachment.displayName,
+          })),
+          metadata: sourceInput.metadata,
+        });
+        inputIdMap.set(sourceInput.id, copiedInput.id);
+        sourceInput.attachments.forEach((attachment, index) => {
+          const copiedReference = copiedInput.attachments[index];
+          if (copiedReference) {
+            attachmentReferenceIdMap.set(attachment.id, copiedReference.id);
+          }
+        });
+      }
+
+      for (const message of copiedMessages) {
+        const copiedMessage = this.createMessage({
+          sessionId: fork.id,
+          role: message.role,
+          ...(message.inputId && inputIdMap.has(message.inputId)
+            ? { inputId: inputIdMap.get(message.inputId)! }
+            : {}),
+          metadata: message.metadata,
+        });
+        for (const part of sourceParts.filter(
+          (candidate) => candidate.messageId === message.id,
+        )) {
+          const sourceReferenceId =
+            typeof part.metadata.inputAttachmentId === "string"
+              ? part.metadata.inputAttachmentId
+              : undefined;
+          this.upsertMessagePart({
+            sessionId: fork.id,
+            messageId: copiedMessage.id,
+            type: part.type,
+            status: part.status,
+            ...(part.text !== undefined ? { text: part.text } : {}),
+            ...(part.toolUseId !== undefined ? { toolUseId: part.toolUseId } : {}),
+            ...(part.toolName !== undefined ? { toolName: part.toolName } : {}),
+            ...(part.input !== undefined ? { input: part.input } : {}),
+            ...(part.output !== undefined ? { output: part.output } : {}),
+            ...(part.isError !== undefined ? { isError: part.isError } : {}),
+            ...(part.assetId !== undefined ? { assetId: part.assetId } : {}),
+            ...(part.intent !== undefined ? { intent: part.intent } : {}),
+            ...(part.displayName !== undefined ? { displayName: part.displayName } : {}),
+            ...(part.mediaType !== undefined ? { mediaType: part.mediaType } : {}),
+            ...(part.sizeBytes !== undefined ? { sizeBytes: part.sizeBytes } : {}),
+            ...(part.kind !== undefined ? { kind: part.kind } : {}),
+            ...(part.representationId !== undefined
+              ? { representationId: part.representationId }
+              : {}),
+            ...(part.processor !== undefined ? { processor: part.processor } : {}),
+            ...(part.transformationError !== undefined
+              ? { transformationError: part.transformationError }
+              : {}),
+            metadata: sourceReferenceId && attachmentReferenceIdMap.has(sourceReferenceId)
+              ? {
+                  ...part.metadata,
+                  inputAttachmentId: attachmentReferenceIdMap.get(sourceReferenceId),
+                }
+              : part.metadata,
+          });
+        }
+      }
+      return clone(assertSession(this.state, fork.id));
+    });
+  }
+
   /** Respect renamed titles; use the first prompt only for initial placeholder titles. */
   resolveSessionListTitle(sessionId: string): string {
     const session = assertSession(this.state, sessionId);
@@ -2114,6 +2352,29 @@ export class SessionStore {
             : {}),
           ...(partInput.isError !== undefined
             ? { isError: partInput.isError }
+            : {}),
+          ...(partInput.assetId !== undefined
+            ? { assetId: partInput.assetId }
+            : {}),
+          ...(partInput.intent !== undefined ? { intent: partInput.intent } : {}),
+          ...(partInput.displayName !== undefined
+            ? { displayName: partInput.displayName }
+            : {}),
+          ...(partInput.mediaType !== undefined
+            ? { mediaType: partInput.mediaType }
+            : {}),
+          ...(partInput.sizeBytes !== undefined
+            ? { sizeBytes: partInput.sizeBytes }
+            : {}),
+          ...(partInput.kind !== undefined ? { kind: partInput.kind } : {}),
+          ...(partInput.representationId !== undefined
+            ? { representationId: partInput.representationId }
+            : {}),
+          ...(partInput.processor !== undefined
+            ? { processor: partInput.processor }
+            : {}),
+          ...(partInput.transformationError !== undefined
+            ? { transformationError: partInput.transformationError }
             : {}),
           metadata: partInput.metadata ?? {},
           createdAt: timestamp,
@@ -3677,6 +3938,14 @@ export class SessionStore {
       "DELETE FROM session_message WHERE id = ?",
     );
     for (const id of this.mutations.deletedMessages) deleteMessage.run(id);
+    const deleteAttempt = this.database.prepare(
+      "DELETE FROM session_run_attempt WHERE id = ?",
+    );
+    for (const id of this.mutations.deletedAttempts) deleteAttempt.run(id);
+    const deleteRun = this.database.prepare("DELETE FROM session_run WHERE id = ?");
+    for (const id of this.mutations.deletedRuns) deleteRun.run(id);
+    const deleteInput = this.database.prepare("DELETE FROM session_input WHERE id = ?");
+    for (const id of this.mutations.deletedInputs) deleteInput.run(id);
 
     const upsertSession = this.database.prepare(`
       INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

@@ -28,7 +28,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
 
     expect(context.agentPool.close).not.toHaveBeenCalled();
     expect(
-      context.runEngine.replaceTranscriptAndAdmitPrompt,
+      context.runEngine.replaceLatestPrompt,
     ).not.toHaveBeenCalled();
   });
 
@@ -50,7 +50,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
     ).rejects.toThrow("close failed");
 
     expect(
-      context.runEngine.replaceTranscriptAndAdmitPrompt,
+      context.runEngine.replaceLatestPrompt,
     ).not.toHaveBeenCalled();
   });
 
@@ -61,6 +61,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
     await service.editLatestPrompt("session-1", {
       id: "edit-1",
       content: "replacement",
+      attachments: [{ assetId: "asset-new", intent: "ocr" }],
       sourceMessageId: "message-1",
       traceId: "trace-edit",
       metadata: { origin: { component: "latest-message-editor" } },
@@ -68,10 +69,11 @@ describe("SessionApplicationService editLatestPrompt", () => {
 
     expect(context.agentPool.close).toHaveBeenCalledWith("session-1");
     expect(
-      context.runEngine.replaceTranscriptAndAdmitPrompt,
-    ).toHaveBeenCalledWith("session-1", [], {
+      context.runEngine.replaceLatestPrompt,
+    ).toHaveBeenCalledWith("session-1", "message-1", {
       id: "edit-1",
       content: "replacement",
+      attachments: [{ assetId: "asset-new", intent: "ocr" }],
       traceId: "trace-edit",
       metadata: {
         origin: { component: "latest-message-editor" },
@@ -79,7 +81,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
       },
     });
     expect(context.agentPool.close.mock.invocationCallOrder[0]).toBeLessThan(
-      context.runEngine.replaceTranscriptAndAdmitPrompt.mock
+      context.runEngine.replaceLatestPrompt.mock
         .invocationCallOrder[0]!,
     );
   });
@@ -90,6 +92,11 @@ describe("SessionApplicationService editLatestPrompt", () => {
       sessionId: "session-1",
       content: "replacement",
       delivery: "queue",
+      attachments: [{
+        assetId: "asset-new",
+        intent: "ocr",
+        metadata: {},
+      }],
       metadata: {
         edit: { kind: "latest_prompt", sourceMessageId: "message-1" },
       },
@@ -107,6 +114,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
     const result = await service.editLatestPrompt("session-1", {
       id: "edit-1",
       content: "replacement",
+      attachments: [{ assetId: "asset-new", intent: "ocr" }],
       sourceMessageId: "message-1",
       traceId: "trace-retry",
     });
@@ -118,7 +126,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
     });
     expect(context.agentPool.close).not.toHaveBeenCalled();
     expect(
-      context.runEngine.replaceTranscriptAndAdmitPrompt,
+      context.runEngine.replaceLatestPrompt,
     ).not.toHaveBeenCalled();
   });
 
@@ -147,6 +155,38 @@ describe("SessionApplicationService editLatestPrompt", () => {
 
     expect(context.agentPool.close).not.toHaveBeenCalled();
   });
+
+  it("rejects reusing an edit id with attachments in a different order", async () => {
+    const context = editContext({
+      getInput: vi.fn(() => ({
+        id: "edit-1",
+        sessionId: "session-1",
+        content: "replacement",
+        delivery: "queue",
+        attachments: [
+          { assetId: "asset-a", intent: "vision", metadata: {} },
+          { assetId: "asset-b", intent: "ocr", metadata: {} },
+        ],
+        metadata: {
+          edit: { kind: "latest_prompt", sourceMessageId: "message-1" },
+        },
+      })),
+    });
+    const service = new SessionApplicationService(context as any);
+
+    await expect(service.editLatestPrompt("session-1", {
+      id: "edit-1",
+      content: "replacement",
+      attachments: [
+        { assetId: "asset-b", intent: "ocr" },
+        { assetId: "asset-a", intent: "vision" },
+      ],
+      sourceMessageId: "message-1",
+      traceId: "trace-collision",
+    })).rejects.toMatchObject({ status: 409 });
+
+    expect(context.agentPool.close).not.toHaveBeenCalled();
+  });
 });
 
 function editContext(
@@ -158,7 +198,7 @@ function editContext(
     hasWork?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
-  const replaceTranscriptAndAdmitPrompt = vi.fn(() => ({
+  const replaceLatestPrompt = vi.fn(() => ({
     input: { id: "replacement-input" },
     run: { id: "replacement-run" },
     queue_state: "running" as const,
@@ -175,7 +215,7 @@ function editContext(
     },
     runEngine: {
       hasWork: overrides.hasWork ?? vi.fn(() => false),
-      replaceTranscriptAndAdmitPrompt,
+      replaceLatestPrompt,
     },
     agentPool: {
       close: overrides.close ?? vi.fn(async () => undefined),

@@ -197,6 +197,76 @@ export class SessionRunEngine {
     };
   }
 
+  replaceLatestPrompt(
+    sessionId: string,
+    sourceMessageId: string,
+    input: Omit<AdmitPromptInput, "delivery">,
+  ): AdmitPromptResult {
+    if (!this.accepting) throw new Error("Session run engine is stopping");
+    const traceId =
+      normalizeTraceId(input.traceId) ??
+      normalizeTraceId(input.metadata?.traceId) ??
+      randomUUID();
+    const metadata = { ...(input.metadata ?? {}), traceId };
+    const before = this.context.events.checkpoint();
+    const admitted = this.context.store.replaceLatestPromptWithAdmission({
+      sessionId,
+      sourceMessageId,
+      admission: {
+        prompt: {
+          id: input.id,
+          sessionId,
+          delivery: "queue",
+          content: input.content,
+          attachments: input.attachments,
+          metadata,
+        },
+        run: { metadata: { ...(input.runMetadata ?? {}), traceId } },
+      },
+      createRun: this.context.agentPool.configured,
+    });
+    this.context.events.publishSince(before);
+    if (!admitted.run) return { input: admitted.input };
+    return {
+      input: admitted.input,
+      run: admitted.run,
+      queue_state: this.enqueueRun(admitted.run, admitted.input.id),
+    };
+  }
+
+  replayInput(
+    inputId: string,
+    input: { id?: string; metadata?: Record<string, unknown>; traceId?: string },
+  ): AdmitPromptResult {
+    if (!this.accepting) throw new Error("Session run engine is stopping");
+    const sourceInput = this.context.store.getInput(inputId);
+    if (!sourceInput) throw new Error(`Session input not found: ${inputId}`);
+    const existing = input.id ? this.context.store.getRun(input.id) : undefined;
+    const traceId =
+      normalizeTraceId(input.traceId) ??
+      normalizeTraceId(input.metadata?.traceId) ??
+      randomUUID();
+    const before = this.context.events.checkpoint();
+    const run = this.context.store.createReplayRun(inputId, {
+      id: input.id,
+      metadata: { ...(input.metadata ?? {}), traceId },
+    });
+    this.context.events.publishSince(before);
+    if (existing || run.status !== "pending") {
+      return {
+        input: sourceInput,
+        run,
+        ...(run.status === "running" ? { queue_state: "running" } : {}),
+        ...(run.status === "pending" ? { queue_state: "queued" } : {}),
+      };
+    }
+    return {
+      input: sourceInput,
+      run,
+      queue_state: this.enqueueRun(run, sourceInput.id),
+    };
+  }
+
   hasActiveRunsForCwd(cwd: string): boolean {
     return this.context.store
       .listSessions({ cwd, includeArchived: true })

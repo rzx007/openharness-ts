@@ -334,6 +334,77 @@ describe("SessionRunEngine", () => {
     await engine.waitForRuns([admitted.run!.id]);
   });
 
+  it("atomically replaces the latest prompt and forwards ordered attachments", async () => {
+    const store = createStore();
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: { execute: vi.fn(async () => {}) } as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    const admitted = engine.replaceLatestPrompt("s1", "source-message", {
+      id: "edited-input",
+      content: "replacement",
+      attachments: [
+        { assetId: "asset-b", intent: "ocr" },
+        { assetId: "asset-a", intent: "vision" },
+      ],
+      traceId: "trace-edit",
+    });
+
+    expect(store.replaceLatestPromptWithAdmission).toHaveBeenCalledWith({
+      sessionId: "s1",
+      sourceMessageId: "source-message",
+      admission: {
+        prompt: expect.objectContaining({
+          id: "edited-input",
+          attachments: [
+            { assetId: "asset-b", intent: "ocr" },
+            { assetId: "asset-a", intent: "vision" },
+          ],
+        }),
+        run: { metadata: { traceId: "trace-edit" } },
+      },
+      createRun: true,
+    });
+    expect(admitted.input.id).toBe("edited-input");
+    await engine.waitForRuns([admitted.run!.id]);
+  });
+
+  it("replays the original input with a second run", async () => {
+    const store = createStore();
+    const sourceInput = store.admitPrompt({
+      id: "source-input",
+      sessionId: "s1",
+      content: "inspect",
+      attachments: [{ assetId: "asset-1", intent: "vision" }],
+    });
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: { execute: vi.fn(async () => {}) } as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    const replayed = engine.replayInput(sourceInput.id, {
+      id: "recovery-run",
+      metadata: { recovery: { sourceRunId: "source-run" } },
+      traceId: "trace-replay",
+    });
+
+    expect(replayed.input).toBe(sourceInput);
+    expect(replayed.run?.inputId).toBe(sourceInput.id);
+    expect(store.createReplayRun).toHaveBeenCalledWith(sourceInput.id, {
+      id: "recovery-run",
+      metadata: {
+        recovery: { sourceRunId: "source-run" },
+        traceId: "trace-replay",
+      },
+    });
+    await engine.waitForRuns([replayed.run!.id]);
+  });
+
   it("interrupts only the selected active run and preserves queued work", async () => {
     const store = createStore();
     const activeDone = deferred<void>();
@@ -556,7 +627,7 @@ function createStore() {
   const createRun = vi.fn((input) => {
     const row = {
       ...input,
-      id: `r${++runCount}`,
+      id: input.id ?? `r${++runCount}`,
       status: "pending",
       createdAt: 1,
       updatedAt: 1,
@@ -597,6 +668,34 @@ function createStore() {
       }
       const admitted = admitPrompt(input.admission.prompt);
       return { transcript: { messages: [], parts: [] }, input: admitted };
+    }),
+    replaceLatestPromptWithAdmission: vi.fn((input) => {
+      if (input.createRun) {
+        const admitted = admitPrompt({
+          ...input.admission.prompt,
+          delivery: "queue",
+        });
+        const run = createRun({
+          id: input.admission.run?.id,
+          sessionId: admitted.sessionId,
+          inputId: admitted.id,
+          metadata: input.admission.run?.metadata,
+        });
+        return { transcript: { messages: [], parts: [] }, input: admitted, run };
+      }
+      const admitted = admitPrompt(input.admission.prompt);
+      return { transcript: { messages: [], parts: [] }, input: admitted };
+    }),
+    createReplayRun: vi.fn((inputId, input) => {
+      const source = inputs.get(inputId);
+      const existing = input.id ? runs.get(input.id) : undefined;
+      if (existing) return existing;
+      return createRun({
+        id: input.id,
+        sessionId: source.sessionId,
+        inputId,
+        metadata: input.metadata,
+      });
     }),
     getInput: vi.fn((id) => inputs.get(id)),
     createRun,

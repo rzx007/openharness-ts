@@ -1656,16 +1656,12 @@ describe("OpenHarnessHttpServer", () => {
         };
         expect(recovered).toMatchObject({
           input: {
+            id: "input-before-restart",
             content: "finish the report",
-            metadata: {
-              recovery: {
-                kind: "prompt_replay",
-                sourceRunId: "run-before-restart",
-                sourceInputId: "input-before-restart",
-              },
-            },
+            metadata: {},
           },
           run: {
+            id: "recovery-request-1",
             metadata: { recovery: { sourceRunId: "run-before-restart" } },
           },
           source_run: { id: "run-before-restart", status: "interrupted" },

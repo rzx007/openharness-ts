@@ -210,6 +210,174 @@ describe("SessionStore", () => {
     });
   });
 
+  it("creates replay runs for the original input without copying its references", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "asset-replay", 42);
+      const input = store.admitPrompt({
+        id: "input-replay",
+        sessionId: "s1",
+        content: "inspect",
+        attachments: [{ assetId: "asset-replay", intent: "vision" }],
+      });
+      store.createRun({ id: "run-original", sessionId: "s1", inputId: input.id });
+
+      const replay = store.createReplayRun(input.id, {
+        id: "run-replay",
+        metadata: { recovery: { sourceRunId: "run-original" } },
+      });
+
+      expect(replay.inputId).toBe(input.id);
+      expect(store.listRunsByInput(input.id).map((run) => run.id)).toEqual([
+        "run-original",
+        "run-replay",
+      ]);
+      expect(store.getInput(input.id)?.attachments).toEqual(input.attachments);
+      expect(store.listInputAttachments(input.id)).toHaveLength(1);
+    });
+  });
+
+  it("atomically replaces the latest prompt admission and its references", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "asset-old", 40);
+      createReadyAttachment(store, "asset-new", 60);
+      const oldInput = store.admitPrompt({
+        id: "input-old",
+        sessionId: "s1",
+        content: "old",
+        attachments: [{ assetId: "asset-old", intent: "vision" }],
+      });
+      store.createRun({ id: "run-old", sessionId: "s1", inputId: oldInput.id });
+      const oldMessage = store.createMessage({
+        id: "message-old",
+        sessionId: "s1",
+        role: "user",
+        runId: "run-old",
+        inputId: oldInput.id,
+      });
+      store.upsertMessagePart({
+        id: "part-old",
+        sessionId: "s1",
+        messageId: oldMessage.id,
+        type: "attachment",
+        status: "completed",
+        assetId: "asset-old",
+        intent: "vision",
+        displayName: "asset-old.png",
+        mediaType: "image/png",
+        sizeBytes: 40,
+      });
+
+      expect(() => store.replaceLatestPromptWithAdmission({
+        sessionId: "s1",
+        sourceMessageId: oldMessage.id,
+        admission: {
+          prompt: {
+            id: "input-new",
+            sessionId: "s1",
+            content: "new",
+            attachments: [{ assetId: "missing-asset" }],
+          },
+          run: { id: "run-new" },
+        },
+        createRun: true,
+      })).toThrow(/missing-asset/i);
+      expect(store.getInput(oldInput.id)).toEqual(oldInput);
+      expect(store.getRun("run-old")).toBeDefined();
+      expect(store.listMessages("s1").map((message) => message.id)).toEqual([oldMessage.id]);
+      expect(store.listInputAttachments(oldInput.id)).toHaveLength(1);
+
+      const replaced = store.replaceLatestPromptWithAdmission({
+        sessionId: "s1",
+        sourceMessageId: oldMessage.id,
+        admission: {
+          prompt: {
+            id: "input-new",
+            sessionId: "s1",
+            content: "new",
+            attachments: [{ assetId: "asset-new", intent: "ocr" }],
+          },
+          run: { id: "run-new" },
+        },
+        createRun: true,
+      });
+
+      expect(replaced.input.id).toBe("input-new");
+      expect(replaced.run?.id).toBe("run-new");
+      expect(store.getInput(oldInput.id)).toBeUndefined();
+      expect(store.getRun("run-old")).toBeUndefined();
+      expect(store.listMessages("s1")).toEqual([]);
+      expect(store.listMessageParts("s1")).toEqual([]);
+      expect(store.listInputAttachments(oldInput.id)).toEqual([]);
+      expect(replaced.input.attachments).toEqual([
+        expect.objectContaining({ assetId: "asset-new", intent: "ocr" }),
+      ]);
+    });
+  });
+
+  it("forks history with new ids, shared assets, and branch-local references", () => {
+    withStore((store) => {
+      const parent = store.createSession({
+        id: "parent",
+        cwd: process.cwd(),
+        model: "m",
+      });
+      createReadyAttachment(store, "asset-shared", 42);
+      const parentInput = store.admitPrompt({
+        id: "parent-input",
+        sessionId: parent.id,
+        content: "inspect",
+        attachments: [{ assetId: "asset-shared", intent: "vision" }],
+      });
+      const parentMessage = store.createMessage({
+        id: "parent-message",
+        sessionId: parent.id,
+        role: "user",
+        inputId: parentInput.id,
+      });
+      const parentPart = store.upsertMessagePart({
+        id: "parent-part",
+        sessionId: parent.id,
+        messageId: parentMessage.id,
+        type: "attachment",
+        status: "completed",
+        assetId: "asset-shared",
+        intent: "vision",
+        displayName: "asset-shared.png",
+        mediaType: "image/png",
+        sizeBytes: 42,
+        metadata: { inputAttachmentId: parentInput.attachments[0]!.id },
+      });
+
+      const child = store.forkSessionWithHistory({
+        sourceSessionId: parent.id,
+        session: {
+          id: "child",
+          cwd: parent.cwd,
+          model: parent.model,
+          title: "child",
+          metadata: {},
+        },
+      });
+      const childMessage = store.listMessages(child.id)[0]!;
+      const childInput = store.getInput(childMessage.inputId!)!;
+      const childPart = store.listMessageParts(child.id)[0]!;
+
+      expect(child.id).not.toBe(parent.id);
+      expect(childInput.id).not.toBe(parentInput.id);
+      expect(childInput.attachments[0]!.id).not.toBe(parentInput.attachments[0]!.id);
+      expect(childMessage.id).not.toBe(parentMessage.id);
+      expect(childPart.id).not.toBe(parentPart.id);
+      expect(childInput.attachments[0]!.assetId).toBe("asset-shared");
+      expect(childPart.assetId).toBe("asset-shared");
+
+      store.deleteSessionTree(child.id);
+      expect(store.listInputAttachments(parentInput.id)).toEqual(parentInput.attachments);
+      expect(store.countInputAttachmentReferences("asset-shared")).toBe(1);
+    });
+  });
+
   it("allows one input to own multiple runs", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });

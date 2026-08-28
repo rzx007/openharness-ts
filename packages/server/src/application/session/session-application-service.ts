@@ -1,9 +1,14 @@
-import { AttachmentError, type SessionStore } from "@openharness/services";
+import {
+  AttachmentError,
+  normalizePromptAttachments,
+  promptAttachmentFingerprint,
+  type SessionStore,
+} from "@openharness/services";
 import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
   readRuntimeMetadata,
-  type ReplaceTranscriptMessageInput,
+  type AdmitPromptAttachmentInput,
 } from "@openharness/protocol";
 
 import type {
@@ -55,6 +60,7 @@ export interface ForkSessionCommand {
 export interface EditLatestPromptCommand {
   id: string;
   content: string;
+  attachments?: AdmitPromptAttachmentInput[];
   sourceMessageId: string;
   metadata?: Record<string, unknown>;
   traceId: string;
@@ -130,27 +136,6 @@ export class SessionApplicationService {
     if (!source)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
 
-    const sourceMessages = this.context.store.listMessages(sessionId);
-    const sourceParts = this.context.store.listMessageParts(sessionId);
-    const beforeMessage = input.beforeMessageId
-      ? sourceMessages.find((message) => message.id === input.beforeMessageId)
-      : undefined;
-    const afterMessage = input.afterMessageId
-      ? sourceMessages.find((message) => message.id === input.afterMessageId)
-      : undefined;
-    if (input.beforeMessageId && !beforeMessage) {
-      throw new SessionApplicationError(404, "Fork point not found");
-    }
-    if (input.afterMessageId && !afterMessage) {
-      throw new SessionApplicationError(404, "Fork point not found");
-    }
-
-    const beforeSeq = beforeMessage?.seq ?? Number.POSITIVE_INFINITY;
-    const afterSeq = afterMessage?.seq ?? Number.POSITIVE_INFINITY;
-    const copiedMessages = sourceMessages.filter(
-      (message) => message.seq < beforeSeq && message.seq <= afterSeq,
-    );
-    const transcript = copyTranscript(copiedMessages, sourceParts);
     const before = this.context.events.checkpoint();
     const metadata = forkSessionMetadata(source.metadata, {
       sourceSessionId: source.id,
@@ -159,20 +144,31 @@ export class SessionApplicationService {
         : {}),
       ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
     });
-    const fork = this.context.store.createSession({
-      parentId: source.id,
-      ...(source.projectId ? { projectId: source.projectId } : {}),
-      cwd: source.cwd,
-      title: source.title ? `${source.title} fork` : "",
-      model: source.model,
-      ...(source.agent ? { agent: source.agent } : {}),
-      metadata,
-    });
-    if (transcript.length > 0) {
-      this.context.store.replaceTranscript({
-        sessionId: fork.id,
-        messages: transcript,
+    let fork;
+    try {
+      fork = this.context.store.forkSessionWithHistory({
+        sourceSessionId: source.id,
+        ...(input.beforeMessageId
+          ? { beforeMessageId: input.beforeMessageId }
+          : {}),
+        ...(input.afterMessageId
+          ? { afterMessageId: input.afterMessageId }
+          : {}),
+        session: {
+          parentId: source.id,
+          ...(source.projectId ? { projectId: source.projectId } : {}),
+          cwd: source.cwd,
+          title: source.title ? `${source.title} fork` : "",
+          model: source.model,
+          ...(source.agent ? { agent: source.agent } : {}),
+          metadata,
+        },
       });
+    } catch (error) {
+      if (error instanceof Error && error.message === "Fork point not found") {
+        throw new SessionApplicationError(404, error.message);
+      }
+      throw error;
     }
     this.warmWhenAdmitted(fork);
     this.context.events.publishSince(before);
@@ -188,7 +184,13 @@ export class SessionApplicationService {
     if (!session)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const content = input.content.trim();
-    if (!content) throw new SessionApplicationError(400, "content is required");
+    const attachments = normalizePromptAttachments(input.attachments);
+    if (!content && attachments.length === 0) {
+      throw new SessionApplicationError(
+        400,
+        "content or attachments are required",
+      );
+    }
     const lease = this.enterSessionOperation(session);
     try {
       const existingInput = this.context.store.getInput(input.id);
@@ -199,6 +201,15 @@ export class SessionApplicationService {
         if (
           existingInput.sessionId !== sessionId ||
           existingInput.content !== content ||
+          promptAttachmentFingerprint(
+            existingInput.attachments.map((reference) => ({
+              assetId: reference.assetId,
+              intent: reference.intent,
+              ...(typeof reference.metadata.requestedDisplayName === "string"
+                ? { displayName: reference.metadata.requestedDisplayName }
+                : {}),
+            })),
+          ) !== promptAttachmentFingerprint(attachments) ||
           edit?.kind !== "latest_prompt" ||
           edit.sourceMessageId !== input.sourceMessageId
         ) {
@@ -236,17 +247,14 @@ export class SessionApplicationService {
           "The prompt selected for editing is no longer the latest user message",
         );
       }
-      const messages = this.context.store
-        .listMessages(sessionId)
-        .filter((message) => message.seq < latestUserMessage.seq);
-      const parts = this.context.store.listMessageParts(sessionId);
       await this.context.agentPool.close(sessionId);
-      return this.context.runEngine.replaceTranscriptAndAdmitPrompt(
+      return this.context.runEngine.replaceLatestPrompt(
         sessionId,
-        copyTranscript(messages, parts),
+        latestUserMessage.id,
         {
           id: input.id,
           content,
+          attachments,
           traceId: input.traceId,
           metadata: {
             ...(input.metadata ?? {}),
@@ -441,24 +449,40 @@ export class SessionApplicationService {
         );
       }
 
+      const requestedRecovery = input.id
+        ? this.context.store.getRun(input.id)
+        : undefined;
+      if (requestedRecovery) {
+        const requestedLink = isRecord(requestedRecovery.metadata.recovery)
+          ? requestedRecovery.metadata.recovery
+          : undefined;
+        if (
+          requestedRecovery.sessionId !== sessionId ||
+          requestedRecovery.inputId !== sourceInput.id ||
+          requestedLink?.sourceRunId !== sourceRun.id
+        ) {
+          throw new SessionApplicationError(
+            409,
+            `Recovery run id is already used: ${requestedRecovery.id}`,
+          );
+        }
+      }
+
       const existingRecovery = this.context.store
-        .listInputs(sessionId)
+        .listRunsByInput(sourceInput.id)
         .find(
           (candidate) =>
             isRecord(candidate.metadata.recovery) &&
             candidate.metadata.recovery.sourceRunId === sourceRun.id,
         );
-      if (existingRecovery && existingRecovery.id === input.id) {
-        const existingRun = this.context.store.findRunByInput(
-          existingRecovery.id,
-        );
+      if (existingRecovery && (!input.id || existingRecovery.id === input.id)) {
         return {
-          input: existingRecovery,
-          ...(existingRun ? { run: existingRun } : {}),
-          ...(existingRun?.status === "running"
+          input: sourceInput,
+          run: existingRecovery,
+          ...(existingRecovery.status === "running"
             ? { queue_state: "running" as const }
             : {}),
-          ...(existingRun?.status === "pending"
+          ...(existingRecovery.status === "pending"
             ? { queue_state: "queued" as const }
             : {}),
           source_run: sourceRun,
@@ -488,16 +512,11 @@ export class SessionApplicationService {
         sourceRunId: sourceRun.id,
         sourceInputId: sourceInput.id,
       };
-      const resumed = await this.context.runEngine.admitPromptAndMaybeRun(
-        sessionId,
-        {
-          id: input.id,
-          content: sourceInput.content,
-          metadata: { ...(input.metadata ?? {}), recovery },
-          runMetadata: { recovery },
-          traceId: input.traceId,
-        },
-      );
+      const resumed = this.context.runEngine.replayInput(sourceInput.id, {
+        id: input.id,
+        metadata: { ...(input.metadata ?? {}), recovery },
+        traceId: input.traceId,
+      });
       const before = this.context.events.checkpoint();
       this.context.store.appendEvent({
         type: "session.run.recovery_requested",
@@ -918,35 +937,6 @@ function forkSessionMetadata(
     next.desktop = desktop;
   }
   return next;
-}
-
-function copyTranscript(
-  messages: ReturnType<SessionStore["listMessages"]>,
-  parts: ReturnType<SessionStore["listMessageParts"]>,
-): ReplaceTranscriptMessageInput[] {
-  const partsByMessage = new Map<string, typeof parts>();
-  for (const part of parts) {
-    const group = partsByMessage.get(part.messageId) ?? [];
-    group.push(part);
-    partsByMessage.set(part.messageId, group);
-  }
-  return messages.map((message) => ({
-    role: message.role,
-    metadata: { ...message.metadata },
-    parts: (partsByMessage.get(message.id) ?? [])
-      .sort((a, b) => a.seq - b.seq)
-      .map((part) => ({
-        type: part.type,
-        status: part.status,
-        ...(part.text !== undefined ? { text: part.text } : {}),
-        ...(part.toolUseId !== undefined ? { toolUseId: part.toolUseId } : {}),
-        ...(part.toolName !== undefined ? { toolName: part.toolName } : {}),
-        ...(part.input !== undefined ? { input: part.input } : {}),
-        ...(part.output !== undefined ? { output: part.output } : {}),
-        ...(part.isError !== undefined ? { isError: part.isError } : {}),
-        metadata: { ...part.metadata },
-      })),
-  }));
 }
 
 function promptResult(

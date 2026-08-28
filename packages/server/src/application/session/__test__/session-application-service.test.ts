@@ -29,16 +29,25 @@ function createService(options: {
     listChildSessions: vi.fn(() => []),
     beginArchive: vi.fn(),
     archiveSession: vi.fn(() => ({ ...session, status: "archived" })),
-    getRun: vi.fn(() => options.run),
+    getRun: vi.fn((id) => id === options.run?.id ? options.run : undefined),
     getInput: vi.fn(() => options.input),
     listInputs: vi.fn(() => options.inputs ?? []),
+    listRunsByInput: vi.fn(() => []),
+    listMessages: vi.fn(() => []),
+    listMessageParts: vi.fn(() => []),
     findRunByInput: vi.fn(() => options.owningRun),
+    forkSessionWithHistory: vi.fn((input) => ({ ...session, ...input.session })),
     admitPrompt: vi.fn((input) => ({ id: input.id ?? "live-input", ...input })),
     appendEvent: vi.fn(),
   };
   const runEngine = {
     admitPromptAndMaybeRun: vi.fn(() => ({
       input: { id: "recovery-input", sessionId: "s1" },
+      run: { id: "recovery-run", sessionId: "s1", status: "pending" },
+      queue_state: "running",
+    })),
+    replayInput: vi.fn(() => ({
+      input: options.input,
       run: { id: "recovery-run", sessionId: "s1", status: "pending" },
       queue_state: "running",
     })),
@@ -277,6 +286,7 @@ describe("SessionApplicationService", () => {
       id: "source-input",
       sessionId: "s1",
       content: "retry this",
+      attachments: [{ assetId: "asset-1", intent: "vision" }],
       metadata: {},
     };
     const { service, store, runEngine, broadcastSince } = createService({
@@ -285,24 +295,17 @@ describe("SessionApplicationService", () => {
     });
 
     const resumed = await service.resumeRun("s1", "source-run", {
-      id: "recovery-input",
+      id: "recovery-run",
       metadata: { requestedBy: "test" },
       traceId: "trace-1",
     });
 
     expect(resumed.source_run).toBe(sourceRun);
-    expect(runEngine.admitPromptAndMaybeRun).toHaveBeenCalledWith("s1", {
-      id: "recovery-input",
-      content: "retry this",
+    expect(resumed.input).toBe(sourceInput);
+    expect(runEngine.replayInput).toHaveBeenCalledWith("source-input", {
+      id: "recovery-run",
       metadata: {
         requestedBy: "test",
-        recovery: {
-          kind: "prompt_replay",
-          sourceRunId: "source-run",
-          sourceInputId: "source-input",
-        },
-      },
-      runMetadata: {
         recovery: {
           kind: "prompt_replay",
           sourceRunId: "source-run",
@@ -317,11 +320,65 @@ describe("SessionApplicationService", () => {
       payload: {
         sourceRunId: "source-run",
         sourceInputId: "source-input",
-        recoveryInputId: "recovery-input",
+        recoveryInputId: "source-input",
         recoveryRunId: "recovery-run",
       },
     });
     expect(broadcastSince).toHaveBeenCalledWith(7);
+  });
+
+  it("rejects a recovery run id that already belongs to another source", async () => {
+    const sourceRun = {
+      id: "source-run",
+      sessionId: "s1",
+      inputId: "source-input",
+      status: "interrupted",
+    };
+    const sourceInput = {
+      id: "source-input",
+      sessionId: "s1",
+      content: "retry this",
+      attachments: [],
+      metadata: {},
+    };
+    const conflictingRun = {
+      id: "recovery-run",
+      sessionId: "s1",
+      inputId: "another-input",
+      status: "pending",
+      metadata: { recovery: { sourceRunId: "another-run" } },
+    };
+    const { service, store, runEngine } = createService({
+      run: sourceRun,
+      input: sourceInput,
+    });
+    store.getRun.mockImplementation((id) =>
+      id === sourceRun.id ? sourceRun : id === conflictingRun.id ? conflictingRun : undefined,
+    );
+
+    await expect(service.resumeRun("s1", sourceRun.id, {
+      id: conflictingRun.id,
+      traceId: "trace-conflict",
+    })).rejects.toMatchObject({ status: 409 });
+
+    expect(runEngine.replayInput).not.toHaveBeenCalled();
+  });
+
+  it("forks a session through the store's atomic history copy", () => {
+    const { service, store } = createService();
+
+    service.forkSession("s1", { afterMessageId: "message-2" });
+
+    expect(store.forkSessionWithHistory).toHaveBeenCalledWith({
+      sourceSessionId: "s1",
+      afterMessageId: "message-2",
+      session: expect.objectContaining({
+        parentId: "s1",
+        cwd: "/repo",
+        title: "Session fork",
+        model: "gpt-test",
+      }),
+    });
   });
 
   it("closes child admission before taking the archive descendant snapshot", async () => {
