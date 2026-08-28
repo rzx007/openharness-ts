@@ -101,6 +101,10 @@ export const desktopAPI = {
       invoke(IpcChannels.attachmentStartUpload, input),
     cancelUpload: (input: IpcInvokeMap[typeof IpcChannels.attachmentCancelUpload]["args"][0]) =>
       invoke(IpcChannels.attachmentCancelUpload, input),
+    retryUpload: (input: IpcInvokeMap[typeof IpcChannels.attachmentRetryUpload]["args"][0]) =>
+      invoke(IpcChannels.attachmentRetryUpload, input),
+    discardDraft: (input: IpcInvokeMap[typeof IpcChannels.attachmentDiscardDraft]["args"][0]) =>
+      invoke(IpcChannels.attachmentDiscardDraft, input),
     deleteUnreferenced: (
       input: IpcInvokeMap[typeof IpcChannels.attachmentDeleteUnreferenced]["args"][0]
     ) => invoke(IpcChannels.attachmentDeleteUnreferenced, input),

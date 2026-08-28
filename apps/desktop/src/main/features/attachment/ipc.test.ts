@@ -44,11 +44,16 @@ describe("attachment IPC owner routing", () => {
     const event = { sender } as unknown as IpcMainInvokeEvent
 
     await stageDropped.handler(event, ["C:\\private\\report.pdf"])
-    await startUpload.handler(event, { draftId: "draft-1", sourceToken: "source-1" })
+    await startUpload.handler(event, {
+      draftId: "draft-1",
+      taskId: "task-1",
+      sourceToken: "source-1",
+    })
 
     expect(service.stagePaths).toHaveBeenCalledWith(41, ["C:\\private\\report.pdf"])
     expect(service.startUpload).toHaveBeenCalledWith(41, {
       draftId: "draft-1",
+      taskId: "task-1",
       sourceToken: "source-1",
     })
     expect(sender.once).toHaveBeenCalledTimes(1)
@@ -84,6 +89,8 @@ function fakeService(): AttachmentIpcService {
     uploadMemory: vi.fn(async () => ({ taskId: "task-memory" })),
     startUpload: vi.fn(async () => ({ taskId: "task-path" })),
     cancelUpload: vi.fn(async () => undefined),
+    retryUpload: vi.fn(async (_ownerId, input) => ({ taskId: input.taskId })),
+    discardDraft: vi.fn(async () => undefined),
     deleteUnreferenced: vi.fn(async () => ({ deleted: true, inUse: false })),
     readPreview: vi.fn(async () => ({ bytes: new Uint8Array(), mediaType: "image/png" })),
     openAttachment: vi.fn(async () => undefined),

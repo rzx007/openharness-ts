@@ -89,6 +89,8 @@ import type {
   DesktopAttachmentCandidate,
   DesktopAttachmentPreview,
   DesktopAttachmentUploadEvent,
+  DiscardDesktopAttachmentDraftInput,
+  RetryDesktopAttachmentUploadInput,
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
 } from "./attachment-types"
@@ -146,6 +148,8 @@ export type DesktopAPI = {
     uploadClipboardImage: (input: UploadDesktopAttachmentMemoryInput) => Promise<{ taskId: string }>
     startUpload: (input: StartDesktopAttachmentUploadInput) => Promise<{ taskId: string }>
     cancelUpload: (input: CancelDesktopAttachmentUploadInput) => Promise<void>
+    retryUpload: (input: RetryDesktopAttachmentUploadInput) => Promise<{ taskId: string }>
+    discardDraft: (input: DiscardDesktopAttachmentDraftInput) => Promise<void>
     deleteUnreferenced: (
       input: DesktopAttachmentAssetInput
     ) => Promise<{ deleted: boolean; inUse: boolean }>

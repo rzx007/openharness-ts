@@ -52,14 +52,25 @@ export interface DesktopPromptAttachmentInput {
 
 export interface StartDesktopAttachmentUploadInput {
   draftId: string
+  taskId: string
   sourceToken: string
 }
 
 export interface UploadDesktopAttachmentMemoryInput {
   draftId: string
+  taskId: string
   bytes: ArrayBuffer
   displayName: string
   mediaType: string
+}
+
+export interface RetryDesktopAttachmentUploadInput {
+  draftId: string
+  taskId: string
+}
+
+export interface DiscardDesktopAttachmentDraftInput {
+  draftId: string
 }
 
 export interface CancelDesktopAttachmentUploadInput {

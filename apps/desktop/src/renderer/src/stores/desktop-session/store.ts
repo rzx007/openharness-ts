@@ -1,5 +1,6 @@
 import { create } from "zustand"
 
+import { createAttachmentActions } from "./attachment-actions"
 import { attachDesktopDaemonStatusEvents, createBootstrapActions } from "./bootstrap-actions"
 import { createInitialState } from "./initial-state"
 import { createProjectActions } from "./project-actions"
@@ -18,6 +19,7 @@ const selectedProjectGitRefreshScheduler = createSelectedProjectGitRefreshSchedu
 let desktopSessionEventSubscriptionCount = 0
 let detachDesktopSessionUpdates: (() => void) | null = null
 let detachDesktopDaemonStatus: (() => void) | null = null
+let detachDesktopAttachmentUploads: (() => void) | null = null
 const projectDetailsCoordinator = createProjectDetailsCoordinator()
 
 export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => {
@@ -34,6 +36,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     ...createProjectActions(context),
     ...createSessionActions(context),
     ...createPromptActions(context),
+    ...createAttachmentActions(context),
     ...createQueuedPromptActions(context),
     applySessionUpdate: createApplySessionUpdate(context),
   }
@@ -49,6 +52,11 @@ export function attachDesktopSessionEvents(): () => void {
     detachDesktopSessionUpdates = window.desktop.sessions.onUpdated((view) => {
       useDesktopSessionStore.getState().applySessionUpdate(view)
     })
+    if (typeof window.desktop.attachments?.onUploadEvent === "function") {
+      detachDesktopAttachmentUploads = window.desktop.attachments.onUploadEvent((event) => {
+        useDesktopSessionStore.getState().applyAttachmentUploadEvent(event)
+      })
+    }
     const activeSessionId = useDesktopSessionStore.getState().activeSessionId
     if (activeSessionId && typeof window.desktop.sessions.open === "function") {
       void useDesktopSessionStore.getState().resyncActiveSessionSnapshot()
@@ -65,8 +73,10 @@ export function attachDesktopSessionEvents(): () => void {
 
     detachDesktopSessionUpdates?.()
     detachDesktopDaemonStatus?.()
+    detachDesktopAttachmentUploads?.()
     detachDesktopSessionUpdates = null
     detachDesktopDaemonStatus = null
+    detachDesktopAttachmentUploads = null
     selectedProjectGitRefreshScheduler.reset()
   }
 }

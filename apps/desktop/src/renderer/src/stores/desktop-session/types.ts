@@ -8,7 +8,12 @@ import type {
   DesktopWorkspaceMode,
 } from "@shared/session-types"
 import type { DesktopAttachmentSupport } from "@shared/attachment-types"
+import type {
+  DesktopAttachmentUploadEvent,
+  UploadDesktopAttachmentMemoryInput,
+} from "@shared/attachment-types"
 import type { StoreApi } from "zustand"
+import type { ComposerDraftState } from "./composer-draft-state"
 import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error"
@@ -145,6 +150,23 @@ export interface QueuedPromptActions {
   cancelQueuedPrompt: (inputId: string, queuedRunId: string) => Promise<void>
 }
 
+export interface AttachmentActions {
+  setComposerDraftText: (scope: string, text: string) => void
+  pickAttachmentFiles: (scope: string) => Promise<void>
+  pickAttachmentImages: (scope: string) => Promise<void>
+  addDroppedAttachments: (scope: string, files: readonly File[]) => Promise<void>
+  addClipboardAttachment: (
+    scope: string,
+    input: Omit<UploadDesktopAttachmentMemoryInput, "draftId" | "taskId">
+  ) => Promise<void>
+  cancelAttachment: (scope: string, draftId: string) => Promise<void>
+  retryAttachment: (scope: string, draftId: string) => Promise<void>
+  removeAttachment: (scope: string, draftId: string) => Promise<void>
+  migrateComposerDraft: (fromScope: string, toScope: string) => void
+  resetComposerDraft: (scope: string) => void
+  applyAttachmentUploadEvent: (event: DesktopAttachmentUploadEvent) => void
+}
+
 export interface DesktopSessionState
   extends
     DesktopRuntimeState,
@@ -152,7 +174,9 @@ export interface DesktopSessionState
     ProjectActions,
     SessionActions,
     PromptActions,
+    AttachmentActions,
     QueuedPromptActions {
+  composerDraftsByScope: ComposerDraftState["composerDraftsByScope"]
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
   projects: DesktopProject[]

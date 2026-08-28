@@ -1,0 +1,247 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+import type { DesktopAttachmentCandidate } from "@shared/attachment-types"
+import { resetDesktopSessionStore } from "./store-test-fixtures"
+import { useDesktopSessionStore } from "./store"
+
+const candidate: DesktopAttachmentCandidate = {
+  draftId: "draft-file",
+  sourceToken: "source-file",
+  displayName: "report.pdf",
+  declaredMediaType: "application/pdf",
+  sizeBytes: 100,
+}
+
+describe("desktop attachment actions", () => {
+  beforeEach(() => {
+    resetDesktopSessionStore()
+    useDesktopSessionStore.setState({
+      attachmentSupport: {
+        daemonSupported: true,
+        interactionEnabled: true,
+        uploadModes: ["single"],
+        limits: {
+          maxFilesPerPrompt: 20,
+          maxBytesPerFile: 1_000,
+          maxBytesPerPrompt: 2_000,
+          maxSessionReferencedBytes: 10_000,
+          resumableThresholdBytes: 500,
+          uploadSessionTtlMs: 1_000,
+          stagingTtlMs: 1_000,
+        },
+      },
+    })
+  })
+
+  it("adds picked candidates in order and sets the task id before starting each upload", async () => {
+    const startUpload = vi.fn(async (input: { taskId: string }) => ({ taskId: input.taskId }))
+    vi.stubGlobal("window", {
+      desktop: {
+        attachments: {
+          pickFiles: vi.fn(async () => [candidate]),
+          startUpload,
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().pickAttachmentFiles("session:a")
+
+    const [draft] =
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments
+    expect(draft).toMatchObject({
+      draftId: candidate.draftId,
+      taskId: expect.any(String),
+      status: "uploading",
+    })
+    expect(startUpload).toHaveBeenCalledWith({
+      draftId: candidate.draftId,
+      taskId: draft!.taskId,
+      sourceToken: candidate.sourceToken,
+    })
+  })
+
+  it("routes completion, retries with a new task, and ignores a late old-task failure", async () => {
+    const retryUpload = vi.fn(async (input: { taskId: string }) => ({ taskId: input.taskId }))
+    vi.stubGlobal("window", {
+      desktop: { attachments: { retryUpload } },
+    })
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "session:a": {
+          text: "",
+          attachments: [
+            {
+              draftId: candidate.draftId,
+              taskId: "task-old",
+              displayName: candidate.displayName,
+              declaredMediaType: candidate.declaredMediaType,
+              sizeBytes: candidate.sizeBytes,
+              status: "failed",
+              bytesUploaded: 10,
+              progress: 0.1,
+              error: { code: "offline", message: "离线", retryable: true },
+            },
+          ],
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().retryAttachment("session:a", candidate.draftId)
+    const retried =
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments[0]!
+    expect(retried.taskId).not.toBe("task-old")
+    expect(retried.status).toBe("uploading")
+
+    useDesktopSessionStore.getState().applyAttachmentUploadEvent({
+      type: "failed",
+      draftId: candidate.draftId,
+      taskId: "task-old",
+      error: { code: "late", message: "迟到", retryable: true },
+    })
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments[0]
+    ).toBe(retried)
+
+    useDesktopSessionStore.getState().applyAttachmentUploadEvent({
+      type: "success",
+      draftId: candidate.draftId,
+      taskId: retried.taskId,
+      assetId: "asset-ready",
+      displayName: candidate.displayName,
+      mediaType: "application/pdf",
+      sizeBytes: 100,
+    })
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments[0]
+    ).toMatchObject({ status: "ready", assetId: "asset-ready" })
+  })
+
+  it("uses the same draft pipeline for images, dropped files, and clipboard bytes", async () => {
+    const image = { ...candidate, draftId: "draft-image", sourceToken: "source-image" }
+    const dropped = { ...candidate, draftId: "draft-drop", sourceToken: "source-drop" }
+    const startUpload = vi.fn(async (input: { taskId: string }) => ({ taskId: input.taskId }))
+    const uploadClipboardImage = vi.fn(async (input: { taskId: string }) => ({
+      taskId: input.taskId,
+    }))
+    const files = [{ name: "drop.pdf" }] as unknown as File[]
+    vi.stubGlobal("window", {
+      desktop: {
+        attachments: {
+          pickImages: vi.fn(async () => [image]),
+          stageDroppedFiles: vi.fn(async () => [dropped]),
+          startUpload,
+          uploadClipboardImage,
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().pickAttachmentImages("session:a")
+    await useDesktopSessionStore.getState().addDroppedAttachments("session:a", files)
+    await useDesktopSessionStore.getState().addClipboardAttachment("session:a", {
+      bytes: Uint8Array.of(1, 2).buffer,
+      displayName: "clipboard.png",
+      mediaType: "image/png",
+    })
+
+    const drafts = useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments
+    expect(drafts.map((item) => item.draftId)).toEqual([
+      "draft-image",
+      "draft-drop",
+      expect.any(String),
+    ])
+    expect(startUpload).toHaveBeenCalledTimes(2)
+    expect(uploadClipboardImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftId: drafts[2]!.draftId,
+        taskId: drafts[2]!.taskId,
+        displayName: "clipboard.png",
+      })
+    )
+  })
+
+  it("cancels uploading drafts and discards failed draft sources without deleting an asset", async () => {
+    const cancelUpload = vi.fn(async () => undefined)
+    const discardDraft = vi.fn(async () => undefined)
+    const deleteUnreferenced = vi.fn(async () => ({ deleted: true, inUse: false }))
+    vi.stubGlobal("window", {
+      desktop: { attachments: { cancelUpload, discardDraft, deleteUnreferenced } },
+    })
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "session:a": {
+          text: "",
+          attachments: [
+            {
+              draftId: "draft-uploading",
+              taskId: "task-uploading",
+              displayName: "uploading.txt",
+              declaredMediaType: "text/plain",
+              sizeBytes: 1,
+              status: "uploading",
+              bytesUploaded: 0,
+              progress: 0,
+            },
+            {
+              draftId: "draft-failed",
+              taskId: "task-failed",
+              displayName: "failed.txt",
+              declaredMediaType: "text/plain",
+              sizeBytes: 1,
+              status: "failed",
+              bytesUploaded: 0,
+              progress: 0,
+              error: { code: "offline", message: "离线", retryable: true },
+            },
+          ],
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().cancelAttachment("session:a", "draft-uploading")
+    expect(cancelUpload).toHaveBeenCalledWith({ taskId: "task-uploading" })
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments[0]?.status
+    ).toBe("cancelled")
+
+    await useDesktopSessionStore.getState().removeAttachment("session:a", "draft-failed")
+    expect(discardDraft).toHaveBeenCalledWith({ draftId: "draft-failed" })
+    expect(deleteUnreferenced).not.toHaveBeenCalled()
+  })
+
+  it("removes ready assets optimistically and does not restore them when cleanup fails", async () => {
+    const deleteUnreferenced = vi.fn(async () => {
+      throw new Error("offline")
+    })
+    vi.stubGlobal("window", {
+      desktop: { attachments: { deleteUnreferenced } },
+    })
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "session:a": {
+          text: "keep text",
+          attachments: [
+            {
+              draftId: candidate.draftId,
+              taskId: "task-ready",
+              displayName: candidate.displayName,
+              declaredMediaType: candidate.declaredMediaType,
+              mediaType: "application/pdf",
+              sizeBytes: candidate.sizeBytes,
+              status: "ready",
+              bytesUploaded: 100,
+              progress: 1,
+              assetId: "asset-ready",
+            },
+          ],
+        },
+      },
+    })
+
+    await useDesktopSessionStore.getState().removeAttachment("session:a", candidate.draftId)
+
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope["session:a"]!.attachments
+    ).toEqual([])
+    expect(deleteUnreferenced).toHaveBeenCalledWith({ assetId: "asset-ready" })
+  })
+})

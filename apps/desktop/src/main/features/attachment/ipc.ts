@@ -14,6 +14,8 @@ import type {
   DesktopAttachmentCandidate,
   DesktopAttachmentPreview,
   DesktopAttachmentUploadEvent,
+  DiscardDesktopAttachmentDraftInput,
+  RetryDesktopAttachmentUploadInput,
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
 } from "../../../shared/attachment-types"
@@ -28,6 +30,7 @@ export interface AttachmentIpcService {
     ownerId: number,
     input: {
       draftId: string
+      taskId: string
       bytes: Uint8Array
       displayName: string
       mediaType: string
@@ -38,6 +41,11 @@ export interface AttachmentIpcService {
     input: StartDesktopAttachmentUploadInput
   ): Promise<{ taskId: string }>
   cancelUpload(ownerId: number, taskId: string): Promise<void>
+  retryUpload(
+    ownerId: number,
+    input: RetryDesktopAttachmentUploadInput
+  ): Promise<{ taskId: string }>
+  discardDraft(ownerId: number, draftId: string): Promise<void>
   deleteUnreferenced(assetId: string): Promise<{ deleted: boolean; inUse: boolean }>
   readPreview(assetId: string): Promise<DesktopAttachmentPreview>
   openAttachment(assetId: string): Promise<void>
@@ -117,6 +125,7 @@ export function createAttachmentIpcContribution(
             const input = value as UploadDesktopAttachmentMemoryInput
             return await service.uploadMemory(event.sender.id, {
               draftId: input.draftId,
+              taskId: input.taskId,
               bytes: new Uint8Array(input.bytes),
               displayName: input.displayName,
               mediaType: input.mediaType,
@@ -139,6 +148,26 @@ export function createAttachmentIpcContribution(
             const service = await serviceFor(event.sender)
             const input = value as CancelDesktopAttachmentUploadInput
             await service.cancelUpload(event.sender.id, input.taskId)
+          },
+        },
+        {
+          channel: IpcChannels.attachmentRetryUpload,
+          handler: async (event, value) => {
+            const service = await serviceFor(event.sender)
+            return await service.retryUpload(
+              event.sender.id,
+              value as RetryDesktopAttachmentUploadInput
+            )
+          },
+        },
+        {
+          channel: IpcChannels.attachmentDiscardDraft,
+          handler: async (event, value) => {
+            const service = await serviceFor(event.sender)
+            await service.discardDraft(
+              event.sender.id,
+              (value as DiscardDesktopAttachmentDraftInput).draftId
+            )
           },
         },
         {

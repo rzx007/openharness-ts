@@ -82,6 +82,7 @@ export class DesktopAttachmentServiceError extends Error {
 export interface StartAttachmentUploadInput {
   draftId: string
   sourceToken: string
+  taskId?: string
 }
 
 type UploadTaskEvent =
@@ -98,6 +99,7 @@ type UploadTaskEvent =
 
 export interface UploadMemoryAttachmentInput {
   draftId: string
+  taskId?: string
   displayName: string
   mediaType: string
   bytes: Uint8Array
@@ -107,6 +109,7 @@ export class DesktopAttachmentService {
   private readonly sources = new Map<string, SourceRecord>()
   private readonly tasks = new Map<string, UploadTask>()
   private readonly queue: UploadTask[] = []
+  private readonly failedSources = new Map<string, SourceRecord>()
   private readonly idleWaiters = new Set<() => void>()
   private readonly managedTemporaryDirectories = new Set<string>()
   private readonly fileSystem: AttachmentFileSystem
@@ -155,19 +158,8 @@ export class DesktopAttachmentService {
     if (source.ownerId !== ownerId) throw serviceError("attachment_source_forbidden")
 
     this.sources.delete(input.sourceToken)
-    const taskId = crypto.randomUUID()
-    const task: UploadTask = {
-      ownerId,
-      taskId,
-      draftId: input.draftId,
-      source,
-      state: "queued",
-      controller: new AbortController(),
-      stream: null,
-    }
-    this.tasks.set(taskKey(ownerId, taskId), task)
-    this.queue.push(task)
-    this.pumpQueue()
+    const taskId = input.taskId ?? crypto.randomUUID()
+    this.enqueue(ownerId, input.draftId, taskId, source)
     return { taskId }
   }
 
@@ -198,33 +190,44 @@ export class DesktopAttachmentService {
     if (input.bytes.byteLength > this.dependencies.maxBytesPerFile) {
       throw serviceError("attachment_file_too_large")
     }
-    const taskId = crypto.randomUUID()
-    const task: UploadTask = {
+    const taskId = input.taskId ?? crypto.randomUUID()
+    this.enqueue(ownerId, input.draftId, taskId, {
+      kind: "memory",
       ownerId,
-      taskId,
-      draftId: input.draftId,
-      source: {
-        kind: "memory",
-        ownerId,
-        bytes: input.bytes,
-        displayName: safeDisplayName(input.displayName),
-        declaredMediaType: input.mediaType,
-        sizeBytes: input.bytes.byteLength,
-        expiresAt: this.now(),
-      },
-      state: "queued",
-      controller: new AbortController(),
-      stream: null,
-    }
-    this.tasks.set(taskKey(ownerId, taskId), task)
-    this.queue.push(task)
-    this.pumpQueue()
+      bytes: input.bytes,
+      displayName: safeDisplayName(input.displayName),
+      declaredMediaType: input.mediaType,
+      sizeBytes: input.bytes.byteLength,
+      expiresAt: this.now(),
+    })
     return { taskId }
+  }
+
+  async retryUpload(
+    ownerId: number,
+    input: { draftId: string; taskId: string }
+  ): Promise<{ taskId: string }> {
+    const key = draftKey(ownerId, input.draftId)
+    const source = this.failedSources.get(key)
+    if (!source) throw serviceError("attachment_retry_unavailable")
+    this.failedSources.delete(key)
+    this.enqueue(ownerId, input.draftId, input.taskId, {
+      ...source,
+      expiresAt: this.now() + this.dependencies.sourceTokenTtlMs,
+    })
+    return { taskId: input.taskId }
+  }
+
+  async discardDraft(ownerId: number, draftId: string): Promise<void> {
+    this.failedSources.delete(draftKey(ownerId, draftId))
   }
 
   async disposeOwner(ownerId: number): Promise<void> {
     for (const [token, source] of this.sources) {
       if (source.ownerId === ownerId) this.sources.delete(token)
+    }
+    for (const [key, source] of this.failedSources) {
+      if (source.ownerId === ownerId) this.failedSources.delete(key)
     }
     const ownerTasks = [...this.tasks.values()].filter((task) => task.ownerId === ownerId)
     await Promise.all(ownerTasks.map((task) => this.cancelUpload(ownerId, task.taskId)))
@@ -400,6 +403,7 @@ export class DesktopAttachmentService {
         signal: task.controller.signal,
       })
       if (task.state !== "cancelled" && !task.controller.signal.aborted) {
+        this.failedSources.delete(draftKey(task.ownerId, task.draftId))
         this.emit(task, {
           type: "success",
           assetId: asset.id,
@@ -410,6 +414,7 @@ export class DesktopAttachmentService {
       }
     } catch (error) {
       if (task.state !== "cancelled" && !task.controller.signal.aborted) {
+        this.failedSources.set(draftKey(task.ownerId, task.draftId), task.source)
         this.emit(task, { type: "failed", error: toPublicError(error) })
       }
     } finally {
@@ -432,6 +437,23 @@ export class DesktopAttachmentService {
     if (this.running !== 0 || this.queue.length !== 0) return
     for (const resolve of this.idleWaiters) resolve()
     this.idleWaiters.clear()
+  }
+
+  private enqueue(ownerId: number, draftId: string, taskId: string, source: SourceRecord): void {
+    const key = taskKey(ownerId, taskId)
+    if (this.tasks.has(key)) throw serviceError("attachment_task_exists")
+    const task: UploadTask = {
+      ownerId,
+      taskId,
+      draftId,
+      source,
+      state: "queued",
+      controller: new AbortController(),
+      stream: null,
+    }
+    this.tasks.set(key, task)
+    this.queue.push(task)
+    this.pumpQueue()
   }
 
   private now(): number {
@@ -471,6 +493,10 @@ function taskKey(ownerId: number, taskId: string): string {
   return `${ownerId}:${taskId}`
 }
 
+function draftKey(ownerId: number, draftId: string): string {
+  return `${ownerId}:${draftId}`
+}
+
 function serviceError(code: string): DesktopAttachmentServiceError {
   const messages: Record<string, string> = {
     attachment_source_expired: "文件授权已过期，请重新选择。",
@@ -485,6 +511,8 @@ function serviceError(code: string): DesktopAttachmentServiceError {
     attachment_open_failed: "附件打开失败。",
     attachment_save_unavailable: "当前环境不能保存附件。",
     attachment_clipboard_unsupported: "剪贴板中的内容不是可上传的图片。",
+    attachment_retry_unavailable: "这个附件已经不能重试，请重新添加。",
+    attachment_task_exists: "附件上传任务重复。",
   }
   return new DesktopAttachmentServiceError(code, messages[code] ?? "附件操作失败。")
 }

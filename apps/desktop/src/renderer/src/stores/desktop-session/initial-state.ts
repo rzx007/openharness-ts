@@ -1,8 +1,10 @@
 import type { DesktopDaemonStatus } from "@shared/session-types"
 
 import { createEmptySessionRuntime } from "./operation-state"
+import { emptyComposerDraftState } from "./composer-draft-state"
 import type {
   BootstrapActions,
+  AttachmentActions,
   DesktopRuntimeState,
   DesktopSessionState,
   ProjectActions,
@@ -33,6 +35,7 @@ export function createInitialRuntimeState(): DesktopRuntimeState {
 export function createInitialState(): Omit<
   DesktopSessionState,
   | keyof BootstrapActions
+  | keyof AttachmentActions
   | keyof ProjectActions
   | keyof SessionActions
   | keyof PromptActions
@@ -66,6 +69,7 @@ export function createInitialState(): Omit<
     branches: [],
     activeSessionId: null,
     sessionView: null,
+    ...emptyComposerDraftState(),
     ...createInitialRuntimeState(),
   }
 }

@@ -173,6 +173,41 @@ describe("DesktopAttachmentService asset actions", () => {
 })
 
 describe("DesktopAttachmentService uploads", () => {
+  it("retries a failed source with a new task id without exposing its path again", async () => {
+    let attempt = 0
+    const events: DesktopAttachmentUploadEvent[] = []
+    const service = createService({
+      emit: (_ownerId, event) => events.push(event),
+      uploadAttachment: async (input) => {
+        attempt += 1
+        if (attempt === 1) throw new Error("offline")
+        return readyAsset("asset-retried", input.displayName, await consume(input.body))
+      },
+    })
+    const [candidate] = await service.stagePaths(13, [await temporaryFile("retry.txt", "retry")])
+    await service.startUpload(13, {
+      draftId: candidate!.draftId,
+      sourceToken: candidate!.sourceToken,
+      taskId: "task-first",
+    })
+    await service.whenIdle()
+
+    await service.retryUpload(13, {
+      draftId: candidate!.draftId,
+      taskId: "task-second",
+    })
+    await service.whenIdle()
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "failed", taskId: "task-first" }))
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "success",
+        taskId: "task-second",
+        assetId: "asset-retried",
+      })
+    )
+  })
+
   it("uploads a pathless clipboard image and enforces the same byte limit", async () => {
     const uploads: UploadAttachmentInput[] = []
     const service = createService({

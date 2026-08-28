@@ -80,6 +80,8 @@ import type {
   DesktopAttachmentAssetInput,
   DesktopAttachmentCandidate,
   DesktopAttachmentPreview,
+  DiscardDesktopAttachmentDraftInput,
+  RetryDesktopAttachmentUploadInput,
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
 } from "./attachment-types"
@@ -148,6 +150,8 @@ export const IpcChannels = {
   attachmentUploadMemory: "attachment:upload-memory",
   attachmentStartUpload: "attachment:start-upload",
   attachmentCancelUpload: "attachment:cancel-upload",
+  attachmentRetryUpload: "attachment:retry-upload",
+  attachmentDiscardDraft: "attachment:discard-draft",
   attachmentDeleteUnreferenced: "attachment:delete-unreferenced",
   attachmentReadPreview: "attachment:read-preview",
   attachmentOpen: "attachment:open",
@@ -396,6 +400,14 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.attachmentCancelUpload]: {
     args: [input: CancelDesktopAttachmentUploadInput]
+    result: void
+  }
+  [IpcChannels.attachmentRetryUpload]: {
+    args: [input: RetryDesktopAttachmentUploadInput]
+    result: { taskId: string }
+  }
+  [IpcChannels.attachmentDiscardDraft]: {
+    args: [input: DiscardDesktopAttachmentDraftInput]
     result: void
   }
   [IpcChannels.attachmentDeleteUnreferenced]: {

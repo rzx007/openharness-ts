@@ -29,6 +29,7 @@ describe("desktop session store event lifecycle", () => {
     >()
     const unsubscribeSession = vi.fn()
     const unsubscribeDaemon = vi.fn()
+    const unsubscribeAttachment = vi.fn()
     const onUpdated = vi.fn((listener: (view: ReturnType<typeof emptySessionView>) => void) => {
       sessionSubscribers.add(listener)
       return () => {
@@ -45,6 +46,7 @@ describe("desktop session store event lifecycle", () => {
         }
       }
     )
+    const onUploadEvent = vi.fn(() => unsubscribeAttachment)
     const publishSession = (view: ReturnType<typeof emptySessionView>): void => {
       sessionSubscribers.forEach((listener) => listener(view))
     }
@@ -56,7 +58,10 @@ describe("desktop session store event lifecycle", () => {
       daemonSubscribers.forEach((listener) => listener(status))
     }
     vi.stubGlobal("window", {
-      desktop: { sessions: { onUpdated, onDaemonStatusChanged } },
+      desktop: {
+        sessions: { onUpdated, onDaemonStatusChanged },
+        attachments: { onUploadEvent },
+      },
     })
     useDesktopSessionStore.setState({ activeSessionId: "session-1" })
 
@@ -65,6 +70,7 @@ describe("desktop session store event lifecycle", () => {
 
     expect(onUpdated).toHaveBeenCalledOnce()
     expect(onDaemonStatusChanged).toHaveBeenCalledOnce()
+    expect(onUploadEvent).toHaveBeenCalledOnce()
 
     publishDaemon({ phase: "ready", message: "connected", updatedAt: 1 })
     publishSession(emptySessionView("session-1", 1))
@@ -77,24 +83,28 @@ describe("desktop session store event lifecycle", () => {
     expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("still connected")
     expect(unsubscribeSession).not.toHaveBeenCalled()
     expect(unsubscribeDaemon).not.toHaveBeenCalled()
+    expect(unsubscribeAttachment).not.toHaveBeenCalled()
 
     secondCleanup()
     publishDaemon({ phase: "ready", message: "detached", updatedAt: 3 })
     publishSession(emptySessionView("session-1", 3))
     expect(unsubscribeSession).toHaveBeenCalledOnce()
     expect(unsubscribeDaemon).toHaveBeenCalledOnce()
+    expect(unsubscribeAttachment).toHaveBeenCalledOnce()
     expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("still connected")
     expect(useDesktopSessionStore.getState().sessionView?.cursor).toBe(1)
 
     const thirdCleanup = attachDesktopSessionEvents()
     expect(onUpdated).toHaveBeenCalledTimes(2)
     expect(onDaemonStatusChanged).toHaveBeenCalledTimes(2)
+    expect(onUploadEvent).toHaveBeenCalledTimes(2)
     publishDaemon({ phase: "ready", message: "reattached", updatedAt: 4 })
     expect(useDesktopSessionStore.getState().daemonStatus.message).toBe("reattached")
 
     thirdCleanup()
     expect(unsubscribeSession).toHaveBeenCalledTimes(2)
     expect(unsubscribeDaemon).toHaveBeenCalledTimes(2)
+    expect(unsubscribeAttachment).toHaveBeenCalledTimes(2)
   })
 
   it("resnapshots the active session after the final listener reattaches", async () => {
