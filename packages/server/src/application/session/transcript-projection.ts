@@ -189,6 +189,7 @@ export class SessionTranscriptProjection {
       case "tool_use_end": {
         const active = state.toolParts.get(event.toolUseId);
         const messageId = active?.messageId ?? this.ensureAssistantMessage(state);
+        const attachmentOcr = recordValue(event.result.metadata?.attachmentOcr);
         this.store.upsertMessagePart({
           id: active?.partId ?? event.toolUseId,
           sessionId: state.sessionId,
@@ -200,7 +201,17 @@ export class SessionTranscriptProjection {
           ...(active?.input ? { input: active.input } : {}),
           output: event.result,
           isError: event.result.isError === true,
+          ...(typeof attachmentOcr?.assetId === "string"
+            ? { assetId: attachmentOcr.assetId }
+            : {}),
+          ...(typeof attachmentOcr?.representationId === "string"
+            ? { representationId: attachmentOcr.representationId }
+            : {}),
+          ...(typeof attachmentOcr?.processor === "string"
+            ? { processor: attachmentOcr.processor }
+            : {}),
           metadata: {
+            ...event.result.metadata,
             toolCallId: event.toolUseId,
             toolAttemptId: event.result.toolAttemptId ?? `tool_attempt_${event.toolUseId}_1`,
             outcome: event.result.isError ? "failed" : "completed",
@@ -331,4 +342,10 @@ export class SessionTranscriptProjection {
       });
     }
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }

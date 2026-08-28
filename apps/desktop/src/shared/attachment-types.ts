@@ -11,7 +11,7 @@ export interface DesktopAttachmentSupport {
 
 export interface DesktopAttachmentSupportEnvironment {
   isPackaged: boolean
-  forceEnable: boolean
+  forceDisable: boolean
 }
 
 export const disabledDesktopAttachmentSupport: DesktopAttachmentSupport = {
@@ -131,7 +131,7 @@ export function resolveDesktopAttachmentSupport(
   if (daemonSupported && capabilities.attachments) {
     return {
       daemonSupported: true,
-      interactionEnabled: !environment.isPackaged || environment.forceEnable,
+      interactionEnabled: !environment.forceDisable,
       uploadModes: capabilities.attachments.uploadModes,
       limits: capabilities.attachments.limits,
     }

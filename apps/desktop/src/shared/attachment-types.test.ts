@@ -36,7 +36,7 @@ describe("resolveDesktopAttachmentSupport", () => {
     expect(
       resolveDesktopAttachmentSupport(attachmentCapabilities, {
         isPackaged: false,
-        forceEnable: false,
+        forceDisable: false,
       })
     ).toEqual({
       daemonSupported: true,
@@ -54,7 +54,7 @@ describe("resolveDesktopAttachmentSupport", () => {
           protocol: { version: 2 },
           features: {},
         },
-        { isPackaged: false, forceEnable: false }
+        { isPackaged: false, forceDisable: false }
       )
     ).toEqual({
       daemonSupported: false,
@@ -64,19 +64,19 @@ describe("resolveDesktopAttachmentSupport", () => {
     })
   })
 
-  it("keeps production disabled unless an internal override is explicit", () => {
+  it("enables packaged attachments by default and allows an explicit kill switch", () => {
     expect(
       resolveDesktopAttachmentSupport(attachmentCapabilities, {
         isPackaged: true,
-        forceEnable: false,
+        forceDisable: false,
       }).interactionEnabled
-    ).toBe(false)
+    ).toBe(true)
 
     expect(
       resolveDesktopAttachmentSupport(attachmentCapabilities, {
         isPackaged: true,
-        forceEnable: true,
+        forceDisable: true,
       }).interactionEnabled
-    ).toBe(true)
+    ).toBe(false)
   })
 })

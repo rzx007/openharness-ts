@@ -18,6 +18,8 @@ import {
 import {
   AttachmentApplicationService,
   AttachmentBlobStore,
+  LightOcrEngine,
+  LocalOcrService,
   closeExecutionRuntimes,
   executeAutoDream,
   getChildAgentExecutionRegistry,
@@ -72,6 +74,7 @@ import { ApplicationRetentionService } from "./retention/application-retention-s
 import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capability-router.js";
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
+import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -154,6 +157,7 @@ export class DaemonApplication implements DurableAgentApplication {
   private readonly operationGate = new DaemonOperationGate();
   private readonly agentPool: AgentPool;
   private readonly runEngine: SessionRunEngine;
+  private readonly localOcr: LocalOcrService;
   private readonly startupRecovery: Promise<void>;
   private closePromise?: Promise<void>;
   private readyState: "starting" | "ready" | "failed" | "closing" | "closed" =
@@ -196,6 +200,29 @@ export class DaemonApplication implements DurableAgentApplication {
           }),
           limits: options.attachmentLimits,
         });
+      const ocrEngine = new LightOcrEngine();
+      this.localOcr = new LocalOcrService({
+        engine: ocrEngine,
+        resolveAsset: async (assetId, signal) => {
+          signal?.throwIfAborted();
+          const opened = await this.attachments.openContent(assetId);
+          return {
+            assetId,
+            sha256: opened.sha256,
+            mediaType: opened.mediaType,
+            sizeBytes: opened.sizeBytes,
+            bytes: await readAttachmentBytes(opened.content, opened.sizeBytes, signal),
+          };
+        },
+        repository: {
+          findCompleted: (assetId, cacheKey) =>
+            store.findCompletedAttachmentRepresentation(assetId, "ocr_text", cacheKey),
+          begin: (input) => store.createAttachmentRepresentation(input),
+          complete: (id, output) =>
+            store.completeAttachmentRepresentation(id, output),
+          fail: (id, error) => { store.failAttachmentRepresentation(id, error); },
+        },
+      });
       // 上次进程可能是被杀掉的：内存里的 Agent/进程都没了，store 里却还挂着 running。
       // 先把这些半截状态结掉，再对外服务，免得窗口以为还在跑。
       recoverProjectionSettlements(store);
@@ -281,6 +308,10 @@ export class DaemonApplication implements DurableAgentApplication {
             },
           })),
         workflowRepository: this.workflows,
+        imageToText: createAgentImageToTextHost({
+          attachments: this.attachments,
+          recognize: (input) => this.localOcr.recognize(input),
+        }),
         requestPermission: async (request, context) => {
           // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
           return await this.permissions.ask({
@@ -692,6 +723,11 @@ export class DaemonApplication implements DurableAgentApplication {
       failures.push(error);
     }
     try {
+      await this.localOcr.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
       await this.terminals.dispose();
     } catch (error) {
       failures.push(error);
@@ -759,6 +795,39 @@ export class DaemonApplication implements DurableAgentApplication {
       this.options.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
   }
+}
+
+async function readAttachmentBytes(
+  stream: ReadableStream<Uint8Array>,
+  expectedBytes: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      signal?.throwIfAborted();
+      const item = await reader.read();
+      if (item.done) break;
+      size += item.value.byteLength;
+      if (size > expectedBytes) throw new Error("attachment content exceeded recorded size");
+      chunks.push(item.value);
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  if (size !== expectedBytes) throw new Error("attachment content size did not match its record");
+  const output = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
 }
 
 async function allocateScheduledOutsideProjectWorkspace(

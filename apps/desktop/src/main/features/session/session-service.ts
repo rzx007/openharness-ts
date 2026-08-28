@@ -146,7 +146,7 @@ export class DesktopSessionService {
       defaultPermissionMode,
       attachments: resolveDesktopAttachmentSupport(capabilities, {
         isPackaged: app.isPackaged,
-        forceEnable: process.env.OPENHARNESS_DESKTOP_ATTACHMENTS === "1",
+        forceDisable: process.env.OPENHARNESS_DESKTOP_ATTACHMENTS === "0",
       }),
     }
   }

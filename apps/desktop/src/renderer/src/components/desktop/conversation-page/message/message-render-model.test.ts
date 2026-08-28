@@ -7,6 +7,7 @@ import {
   collectChangedFiles,
   parseFileReference,
   parseInlineFileReference,
+  summarizeToolCall,
 } from "./message-render-model"
 
 describe("message render model", () => {
@@ -108,6 +109,22 @@ describe("message render model", () => {
     expect(collectChangedFiles([toolPart("write_file", { file_path: "src/output.ts" })])).toEqual([
       { path: "src/output.ts", additions: 0, deletions: 0, hasStats: false },
     ])
+  })
+
+  it("shows completed, empty, and failed local OCR states without claiming image understanding", () => {
+    expect(summarizeToolCall({
+      ...toolPart("ImageToText", { attachment_id: "att-1" }),
+      metadata: { attachmentOcr: { status: "completed", cached: true } },
+    })).toEqual({ name: "已使用本地 OCR 提取文字", detail: "已复用识别结果" })
+    expect(summarizeToolCall({
+      ...toolPart("ImageToText", { attachment_id: "att-1" }),
+      metadata: { attachmentOcr: { status: "no_text_detected" } },
+    })).toEqual({ name: "本地 OCR 未检测到文字", detail: "不能描述图片" })
+    expect(summarizeToolCall({
+      ...toolPart("ImageToText", { attachment_id: "att-1" }),
+      status: "failed",
+      isError: true,
+    })).toEqual({ name: "本地 OCR 提取失败", detail: "可以重新发送消息重试" })
   })
 })
 

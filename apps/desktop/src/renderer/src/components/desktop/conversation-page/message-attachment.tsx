@@ -168,6 +168,10 @@ export function attachmentRoutingMessage(code: string): string {
       return "当前阶段只支持把图片直接发送给模型。"
     case "attachment_media_type_unsupported":
       return "当前图片格式不受支持，请改用 PNG、JPEG、GIF 或 WebP。"
+    case "attachment_ocr_tool_unavailable":
+      return "本地 OCR 工具被当前 Agent 配置禁用，请允许 ImageToText 后重试。"
+    case "attachment_ocr_host_unavailable":
+      return "本地 OCR 服务暂不可用，请重启应用后重试。"
     case "attachment_materialization_failed":
       return "附件内容不可用，请重新上传后重试。"
     case "attachment_routing_aborted":

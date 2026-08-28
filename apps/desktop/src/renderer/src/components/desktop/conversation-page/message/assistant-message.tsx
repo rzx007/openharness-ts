@@ -277,13 +277,17 @@ function ToolActivityGroup({ tools }: { tools: ToolUnit[] }): React.JSX.Element 
     /bash|shell|terminal|exec|command/i.test(tool.call.toolName ?? "")
   )
   const reads = tools.length - edits.length - commands.length
-  const heading = [
+  const activityHeading = [
     edits.length ? `编辑了 ${edits.length} 个文件` : "",
     commands.length ? `运行了 ${commands.length} 个命令` : "",
     reads > 0 ? `执行了 ${reads} 次查看` : "",
   ]
     .filter(Boolean)
     .join("，")
+  const onlyToolSummary = tools.length === 1 ? summarizeToolCall(tools[0]!.call) : undefined
+  const heading = tools.length === 1 && tools[0]!.call.toolName === "ImageToText"
+    ? onlyToolSummary?.name
+    : activityHeading
   return (
     <section className="text-[13px] text-ui-muted">
       <button

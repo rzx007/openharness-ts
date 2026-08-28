@@ -181,6 +181,41 @@ describe("SessionTranscriptProjection", () => {
     });
   });
 
+  it("projects local OCR provenance onto the completed tool part", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
+    projection.projectStreamEvent(state, {
+      type: "tool_use_start",
+      toolUse: { id: "ocr-1", name: "ImageToText", input: { attachment_id: "att-1" } },
+    });
+    projection.projectStreamEvent(state, {
+      type: "tool_use_end",
+      toolUseId: "ocr-1",
+      result: {
+        content: [{ type: "text", text: "hello" }],
+        metadata: {
+          attachmentOcr: {
+            assetId: "att-1",
+            representationId: "rep-1",
+            processor: "light-ocr",
+            status: "completed",
+          },
+        },
+      },
+    });
+
+    expect(store.upsertMessagePart).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: "ocr-1",
+      assetId: "att-1",
+      representationId: "rep-1",
+      processor: "light-ocr",
+      metadata: expect.objectContaining({
+        attachmentOcr: expect.objectContaining({ status: "completed" }),
+      }),
+    }));
+  });
+
   it("closes only running parts owned by the failed run", () => {
     const store = createStore();
     store.listMessages.mockReturnValue([

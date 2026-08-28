@@ -103,6 +103,7 @@ export function isTurnComplete(parts: DesktopSessionPart[]): boolean {
 export function summarizeToolCall(part: DesktopSessionPart): { name: string; detail?: string } {
   const rawName = part.toolName || "tool"
   const normalized = rawName.toLocaleLowerCase().replace(/[-_]/g, "")
+  if (normalized === "imagetotext") return summarizeLocalOcr(part)
   const names: Array<[RegExp, string]> = [
     [/^(?:glob|listfiles|findfiles)/, "查找文件"],
     [/^(?:read|readfile)/, "读取文件"],
@@ -116,6 +117,29 @@ export function summarizeToolCall(part: DesktopSessionPart): { name: string; det
   ]
   const name = names.find(([pattern]) => pattern.test(normalized))?.[1] ?? humanizeToolName(rawName)
   return { name, detail: summarizeToolInput(part.input) }
+}
+
+function summarizeLocalOcr(part: DesktopSessionPart): { name: string; detail?: string } {
+  const metadata = recordValue(part.metadata.attachmentOcr)
+  if (part.status === "failed" || part.isError) {
+    return { name: "本地 OCR 提取失败", detail: "可以重新发送消息重试" }
+  }
+  if (metadata?.status === "no_text_detected") {
+    return { name: "本地 OCR 未检测到文字", detail: "不能描述图片" }
+  }
+  if (metadata?.status === "completed") {
+    return {
+      name: "已使用本地 OCR 提取文字",
+      ...(metadata.cached === true ? { detail: "已复用识别结果" } : {}),
+    }
+  }
+  return { name: "正在使用本地 OCR 识别文字" }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
 }
 
 export function formatValue(value: unknown): string {
