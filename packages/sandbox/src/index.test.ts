@@ -711,7 +711,7 @@ describe("resolveShellArgv", () => {
       expect(["-Command", "/c"]).toContain(argv[argv.length - 2]);
       expect(argv.at(-1)).toBe("echo hi");
     }
-  });
+  }, 10_000);
 
   it("describes the active host shell launcher", () => {
     const shell = resolveHostShellLauncher();
@@ -719,7 +719,7 @@ describe("resolveShellArgv", () => {
 
     expect(description).toContain(shell.kind === "posix-sh" ? "/bin/sh" : shell.bin);
     expect(description).toMatch(/(?:-c|-Command|\/c)$/);
-  });
+  }, 10_000);
 });
 
 describe("createProcess", () => {

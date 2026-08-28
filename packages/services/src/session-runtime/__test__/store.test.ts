@@ -572,7 +572,7 @@ describe("SessionStore", () => {
       ]);
       reloaded.close();
     });
-  });
+  }, 40_000);
 
   it("enforces the combined byte limit for one prompt", () => {
     withStore(

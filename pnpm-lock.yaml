@@ -440,6 +440,9 @@ importers:
         specifier: 'catalog:'
         version: 19.2.7
     devDependencies:
+      '@openharness/server':
+        specifier: workspace:*
+        version: link:../../packages/server
       '@types/bun':
         specifier: ^1.3.14
         version: 1.3.14

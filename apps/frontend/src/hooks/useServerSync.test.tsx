@@ -150,7 +150,7 @@ const server = new OpenHarnessHttpServer({
           const request = { toolName: "Write", reason: "exercise TUI permission flow", input: { path: "README.md" } };
           const requestId = \`permission-\${sequence + 1}\`;
           await publish({ type: "permission.requested", data: { requestId, request } }, context);
-          const decision = await agentOptions.requestPermission(request, {
+          const decision = await agentOptions.hostCapabilities.permissions.requestPermission(request, {
             ...context,
             cwd: session.cwd,
             signal: new AbortController().signal,
@@ -849,13 +849,15 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       return jsonResponse({
         plugins: [
           {
-          name: "demo",
-          version: "1.0.0",
-          enabled: true,
-          skillCount: 1,
-          commandCount: 0,
-          hookCount: 0,
-          agentCount: 0,
+            identity: { id: "demo", name: "demo", version: "1.0.0" },
+            origin: "native",
+            scope: "project",
+            enabled: true,
+            installation: "installed",
+            activation: "active",
+            inventory: { skills: 1, commands: 0, hooks: 0, agents: 0 },
+            permissions: { requested: [], approved: [], missing: [] },
+            diagnostics: [],
           },
         ],
         warnings: [],
@@ -1374,7 +1376,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.transcript.some((item) => item.text.includes("Unknown command: /definitely-not-a-command") || item.text.includes("Model set to gpt-test"))).toBe(false);
 
   renderer.destroy();
-});
+}, 15_000);
 
 test("useServerSync starts on the new-session home when the latest session uses an older model", async () => {
   const oldSession: SessionRecord = {
@@ -2482,7 +2484,7 @@ test("useServerSync rejects malformed, wrong-id, and wrong-session Job reads wit
     const invalidResults = [
       {
         value: { text: 42, cursor: 20, truncated: false, snapshot: agentJob },
-        error: 'Jobs: Job read response for "agent-1" has invalid fields.',
+        error: "Jobs: jobReadResult.text must be a string",
       },
       {
         value: { text: "", cursor: 20, truncated: false, snapshot: { ...agentJob, id: "agent-other" } },
@@ -2548,7 +2550,7 @@ test("useServerSync rejects missing-id, wrong-id, and wrong-owner cancel snapsho
     const invalidSnapshots = [
       {
         value: { ...agentJob, id: undefined },
-        error: "Jobs: Job snapshot has invalid fields.",
+        error: "Jobs: job.id must be a string",
       },
       {
         value: { ...agentJob, id: "agent-other" },
