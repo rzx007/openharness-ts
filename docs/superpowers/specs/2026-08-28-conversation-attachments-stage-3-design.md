@@ -1,6 +1,31 @@
 # 对话附件阶段 3：Desktop 上传、草稿与消息展示设计
 
-**状态：设计已确认，待实施。**
+**状态：已完成（2026-08-28）。**
+
+## 实现结果与验证证据
+
+阶段 3 已按本设计完成，实际入口、状态位置和返回链路如下：
+
+- picker、拖放和剪贴板图片统一进入 Electron Main 的附件服务；Renderer 只保存安全元数据、`draftId`、`taskId` 和上传状态，不保存真实路径；
+- Main 以最多 3 个并发任务流式上传，source token 按窗口隔离并一次性消费；取消、重试、窗口销毁和迟到事件都有测试；
+- `new-conversation` 与 `session:<id>` scope 同时保存文字和附件草稿，新会话创建成功后原子迁移，创建/打开/发送失败保留唯一 owner scope；
+- 已有会话和新会话都支持“文字 + 附件”与纯附件，发送使用 ready 卡片的不可变 ordered refs 快照，optimistic transcript 按 input ID 与 Snapshot/SSE 收敛；
+- 历史消息渲染 typed `attachment`/`transformation` part；最近消息编辑只改文字，从权威 input 保留原 ordered refs，不重新上传；
+- 缩略图只接受安全位图 MIME，并在 Main 再校验 PNG/JPEG/GIF/WebP/BMP/AVIF 文件头；SVG、HTML 和伪装内容不进入图片预览；
+- 打开和另存为只走专用 Main API；上传错误不会把路径、Authorization、source token 或 stack 写进 Renderer；
+- “添加文件夹”图标和菜单项保留但禁用；production 构建默认关闭附件交互。
+
+验证结果：
+
+- Desktop 全量 Vitest：50 个文件、310 个测试通过；
+- 阶段 3 定向链路：11 个文件、122 个测试通过；
+- 最终改动覆盖测试：4 个文件、31 个测试通过；
+- Web TypeScript：通过；提交钩子 Turbo 全仓类型检查：57/57 成功；
+- 阶段改动文件 ESLint：0 error；`git diff --check`：通过；
+- Desktop 全目录 lint 的既有基线仍有 185 个与本阶段无关的错误，主要来自既有 shadcn UI 显式返回类型和 React/Fast Refresh 规则，本阶段没有扩大范围批量改写；
+- 阶段边界审计确认没有修改 Provider 图片适配、`ImageToText`、OCR、文档提取、分片上传或文件夹遍历代码。
+
+阶段 4 和阶段 5 未开始。本阶段不会把附件交给模型，也不会调用或修改 `ImageToText`。
 
 ## 背景
 

@@ -1111,7 +1111,7 @@ daemon 启动时：
 
 ### 阶段 1：附件领域、存储与基础 HTTP API
 
-> **状态：已完成（2026-08-28）。** 已交付 migration `0013_attachments`、`features.attachments: 1`、`attachments.limits`、`uploadModes: ["single"]`，以及基于 `POST /attachments` 原始请求体的单文件流式上传协议。阶段 2 已完成；阶段 3 的 Composer、阶段 4 的原生图片路由和阶段 5 的本地 OCR / `ImageToText` 改造仍未开始。
+> **状态：已完成（2026-08-28）。** 已交付 migration `0013_attachments`、`features.attachments: 1`、`attachments.limits`、`uploadModes: ["single"]`，以及基于 `POST /attachments` 原始请求体的单文件流式上传协议。阶段 2 和阶段 3 已完成；阶段 4 的原生图片路由和阶段 5 的本地 OCR / `ImageToText` 改造仍未开始。
 
 #### 目标
 
@@ -1149,7 +1149,7 @@ daemon 启动时：
 
 ### 阶段 2：Prompt 协议、durable 引用与 Transcript
 
-> **状态：已完成（2026-08-28）。** 已交付 storage format 2、`session_input_attachment`、原子 input/ref/run admission、typed attachment part、Snapshot/SSE/Client 透传、queue/retry/edit/fork/restart 引用保持、删除保护、导出和 compaction 保留规则。阶段 3—5 未提前实现。
+> **状态：已完成（2026-08-28）。** 已交付 storage format 2、`session_input_attachment`、原子 input/ref/run admission、typed attachment part、Snapshot/SSE/Client 透传、queue/retry/edit/fork/restart 引用保持、删除保护、导出和 compaction 保留规则。阶段 3 已完成；阶段 4—5 未提前实现。
 
 #### 目标
 
@@ -1186,6 +1186,17 @@ daemon 启动时：
 - 空数据库直接创建 storage format 2；format 1 数据库在 migration 前明确拒绝启动，不做迁移、回填或读取兼容。
 
 ### 阶段 3：Desktop 上传、草稿与消息展示
+
+> **状态：已完成（2026-08-28）。** Desktop 已接通 picker、拖放、剪贴板图片、Main 流式上传、按 Composer scope 隔离的草稿、进度/取消/重试/移除、纯附件发送、新会话首条附件、optimistic/SSE 对账、历史卡片、打开/另存为和只读文字编辑。生产构建仍由 feature gate 默认关闭附件交互；阶段 4 的模型图片路由和阶段 5 的本地 OCR / `ImageToText` 改造均未开始。
+
+#### 阶段 3 验证证据
+
+- Desktop 全量 Vitest：50 个测试文件、310 个测试通过；单 worker 运行以避免 5000 文件目录用例与其他测试争抢磁盘。
+- 附件定向链路：11 个测试文件、122 个测试通过，覆盖 capability、IPC owner、三种入口、上传服务、草稿、发送竞态、新会话、历史展示与编辑引用保持。
+- 安全用例覆盖 source token 窗口隔离、路径/Authorization/stack 脱敏、SVG/HTML 与伪装 PNG 拒绝预览、源文件删除后读取 daemon 副本、窗口关闭取消任务和生产 gate。
+- Web TypeScript 检查通过；每个阶段提交钩子的 Turbo 全仓检查均为 57/57 成功；阶段改动文件的 ESLint 检查为 0 error。
+- Desktop 全目录 lint 仍会报告阶段开始前已经存在的 185 个错误，集中在 shadcn UI 缺少显式返回类型、Fast Refresh 导出规则和既有 React hook 规则；阶段 3 没有批量改写这些无关文件，且本阶段改动没有新增 lint error。
+- `node scripts/check-docs.mjs` 与 `git diff --check` 在文档收束提交前执行；最终结果记录在阶段 3 设计文档。
 
 #### 目标
 
