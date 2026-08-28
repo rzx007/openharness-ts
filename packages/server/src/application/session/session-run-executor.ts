@@ -87,22 +87,26 @@ export class SessionRunExecutor {
           signal: workContext.signal,
         });
         submittedContent = routed.content;
-        this.context.transcriptProjection.projectAttachmentTransformations({
-          sessionId,
-          inputId,
-          runId,
-          input: admitted,
-          decisions: routed.decisions,
-          status: "completed",
-        });
-        this.context.store.updateRun(runId, {
-          metadata: {
-            attachmentRouting: {
-              status: "completed",
-              decisions: routed.decisions,
+        const beforeAttachmentProjection = this.context.events.checkpoint();
+        this.context.store.transaction(() => {
+          this.context.transcriptProjection.projectAttachmentTransformations({
+            sessionId,
+            inputId,
+            runId,
+            input: admitted,
+            decisions: routed.decisions,
+            status: "completed",
+          });
+          this.context.store.updateRun(runId, {
+            metadata: {
+              attachmentRouting: {
+                status: "completed",
+                decisions: routed.decisions,
+              },
             },
-          },
+          });
         });
+        this.context.events.publishSince(beforeAttachmentProjection);
       }
 
       // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。

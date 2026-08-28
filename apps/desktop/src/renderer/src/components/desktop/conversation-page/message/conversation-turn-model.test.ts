@@ -66,6 +66,33 @@ describe("conversation turn model", () => {
     expect(entries[0].turn.assistantMessages).toHaveLength(1)
   })
 
+  it("merges an out-of-order optimistic user message into its own input turn", () => {
+    const optimisticSeq = Number.MAX_SAFE_INTEGER
+    const messages = [
+      message("user", 1, { inputId: "input-1" }),
+      message("assistant", 2, { inputId: "input-1", runId: "run-1" }),
+      message("assistant", 3, { inputId: "input-2", runId: "run-2" }),
+      message("user", optimisticSeq, { inputId: "input-2" }),
+    ]
+    const entries = buildConversationEntries(
+      messages,
+      messages.map((item) => part(item.id, item.seq, `${item.role}-${item.seq}`)),
+      [run("run-1", "input-1"), run("run-2", "input-2")]
+    )
+    const turns = entries.flatMap((entry) => (entry.type === "turn" ? [entry.turn] : []))
+
+    expect(turns).toHaveLength(2)
+    expect(turns[0]).toMatchObject({
+      inputId: "input-1",
+      assistantMessages: [{ inputId: "input-1" }],
+    })
+    expect(turns[1]).toMatchObject({
+      inputId: "input-2",
+      userMessage: { inputId: "input-2" },
+      assistantMessages: [{ inputId: "input-2" }],
+    })
+  })
+
   it("keeps a failed run with its original user turn when no assistant message exists", () => {
     const failedRun = { ...run("run-1", "input-1"), status: "failed" as const, updatedAt: 2 }
     const entries = buildConversationEntries(

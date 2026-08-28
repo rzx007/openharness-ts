@@ -102,6 +102,8 @@ describe("SessionRunExecutor", () => {
     const store = createStore({ attachments: [attachment("asset-1", 0)] });
     const submitMessage = vi.fn(() => completedHandle());
     const projectAttachmentTransformations = vi.fn();
+    const checkpoint = vi.fn(() => 9);
+    const publishSince = vi.fn();
     const executor = new SessionRunExecutor({
       store: store as any,
       agentPool: {
@@ -113,7 +115,7 @@ describe("SessionRunExecutor", () => {
         })),
         close: vi.fn(),
       } as any,
-      events: { checkpoint: () => 1, publishSince: vi.fn() },
+      events: { checkpoint, publishSince },
       transcriptProjection: {
         finalizeRunParts: vi.fn(),
         projectAttachmentTransformations,
@@ -147,6 +149,11 @@ describe("SessionRunExecutor", () => {
     );
     expect(projectAttachmentTransformations).toHaveBeenCalledWith(
       expect.objectContaining({ status: "completed" }),
+    );
+    expect(checkpoint).toHaveBeenCalled();
+    expect(publishSince).toHaveBeenCalledWith(9);
+    expect(publishSince.mock.invocationCallOrder[0]).toBeLessThan(
+      submitMessage.mock.invocationCallOrder[0]!,
     );
   });
 

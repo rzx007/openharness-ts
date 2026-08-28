@@ -47,6 +47,18 @@ export function buildConversationEntries(
     const inputId =
       message.inputId ?? (message.runId ? inputIdByRunId.get(message.runId) : undefined)
     if (message.role === "user") {
+      const existingTurn = inputId ? turnsByInputId.get(inputId) : undefined
+      if (existingTurn) {
+        existingTurn.userMessage = message
+        existingTurn.userParts = messageParts
+        existingTurn.createdAt = Math.min(existingTurn.createdAt, message.createdAt)
+        latestTurn = existingTurn
+        if (message.runId) {
+          if (!existingTurn.runIds.includes(message.runId)) existingTurn.runIds.push(message.runId)
+          turnsByRunId.set(message.runId, existingTurn)
+        }
+        continue
+      }
       const turn = createTurn(message, messageParts, inputId)
       entries.push({ type: "turn", turn })
       latestTurn = turn
@@ -56,7 +68,7 @@ export function buildConversationEntries(
     }
 
     let turn = inputId ? turnsByInputId.get(inputId) : undefined
-    if (!turn) turn = latestTurn
+    if (!turn && !inputId) turn = latestTurn
     if (!turn) {
       turn = createTurn(undefined, [], inputId, message.id)
       entries.push({ type: "turn", turn })
