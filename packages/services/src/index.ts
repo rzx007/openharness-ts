@@ -13,6 +13,11 @@ export {
   type DurableEventDefinition,
   type DurableEventScope,
   type PreparedDurableEvent,
+  normalizePromptAttachments,
+  promptAttachmentFingerprint,
+  uniqueReferencedBytes,
+  type NormalizedPromptAttachment,
+  type ReferencedAttachmentSize,
 } from "./session-runtime";
 
 export {

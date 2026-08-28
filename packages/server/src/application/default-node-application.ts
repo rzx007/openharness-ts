@@ -25,6 +25,7 @@ export function createDefaultNodeApplication(
     options.store ??
     new SessionStore({
       path: options.storePath ?? getDefaultSessionStorePath(),
+      attachmentLimits: options.attachmentLimits,
     });
   return new DaemonApplication({
     ...options,

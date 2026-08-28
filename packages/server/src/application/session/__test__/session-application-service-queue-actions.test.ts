@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AttachmentError } from "@openharness/services";
 
 import {
   SessionApplicationError,
@@ -18,6 +19,31 @@ describe("SessionApplicationService queued prompt actions", () => {
       }),
     ).rejects.toBeInstanceOf(SessionApplicationError);
 
+    expect(context.runEngine.promoteQueuedRun).not.toHaveBeenCalled();
+  });
+
+  it("keeps queued attachment prompts queued during stage two", async () => {
+    const context = queueContext();
+    context.store.getInput.mockReturnValue({
+      id: "input-queued",
+      sessionId: "session-1",
+      delivery: "queue",
+      content: "inspect",
+      attachments: [{ assetId: "att-1" }],
+      metadata: {},
+    });
+    const service = new SessionApplicationService(context as any);
+
+    await expect(
+      service.promoteQueuedPrompt("session-1", "input-queued", {
+        queuedRunId: "run-queued",
+        expectedActiveRunId: "active-visible",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<AttachmentError>>({
+        code: "attachment_structured_steer_unsupported",
+      }),
+    );
     expect(context.runEngine.promoteQueuedRun).not.toHaveBeenCalled();
   });
 
@@ -92,6 +118,7 @@ function queueContext(
     sessionId: "session-1",
     delivery: "queue",
     content: "continue",
+    attachments: [],
     metadata: {},
   };
   let queuedRun =

@@ -219,6 +219,26 @@ describe("SessionApplicationService", () => {
     expect(agentPool.close).toHaveBeenCalledWith("s1");
   });
 
+  it("routes attachment prompts to the durable run engine instead of a live child", async () => {
+    const { service, runEngine, liveChildren } = createService({ live: true });
+
+    await service.admitPrompt("s1", {
+      id: "file-input",
+      content: "inspect",
+      delivery: "steer",
+      attachments: [{ assetId: "att-1" }],
+    });
+
+    expect(liveChildren.send).not.toHaveBeenCalled();
+    expect(runEngine.admitPromptAndMaybeRun).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({
+        id: "file-input",
+        attachments: [{ assetId: "att-1" }],
+      }),
+    );
+  });
+
   it("blocks prompt admission until a runtime configuration change has closed the old agent", async () => {
     const { service, agentPool, runEngine } = createService();
     let finishClose!: () => void;

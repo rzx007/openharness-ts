@@ -109,6 +109,42 @@ describe("SessionRunEngine", () => {
     runDone.resolve();
   });
 
+  it.each([
+    [
+      "order",
+      [{ assetId: "b" }, { assetId: "a" }],
+      [{ assetId: "a" }, { assetId: "b" }],
+    ],
+    ["intent", [{ assetId: "a" }], [{ assetId: "a", intent: "ocr" }]],
+    [
+      "display name",
+      [{ assetId: "a", displayName: "first.png" }],
+      [{ assetId: "a", displayName: "second.png" }],
+    ],
+  ] as const)("rejects concurrent id reuse with changed attachment %s", async (_label, firstAttachments, changedAttachments) => {
+    const store = createStore();
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: false } as any,
+      runExecutor: {} as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+    const first = engine.admitPromptAndMaybeRun("s1", {
+      id: `same-${_label}`,
+      content: "inspect",
+      attachments: [...firstAttachments],
+    });
+
+    expect(() =>
+      engine.admitPromptAndMaybeRun("s1", {
+        id: `same-${_label}`,
+        content: "inspect",
+        attachments: [...changedAttachments],
+      }),
+    ).toThrow(/prompt_id_conflict/);
+    await first;
+  });
+
   it("terminalizes a steer input interrupted before delivery", async () => {
     const store = createStore();
     const runDone = deferred<void>();
@@ -212,6 +248,48 @@ describe("SessionRunEngine", () => {
     });
     await engine.waitForRuns([admitted.run!.id]);
     expect(runExecutor.execute).toHaveBeenCalledOnce();
+  });
+
+  it("queues pure attachment prompts and attachment steer without direct delivery", async () => {
+    const store = createStore();
+    const runDone = deferred<void>();
+    const runExecutor = { execute: vi.fn(async () => await runDone.promise) };
+    const engine = new SessionRunEngine({
+      store: store as any,
+      agentPool: { configured: true } as any,
+      runExecutor: runExecutor as any,
+      events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
+    });
+
+    await expect(
+      engine.admitPromptAndMaybeRun("s1", {
+        id: "only-file",
+        content: "",
+        attachments: [{ assetId: "att-1" }],
+      }),
+    ).resolves.toMatchObject({
+      input: { attachments: [{ assetId: "att-1" }] },
+    });
+    await expect(
+      engine.admitPromptAndMaybeRun("s1", {
+        id: "steer-file",
+        delivery: "steer",
+        content: "inspect",
+        attachments: [{ assetId: "att-1", intent: "ocr" }],
+      }),
+    ).resolves.toMatchObject({
+      input: { delivery: "queue" },
+      queue_state: "queued",
+    });
+    expect(store.admitPromptWithRun).toHaveBeenLastCalledWith({
+      prompt: expect.objectContaining({
+        id: "steer-file",
+        delivery: "queue",
+        attachments: [{ assetId: "att-1", intent: "ocr" }],
+      }),
+      run: expect.any(Object),
+    });
+    runDone.resolve();
   });
 
   it("atomically replaces the transcript before enqueuing edited work", async () => {
@@ -469,6 +547,7 @@ function createStore() {
       ...input,
       id: input.id ?? `i${++inputCount}`,
       delivery: input.delivery ?? "queue",
+      attachments: input.attachments ?? [],
       createdAt: 1,
     };
     inputs.set(row.id, row);

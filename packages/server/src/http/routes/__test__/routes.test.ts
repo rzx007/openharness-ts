@@ -754,6 +754,7 @@ describe("run execution routes", () => {
       id: "i1",
       delivery: "steer",
       content: "hello",
+      attachments: [],
       metadata: { source: "test" },
       traceId: "trace-1",
     });

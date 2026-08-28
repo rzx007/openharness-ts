@@ -1,7 +1,7 @@
 import { AttachmentError } from "@openharness/services";
 import { describe, expect, it } from "vitest";
 
-import { attachmentErrorResponse } from "./support.js";
+import { applicationErrorResponse, attachmentErrorResponse } from "./support.js";
 
 describe("attachmentErrorResponse", () => {
   it.each([
@@ -19,5 +19,13 @@ describe("attachmentErrorResponse", () => {
     expect(attachmentErrorResponse(new AttachmentError(code, "test")).status).toBe(
       status,
     );
+  });
+
+  it("uses the same attachment mapping through the general application handler", () => {
+    expect(
+      applicationErrorResponse(
+        new AttachmentError("attachment_count_exceeded", "too many"),
+      ).status,
+    ).toBe(413);
   });
 });

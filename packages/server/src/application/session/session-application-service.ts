@@ -1,4 +1,4 @@
-import { type SessionStore } from "@openharness/services";
+import { AttachmentError, type SessionStore } from "@openharness/services";
 import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
@@ -331,7 +331,8 @@ export class SessionApplicationService {
       ...(input.metadata ?? {}),
       ...(input.traceId ? { traceId: input.traceId } : {}),
     };
-    if (this.context.liveChildren.has(sessionId) && input.id) {
+    const hasAttachments = (input.attachments?.length ?? 0) > 0;
+    if (!hasAttachments && this.context.liveChildren.has(sessionId) && input.id) {
       const existing = this.context.store.getInput(input.id);
       if (existing) {
         if (
@@ -351,13 +352,15 @@ export class SessionApplicationService {
         return promptResult(this.context.store, existing);
       }
     }
-    const live = await this.context.liveChildren.send(sessionId, {
-      id: input.id,
-      content: input.content,
-      delivery,
-      traceId: input.traceId,
-      metadata: input.metadata,
-    });
+    const live = hasAttachments
+      ? undefined
+      : await this.context.liveChildren.send(sessionId, {
+          id: input.id,
+          content: input.content,
+          delivery,
+          traceId: input.traceId,
+          metadata: input.metadata,
+        });
     if (live) {
       const admitted = this.context.store.getInput(live.inputId);
       const run = this.context.store.getRun(live.runId);
@@ -551,6 +554,12 @@ export class SessionApplicationService {
       const queuedRun = this.context.store.getRun(command.queuedRunId);
       if (!input || input.sessionId !== sessionId) {
         throw new SessionApplicationError(404, `Prompt not found: ${inputId}`);
+      }
+      if (input.attachments.length > 0) {
+        throw new AttachmentError(
+          "attachment_structured_steer_unsupported",
+          "Queued prompts with attachments cannot be promoted during stage two",
+        );
       }
       if (!queuedRun || queuedRun.sessionId !== sessionId) {
         throw new SessionApplicationError(

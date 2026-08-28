@@ -1105,8 +1105,17 @@ export class SessionStore {
     return clone(session);
   }
 
-  admitPrompt(input: AdmitPromptInput): SessionInputRecord {
+  admitPrompt(
+    input: AdmitPromptInput,
+    options: { attachmentLimits?: Partial<AttachmentLimits> } = {},
+  ): SessionInputRecord {
     return this.transaction(() => {
+      const attachmentLimits = options.attachmentLimits
+        ? parseAttachmentLimits({
+            ...this.attachmentLimits,
+            ...options.attachmentLimits,
+          })
+        : this.attachmentLimits;
       const session = assertSession(this.state, input.sessionId);
       assertMutableSession(session);
       const normalized = normalizePromptAttachments(input.attachments);
@@ -1116,10 +1125,10 @@ export class SessionStore {
           "Prompt text and attachments cannot both be empty",
         );
       }
-      if (normalized.length > this.attachmentLimits.maxFilesPerPrompt) {
+      if (normalized.length > attachmentLimits.maxFilesPerPrompt) {
         throw new AttachmentError(
           "attachment_count_exceeded",
-          `Prompt references ${normalized.length} files; limit is ${this.attachmentLimits.maxFilesPerPrompt}`,
+          `Prompt references ${normalized.length} files; limit is ${attachmentLimits.maxFilesPerPrompt}`,
         );
       }
 
@@ -1177,7 +1186,7 @@ export class SessionStore {
             `Attachment ${reference.assetId} is ${asset.status}`,
           );
         }
-        if (asset.sizeBytes > this.attachmentLimits.maxBytesPerFile) {
+        if (asset.sizeBytes > attachmentLimits.maxBytesPerFile) {
           throw new AttachmentError(
             "attachment_too_large",
             `Attachment ${reference.assetId} exceeds the per-file limit`,
@@ -1189,10 +1198,10 @@ export class SessionStore {
         (total, entry) => total + entry.asset.sizeBytes!,
         0,
       );
-      if (promptBytes > this.attachmentLimits.maxBytesPerPrompt) {
+      if (promptBytes > attachmentLimits.maxBytesPerPrompt) {
         throw new AttachmentError(
           "attachment_prompt_size_exceeded",
-          `Prompt attachments use ${promptBytes} bytes; limit is ${this.attachmentLimits.maxBytesPerPrompt}`,
+          `Prompt attachments use ${promptBytes} bytes; limit is ${attachmentLimits.maxBytesPerPrompt}`,
         );
       }
       const sessionBytes = uniqueReferencedBytes(
@@ -1204,10 +1213,10 @@ export class SessionStore {
           sizeBytes: asset.sizeBytes!,
         })),
       );
-      if (sessionBytes > this.attachmentLimits.maxSessionReferencedBytes) {
+      if (sessionBytes > attachmentLimits.maxSessionReferencedBytes) {
         throw new AttachmentError(
           "attachment_session_size_exceeded",
-          `Session attachments use ${sessionBytes} bytes; limit is ${this.attachmentLimits.maxSessionReferencedBytes}`,
+          `Session attachments use ${sessionBytes} bytes; limit is ${attachmentLimits.maxSessionReferencedBytes}`,
         );
       }
 
@@ -1889,7 +1898,10 @@ export class SessionStore {
   }
 
   /** Atomically persists a queued prompt and the one root run that owns it. */
-  admitPromptWithRun(input: AdmitPromptWithRunInput): {
+  admitPromptWithRun(
+    input: AdmitPromptWithRunInput,
+    options: { attachmentLimits?: Partial<AttachmentLimits> } = {},
+  ): {
     input: SessionInputRecord;
     run: SessionRunRecord;
   } {
@@ -1902,7 +1914,7 @@ export class SessionStore {
       const admitted = this.admitPrompt({
         ...input.prompt,
         delivery: "queue",
-      });
+      }, options);
       const existingRun = this.findOwningRunByInput(admitted.id);
       if (existingRun) return { input: admitted, run: existingRun };
       const run = this.createRun({

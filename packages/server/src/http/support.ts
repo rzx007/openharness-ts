@@ -144,6 +144,7 @@ export function applicationErrorResponse(
   error: unknown,
   fallbackStatus = 500,
 ): Response {
+  if (isAttachmentError(error)) return attachmentErrorResponse(error);
   const status =
     error instanceof ApplicationError
       ? APPLICATION_ERROR_HTTP_STATUS[error.code]

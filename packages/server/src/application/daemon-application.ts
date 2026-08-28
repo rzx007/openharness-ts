@@ -352,6 +352,7 @@ export class DaemonApplication implements DurableAgentApplication {
        */
       this.runEngine = new SessionRunEngine({
         store,
+        attachmentLimits: this.attachments.limits,
         agentPool: this.agentPool,
         runExecutor,
         events: this.eventPublisher,

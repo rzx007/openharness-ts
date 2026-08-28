@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AdmitPromptAttachmentInput,
+  AttachmentLimits,
   ReplaceTranscriptMessageInput,
   SessionRunRecord,
 } from "@openharness/protocol";
-import type { SessionStore } from "@openharness/services";
+import {
+  AttachmentError,
+  normalizePromptAttachments,
+  promptAttachmentFingerprint,
+  type SessionStore,
+} from "@openharness/services";
 
 import { jsonEqual, normalizeTraceId, withoutTraceId } from "../support.js";
 import {
@@ -22,6 +29,7 @@ export type AdmitPromptInput = {
   metadata?: Record<string, unknown>;
   runMetadata?: Record<string, unknown>;
   traceId?: string;
+  attachments?: AdmitPromptAttachmentInput[];
 };
 
 export type AdmitPromptResult = {
@@ -50,6 +58,7 @@ export interface SessionRunEngineContext {
   agentPool: AgentPool;
   runExecutor: Pick<SessionRunExecutor, "execute">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
+  attachmentLimits?: AttachmentLimits;
 }
 
 /**
@@ -68,6 +77,7 @@ export class SessionRunEngine {
       sessionId: string;
       delivery: "queue" | "steer";
       content: string;
+      attachmentFingerprint: string;
       metadata: Record<string, unknown>;
       promise: Promise<AdmitPromptResult>;
     }
@@ -171,6 +181,7 @@ export class SessionRunEngine {
           sessionId,
           delivery: "queue",
           content: input.content,
+          attachments: input.attachments,
           metadata,
         },
         run: { metadata: runMetadata },
@@ -265,7 +276,12 @@ export class SessionRunEngine {
     if (!this.accepting)
       return Promise.reject(new Error("Session run engine is stopping"));
     if (!input.id) return this.admitPrompt(sessionId, input);
-    const delivery = input.delivery ?? "queue";
+    const attachments = normalizePromptAttachments(input.attachments);
+    const delivery =
+      attachments.length > 0 && input.delivery === "steer"
+        ? "queue"
+        : (input.delivery ?? "queue");
+    const attachmentFingerprint = promptAttachmentFingerprint(attachments);
     const metadata = withoutTraceId(input.metadata ?? {});
     const pending = this.pendingAdmissions.get(input.id);
     if (pending) {
@@ -273,9 +289,13 @@ export class SessionRunEngine {
         pending.sessionId !== sessionId ||
         pending.delivery !== delivery ||
         pending.content !== input.content ||
+        pending.attachmentFingerprint !== attachmentFingerprint ||
         !jsonEqual(pending.metadata, metadata)
       ) {
-        throw new Error(`Prompt id is already used: ${input.id}`);
+        throw new AttachmentError(
+          "prompt_id_conflict",
+          `Prompt id is already used: ${input.id}`,
+        );
       }
       return pending.promise;
     }
@@ -288,6 +308,7 @@ export class SessionRunEngine {
       sessionId,
       delivery,
       content: input.content,
+      attachmentFingerprint,
       metadata,
       promise,
     });
@@ -298,7 +319,11 @@ export class SessionRunEngine {
     sessionId: string,
     input: AdmitPromptInput,
   ): Promise<AdmitPromptResult> {
-    const delivery = input.delivery ?? "queue";
+    const attachments = normalizePromptAttachments(input.attachments);
+    const delivery =
+      attachments.length > 0 && input.delivery === "steer"
+        ? "queue"
+        : (input.delivery ?? "queue");
     const traceId =
       normalizeTraceId(input.traceId) ??
       normalizeTraceId(input.metadata?.traceId) ??
@@ -313,12 +338,24 @@ export class SessionRunEngine {
         existingInput.sessionId !== sessionId ||
         existingInput.content !== input.content ||
         existingInput.delivery !== delivery ||
+        promptAttachmentFingerprint(
+          existingInput.attachments.map((reference) => ({
+            assetId: reference.assetId,
+            intent: reference.intent,
+            ...(typeof reference.metadata.requestedDisplayName === "string"
+              ? { displayName: reference.metadata.requestedDisplayName }
+              : {}),
+          })),
+        ) !== promptAttachmentFingerprint(attachments) ||
         !jsonEqual(
           withoutTraceId(existingInput.metadata),
           withoutTraceId(metadata),
         )
       ) {
-        throw new Error(`Prompt id is already used: ${input.id}`);
+        throw new AttachmentError(
+          "prompt_id_conflict",
+          `Prompt id is already used: ${input.id}`,
+        );
       }
       const existingRun = this.context.store.findRunByInput(existingInput.id);
       if (!existingRun && this.context.agentPool.configured) {
@@ -349,16 +386,22 @@ export class SessionRunEngine {
 
     const before = this.context.events.checkpoint();
     if (delivery === "queue" && this.context.agentPool.configured) {
-      const admitted = this.context.store.admitPromptWithRun({
+      const admission = {
         prompt: {
           id: input.id,
           sessionId,
           delivery,
           content: input.content,
+          attachments,
           metadata,
         },
         run: { metadata: runMetadata },
-      });
+      };
+      const admitted = this.context.attachmentLimits
+        ? this.context.store.admitPromptWithRun(admission, {
+            attachmentLimits: this.context.attachmentLimits,
+          })
+        : this.context.store.admitPromptWithRun(admission);
       this.context.events.publishSince(before);
       return {
         input: admitted.input,
@@ -367,13 +410,19 @@ export class SessionRunEngine {
       };
     }
 
-    const admitted = this.context.store.admitPrompt({
+    const admission = {
       id: input.id,
       sessionId,
       delivery,
       content: input.content,
+      attachments,
       metadata,
-    });
+    };
+    const admitted = this.context.attachmentLimits
+      ? this.context.store.admitPrompt(admission, {
+          attachmentLimits: this.context.attachmentLimits,
+        })
+      : this.context.store.admitPrompt(admission);
 
     if (delivery === "steer" && this.context.agentPool.configured) {
       const steered = this.runCoordinator.steer(sessionId, {
