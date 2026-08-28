@@ -29,8 +29,9 @@ interface JobSessionStore {
   listSessionTasks(sessionId: string): SessionExecutionRecord[];
   getSessionTask(taskId: string): SessionExecutionRecord | undefined;
   updateSessionTask(taskId: string, input: {
-    status: "stopped";
+    status: SessionExecutionRecord["status"];
     output?: string;
+    error?: string;
     metadata?: Record<string, unknown>;
   }): SessionExecutionRecord;
   waitForSessionTaskChange?(taskId: string, after: number, options: {
@@ -181,7 +182,28 @@ export class DaemonJobService {
         throw new Error(`Job ${input.jobId} does not accept input.`);
       }
       const runtime = this.runtimeFor(source.value);
-      await runtime.writeInput(runtimeExecutionId(source.value), input.data);
+      // Completed/failed Agents may continue via JobSend. Reopen the durable task
+      // before writeInput so JobWait does not early-return on the old terminal
+      // status, and so detached restart is not treated as an orphan by reconcile.
+      const reopen = source.value.type === "agent" &&
+        (source.value.status === "completed" || source.value.status === "failed")
+        ? {
+            status: source.value.status,
+            ...(source.value.output !== undefined ? { output: source.value.output } : {}),
+            ...(source.value.error !== undefined ? { error: source.value.error } : {}),
+          }
+        : undefined;
+      if (reopen) {
+        this.store.updateSessionTask(source.value.id, { status: "running" });
+      }
+      try {
+        await runtime.writeInput(runtimeExecutionId(source.value), input.data);
+      } catch (error) {
+        if (reopen) {
+          this.store.updateSessionTask(source.value.id, reopen);
+        }
+        throw error;
+      }
       return;
     }
     throw new Error(`Workflow ${input.jobId} does not accept input.`);
