@@ -16,6 +16,7 @@ function input(id: string, seq: number, content: string, createdAt = seq): Sessi
     seq,
     delivery: "queue",
     content,
+    attachments: [],
     metadata: {},
     createdAt,
   };

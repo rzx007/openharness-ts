@@ -6,6 +6,7 @@
  */
 
 import type {
+  AdmitPromptAttachmentInput,
   AdmitPromptInput,
   AttachmentAssetRecord,
   CreateScheduledTaskInput,
@@ -17,6 +18,8 @@ import type {
   UpdateScheduledTaskInput,
   PermissionStatus,
   SessionEventRecord,
+  SessionAttachmentMessagePartRecord,
+  SessionInputAttachmentRecord,
   SessionInputRecord,
   SessionMessagePartRecord,
   SessionMessageRecord,
@@ -25,11 +28,13 @@ import type {
   SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
+  SessionTransformationMessagePartRecord,
   ListMessagePartsOptions,
   JobSnapshot,
 } from "@openharness/protocol";
 
 export type {
+  AdmitPromptAttachmentInput,
   AttachmentAssetRecord,
   CreateScheduledTaskInput,
   InputDelivery,
@@ -39,6 +44,8 @@ export type {
   UpdateScheduledTaskInput,
   PermissionStatus,
   SessionEventRecord,
+  SessionAttachmentMessagePartRecord,
+  SessionInputAttachmentRecord,
   SessionInputRecord,
   SessionMessagePartRecord,
   SessionMessageRecord,
@@ -47,6 +54,7 @@ export type {
   SessionRunAttemptRecord,
   SessionExecutionRecord,
   SessionStateSnapshot,
+  SessionTransformationMessagePartRecord,
   ListMessagePartsOptions,
 };
 

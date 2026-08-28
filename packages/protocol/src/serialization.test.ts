@@ -35,6 +35,7 @@ const snapshot: SessionStateSnapshot = {
       seq: 1,
       delivery: "queue",
       content: "Review this",
+      attachments: [],
       metadata: {},
       createdAt: 2,
     },
@@ -80,6 +81,89 @@ describe("protocol serialization", () => {
         details: { path: "snapshot.inputs[0].seq" },
       }),
     );
+  });
+
+  it("requires and validates ordered input attachment records", () => {
+    const { attachments: _attachments, ...legacyInput } = snapshot.inputs[0]!;
+    expect(() =>
+      decodeSessionStateSnapshot({
+        ...snapshot,
+        inputs: [legacyInput],
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ProtocolDataError>>({
+        details: { path: "snapshot.inputs[0].attachments" },
+      }),
+    );
+
+    expect(() =>
+      decodeSessionStateSnapshot({
+        ...snapshot,
+        inputs: [{
+          ...snapshot.inputs[0],
+          attachments: [{
+            id: "ref_1",
+            sessionId: "s1",
+            inputId: "i1",
+            assetId: "att_1",
+            seq: 0,
+            intent: "describe",
+            displayName: "screen.png",
+            mediaType: "image/png",
+            sizeBytes: 42,
+            metadata: {},
+            createdAt: 3,
+          }],
+        }],
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ProtocolDataError>>({
+        details: { path: "snapshot.inputs[0].attachments[0].intent" },
+      }),
+    );
+  });
+
+  it("decodes typed attachment and transformation message parts", () => {
+    const decoded = decodeSessionStateSnapshot({
+      ...snapshot,
+      parts: [
+        {
+          id: "part_attachment",
+          sessionId: "s1",
+          messageId: "m1",
+          seq: 1,
+          type: "attachment",
+          status: "completed",
+          assetId: "att_1",
+          intent: "vision",
+          displayName: "screen.png",
+          mediaType: "image/png",
+          sizeBytes: 42,
+          metadata: { inputAttachmentId: "ref_1" },
+          createdAt: 3,
+          updatedAt: 3,
+        },
+        {
+          id: "part_transformation",
+          sessionId: "s1",
+          messageId: "m1",
+          seq: 2,
+          type: "transformation",
+          status: "running",
+          assetId: "att_1",
+          kind: "direct",
+          processor: "native-image-router",
+          metadata: {},
+          createdAt: 4,
+          updatedAt: 4,
+        },
+      ],
+    });
+
+    expect(decoded.parts).toMatchObject([
+      { type: "attachment", assetId: "att_1", intent: "vision" },
+      { type: "transformation", assetId: "att_1", kind: "direct" },
+    ]);
   });
 
   it("rejects malformed JSON before reading an event", () => {

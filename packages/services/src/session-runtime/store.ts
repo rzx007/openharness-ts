@@ -1095,6 +1095,7 @@ export class SessionStore {
       seq,
       delivery: input.delivery ?? "queue",
       content: input.content,
+      attachments: [],
       metadata: input.metadata ?? {},
       createdAt: timestamp,
     };
@@ -3166,6 +3167,7 @@ export class SessionStore {
         seq: row.seq as number,
         delivery: row.delivery as SessionInputRecord["delivery"],
         content: row.content as string,
+        attachments: [],
         metadata: decode(row.metadata_json as string),
         createdAt: row.created_at as number,
       };

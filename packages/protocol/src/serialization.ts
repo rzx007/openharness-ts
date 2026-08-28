@@ -9,6 +9,7 @@ import type {
   SessionRunRecord,
   SessionStateSnapshot,
 } from "./session.js";
+import type { AttachmentIntent } from "./attachment.js";
 import type { JobReadResult, JobSnapshot, JobWaitResult } from "./job.js";
 import type {
   TerminalEvent,
@@ -165,10 +166,60 @@ function validateInput(value: unknown, path: string): SessionInputRecord {
   numberField(item, "seq", path);
   enumField(item, "delivery", path, ["queue", "steer"] as const);
   stringField(item, "content", path);
+  const attachments = arrayField(item, "attachments", path, validateInputAttachment);
+  const assetIds = new Set<string>();
+  for (const [index, attachment] of attachments.entries()) {
+    const attachmentPath = `${path}.attachments[${index}]`;
+    if (attachment.sessionId !== item.sessionId) {
+      throw new ProtocolDataError(
+        `${attachmentPath}.sessionId must match ${path}.sessionId`,
+        `${attachmentPath}.sessionId`,
+      );
+    }
+    if (attachment.inputId !== item.id) {
+      throw new ProtocolDataError(
+        `${attachmentPath}.inputId must match ${path}.id`,
+        `${attachmentPath}.inputId`,
+      );
+    }
+    if (attachment.seq !== index) {
+      throw new ProtocolDataError(
+        `${attachmentPath}.seq must equal its array index`,
+        `${attachmentPath}.seq`,
+      );
+    }
+    if (assetIds.has(attachment.assetId)) {
+      throw new ProtocolDataError(
+        `${attachmentPath}.assetId must be unique within the input`,
+        `${attachmentPath}.assetId`,
+      );
+    }
+    assetIds.add(attachment.assetId);
+  }
   optionalString(item, "promotedMessageId", path);
   recordField(item, "metadata", path);
   numberField(item, "createdAt", path);
   return item as unknown as SessionInputRecord;
+}
+
+function validateInputAttachment(value: unknown, path: string) {
+  const item = object(value, path);
+  for (const field of ["id", "sessionId", "inputId", "assetId", "displayName", "mediaType"] as const) {
+    stringField(item, field, path);
+  }
+  numberField(item, "seq", path);
+  enumField(item, "intent", path, [
+    "auto",
+    "vision",
+    "ocr",
+    "document",
+    "tool_resource",
+    "workspace_reference",
+  ] as const satisfies readonly AttachmentIntent[]);
+  numberField(item, "sizeBytes", path);
+  recordField(item, "metadata", path);
+  numberField(item, "createdAt", path);
+  return item as unknown as SessionInputRecord["attachments"][number];
 }
 
 function validateMessage(value: unknown, path: string): SessionMessageRecord {
@@ -191,12 +242,42 @@ function validatePart(value: unknown, path: string): SessionMessagePartRecord {
   stringField(item, "sessionId", path);
   stringField(item, "messageId", path);
   numberField(item, "seq", path);
-  enumField(item, "type", path, ["text", "reasoning", "tool", "tool_result", "error", "log"] as const);
+  const type = enumField(item, "type", path, [
+    "text",
+    "attachment",
+    "transformation",
+    "reasoning",
+    "tool",
+    "tool_result",
+    "error",
+    "log",
+  ] as const);
   enumField(item, "status", path, ["pending", "running", "completed", "failed", "interrupted"] as const);
   for (const field of ["text", "toolUseId", "toolName"] as const) optionalString(item, field, path);
   optionalRecord(item, "input", path);
   if (item.isError !== undefined && typeof item.isError !== "boolean") {
     throw new ProtocolDataError(`${path}.isError must be a boolean`, `${path}.isError`);
+  }
+  if (type === "attachment") {
+    for (const field of ["assetId", "displayName", "mediaType"] as const) {
+      stringField(item, field, path);
+    }
+    enumField(item, "intent", path, [
+      "auto",
+      "vision",
+      "ocr",
+      "document",
+      "tool_resource",
+      "workspace_reference",
+    ] as const);
+    numberField(item, "sizeBytes", path);
+  }
+  if (type === "transformation") {
+    stringField(item, "assetId", path);
+    enumField(item, "kind", path, ["direct", "document_extract", "tool_mount"] as const);
+    for (const field of ["representationId", "processor", "transformationError"] as const) {
+      optionalString(item, field, path);
+    }
   }
   recordField(item, "metadata", path);
   numberField(item, "createdAt", path);

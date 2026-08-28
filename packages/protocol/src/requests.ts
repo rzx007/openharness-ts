@@ -3,6 +3,7 @@ import {
   readRuntimeMetadata,
 } from "./runtime-config.js";
 import type {
+  AdmitPromptAttachmentInput,
   AdmitPromptInput,
   CreateScheduledTaskInput,
   CreateSessionInput,
@@ -12,6 +13,7 @@ import type {
   UpdateScheduledTaskInput,
   UpdateSessionInput,
 } from "./session.js";
+import type { AttachmentIntent } from "./attachment.js";
 
 export interface ProtocolError {
   code: string;
@@ -200,12 +202,67 @@ export function parseAdmitPromptRequest(value: unknown): AdmitPromptRequest {
   const id = optionalString(body, "id");
   const delivery = optionalEnum(body, "delivery", ["queue", "steer"] as const);
   const metadata = optionalRecord(body, "metadata");
+  const attachments = parsePromptAttachments(body.attachments);
   return {
     content: requiredString(body, "content"),
+    attachments,
     ...(id !== undefined ? { id } : {}),
     ...(delivery !== undefined ? { delivery } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
   };
+}
+
+export function parsePromptAttachments(
+  value: unknown,
+): AdmitPromptAttachmentInput[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ProtocolValidationError("attachments must be an array", "attachments");
+  }
+  return value.map((entry, index) => {
+    const field = `attachments[${index}]`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new ProtocolValidationError(`${field} must be an object`, field);
+    }
+    const item = entry as JsonRecord;
+    const assetId = item.assetId;
+    if (typeof assetId !== "string" || assetId.length === 0) {
+      throw new ProtocolValidationError(
+        `${field}.assetId must be a non-empty string`,
+        `${field}.assetId`,
+      );
+    }
+    const intent = item.intent;
+    const allowedIntents = [
+      "auto",
+      "vision",
+      "ocr",
+      "document",
+      "tool_resource",
+      "workspace_reference",
+    ] as const satisfies readonly AttachmentIntent[];
+    if (
+      intent !== undefined &&
+      (typeof intent !== "string" || !allowedIntents.includes(intent as AttachmentIntent))
+    ) {
+      throw new ProtocolValidationError(
+        `${field}.intent must be one of: ${allowedIntents.join(", ")}`,
+        `${field}.intent`,
+      );
+    }
+    const displayName = item.displayName;
+    if (displayName !== undefined && typeof displayName !== "string") {
+      throw new ProtocolValidationError(
+        `${field}.displayName must be a string`,
+        `${field}.displayName`,
+      );
+    }
+    return {
+      assetId,
+      ...(intent !== undefined ? { intent: intent as AttachmentIntent } : {}),
+      ...(displayName !== undefined ? { displayName } : {}),
+    };
+  });
 }
 
 export function parseReplyPermissionRequest(value: unknown): ReplyPermissionRequest {

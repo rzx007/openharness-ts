@@ -41,7 +41,7 @@ export interface AttachmentAssetRecord {
   deletedAt?: number;
 }
 
-export interface AttachmentReferenceRecord {
+export interface SessionInputAttachmentRecord {
   id: string;
   sessionId: string;
   inputId: string;
@@ -49,6 +49,8 @@ export interface AttachmentReferenceRecord {
   seq: number;
   intent: AttachmentIntent;
   displayName: string;
+  mediaType: string;
+  sizeBytes: number;
   metadata: Record<string, unknown>;
   createdAt: number;
 }

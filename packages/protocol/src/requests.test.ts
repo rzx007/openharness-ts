@@ -59,10 +59,47 @@ describe("HTTP request parsers", () => {
     expect(parseAdmitPromptRequest({ content: "hello", delivery: "steer" })).toEqual({
       content: "hello",
       delivery: "steer",
+      attachments: [],
     });
     expectInvalid(
       () => parseAdmitPromptRequest({ content: "hello", delivery: "now" }),
       "delivery",
+    );
+  });
+
+  it("preserves ordered prompt attachment inputs", () => {
+    expect(
+      parseAdmitPromptRequest({
+        content: "",
+        attachments: [
+          { assetId: "att_b" },
+          { assetId: "att_a", intent: "ocr", displayName: "receipt.png" },
+        ],
+      }),
+    ).toEqual({
+      content: "",
+      attachments: [
+        { assetId: "att_b" },
+        { assetId: "att_a", intent: "ocr", displayName: "receipt.png" },
+      ],
+    });
+  });
+
+  it("rejects malformed prompt attachment inputs", () => {
+    expectInvalid(
+      () => parseAdmitPromptRequest({ content: "look", attachments: {} }),
+      "attachments",
+    );
+    expectInvalid(
+      () => parseAdmitPromptRequest({ content: "look", attachments: [{ assetId: 7 }] }),
+      "attachments[0].assetId",
+    );
+    expectInvalid(
+      () => parseAdmitPromptRequest({
+        content: "look",
+        attachments: [{ assetId: "att_1", intent: "describe" }],
+      }),
+      "attachments[0].intent",
     );
   });
 

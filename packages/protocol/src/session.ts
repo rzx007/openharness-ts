@@ -13,7 +13,14 @@ export type SessionTaskStatus =
 export type PermissionStatus = "pending" | "approved" | "denied" | "expired";
 export type SessionMessageRole = "system" | "user" | "assistant";
 export type SessionMessagePartType =
-  "text" | "reasoning" | "tool" | "tool_result" | "error" | "log";
+  | "text"
+  | "attachment"
+  | "transformation"
+  | "reasoning"
+  | "tool"
+  | "tool_result"
+  | "error"
+  | "log";
 export type SessionMessagePartStatus =
   "pending" | "running" | "completed" | "failed" | "interrupted";
 export type ProjectionSettlementAction = "retry-terminal-projection" | "compensate-child";
@@ -66,6 +73,7 @@ export interface SessionInputRecord {
   seq: number;
   delivery: InputDelivery;
   content: string;
+  attachments: SessionInputAttachmentRecord[];
   promotedMessageId?: string;
   metadata: Record<string, unknown>;
   createdAt: number;
@@ -96,6 +104,15 @@ export interface SessionMessagePartRecord {
   input?: Record<string, unknown>;
   output?: unknown;
   isError?: boolean;
+  assetId?: string;
+  intent?: AttachmentIntent;
+  displayName?: string;
+  mediaType?: string;
+  sizeBytes?: number;
+  kind?: "direct" | "document_extract" | "tool_mount";
+  representationId?: string;
+  processor?: string;
+  transformationError?: string;
   metadata: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
@@ -109,6 +126,26 @@ export interface SessionEventRecord {
   sessionId?: string;
   payload: Record<string, unknown>;
   createdAt: number;
+}
+
+export interface SessionAttachmentMessagePartRecord
+  extends SessionMessagePartRecord {
+  type: "attachment";
+  assetId: string;
+  intent: AttachmentIntent;
+  displayName: string;
+  mediaType: string;
+  sizeBytes: number;
+}
+
+export interface SessionTransformationMessagePartRecord
+  extends SessionMessagePartRecord {
+  type: "transformation";
+  assetId: string;
+  kind: "direct" | "document_extract" | "tool_mount";
+  representationId?: string;
+  processor?: string;
+  transformationError?: string;
 }
 
 export interface ProjectionSettlementRecord {
@@ -361,7 +398,14 @@ export interface AdmitPromptInput {
   sessionId: string;
   delivery?: InputDelivery;
   content: string;
+  attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
+}
+
+export interface AdmitPromptAttachmentInput {
+  assetId: string;
+  intent?: AttachmentIntent;
+  displayName?: string;
 }
 
 export interface CreateProjectionSettlementInput {
@@ -406,6 +450,15 @@ export interface ReplaceTranscriptPartInput {
   input?: Record<string, unknown>;
   output?: unknown;
   isError?: boolean;
+  assetId?: string;
+  intent?: AttachmentIntent;
+  displayName?: string;
+  mediaType?: string;
+  sizeBytes?: number;
+  kind?: "direct" | "document_extract" | "tool_mount";
+  representationId?: string;
+  processor?: string;
+  transformationError?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -432,6 +485,15 @@ export interface UpsertMessagePartInput {
   input?: Record<string, unknown>;
   output?: unknown;
   isError?: boolean;
+  assetId?: string;
+  intent?: AttachmentIntent;
+  displayName?: string;
+  mediaType?: string;
+  sizeBytes?: number;
+  kind?: "direct" | "document_extract" | "tool_mount";
+  representationId?: string;
+  processor?: string;
+  transformationError?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -546,3 +608,7 @@ export interface ListMessagePartsOptions {
   messageId?: string;
   limit?: number;
 }
+import type {
+  AttachmentIntent,
+  SessionInputAttachmentRecord,
+} from "./attachment.js";
