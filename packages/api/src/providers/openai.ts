@@ -8,7 +8,7 @@ import type {
   ContentBlock,
 } from "@openharness/core";
 import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
-import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
+import { AuthenticationFailure, RateLimitFailure, requestFailure } from "../errors/index";
 import { abortableDelay } from "./retry";
 
 const MAX_RETRIES = 3;
@@ -319,7 +319,7 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
       return new RateLimitFailure(message);
     }
     if (status) {
-      return new RequestFailure(message, status);
+      return requestFailure(message, status);
     }
     return error instanceof Error ? error : new Error(message);
   }

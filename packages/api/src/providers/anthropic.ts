@@ -13,7 +13,7 @@ import {
   type NativeImageMediaType,
   type ProviderConfig,
 } from "./registry";
-import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
+import { AuthenticationFailure, RateLimitFailure, requestFailure } from "../errors/index";
 import { abortableDelay } from "./retry";
 
 const MAX_RETRIES = 3;
@@ -154,7 +154,7 @@ export class AnthropicClient implements StreamingMessageClient {
       return new RateLimitFailure(message);
     }
     if (status) {
-      return new RequestFailure(message, status);
+      return requestFailure(message, status);
     }
     return error instanceof Error ? error : new Error(message);
   }

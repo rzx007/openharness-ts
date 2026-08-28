@@ -39,6 +39,7 @@ export class AttachmentCapabilityRouter {
     }
 
     const decisions: AttachmentRoutingDecision[] = [];
+    let firstFailure: AttachmentRoutingErrorCode | undefined;
     for (const attachment of attachments) {
       const reason = attachmentFailure(
         attachment.intent,
@@ -53,8 +54,9 @@ export class AttachmentCapabilityRouter {
         ...(reason ? { reason } : {}),
       };
       decisions.push(decision);
-      if (reason) throw blocked(reason, assetIds, decisions);
+      firstFailure ??= reason;
     }
+    if (firstFailure) throw blocked(firstFailure, assetIds, decisions);
 
     const resolved: ResolvedAttachmentContentPath[] = [];
     try {

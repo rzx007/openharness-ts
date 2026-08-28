@@ -9,7 +9,7 @@ import type {
   ToolDefinition,
 } from "@openharness/core";
 import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
-import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
+import { AuthenticationFailure, RateLimitFailure, RequestFailure, requestFailure } from "../errors/index";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_AUTH_CLAIM = "https://api.openai.com/auth";
@@ -98,7 +98,7 @@ export class CodexSubscriptionClient implements StreamingMessageClient {
 
     if (!response.ok) {
       const payload = await response.text();
-      throw new RequestFailure(formatStatusError(response.status, payload), response.status);
+      throw requestFailure(formatStatusError(response.status, payload), response.status);
     }
     if (!response.body) {
       throw new RequestFailure("Codex response did not include a stream body.");

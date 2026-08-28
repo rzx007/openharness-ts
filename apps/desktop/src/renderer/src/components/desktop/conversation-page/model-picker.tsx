@@ -105,7 +105,7 @@ function formatCompactCount(value: number): string {
   return String(parseFloat(value.toFixed(2)))
 }
 
-function formatInput(model: DesktopModel): string {
+export function formatInput(model: DesktopModel): string {
   const inputs = model.inputModalities
   if (inputs && inputs.length > 0) {
     return inputs.map((item) => INPUT_MODALITY_LABELS[item] ?? item).join("、")
