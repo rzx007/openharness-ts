@@ -32,20 +32,49 @@ export function mergeOptimisticTranscript(
         updatedAt: submission.createdAt,
       })),
     ],
-    parts: [
-      ...parts,
-      ...optimistic.map<DesktopSessionPart>((submission) => ({
-        id: `optimistic-part:${submission.id}`,
+    parts: [...parts, ...optimistic.flatMap(optimisticParts)],
+  }
+}
+
+function optimisticParts(submission: PendingPromptSubmission): DesktopSessionPart[] {
+  const messageId = `optimistic-message:${submission.id}`
+  const textParts: DesktopSessionPart[] = submission.content
+    ? [
+        {
+          id: `optimistic-part:${submission.id}`,
+          sessionId: submission.sessionId,
+          messageId,
+          seq: 0,
+          type: "text",
+          status: "completed",
+          text: submission.content,
+          metadata: { optimistic: true },
+          createdAt: submission.createdAt,
+          updatedAt: submission.createdAt,
+        },
+      ]
+    : []
+  const offset = textParts.length
+  return [
+    ...textParts,
+    ...submission.attachments.map<DesktopSessionPart>((attachment, index) => {
+      const seq = offset + index
+      return {
+        id: `optimistic-attachment:${submission.id}:${attachment.assetId}:${seq}`,
         sessionId: submission.sessionId,
-        messageId: `optimistic-message:${submission.id}`,
-        seq: 0,
-        type: "text",
+        messageId,
+        seq,
+        type: "attachment",
         status: "completed",
-        text: submission.content,
+        assetId: attachment.assetId,
+        intent: attachment.intent,
+        displayName: attachment.displayName,
+        mediaType: attachment.mediaType,
+        sizeBytes: attachment.sizeBytes,
         metadata: { optimistic: true },
         createdAt: submission.createdAt,
         updatedAt: submission.createdAt,
-      })),
-    ],
-  }
+      }
+    }),
+  ]
 }

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import type { DesktopModel } from "../../../shared/session-types"
 import {
   resolveBootstrapRuntimeSelection,
   resolveDesktopRuntimeSnapshot,
 } from "./runtime-selection"
+import { DesktopSessionService } from "./session-service"
 
 const models: DesktopModel[] = [
   {
@@ -29,9 +30,7 @@ const models: DesktopModel[] = [
 
 describe("resolveBootstrapRuntimeSelection", () => {
   it("prefers the configured provider and switches to one of its models when the saved model belongs elsewhere", () => {
-    expect(
-      resolveBootstrapRuntimeSelection(models, "gpt-5.3-codex-spark", "gemini")
-    ).toEqual({
+    expect(resolveBootstrapRuntimeSelection(models, "gpt-5.3-codex-spark", "gemini")).toEqual({
       model: "gemini-2.5-pro",
       provider: "gemini",
     })
@@ -90,3 +89,64 @@ describe("resolveDesktopRuntimeSnapshot", () => {
     })
   })
 })
+
+describe("DesktopSessionService.sendPrompt attachments", () => {
+  it("accepts an attachment-only prompt and preserves attachment order", async () => {
+    const admitPrompt = vi.fn(async () => undefined)
+    const service = serviceWithClient({ admitPrompt })
+
+    await service.sendPrompt({
+      id: "input-1",
+      sessionId: "session-1",
+      content: "",
+      attachments: [
+        { assetId: "att-b", intent: "auto", displayName: "b.png" },
+        { assetId: "att-a", intent: "auto", displayName: "a.pdf" },
+      ],
+    })
+
+    expect(admitPrompt).toHaveBeenCalledWith("session-1", {
+      id: "input-1",
+      content: "",
+      delivery: "queue",
+      attachments: [
+        { assetId: "att-b", intent: "auto", displayName: "b.png" },
+        { assetId: "att-a", intent: "auto", displayName: "a.pdf" },
+      ],
+      metadata: {
+        origin: {
+          client: "desktop",
+          component: "composer",
+          action: "append_prompt",
+        },
+      },
+    })
+  })
+
+  it("rejects a prompt when both text and attachments are empty", async () => {
+    const admitPrompt = vi.fn(async () => undefined)
+    const service = serviceWithClient({ admitPrompt })
+
+    await expect(
+      service.sendPrompt({
+        id: "input-empty",
+        sessionId: "session-1",
+        content: "   ",
+        attachments: [],
+      })
+    ).rejects.toThrow("消息内容和附件不能同时为空")
+    expect(admitPrompt).not.toHaveBeenCalled()
+  })
+})
+
+function serviceWithClient(client: {
+  admitPrompt: ReturnType<typeof vi.fn>
+}): DesktopSessionService {
+  const service = new DesktopSessionService()
+  ;(
+    service as unknown as {
+      clientPromise: Promise<typeof client>
+    }
+  ).clientPromise = Promise.resolve(client)
+  return service
+}

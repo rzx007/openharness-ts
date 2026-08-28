@@ -18,6 +18,7 @@ import type {
   PendingPromptSubmission,
   PromptActions,
 } from "./types"
+import { removeDraftAttachment, sessionComposerScope } from "./composer-draft-state"
 
 interface PromptActionsContext extends DesktopStoreContext {
   scheduleSelectedProjectGitRefresh: (force: boolean) => void
@@ -30,9 +31,27 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
     async sendMessage(content, options) {
       const prompt = content.trim()
       const sessionId = get().activeSessionId
-      if (!prompt || !sessionId) return
+      const attachmentDrafts = [...(options?.attachments ?? [])]
+      if (!sessionId || attachmentDrafts.some((attachment) => attachment.status !== "ready")) return
+      const attachments = attachmentDrafts.flatMap((attachment) =>
+        attachment.assetId && attachment.mediaType
+          ? [
+              {
+                assetId: attachment.assetId,
+                intent: "auto" as const,
+                displayName: attachment.displayName,
+                mediaType: attachment.mediaType,
+                sizeBytes: attachment.sizeBytes,
+              },
+            ]
+          : []
+      )
+      if (attachments.length !== attachmentDrafts.length || (!prompt && attachments.length === 0)) {
+        return
+      }
 
       if (options?.commandLine) {
+        if (attachments.length > 0) throw new Error("命令暂不支持附件，请先移除附件。")
         await invokeCommand(sessionId, options.commandLine)
         return
       }
@@ -40,7 +59,10 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       const current = get()
       const runtime = getSessionRuntime(current, sessionId)
       const retry = Object.values(runtime.pendingPromptSubmissions).find(
-        (submission) => submission.content === prompt && submission.phase === "failed"
+        (submission) =>
+          submission.content === prompt &&
+          submission.phase === "failed" &&
+          sameAttachmentSnapshot(submission.attachments, attachments)
       )
       const submission: PendingPromptSubmission = retry
         ? { ...retry, phase: "submitting", error: undefined }
@@ -48,6 +70,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
             id: globalThis.crypto.randomUUID(),
             sessionId,
             content: prompt,
+            attachments,
             createdAt: Date.now(),
             phase: "submitting",
             placement: classifyPromptPlacement(current.sessionView, runtime, sessionId),
@@ -76,8 +99,13 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           id: submission.id,
           sessionId,
           content: prompt,
-          attachments: [],
+          attachments: attachments.map(({ assetId, intent, displayName }) => ({
+            assetId,
+            intent,
+            displayName,
+          })),
         })
+        clearSubmittedAttachments(sessionId, attachmentDrafts)
         const keepLocalAcknowledgement = get().activeSessionId === sessionId
         replaceRuntime(sessionId, (currentRuntime) =>
           settleSubmittedPrompt(
@@ -100,6 +128,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       } catch (error) {
         const message = errorMessage(error)
         const confirmed = promptSubmissionConfirmed(get(), sessionId, submission.id)
+        if (confirmed) clearSubmittedAttachments(sessionId, attachmentDrafts)
         replaceRuntime(sessionId, (currentRuntime) => {
           if (confirmed) return removeOperation(currentRuntime, submission.id)
           return failOperation(
@@ -278,6 +307,36 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       return next
     })
   }
+
+  function clearSubmittedAttachments(
+    sessionId: string,
+    submitted: readonly { draftId: string; assetId?: string }[]
+  ): void {
+    if (submitted.length === 0) return
+    const scope = sessionComposerScope(sessionId)
+    set((state) => {
+      let composerState = { composerDraftsByScope: state.composerDraftsByScope }
+      for (const attachment of submitted) {
+        const current = composerState.composerDraftsByScope[scope]?.attachments.find(
+          (candidate) => candidate.draftId === attachment.draftId
+        )
+        if (current?.status === "ready" && current.assetId === attachment.assetId) {
+          composerState = removeDraftAttachment(composerState, scope, attachment.draftId)
+        }
+      }
+      return { ...state, ...composerState }
+    })
+  }
+}
+
+function sameAttachmentSnapshot(
+  left: readonly { assetId: string }[],
+  right: readonly { assetId: string }[]
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((attachment, index) => attachment.assetId === right[index]?.assetId)
+  )
 }
 
 function getSessionRuntime(

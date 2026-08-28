@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { DesktopSessionView } from "@shared/session-types"
+import type { DesktopSessionView, SendDesktopPromptInput } from "@shared/session-types"
+import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import { createEmptySessionRuntime } from "./operation-state"
 import { createPromptActions } from "./prompt-actions"
 import { createQueuedPromptActions } from "./queued-prompt-actions"
@@ -91,6 +92,138 @@ describe("prompt actions session runtime", () => {
 
     resolveSend()
     await request
+  })
+
+  it("sends an attachment-only snapshot in ready-card order", async () => {
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+    const attachments = [
+      readyAttachment("draft-b", "asset-b"),
+      readyAttachment("draft-a", "asset-a"),
+    ]
+
+    await useDesktopSessionStore.getState().sendMessage("", { attachments })
+
+    expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: "session-1",
+      content: "",
+      attachments: [
+        { assetId: "asset-b", intent: "auto", displayName: "asset-b.png" },
+        { assetId: "asset-a", intent: "auto", displayName: "asset-a.png" },
+      ],
+    })
+    expect(onlyPendingPromptSubmission()).toMatchObject({
+      content: "",
+      attachments: [
+        { assetId: "asset-b", mediaType: "image/png", sizeBytes: 100 },
+        { assetId: "asset-a", mediaType: "image/png", sizeBytes: 100 },
+      ],
+    })
+  })
+
+  it("does not send while any attachment is not ready", async () => {
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+    const uploading = { ...readyAttachment("draft-a", "asset-a"), status: "uploading" as const }
+
+    await useDesktopSessionStore.getState().sendMessage("describe this", {
+      attachments: [uploading],
+    })
+
+    expect(sendPrompt).not.toHaveBeenCalled()
+  })
+
+  it("removes only the submitted attachment cards after acceptance", async () => {
+    let resolveSend!: () => void
+    const sendPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    const submitted = readyAttachment("draft-submitted", "asset-submitted")
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      composerDraftsByScope: {
+        "session:session-1": { text: "", attachments: [submitted] },
+      },
+    })
+
+    const request = useDesktopSessionStore.getState().sendMessage("", {
+      attachments: [submitted],
+    })
+    const addedLater = readyAttachment("draft-later", "asset-later")
+    useDesktopSessionStore.setState((state) => ({
+      composerDraftsByScope: {
+        ...state.composerDraftsByScope,
+        "session:session-1": { text: "", attachments: [submitted, addedLater] },
+      },
+    }))
+    resolveSend()
+    await request
+
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope["session:session-1"]?.attachments
+    ).toEqual([addedLater])
+  })
+
+  it("keeps ready attachment cards when sending fails", async () => {
+    const sendPrompt = vi.fn<(input: SendDesktopPromptInput) => Promise<void>>(async () => {
+      throw new Error("offline")
+    })
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    const attachment = readyAttachment("draft-a", "asset-a")
+    useDesktopSessionStore.setState({
+      activeSessionId: "session-1",
+      composerDraftsByScope: {
+        "session:session-1": { text: "", attachments: [attachment] },
+      },
+    })
+
+    await expect(
+      useDesktopSessionStore.getState().sendMessage("", { attachments: [attachment] })
+    ).rejects.toThrow("offline")
+
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope["session:session-1"]?.attachments
+    ).toEqual([attachment])
+  })
+
+  it("does not reuse a failed input id for a different ordered attachment snapshot", async () => {
+    const sendPrompt = vi.fn<(input: SendDesktopPromptInput) => Promise<void>>(async () => {
+      throw new Error("offline")
+    })
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+    const first = readyAttachment("draft-a", "asset-a")
+    const second = readyAttachment("draft-b", "asset-b")
+
+    await expect(
+      useDesktopSessionStore.getState().sendMessage("same text", { attachments: [first] })
+    ).rejects.toThrow("offline")
+    await expect(
+      useDesktopSessionStore.getState().sendMessage("same text", { attachments: [second] })
+    ).rejects.toThrow("offline")
+
+    expect(sendPrompt.mock.calls[0]?.[0].id).not.toBe(sendPrompt.mock.calls[1]?.[0].id)
+  })
+
+  it("blocks skill commands from silently carrying attachments", async () => {
+    const invokeCommand = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { invokeCommand } } })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+
+    await expect(
+      useDesktopSessionStore.getState().sendMessage("/review", {
+        commandLine: "/review",
+        attachments: [readyAttachment("draft-a", "asset-a")],
+      })
+    ).rejects.toThrow("命令暂不支持附件")
+    expect(invokeCommand).not.toHaveBeenCalled()
   })
 
   it("cleans an acknowledged send after its session loses the primary stream", async () => {
@@ -324,6 +457,21 @@ function onlyPendingPromptSubmission(
   )
   expect(submissions).toHaveLength(1)
   return submissions[0]!
+}
+
+function readyAttachment(draftId: string, assetId: string): DesktopAttachmentDraft {
+  return {
+    draftId,
+    taskId: `task-${draftId}`,
+    displayName: `${assetId}.png`,
+    declaredMediaType: "image/png",
+    mediaType: "image/png",
+    sizeBytes: 100,
+    status: "ready",
+    bytesUploaded: 100,
+    progress: 1,
+    assetId,
+  }
 }
 
 describe("desktop session store prompt intent boundaries", () => {

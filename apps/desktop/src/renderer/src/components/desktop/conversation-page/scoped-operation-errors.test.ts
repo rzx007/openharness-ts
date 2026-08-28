@@ -170,6 +170,7 @@ describe("scoped operation errors", () => {
               id: "prompt-a",
               sessionId: "session-a",
               content: "需要重试的消息",
+              attachments: [],
               createdAt: 1,
               phase: "failed",
               placement: "queue",

@@ -82,7 +82,7 @@ const execFileAsync = promisify(execFile)
 
 const primarySubscriptionSlot = "primary"
 
-class DesktopSessionService {
+export class DesktopSessionService {
   private clientPromise: Promise<OpenHarnessClient> | null = null
   private embeddedServer: OpenHarnessHttpServer | null = null
   private embeddedUrl: string | null = null
@@ -387,11 +387,16 @@ class DesktopSessionService {
   async sendPrompt(input: SendDesktopPromptInput): Promise<void> {
     const id = requireString(input.id, "输入 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
-    const content = requireString(input.content, "消息内容")
+    const content = typeof input.content === "string" ? input.content.trim() : ""
+    const attachments = normalizePromptAttachments(input.attachments)
+    if (!content && attachments.length === 0) {
+      throw new Error("消息内容和附件不能同时为空。")
+    }
     const client = await this.getClient()
     await client.admitPrompt(sessionId, {
       id,
       content,
+      attachments,
       delivery: "queue",
       metadata: {
         origin: {
@@ -920,6 +925,22 @@ function resolveRequiredPath(value: unknown): string {
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label}不能为空。`)
   return value.trim()
+}
+
+function normalizePromptAttachments(value: unknown): SendDesktopPromptInput["attachments"] {
+  if (!Array.isArray(value)) throw new Error("附件必须是数组。")
+  return value.map((attachment, index) => {
+    if (!attachment || typeof attachment !== "object") {
+      throw new Error(`第 ${index + 1} 个附件无效。`)
+    }
+    const record = attachment as Record<string, unknown>
+    if (record.intent !== "auto") throw new Error(`第 ${index + 1} 个附件 intent 必须是 auto。`)
+    return {
+      assetId: requireString(record.assetId, `第 ${index + 1} 个附件 assetId`),
+      intent: "auto",
+      displayName: requireString(record.displayName, `第 ${index + 1} 个附件名称`),
+    }
+  })
 }
 
 export const desktopSessionService = new DesktopSessionService()

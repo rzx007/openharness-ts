@@ -557,6 +557,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               id: promptSubmissionId,
               sessionId: session.id,
               content: prompt,
+              attachments: [],
               createdAt: Date.now(),
               phase: "submitting",
               placement: "transcript",

@@ -9,7 +9,9 @@ import type {
 } from "@shared/session-types"
 import type { DesktopAttachmentSupport } from "@shared/attachment-types"
 import type {
+  DesktopAttachmentDraft,
   DesktopAttachmentUploadEvent,
+  DesktopPromptAttachmentInput,
   UploadDesktopAttachmentMemoryInput,
 } from "@shared/attachment-types"
 import type { StoreApi } from "zustand"
@@ -20,12 +22,19 @@ export type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 export interface SubmitPromptOptions {
   commandLine?: string
+  attachments?: readonly DesktopAttachmentDraft[]
+}
+
+export interface PendingPromptAttachmentSnapshot extends DesktopPromptAttachmentInput {
+  mediaType: string
+  sizeBytes: number
 }
 
 export interface PendingPromptSubmission {
   id: string
   sessionId: string
   content: string
+  attachments: PendingPromptAttachmentSnapshot[]
   createdAt: number
   phase: "submitting" | "accepted" | "failed"
   placement: "transcript" | "queue"

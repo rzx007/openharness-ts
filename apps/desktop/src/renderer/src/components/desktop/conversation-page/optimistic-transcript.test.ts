@@ -8,6 +8,7 @@ const submission: PendingPromptSubmission = {
   id: "input-local",
   sessionId: "session-1",
   content: "new request",
+  attachments: [],
   createdAt: 10,
   phase: "accepted",
   placement: "transcript",
@@ -61,5 +62,52 @@ describe("mergeOptimisticTranscript", () => {
 
     expect(result.messages).toEqual([authoritative])
     expect(result.parts).toEqual([])
+  })
+
+  it("renders ordered attachment parts and omits an empty text part", () => {
+    const result = mergeOptimisticTranscript(
+      [],
+      [],
+      [
+        {
+          ...submission,
+          content: "",
+          attachments: [
+            {
+              assetId: "asset-b",
+              intent: "auto",
+              displayName: "b.png",
+              mediaType: "image/png",
+              sizeBytes: 20,
+            },
+            {
+              assetId: "asset-a",
+              intent: "auto",
+              displayName: "a.pdf",
+              mediaType: "application/pdf",
+              sizeBytes: 10,
+            },
+          ],
+        },
+      ]
+    )
+
+    expect(result.parts).toEqual([
+      expect.objectContaining({
+        id: "optimistic-attachment:input-local:asset-b:0",
+        seq: 0,
+        type: "attachment",
+        assetId: "asset-b",
+        displayName: "b.png",
+      }),
+      expect.objectContaining({
+        id: "optimistic-attachment:input-local:asset-a:1",
+        seq: 1,
+        type: "attachment",
+        assetId: "asset-a",
+        displayName: "a.pdf",
+      }),
+    ])
+    expect(result.parts.some((part) => part.type === "text")).toBe(false)
   })
 })
