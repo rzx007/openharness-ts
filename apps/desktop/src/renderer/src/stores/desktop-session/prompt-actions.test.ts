@@ -474,6 +474,27 @@ function readyAttachment(draftId: string, assetId: string): DesktopAttachmentDra
   }
 }
 
+function inputAttachment(
+  id: string,
+  assetId: string,
+  seq: number,
+  displayName: string
+): DesktopSessionView["inputs"][number]["attachments"][number] {
+  return {
+    id,
+    sessionId: "session-1",
+    inputId: "input-1",
+    assetId,
+    seq,
+    intent: "auto",
+    displayName,
+    mediaType: displayName.endsWith(".png") ? "image/png" : "application/pdf",
+    sizeBytes: 10,
+    metadata: {},
+    createdAt: 1,
+  }
+}
+
 describe("desktop session store prompt intent boundaries", () => {
   beforeEach(() => {
     useDesktopSessionStore.setState({
@@ -780,6 +801,53 @@ describe("desktop session store prompt intent boundaries", () => {
       sourceMessageId: "message-1",
       content: "replacement",
       attachments: [],
+    })
+  })
+
+  it("preserves authoritative ordered attachment refs when editing a pure-attachment message", async () => {
+    const editLatestPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { editLatestPrompt } } })
+    const view = emptySessionView("session-1", 1)
+    view.messages = [
+      {
+        id: "message-1",
+        sessionId: "session-1",
+        seq: 1,
+        role: "user",
+        inputId: "input-1",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]
+    view.inputs = [
+      {
+        id: "input-1",
+        sessionId: "session-1",
+        seq: 1,
+        delivery: "queue",
+        content: "",
+        attachments: [
+          inputAttachment("attachment-b", "asset-b", 0, "b.png"),
+          inputAttachment("attachment-a", "asset-a", 1, "a.pdf"),
+        ],
+        metadata: {},
+        createdAt: 1,
+      },
+    ]
+    useDesktopSessionStore.setState({ activeSessionId: "session-1", sessionView: view })
+
+    await useDesktopSessionStore.getState().editLatestMessage("message-1", "")
+
+    expect(editLatestPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: "session-1",
+      sourceMessageId: "message-1",
+      content: "",
+      attachments: [
+        { assetId: "asset-b", intent: "auto", displayName: "b.png" },
+        { assetId: "asset-a", intent: "auto", displayName: "a.pdf" },
+      ],
     })
   })
 

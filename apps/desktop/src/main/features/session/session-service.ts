@@ -388,7 +388,7 @@ export class DesktopSessionService {
     const id = requireString(input.id, "输入 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
     const content = typeof input.content === "string" ? input.content.trim() : ""
-    const attachments = normalizePromptAttachments(input.attachments)
+    const attachments = normalizePromptAttachments(input.attachments, true)
     if (!content && attachments.length === 0) {
       throw new Error("消息内容和附件不能同时为空。")
     }
@@ -418,13 +418,16 @@ export class DesktopSessionService {
   async editLatestPrompt(input: EditLatestDesktopPromptInput): Promise<void> {
     const id = requireString(input.id, "编辑请求 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
-    const content = requireString(input.content, "消息内容")
+    const content = typeof input.content === "string" ? input.content.trim() : ""
     const sourceMessageId = requireString(input.sourceMessageId, "原消息 ID")
+    const attachments = normalizePromptAttachments(input.attachments, false)
+    if (!content && attachments.length === 0) throw new Error("消息内容和附件不能同时为空。")
     const client = await this.getClient()
     await client.editLatestPrompt(sessionId, {
       id,
       content,
       sourceMessageId,
+      attachments,
       metadata: {
         origin: {
           client: "desktop",
@@ -927,20 +930,43 @@ function requireString(value: unknown, label: string): string {
   return value.trim()
 }
 
-function normalizePromptAttachments(value: unknown): SendDesktopPromptInput["attachments"] {
+function normalizePromptAttachments(
+  value: unknown,
+  autoOnly: boolean
+): SendDesktopPromptInput["attachments"] {
   if (!Array.isArray(value)) throw new Error("附件必须是数组。")
   return value.map((attachment, index) => {
     if (!attachment || typeof attachment !== "object") {
       throw new Error(`第 ${index + 1} 个附件无效。`)
     }
     const record = attachment as Record<string, unknown>
-    if (record.intent !== "auto") throw new Error(`第 ${index + 1} 个附件 intent 必须是 auto。`)
+    const intent = requireAttachmentIntent(record.intent, index)
+    if (autoOnly && intent !== "auto") {
+      throw new Error(`第 ${index + 1} 个附件 intent 必须是 auto。`)
+    }
     return {
       assetId: requireString(record.assetId, `第 ${index + 1} 个附件 assetId`),
-      intent: "auto",
+      intent,
       displayName: requireString(record.displayName, `第 ${index + 1} 个附件名称`),
     }
   })
+}
+
+function requireAttachmentIntent(
+  value: unknown,
+  index: number
+): SendDesktopPromptInput["attachments"][number]["intent"] {
+  if (
+    value === "auto" ||
+    value === "vision" ||
+    value === "ocr" ||
+    value === "document" ||
+    value === "tool_resource" ||
+    value === "workspace_reference"
+  ) {
+    return value
+  }
+  throw new Error(`第 ${index + 1} 个附件 intent 无效。`)
 }
 
 export const desktopSessionService = new DesktopSessionService()

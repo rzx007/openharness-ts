@@ -137,10 +137,44 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
     ).rejects.toThrow("消息内容和附件不能同时为空")
     expect(admitPrompt).not.toHaveBeenCalled()
   })
+
+  it("preserves ordered refs when editing an attachment-only prompt", async () => {
+    const editLatestPrompt = vi.fn(async () => undefined)
+    const service = serviceWithClient({ admitPrompt: vi.fn(), editLatestPrompt })
+
+    await service.editLatestPrompt({
+      id: "edit-1",
+      sessionId: "session-1",
+      sourceMessageId: "message-1",
+      content: "",
+      attachments: [
+        { assetId: "asset-b", intent: "auto", displayName: "b.png" },
+        { assetId: "asset-a", intent: "auto", displayName: "a.pdf" },
+      ],
+    })
+
+    expect(editLatestPrompt).toHaveBeenCalledWith("session-1", {
+      id: "edit-1",
+      sourceMessageId: "message-1",
+      content: "",
+      attachments: [
+        { assetId: "asset-b", intent: "auto", displayName: "b.png" },
+        { assetId: "asset-a", intent: "auto", displayName: "a.pdf" },
+      ],
+      metadata: {
+        origin: {
+          client: "desktop",
+          component: "latest-message-editor",
+          action: "edit_latest_prompt",
+        },
+      },
+    })
+  })
 })
 
 function serviceWithClient(client: {
   admitPrompt: ReturnType<typeof vi.fn>
+  editLatestPrompt?: ReturnType<typeof vi.fn>
 }): DesktopSessionService {
   const service = new DesktopSessionService()
   ;(

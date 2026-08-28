@@ -46,6 +46,7 @@ export interface PendingPromptEdit {
   sessionId: string
   sourceMessageId: string
   content: string
+  attachments: DesktopPromptAttachmentInput[]
 }
 
 export interface QueuedPromptAction {

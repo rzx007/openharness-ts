@@ -15,13 +15,17 @@ import { messageTextContent } from "./message-content"
 import { AssistantMessage } from "./message/assistant-message"
 import { formatMessageTime } from "./message/format-message-time"
 import { Button } from "@renderer/components/ui/button"
+import { AttachmentGroup } from "@renderer/components/ui/attachment"
 import { Message, MessageContent } from "@renderer/components/ui/message"
 import { cn } from "@renderer/lib/utils"
 import type {
   DesktopPermissionRequest,
+  DesktopAttachmentSessionPart,
   DesktopSessionMessage,
   DesktopSessionPart,
+  DesktopTransformationSessionPart,
 } from "@shared/session-types"
+import { MessageAttachment, MessageTransformation } from "./message-attachment"
 
 const collapsibleUserMessageChars = 900
 const collapsibleUserMessageLines = 14
@@ -82,8 +86,20 @@ export function MessageBlock({
 }): React.JSX.Element {
   if (message.role === "user") {
     const content = messageTextContent(parts)
+    const attachmentParts = parts
+      .filter((part): part is DesktopAttachmentSessionPart => part.type === "attachment")
+      .sort((left, right) => left.seq - right.seq)
+    const transformationParts = parts
+      .filter((part): part is DesktopTransformationSessionPart => part.type === "transformation")
+      .sort((left, right) => left.seq - right.seq)
     return (
-      <UserMessageBlock content={content} timestamp={message.updatedAt} userActions={userActions} />
+      <UserMessageBlock
+        content={content}
+        attachmentParts={attachmentParts}
+        transformationParts={transformationParts}
+        timestamp={message.updatedAt}
+        userActions={userActions}
+      />
     )
   }
 
@@ -106,16 +122,20 @@ export function MessageBlock({
 
 function UserMessageBlock({
   content,
+  attachmentParts,
+  transformationParts,
   timestamp,
   userActions,
 }: {
   content: string
+  attachmentParts: DesktopAttachmentSessionPart[]
+  transformationParts: DesktopTransformationSessionPart[]
   timestamp: number
   userActions?: { canEdit: boolean; onEdit: (content: string) => void }
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(content)
-  const canEdit = Boolean(userActions?.canEdit && content.trim())
+  const canEdit = Boolean(userActions?.canEdit && (content.trim() || attachmentParts.length > 0))
 
   useEffect(() => {
     if (editing) return
@@ -125,6 +145,7 @@ function UserMessageBlock({
 
   if (editing && userActions) {
     const normalized = draft.trim()
+    const canSubmitEdit = Boolean(normalized || attachmentParts.length > 0)
     return (
       <Message align="end" className="group/msg">
         <MessageContent className="items-end">
@@ -132,7 +153,7 @@ function UserMessageBlock({
             className="flex w-full max-w-[78%] flex-col items-end gap-2"
             onSubmit={(event) => {
               event.preventDefault()
-              if (!normalized) return
+              if (!canSubmitEdit) return
               setEditing(false)
               userActions.onEdit(normalized)
             }}
@@ -149,7 +170,7 @@ function UserMessageBlock({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault()
-                  if (!normalized) return
+                  if (!canSubmitEdit) return
                   setEditing(false)
                   userActions.onEdit(normalized)
                 }
@@ -157,6 +178,13 @@ function UserMessageBlock({
               }}
               className="min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground outline-none"
             />
+            {attachmentParts.length > 0 ? (
+              <AttachmentGroup aria-label="原消息附件" className="max-w-full justify-end">
+                {attachmentParts.map((part) => (
+                  <MessageAttachment key={part.id} part={part} readOnly />
+                ))}
+              </AttachmentGroup>
+            ) : null}
             <div className="flex items-center gap-1">
               <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
                 <X />
@@ -164,7 +192,7 @@ function UserMessageBlock({
               <Button
                 type="submit"
                 size="sm"
-                disabled={!normalized}
+                disabled={!canSubmitEdit}
                 className="bg-foreground text-background hover:bg-foreground/85"
               >
                 <Check data-icon="inline-start" />
@@ -180,7 +208,21 @@ function UserMessageBlock({
   return (
     <Message align="end" className="group/msg">
       <MessageContent className="items-end">
-        <UserMessageBubble content={content} />
+        {content.trim() ? <UserMessageBubble content={content} /> : null}
+        {attachmentParts.length > 0 ? (
+          <AttachmentGroup aria-label="消息附件" className="max-w-[78%] justify-end">
+            {attachmentParts.map((part) => (
+              <MessageAttachment key={part.id} part={part} />
+            ))}
+          </AttachmentGroup>
+        ) : null}
+        {transformationParts.length > 0 ? (
+          <AttachmentGroup aria-label="附件处理状态" className="max-w-[78%] justify-end">
+            {transformationParts.map((part) => (
+              <MessageTransformation key={part.id} part={part} />
+            ))}
+          </AttachmentGroup>
+        ) : null}
         <MessageToolbar align="end" timestamp={timestamp}>
           {content.trim() ? (
             <MessageActionButton
@@ -214,7 +256,7 @@ function UserMessageBubble({ content }: { content: string }): React.JSX.Element 
         <div
           className={cn("px-4 py-3 whitespace-pre-wrap", collapsed && "max-h-72 overflow-hidden")}
         >
-          {content || "已发送消息"}
+          {content}
         </div>
         {collapsed ? (
           <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-16 bg-linear-to-b from-input/0 to-input/95" />

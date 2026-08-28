@@ -46,9 +46,12 @@ export interface DesktopAttachmentDraft {
 
 export interface DesktopPromptAttachmentInput {
   assetId: string
-  intent: "auto"
+  intent: DesktopAttachmentIntent
   displayName: string
 }
+
+export type DesktopAttachmentIntent =
+  "auto" | "vision" | "ocr" | "document" | "tool_resource" | "workspace_reference"
 
 export interface StartDesktopAttachmentUploadInput {
   draftId: string

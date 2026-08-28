@@ -486,6 +486,7 @@ describe("desktop session actions", () => {
           sessionId: "session-new",
           sourceMessageId: "message-new",
           content: "edited prompt",
+          attachments: [],
         },
         queuedPromptActions: {
           "session-new:run-new": {

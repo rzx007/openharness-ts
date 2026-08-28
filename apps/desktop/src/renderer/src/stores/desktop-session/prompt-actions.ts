@@ -153,15 +153,32 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
 
     async editLatestMessage(sourceMessageId, content) {
       const prompt = content.trim()
-      const sessionId = get().activeSessionId
-      if (!prompt || !sourceMessageId || !sessionId) return
+      const current = get()
+      const sessionId = current.activeSessionId
+      const sourceMessage = current.sessionView?.messages.find(
+        (message) => message.id === sourceMessageId && message.role === "user"
+      )
+      const sourceInput = sourceMessage?.inputId
+        ? current.sessionView?.inputs.find((input) => input.id === sourceMessage.inputId)
+        : undefined
+      const attachments = [...(sourceInput?.attachments ?? [])]
+        .sort((left, right) => left.seq - right.seq)
+        .map(({ assetId, intent, displayName }) => ({ assetId, intent, displayName }))
+      if ((!prompt && attachments.length === 0) || !sourceMessageId || !sessionId) return
 
-      const runtime = getSessionRuntime(get(), sessionId)
+      const runtime = getSessionRuntime(current, sessionId)
       const edit: PendingPromptEdit =
         runtime.pendingPromptEdit?.sourceMessageId === sourceMessageId &&
-        runtime.pendingPromptEdit.content === prompt
+        runtime.pendingPromptEdit.content === prompt &&
+        sameAttachmentSnapshot(runtime.pendingPromptEdit.attachments, attachments)
           ? runtime.pendingPromptEdit
-          : { id: globalThis.crypto.randomUUID(), sessionId, sourceMessageId, content: prompt }
+          : {
+              id: globalThis.crypto.randomUUID(),
+              sessionId,
+              sourceMessageId,
+              content: prompt,
+              attachments,
+            }
 
       replaceRuntime(sessionId, (currentRuntime) =>
         beginOperation(
@@ -181,7 +198,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           sessionId,
           content: prompt,
           sourceMessageId,
-          attachments: [],
+          attachments,
         })
         replaceRuntime(sessionId, (currentRuntime) =>
           removeOperation(
