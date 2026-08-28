@@ -25,6 +25,11 @@ import {
 } from "./pending-prompt-state"
 import { clearPersistedActiveSessionId, writePersistedActiveSessionId } from "./persistence"
 import {
+  migrateComposerScope,
+  NEW_CONVERSATION_SCOPE,
+  sessionComposerScope,
+} from "./composer-draft-state"
+import {
   acceptActiveSessionView,
   reconcileRuntimeWithView,
   releaseAcknowledgedRuntime,
@@ -493,6 +498,25 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
     async startSession(content, options) {
       const prompt = content.trim()
+      const attachmentDrafts = [...(options?.attachments ?? [])]
+      if (attachmentDrafts.some((attachment) => attachment.status !== "ready")) return null
+      const attachments = attachmentDrafts.flatMap((attachment) =>
+        attachment.assetId && attachment.mediaType
+          ? [
+              {
+                assetId: attachment.assetId,
+                intent: "auto" as const,
+                displayName: attachment.displayName,
+                mediaType: attachment.mediaType,
+                sizeBytes: attachment.sizeBytes,
+              },
+            ]
+          : []
+      )
+      if (attachments.length !== attachmentDrafts.length) return null
+      if (options?.commandLine && attachments.length > 0) {
+        throw new Error("命令暂不支持附件，请先移除附件。")
+      }
       const {
         selectedProject,
         workspaceMode,
@@ -505,7 +529,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       const model = selectedModel ?? defaultModel
       const provider = selectedProvider ?? defaultProvider
       if (
-        !prompt ||
+        (!prompt && attachments.length === 0) ||
         Object.values(get().newConversationRuntime.operations).some(
           (operation) => operation.kind === "create-session" && operation.phase === "pending"
         )
@@ -557,7 +581,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               id: promptSubmissionId,
               sessionId: session.id,
               content: prompt,
-              attachments: [],
+              attachments,
               createdAt: Date.now(),
               phase: "submitting",
               placement: "transcript",
@@ -595,6 +619,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               }
             : bound.target
           const acknowledgedRuntime = acknowledgeOperation(runtime, promptSubmissionId, Date.now())
+          const composerState = ownsNewConversationRuntime
+            ? migrateComposerScope(
+                { composerDraftsByScope: state.composerDraftsByScope },
+                NEW_CONVERSATION_SCOPE,
+                sessionComposerScope(session.id)
+              )
+            : { composerDraftsByScope: state.composerDraftsByScope }
           return {
             sessions: upsertSession(state.sessions, session),
             newConversationRuntime: bound.source,
@@ -602,6 +633,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               ...state.sessionRuntimes,
               [session.id]: acknowledgedRuntime,
             },
+            ...composerState,
             ...(ownsCurrentPage
               ? {
                   activeSessionId: session.id,
@@ -610,13 +642,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         })
         const openResult = ownsCurrentPage ? await openPrimarySession(session.id) : "cancelled"
+        if (openResult === "failed") {
+          const openError = Object.values(get().sessionRuntimes[session.id]?.operations ?? {}).find(
+            (operation) => operation.kind === "open-session" && operation.phase === "failed"
+          )
+          throw new Error(openError?.error ?? "无法打开新会话")
+        }
         if (options?.commandLine) {
-          if (openResult === "failed") {
-            const openError = Object.values(
-              get().sessionRuntimes[session.id]?.operations ?? {}
-            ).find((operation) => operation.kind === "open-session" && operation.phase === "failed")
-            throw new Error(openError?.error ?? "无法打开新会话")
-          }
           const invokeCommandOperationId = globalThis.crypto.randomUUID()
           commandOperationId = invokeCommandOperationId
           set((state) => {
@@ -659,8 +691,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             id: promptSubmissionId,
             sessionId: session.id,
             content: prompt,
-            attachments: [],
+            attachments: attachments.map(({ assetId, intent, displayName }) => ({
+              assetId,
+              intent,
+              displayName,
+            })),
           })
+          clearFirstPromptDraft(session.id, prompt, attachmentDrafts)
           const keepLocalAcknowledgement = get().activeSessionId === session.id
           set((state) => {
             const sessionRuntimes = updateSessionRuntime(
@@ -692,7 +729,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             return { sessionRuntimes }
           })
         }
-        const title = formatSessionTitle(prompt)
+        const title = prompt
+          ? formatSessionTitle(prompt)
+          : [...(attachments[0]?.displayName || "新对话")].slice(0, 20).join("")
         set((state) => {
           if (!state.sessions.some((candidate) => candidate.id === session.id)) return state
           const titledSession = { ...session, title, updatedAt: Date.now() }
@@ -716,9 +755,11 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         const confirmed =
           !options?.commandLine &&
           Boolean(
-            !currentSessionRuntime?.pendingPromptSubmissions[promptSubmissionId] ||
-            (currentState.activeSessionId === startedSessionId &&
-              sessionViewContainsInput(currentState.sessionView, promptSubmissionId))
+            startedSessionId &&
+            currentSessionRuntime &&
+            (!currentSessionRuntime.pendingPromptSubmissions[promptSubmissionId] ||
+              (currentState.activeSessionId === startedSessionId &&
+                sessionViewContainsInput(currentState.sessionView, promptSubmissionId)))
           )
         set((state) => {
           const ownsNewConversation =
@@ -752,6 +793,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             sessionRuntimes,
           }
         })
+        if (confirmed && startedSessionId) {
+          clearFirstPromptDraft(startedSessionId, prompt, attachmentDrafts)
+        }
         if (confirmed) return startedSessionId
         throw error
       } finally {
@@ -759,6 +803,34 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       }
       return startedSessionId
     },
+  }
+
+  function clearFirstPromptDraft(
+    sessionId: string,
+    submittedText: string,
+    submittedAttachments: readonly { draftId: string; assetId?: string }[]
+  ): void {
+    const scope = sessionComposerScope(sessionId)
+    set((state) => {
+      const current = state.composerDraftsByScope[scope]
+      if (!current) return state
+      const submittedByDraftId = new Map(
+        submittedAttachments.map((attachment) => [attachment.draftId, attachment.assetId])
+      )
+      return {
+        composerDraftsByScope: {
+          ...state.composerDraftsByScope,
+          [scope]: {
+            text: current.text.trim() === submittedText ? "" : current.text,
+            attachments: current.attachments.filter(
+              (attachment) =>
+                submittedByDraftId.get(attachment.draftId) !== attachment.assetId ||
+                attachment.status !== "ready"
+            ),
+          },
+        },
+      }
+    })
   }
 }
 

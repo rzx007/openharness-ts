@@ -14,6 +14,7 @@ import type {
   DesktopProject,
   DesktopWorkspaceMode,
 } from "@shared/session-types"
+import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import { Composer } from "./composer"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
@@ -38,9 +39,18 @@ export function NewConversationStart({
   selectedPermissionMode,
   operationError,
   skillCommands,
+  attachments,
+  attachmentInteractionEnabled,
   panelOpen,
   onDraftChange,
   onSubmit,
+  onPickFiles,
+  onPickImages,
+  onDropFiles,
+  onPasteFiles,
+  onCancelAttachment,
+  onRetryAttachment,
+  onRemoveAttachment,
   onChooseProject,
   onSelectProject,
   onSelectOutsideProject,
@@ -66,9 +76,18 @@ export function NewConversationStart({
   selectedPermissionMode: DesktopPermissionMode
   operationError: string | null
   skillCommands: ComposerSkillCommand[]
+  attachments: readonly DesktopAttachmentDraft[]
+  attachmentInteractionEnabled: boolean
   panelOpen: boolean
   onDraftChange: (value: string) => void
   onSubmit: () => void
+  onPickFiles: () => void
+  onPickImages: () => void
+  onDropFiles: (files: readonly File[]) => void
+  onPasteFiles: (files: readonly File[]) => void
+  onCancelAttachment: (draftId: string) => void
+  onRetryAttachment: (draftId: string) => void
+  onRemoveAttachment: (draftId: string) => void
   onChooseProject: () => void
   onSelectProject: (project: DesktopProject) => void
   onSelectOutsideProject: () => void
@@ -380,10 +399,21 @@ export function NewConversationStart({
             permissionMode={selectedPermissionMode}
             skillCommands={skillCommands}
             canSubmit={Boolean(
-              draft.trim() && (selectedProject || workspaceMode === "outside_project")
+              (draft.trim() || attachments.length > 0) &&
+              attachments.every((attachment) => attachment.status === "ready") &&
+              (selectedProject || workspaceMode === "outside_project")
             )}
+            attachments={attachments}
+            attachmentInteractionEnabled={attachmentInteractionEnabled}
             onDraftChange={onDraftChange}
             onSubmit={onSubmit}
+            onPickFiles={onPickFiles}
+            onPickImages={onPickImages}
+            onDropFiles={onDropFiles}
+            onPasteFiles={onPasteFiles}
+            onCancelAttachment={onCancelAttachment}
+            onRetryAttachment={onRetryAttachment}
+            onRemoveAttachment={onRemoveAttachment}
             onSelectModel={onSelectModel}
             onSelectPermissionMode={onSelectPermissionMode}
           />

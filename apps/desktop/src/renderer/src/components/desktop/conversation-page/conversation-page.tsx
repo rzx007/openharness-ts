@@ -13,6 +13,7 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
+  NEW_CONVERSATION_SCOPE,
   selectDraftAttachments,
   selectDraftText,
   sessionComposerScope,
@@ -56,7 +57,6 @@ function ConversationPane({
   onOpenTerminal,
   onOpenAgents,
 }: ConversationPaneProps): React.JSX.Element {
-  const [newConversationDraft, setNewConversationDraft] = useState("")
   const [composerValidationError, setComposerValidationError] = useState<string | null>(null)
   const [skillCommandSnapshot, setSkillCommandSnapshot] = useState<{
     cwd: string
@@ -114,21 +114,16 @@ function ConversationPane({
   const removeAttachment = useDesktopSessionStore((state) => state.removeAttachment)
   const attachmentSupport = useDesktopSessionStore((state) => state.attachmentSupport)
   const hasSession = activeSessionId !== null
-  const composerScope = activeSessionId ? sessionComposerScope(activeSessionId) : null
-  const sessionDraft = useDesktopSessionStore((state) =>
-    composerScope ? selectDraftText(state, composerScope) : ""
-  )
+  const composerScope = activeSessionId
+    ? sessionComposerScope(activeSessionId)
+    : NEW_CONVERSATION_SCOPE
+  const draft = useDesktopSessionStore((state) => selectDraftText(state, composerScope))
   const attachments = useDesktopSessionStore((state) =>
-    composerScope ? selectDraftAttachments(state, composerScope) : []
+    selectDraftAttachments(state, composerScope)
   )
-  const draft = composerScope ? sessionDraft : newConversationDraft
   const setDraft = useCallback(
     (next: SetStateAction<string>): void => {
       setComposerValidationError(null)
-      if (!composerScope) {
-        setNewConversationDraft(next)
-        return
-      }
       const current = selectDraftText(useDesktopSessionStore.getState(), composerScope)
       setComposerDraftText(composerScope, typeof next === "function" ? next(current) : next)
     },
@@ -152,7 +147,7 @@ function ConversationPane({
     try {
       let completedSessionId = submittedSessionId
       if (hasSession) await sendMessage(content, { commandLine, attachments })
-      else completedSessionId = await startSession(content, { commandLine })
+      else completedSessionId = await startSession(content, { commandLine, attachments })
       const currentSessionId = useDesktopSessionStore.getState().activeSessionId
       setDraft((current) =>
         resolveDraftAfterSubmission(current, content, completedSessionId, currentSessionId)
@@ -199,7 +194,6 @@ function ConversationPane({
     Boolean(draft.trim() || attachments.length > 0)
 
   const pasteAttachments = async (files: readonly File[]): Promise<void> => {
-    if (!composerScope) return
     const payloads = await Promise.all(
       files.map(async (file) => ({
         bytes: await file.arrayBuffer(),
@@ -330,11 +324,23 @@ function ConversationPane({
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
           selectedPermissionMode={selectedPermissionMode}
-          operationError={newConversationError}
+          operationError={composerValidationError ?? newConversationError}
           skillCommands={skillCommands}
+          attachments={attachments}
+          attachmentInteractionEnabled={attachmentSupport.interactionEnabled}
           panelOpen={panelOpen}
           onDraftChange={setDraft}
           onSubmit={() => void submitDraft()}
+          onPickFiles={() => void pickAttachmentFiles(composerScope)}
+          onPickImages={() => void pickAttachmentImages(composerScope)}
+          onDropFiles={(files) => void addDroppedAttachments(composerScope, files)}
+          onPasteFiles={(files) => void pasteAttachments(files)}
+          onCancelAttachment={(draftId) => void cancelAttachment(composerScope, draftId)}
+          onRetryAttachment={(draftId) => void retryAttachment(composerScope, draftId)}
+          onRemoveAttachment={(draftId) => {
+            setComposerValidationError(null)
+            void removeAttachment(composerScope, draftId)
+          }}
           onChooseProject={() => void chooseProject()}
           onSelectProject={(project) => void selectProject(project)}
           onSelectOutsideProject={selectOutsideProject}
@@ -443,25 +449,15 @@ function ConversationPane({
                 attachmentInteractionEnabled={attachmentSupport.interactionEnabled}
                 onDraftChange={setDraft}
                 onSubmit={() => void submitDraft()}
-                onPickFiles={() => {
-                  if (composerScope) void pickAttachmentFiles(composerScope)
-                }}
-                onPickImages={() => {
-                  if (composerScope) void pickAttachmentImages(composerScope)
-                }}
-                onDropFiles={(files) => {
-                  if (composerScope) void addDroppedAttachments(composerScope, files)
-                }}
+                onPickFiles={() => void pickAttachmentFiles(composerScope)}
+                onPickImages={() => void pickAttachmentImages(composerScope)}
+                onDropFiles={(files) => void addDroppedAttachments(composerScope, files)}
                 onPasteFiles={(files) => void pasteAttachments(files)}
-                onCancelAttachment={(draftId) => {
-                  if (composerScope) void cancelAttachment(composerScope, draftId)
-                }}
-                onRetryAttachment={(draftId) => {
-                  if (composerScope) void retryAttachment(composerScope, draftId)
-                }}
+                onCancelAttachment={(draftId) => void cancelAttachment(composerScope, draftId)}
+                onRetryAttachment={(draftId) => void retryAttachment(composerScope, draftId)}
                 onRemoveAttachment={(draftId) => {
                   setComposerValidationError(null)
-                  if (composerScope) void removeAttachment(composerScope, draftId)
+                  void removeAttachment(composerScope, draftId)
                 }}
                 onInterrupt={() => void interrupt()}
                 onSelectModel={(model) => {

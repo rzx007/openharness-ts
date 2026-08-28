@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopSessionView } from "@shared/session-types"
+import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import { beginOperation, createEmptySessionRuntime } from "./operation-state"
 import {
   selectActiveSessionOpening,
@@ -64,6 +65,21 @@ function resetNewConversationState(): void {
   })
 }
 
+function readyAttachment(draftId: string, assetId: string): DesktopAttachmentDraft {
+  return {
+    draftId,
+    taskId: `task-${draftId}`,
+    displayName: `${assetId}.png`,
+    declaredMediaType: "image/png",
+    mediaType: "image/png",
+    sizeBytes: 100,
+    status: "ready",
+    bytesUploaded: 100,
+    progress: 1,
+    assetId,
+  }
+}
+
 describe("desktop session actions", () => {
   beforeEach(() => {
     resetDesktopSessionStore()
@@ -71,6 +87,130 @@ describe("desktop session actions", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it("sends a pure-attachment first prompt and clears only its migrated snapshot", async () => {
+    const session = emptySessionView("session-created").session
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => emptySessionView(session.id, 1)),
+          sendPrompt,
+        },
+      },
+    })
+    resetNewConversationState()
+    const attachment = readyAttachment("draft-first", "asset-first")
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "new-conversation": { text: "", attachments: [attachment] },
+      },
+    })
+
+    await useDesktopSessionStore.getState().startSession("", { attachments: [attachment] })
+
+    expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: session.id,
+      content: "",
+      attachments: [{ assetId: "asset-first", intent: "auto", displayName: "asset-first.png" }],
+    })
+    expect(useDesktopSessionStore.getState().composerDraftsByScope).toEqual({
+      [`session:${session.id}`]: { text: "", attachments: [] },
+    })
+    expect(useDesktopSessionStore.getState().sessions).toContainEqual(
+      expect.objectContaining({ id: session.id, title: "asset-first.png" })
+    )
+  })
+
+  it("keeps the new-conversation attachment draft when create fails", async () => {
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => {
+            throw new Error("create failed")
+          }),
+        },
+      },
+    })
+    resetNewConversationState()
+    const attachment = readyAttachment("draft-first", "asset-first")
+    const draft = { text: "说明", attachments: [attachment] }
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: { "new-conversation": draft },
+    })
+
+    await expect(
+      useDesktopSessionStore.getState().startSession("说明", { attachments: [attachment] })
+    ).rejects.toThrow("create failed")
+
+    expect(useDesktopSessionStore.getState().composerDraftsByScope["new-conversation"]).toEqual(
+      draft
+    )
+  })
+
+  it("moves the draft once to the created session when opening it fails", async () => {
+    const session = emptySessionView("session-created").session
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => {
+            throw new Error("open failed")
+          }),
+          sendPrompt,
+        },
+      },
+    })
+    resetNewConversationState()
+    const attachment = readyAttachment("draft-first", "asset-first")
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "new-conversation": { text: "说明", attachments: [attachment] },
+      },
+    })
+
+    await expect(
+      useDesktopSessionStore.getState().startSession("说明", { attachments: [attachment] })
+    ).rejects.toThrow("open failed")
+
+    expect(sendPrompt).not.toHaveBeenCalled()
+    expect(useDesktopSessionStore.getState().composerDraftsByScope).toEqual({
+      [`session:${session.id}`]: { text: "说明", attachments: [attachment] },
+    })
+  })
+
+  it("keeps the migrated text and ready cards when first-prompt sending fails", async () => {
+    const session = emptySessionView("session-created").session
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => emptySessionView(session.id, 1)),
+          sendPrompt: vi.fn(async () => {
+            throw new Error("send failed")
+          }),
+        },
+      },
+    })
+    resetNewConversationState()
+    const attachment = readyAttachment("draft-first", "asset-first")
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "new-conversation": { text: "说明", attachments: [attachment] },
+      },
+    })
+
+    await expect(
+      useDesktopSessionStore.getState().startSession("说明", { attachments: [attachment] })
+    ).rejects.toThrow("send failed")
+
+    expect(useDesktopSessionStore.getState().composerDraftsByScope).toEqual({
+      [`session:${session.id}`]: { text: "说明", attachments: [attachment] },
+    })
   })
 
   it("does not let a late create steal the primary subscription", async () => {
