@@ -248,6 +248,19 @@ function mountLayout(state: DesktopSessionState): HTMLDivElement {
 }
 
 describe("MainLayout selected project operation error owner", () => {
+  it("keeps an older bootstrap without attachment support on the text-only composer", () => {
+    const container = mountLayout(
+      stateWith({
+        attachmentSupport: undefined as never,
+        selectedProject: project("project-a", "项目 A"),
+        projects: [project("project-a", "项目 A")],
+      })
+    )
+
+    expect(container.textContent).toContain("开始使用")
+    expect(container.querySelector('[aria-label="添加文件"]')).toBeNull()
+  })
+
   it("shows the selected project failure while the active conversation is archived", () => {
     const error = "归档会话中的项目操作失败"
     const selectedProject = project("project-a", "项目 A")

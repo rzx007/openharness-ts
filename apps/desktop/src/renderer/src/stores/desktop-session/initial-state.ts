@@ -1,4 +1,5 @@
 import type { DesktopDaemonStatus } from "@shared/session-types"
+import { disabledDesktopAttachmentSupport } from "@shared/attachment-types"
 
 import { createEmptySessionRuntime } from "./operation-state"
 import { emptyComposerDraftState } from "./composer-draft-state"
@@ -49,12 +50,7 @@ export function createInitialState(): Omit<
     sessions: [],
     archivedSessions: [],
     models: [],
-    attachmentSupport: {
-      daemonSupported: false,
-      interactionEnabled: false,
-      uploadModes: [],
-      limits: null,
-    },
+    attachmentSupport: disabledDesktopAttachmentSupport,
     defaultModel: null,
     defaultProvider: null,
     defaultPermissionMode: "default" as const,

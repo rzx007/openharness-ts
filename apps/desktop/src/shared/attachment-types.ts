@@ -14,6 +14,13 @@ export interface DesktopAttachmentSupportEnvironment {
   forceEnable: boolean
 }
 
+export const disabledDesktopAttachmentSupport: DesktopAttachmentSupport = {
+  daemonSupported: false,
+  interactionEnabled: false,
+  uploadModes: [],
+  limits: null,
+}
+
 export type DesktopAttachmentDraftStatus = "uploading" | "ready" | "failed" | "cancelled"
 
 export interface DesktopAttachmentError {
@@ -129,10 +136,11 @@ export function resolveDesktopAttachmentSupport(
       limits: capabilities.attachments.limits,
     }
   }
-  return {
-    daemonSupported: false,
-    interactionEnabled: false,
-    uploadModes: [],
-    limits: null,
-  }
+  return { ...disabledDesktopAttachmentSupport }
+}
+
+export function normalizeDesktopAttachmentSupport(
+  support: DesktopAttachmentSupport | null | undefined
+): DesktopAttachmentSupport {
+  return support ?? disabledDesktopAttachmentSupport
 }

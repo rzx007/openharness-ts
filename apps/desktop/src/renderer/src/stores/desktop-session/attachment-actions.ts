@@ -56,22 +56,22 @@ export function createAttachmentActions(context: DesktopStoreContext): Attachmen
     },
 
     async pickAttachmentFiles(scope) {
-      if (!get().attachmentSupport.interactionEnabled) return
+      if (!get().attachmentSupport?.interactionEnabled) return
       await startCandidates(scope, await window.desktop.attachments.pickFiles())
     },
 
     async pickAttachmentImages(scope) {
-      if (!get().attachmentSupport.interactionEnabled) return
+      if (!get().attachmentSupport?.interactionEnabled) return
       await startCandidates(scope, await window.desktop.attachments.pickImages())
     },
 
     async addDroppedAttachments(scope, files) {
-      if (!get().attachmentSupport.interactionEnabled || files.length === 0) return
+      if (!get().attachmentSupport?.interactionEnabled || files.length === 0) return
       await startCandidates(scope, await window.desktop.attachments.stageDroppedFiles(files))
     },
 
     async addClipboardAttachment(scope, input) {
-      if (!get().attachmentSupport.interactionEnabled) return
+      if (!get().attachmentSupport?.interactionEnabled) return
       const draftId = crypto.randomUUID()
       const taskId = crypto.randomUUID()
       const candidate: DesktopAttachmentCandidate = {

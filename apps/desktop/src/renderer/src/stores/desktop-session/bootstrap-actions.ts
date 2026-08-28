@@ -3,6 +3,7 @@ import type {
   DesktopProject,
   DesktopWorkspaceMode,
 } from "@shared/session-types"
+import { normalizeDesktopAttachmentSupport } from "@shared/attachment-types"
 
 import {
   beginScopedOperation,
@@ -58,7 +59,7 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
           sessions,
           archivedSessions,
           models: data.models,
-          attachmentSupport: data.attachments,
+          attachmentSupport: normalizeDesktopAttachmentSupport(data.attachments),
           defaultModel: data.defaultModel,
           defaultProvider: data.defaultProvider ?? null,
           defaultPermissionMode: data.defaultPermissionMode,
@@ -164,7 +165,7 @@ export function applyBootstrapData(
     sessions: sortSessions(data.sessions),
     archivedSessions: sortSessions(data.archivedSessions),
     models: data.models,
-    attachmentSupport: data.attachments,
+    attachmentSupport: normalizeDesktopAttachmentSupport(data.attachments),
     defaultModel: data.defaultModel,
     defaultProvider: data.defaultProvider ?? null,
     defaultPermissionMode: data.defaultPermissionMode,

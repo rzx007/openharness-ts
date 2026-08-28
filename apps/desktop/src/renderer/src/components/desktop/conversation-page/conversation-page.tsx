@@ -11,6 +11,7 @@ import {
   MessageScrollerViewport,
 } from "@renderer/components/ui/message-scroller"
 import { Spinner } from "@renderer/components/ui/spinner"
+import { disabledDesktopAttachmentSupport } from "@shared/attachment-types"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
   NEW_CONVERSATION_SCOPE,
@@ -112,7 +113,9 @@ function ConversationPane({
   const cancelAttachment = useDesktopSessionStore((state) => state.cancelAttachment)
   const retryAttachment = useDesktopSessionStore((state) => state.retryAttachment)
   const removeAttachment = useDesktopSessionStore((state) => state.removeAttachment)
-  const attachmentSupport = useDesktopSessionStore((state) => state.attachmentSupport)
+  const attachmentSupport = useDesktopSessionStore(
+    (state) => state.attachmentSupport ?? disabledDesktopAttachmentSupport
+  )
   const hasSession = activeSessionId !== null
   const composerScope = activeSessionId
     ? sessionComposerScope(activeSessionId)

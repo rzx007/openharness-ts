@@ -312,6 +312,19 @@ describe("desktop attachment actions", () => {
     expect(useDesktopSessionStore.getState().composerDraftsByScope["session:a"]).toBeUndefined()
   })
 
+  it("treats a missing attachment capability from an older bootstrap as disabled", async () => {
+    const pickFiles = vi.fn()
+    vi.stubGlobal("window", {
+      desktop: { attachments: { pickFiles } },
+    })
+    useDesktopSessionStore.setState({ attachmentSupport: undefined as never })
+
+    await expect(
+      useDesktopSessionStore.getState().pickAttachmentFiles("session:a")
+    ).resolves.toBeUndefined()
+    expect(pickFiles).not.toHaveBeenCalled()
+  })
+
   it("redacts rejected IPC details before storing a retryable renderer error", async () => {
     vi.stubGlobal("window", {
       desktop: {

@@ -1,7 +1,11 @@
 import type { ServerCapabilities } from "@openharness/client"
 import { describe, expect, it } from "vitest"
 
-import { resolveDesktopAttachmentSupport } from "./attachment-types"
+import {
+  disabledDesktopAttachmentSupport,
+  normalizeDesktopAttachmentSupport,
+  resolveDesktopAttachmentSupport,
+} from "./attachment-types"
 
 const attachmentLimits = {
   maxFilesPerPrompt: 20,
@@ -24,6 +28,10 @@ const attachmentCapabilities: ServerCapabilities = {
 }
 
 describe("resolveDesktopAttachmentSupport", () => {
+  it("normalizes an older bootstrap without attachment capability to disabled", () => {
+    expect(normalizeDesktopAttachmentSupport(undefined)).toBe(disabledDesktopAttachmentSupport)
+  })
+
   it("enables the daemon attachment contract in development", () => {
     expect(
       resolveDesktopAttachmentSupport(attachmentCapabilities, {
