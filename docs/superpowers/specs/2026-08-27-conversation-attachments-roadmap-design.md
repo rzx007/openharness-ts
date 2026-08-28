@@ -1181,7 +1181,7 @@ daemon 启动时：
 - 相同 request ID 改变附件顺序或 intent 返回 409；
 - queue、restart、retry、edit 和 fork 不丢引用；
 - 删除一个 fork 不删除另一分支仍引用的 asset；
-- 旧纯文本数据库无需重写即可继续读取。
+- 空数据库直接创建 storage format 2；format 1 数据库在 migration 前明确拒绝启动，不做迁移、回填或读取兼容。
 
 ### 阶段 3：Desktop 上传、草稿与消息展示
 
@@ -1507,7 +1507,7 @@ daemon 启动时：
 - admission 回滚；
 - 幂等相同/冲突；
 - schema serialization；
-- migration 与旧数据库启动。
+- format 2 migration 链与 format 1 拒绝启动。
 
 ### 上传与存储
 
