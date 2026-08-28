@@ -1323,42 +1323,46 @@ daemon 启动时：
 - processor version、model profile、locale 或归一化版本改变时生成新 representation；
 - attachment ID、兼容本地路径和安全 URL 最终走同一个 `LocalOcrService`。
 
-### 阶段 6：PDF、文本、代码与通用文件资源
+### 阶段 6：文本、代码与安全只读资源
+
+> **状态：已实现，等待合并（2026-08-29）。** 根据阶段开始前的产品决定，本阶段收窄为可靠文本与代码资源。PDF、Office、压缩包和未知二进制明确阻止，不做转换、OCR、解压或 Provider 透传。
 
 #### 目标
 
-建立完整文档和任意普通文件处理路径，支持原生文档、文本提取和 Agent 只读资源。
+建立可靠文本和代码附件路径：小文本有界内联，大文本通过现有 `Read` 按行读取；所有暂不支持的二进制格式在 Provider 执行前明确失败。
 
 #### 交付内容
 
-- `DocumentBlock`、`FileResourceBlock`；
-- PDF 元数据、文本提取、`light-ocr` document engine 扫描页识别和页面渲染；
-- bounded text representation；
-- 编码检测和二进制保护；
-- OpenAI/Codex/Anthropic 原生 PDF/file 适配；
+- `text_inline`、`text_resource` 和 `attachment://`；
+- UTF-8、UTF-8 BOM、UTF-16LE/BE 严格解码；
+- 文本候选分类、二进制控制字符和伪装文件保护；
 - host 与 Docker sandbox 的 read-only attachment mounts；
 - 文件工具 attachment resource roots；
-- Office/归档作为 tool resource 的安全行为；
-- 大文档索引和按需读取；
-- 文档预览、页数和转换状态。
+- PDF、Office、归档和未知二进制的稳定阻止错误；
+- Desktop 格式提示和发送阻止；
+- 大文本预览和按需行读取。
 
 #### 主要代码区域
 
-- `packages/services/src/document-processing/`；
+- `packages/services/src/attachment/`；
 - `packages/sandbox/`；
 - `packages/tools/src/file/`；
 - `packages/agent-runtime/`；
-- `packages/api/src/providers/`；
-- Desktop preview components。
+- `packages/server/src/application/attachment-routing/`；
+- `packages/server/src/application/attachment-resource/`；
+- Desktop composer attachment components。
 
 #### 验收门槛
 
-- 原生 PDF 模型收到 document block；
-- 非原生模型能通过文本提取或扫描页本地 OCR 回答，不静默截断；
+- 小文本完整进入上下文，大文本只给明确标记的预览并可由 `Read` 继续读取；
+- UTF-8 与带 BOM 的 UTF-16 可读取，未知编码和伪装二进制明确失败；
+- PDF、DOCX、XLSX、PPTX、ZIP 在 Provider 调用前失败；
 - 大文本不会一次性塞满上下文；
 - 二进制文件不会被误解码；
 - sandbox 只能读明确挂载的附件，不能访问整个 daemon data dir；
 - run 结束后 mount 清理，原资产不可修改。
+
+PDF/Office 的原生输入、转换、扫描页 OCR、文档索引和预览另立后续阶段，不再算作阶段 6 未完成项。
 
 ### 阶段 7：Compaction、资源生命周期与 Provider 文件缓存
 

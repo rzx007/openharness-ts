@@ -22,6 +22,8 @@ export interface SandboxRuntimeOptions {
   policy?: SandboxPolicy;
   deps?: AvailabilityDeps;
   reporter?: SandboxRuntimeReporter;
+  /** Host-managed mounts that users cannot override; always mounted read-only. */
+  managedReadOnlyMounts?: readonly { source: string; target: string }[];
 }
 
 export interface StartedSandboxRuntime {
@@ -38,7 +40,12 @@ export async function startSandboxRuntime(
     sessionId: options.sessionId,
     settings: options.settings,
   });
-  const sandbox = policy.config;
+  const sandbox = options.managedReadOnlyMounts?.length
+    ? {
+        ...policy.config,
+        docker: { ...policy.config.docker, reuseContainer: false },
+      }
+    : policy.config;
   const runtimeSettings: Settings = { ...options.settings, sandbox };
 
   if (!sandbox.enabled) {
@@ -98,6 +105,7 @@ export async function startSandboxRuntime(
     cwd: options.cwd,
     deps: options.deps,
     reporter: options.reporter,
+    managedReadOnlyMounts: options.managedReadOnlyMounts,
   });
   try {
     await session.start();

@@ -17,6 +17,7 @@ import type {
   MemoryRetriever,
   AgentBackgroundShellHost,
   AgentImageToTextHost,
+  AgentAttachmentResourceHost,
   McpAuthHost,
 } from "../index";
 import type {
@@ -197,6 +198,7 @@ export class QueryEngine implements IQueryEngine {
   private jobs: AgentJobHost | undefined;
   private backgroundShell: AgentBackgroundShellHost | undefined;
   private imageToText: AgentImageToTextHost | undefined;
+  private attachments: AgentAttachmentResourceHost | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -268,6 +270,10 @@ export class QueryEngine implements IQueryEngine {
 
   setImageToText(imageToText: AgentImageToTextHost | undefined): void {
     this.imageToText = imageToText;
+  }
+
+  setAttachments(attachments: AgentAttachmentResourceHost | undefined): void {
+    this.attachments = attachments;
   }
 
   /**
@@ -693,6 +699,7 @@ export class QueryEngine implements IQueryEngine {
             jobs: this.jobs,
             backgroundShell: this.backgroundShell,
             imageToText: this.imageToText,
+            attachments: this.attachments,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(

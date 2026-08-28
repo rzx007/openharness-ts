@@ -9,6 +9,11 @@ export type AttachmentRoutingErrorCode =
   | "attachment_provider_unsupported"
   | "attachment_intent_unavailable"
   | "attachment_kind_unsupported"
+  | "attachment_document_unsupported"
+  | "attachment_archive_unsupported"
+  | "attachment_binary_unsupported"
+  | "attachment_text_encoding_unsupported"
+  | "attachment_text_invalid"
   | "attachment_media_type_unsupported"
   | "attachment_ocr_tool_unavailable"
   | "attachment_ocr_host_unavailable"
@@ -19,8 +24,10 @@ export interface AttachmentRoutingDecision {
   assetId: string;
   intent: SessionInputAttachmentRecord["intent"];
   mediaType: string;
-  route: "native_image" | "image_to_text_tool" | "blocked";
+  route: "native_image" | "image_to_text_tool" | "text_inline" | "text_resource" | "blocked";
   reason?: AttachmentRoutingErrorCode;
+  complete?: boolean;
+  resourceUri?: string;
 }
 
 export interface RouteAttachmentBatchInput {

@@ -2,6 +2,9 @@ import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
 import { fileOperationsFor } from "./operations.js";
+import { isAttachmentUri, parseAttachmentUri } from "./attachment-uri.js";
+
+const MAX_ATTACHMENT_READ_LINES = 2_000;
 
 export const fileReadTool: ToolDefinition = {
   name: "Read",
@@ -19,11 +22,36 @@ export const fileReadTool: ToolDefinition = {
   async execute(input, context) {
     const rawPath = input.file_path as string;
     const cwd = (context as { cwd?: string } | undefined)?.cwd ?? process.cwd();
-    const filePath = resolveToolPath(rawPath, cwd);
     const offset = (input.offset as number) ?? 1;
     const limit = (input.limit as number) ?? 2000;
 
     try {
+      if (isAttachmentUri(rawPath)) {
+        const parsed = parseAttachmentUri(rawPath);
+        validateAttachmentRange(offset, limit);
+        if (!context.attachments) {
+          throw new Error("Attachment resources are unavailable in this session");
+        }
+        const slice = await context.attachments.readText(
+          { assetId: parsed.assetId, offset, limit },
+          {
+            ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+            ...(context.abortSignal ? { signal: context.abortSignal } : {}),
+          },
+        );
+        const numbered = slice.content
+          .split("\n")
+          .map((line, index) => `${slice.startLine + index}: ${line}`)
+          .join("\n");
+        return {
+          content: [{
+            type: "text",
+            text: `${numbered}${numbered ? "\n" : ""}has_more: ${String(slice.hasMore)}`,
+          }],
+        };
+      }
+
+      const filePath = resolveToolPath(rawPath, cwd);
       const sandboxError = await sandboxPathError(filePath, cwd, "read", context.settings);
       if (sandboxError) {
         return {
@@ -68,3 +96,12 @@ export const fileReadTool: ToolDefinition = {
     }
   },
 };
+
+function validateAttachmentRange(offset: number, limit: number): void {
+  if (!Number.isSafeInteger(offset) || offset < 1) {
+    throw new Error("attachment offset must be a positive integer");
+  }
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ATTACHMENT_READ_LINES) {
+    throw new Error(`attachment limit must be between 1 and ${MAX_ATTACHMENT_READ_LINES}`);
+  }
+}

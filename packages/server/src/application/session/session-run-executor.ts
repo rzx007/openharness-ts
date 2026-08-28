@@ -15,6 +15,7 @@ import type {
   NativeAttachmentRouteResult,
   RouteAttachmentBatchInput,
 } from "../attachment-routing/attachment-routing-types.js";
+import type { SessionAttachmentResources } from "../attachment-resource/session-attachment-resources.js";
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
@@ -34,6 +35,7 @@ export interface SessionRunExecutorContext {
   traceIdForRun(runId: string): string;
   log(event: ObservabilityEvent): void;
   postRunMaintenance?: Pick<SessionPostRunMaintenance, "run">;
+  attachmentResources?: Pick<SessionAttachmentResources, "materializeRun">;
 }
 
 export interface ExecuteSessionRunInput {
@@ -60,6 +62,7 @@ export class SessionRunExecutor {
     if (!this.context.agentPool.configured) return;
     const { sessionId, inputId, runId } = input;
     let agentTouched = false;
+    let cleanupAttachmentResources: (() => Promise<void>) | undefined;
     try {
       const session = this.context.store.getSession(sessionId);
       if (!session) throw new Error(`Session not found: ${sessionId}`);
@@ -87,6 +90,11 @@ export class SessionRunExecutor {
           signal: workContext.signal,
         });
         submittedContent = routed.content;
+        cleanupAttachmentResources = await this.context.attachmentResources?.materializeRun({
+          sessionId,
+          runId,
+          decisions: routed.decisions,
+        });
         const beforeAttachmentProjection = this.context.events.checkpoint();
         this.context.store.transaction(() => {
           this.context.transcriptProjection.projectAttachmentTransformations({
@@ -225,6 +233,21 @@ export class SessionRunExecutor {
         error: message,
       });
       this.context.events.publishSince(before);
+    } finally {
+      if (cleanupAttachmentResources) {
+        try {
+          await cleanupAttachmentResources();
+        } catch (error) {
+          this.context.log({
+            level: "error",
+            event: "attachment.resources.cleanup_failed",
+            traceId: this.context.traceIdForRun(runId),
+            sessionId,
+            runId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
   }
 }

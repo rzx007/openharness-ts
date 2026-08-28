@@ -104,6 +104,8 @@ describe("SessionRunExecutor", () => {
     const projectAttachmentTransformations = vi.fn();
     const checkpoint = vi.fn(() => 9);
     const publishSince = vi.fn();
+    const cleanupResources = vi.fn(async () => {});
+    const materializeRun = vi.fn(async () => cleanupResources);
     const executor = new SessionRunExecutor({
       store: store as any,
       agentPool: {
@@ -131,6 +133,7 @@ describe("SessionRunExecutor", () => {
         ],
         decisions: [{ assetId: "asset-1", intent: "auto" as const, mediaType: "image/png", route: "native_image" as const }],
       })),
+      attachmentResources: { materializeRun },
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
     });
@@ -155,6 +158,11 @@ describe("SessionRunExecutor", () => {
     expect(publishSince.mock.invocationCallOrder[0]).toBeLessThan(
       submitMessage.mock.invocationCallOrder[0]!,
     );
+    expect(materializeRun).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "s1",
+      runId: "run-1",
+    }));
+    expect(cleanupResources).toHaveBeenCalledOnce();
   });
 
   it("settles a blocked attachment run after inspecting and then closes the agent", async () => {

@@ -27,6 +27,7 @@ export interface DockerRunArgsOptions {
   cwd: string;
   config?: SandboxConfig;
   dockerCommand?: string;
+  managedReadOnlyMounts?: readonly { source: string; target: string }[];
 }
 
 export interface DockerExecArgsOptions {
@@ -179,7 +180,7 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
   }
   argv.push(
     "--label",
-    `${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(config, cwd)}`,
+    `${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(config, cwd, options.managedReadOnlyMounts)}`,
     "--label",
     `${DOCKER_WORKSPACE_LABEL}=${cwd}`,
   );
@@ -198,6 +199,13 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
 
   for (const mount of config.docker.extraMounts) {
     argv.push("-v", mount);
+  }
+  for (const mount of options.managedReadOnlyMounts ?? []) {
+    const source = resolve(mount.source);
+    if (!mount.target.startsWith("/") || mount.target.includes(":")) {
+      throw new SandboxUnavailableError("Managed Docker mount target must be an absolute container path");
+    }
+    argv.push("-v", `${source}:${mount.target}:ro`);
   }
   for (const [key, value] of Object.entries(config.docker.extraEnv)) {
     argv.push("-e", `${key}=${value}`);
@@ -287,6 +295,7 @@ export class DockerSandboxSession {
       cwd: string;
       deps?: AvailabilityDeps;
       reporter?: SandboxRuntimeReporter;
+      managedReadOnlyMounts?: readonly { source: string; target: string }[];
     },
   ) {
     const config = normalizeSandboxConfig(options.settings.sandbox);
@@ -325,7 +334,11 @@ export class DockerSandboxSession {
       await assertReusableContainerMatchesConfig({
         dockerCommand: this.dockerCommand,
         containerName: this.containerName,
-        expectedHash: dockerSandboxConfigHash(config, resolve(this.options.cwd)),
+        expectedHash: dockerSandboxConfigHash(
+          config,
+          resolve(this.options.cwd),
+          this.options.managedReadOnlyMounts,
+        ),
       });
       this.options.reporter?.({ type: "start-container", containerName: this.containerName, reused: true });
       const wasRunning = await dockerContainerRunning(this.dockerCommand, this.containerName);
@@ -354,6 +367,7 @@ export class DockerSandboxSession {
       cwd: this.options.cwd,
       config: this.options.settings.sandbox,
       dockerCommand: this.dockerCommand,
+      managedReadOnlyMounts: this.options.managedReadOnlyMounts,
     });
     await runToCompletion(argv);
     try {
@@ -531,6 +545,7 @@ export function dockerReusableContainerName(projectRoot: string, prefix = "openh
 export function dockerSandboxConfigHash(
   config: ReturnType<typeof normalizeSandboxConfig>,
   cwd: string,
+  managedReadOnlyMounts: readonly { source: string; target: string }[] = [],
 ): string {
   const payload = {
     cwd: resolve(cwd),
@@ -541,6 +556,9 @@ export function dockerSandboxConfigHash(
     memoryLimit: config.docker.memoryLimit,
     dns: [...config.docker.dns].sort(),
     extraMounts: [...config.docker.extraMounts].sort(),
+    managedReadOnlyMounts: managedReadOnlyMounts
+      .map((mount) => `${resolve(mount.source)}:${mount.target}:ro`)
+      .sort(),
     extraEnv: stableRecord(config.docker.extraEnv),
     supervisorVersion: DOCKER_SUPERVISOR_VERSION,
   };

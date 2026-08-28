@@ -14,7 +14,10 @@ import type {
   DesktopProject,
   DesktopWorkspaceMode,
 } from "@shared/session-types"
-import type { DesktopAttachmentDraft } from "@shared/attachment-types"
+import {
+  areDesktopAttachmentsSendable,
+  type DesktopAttachmentDraft,
+} from "@shared/attachment-types"
 import { Composer } from "./composer"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
@@ -400,7 +403,7 @@ export function NewConversationStart({
             skillCommands={skillCommands}
             canSubmit={Boolean(
               (draft.trim() || attachments.length > 0) &&
-              attachments.every((attachment) => attachment.status === "ready") &&
+              areDesktopAttachmentsSendable(attachments) &&
               (selectedProject || workspaceMode === "outside_project")
             )}
             attachments={attachments}

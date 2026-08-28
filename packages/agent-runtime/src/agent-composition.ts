@@ -90,6 +90,8 @@ export async function composeOpenHarnessAgent(
       jobs: Boolean(explicitCapabilities?.jobs) || !explicitCapabilities,
       workflowRepository: explicitCapabilities?.workflowRepository,
       imageToText: Boolean(explicitCapabilities?.imageToText),
+      attachments: Boolean(explicitCapabilities?.attachments),
+      attachmentResourceRoot: explicitCapabilities?.attachmentResourceRoot,
     },
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
@@ -168,6 +170,7 @@ export async function composeOpenHarnessAgent(
       localJobs;
     runtime.queryEngine.setBackgroundShell(backgroundShell);
     runtime.queryEngine.setImageToText(explicitCapabilities?.imageToText);
+    runtime.queryEngine.setAttachments(explicitCapabilities?.attachments);
     const hostCapabilities = [
       "permissions",
       ...(jobs ? ["jobs"] : []),
@@ -181,6 +184,7 @@ export async function composeOpenHarnessAgent(
         : []),
       ...(explicitCapabilities?.workflowRepository ? ["workflowRepository"] : []),
       ...(explicitCapabilities?.imageToText ? ["imageToText"] : []),
+      ...(explicitCapabilities?.attachments ? ["attachments"] : []),
     ];
     return {
       runtime,

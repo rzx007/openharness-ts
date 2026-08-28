@@ -12,7 +12,10 @@ import {
   AttachmentProgress,
   AttachmentTitle,
 } from "@renderer/components/ui/attachment"
-import type { DesktopAttachmentDraft } from "@shared/attachment-types"
+import {
+  resolveDesktopAttachmentCompatibility,
+  type DesktopAttachmentDraft,
+} from "@shared/attachment-types"
 
 export function ComposerAttachments({
   attachments,
@@ -68,12 +71,15 @@ function ComposerAttachmentCard({
         ? "done"
         : "error"
   const mediaType = attachment.mediaType ?? attachment.declaredMediaType
+  const compatibility = resolveDesktopAttachmentCompatibility(attachment)
   const fileIcon = attachmentIcon(mediaType)
   const errorMessage =
-    attachment.error?.message ?? (attachment.status === "cancelled" ? "上传已取消" : null)
+    attachment.error?.message ??
+    (attachment.status === "cancelled" ? "上传已取消" : null) ??
+    (attachment.status === "ready" && !compatibility.supported ? compatibility.reason ?? null : null)
 
   return (
-    <Attachment state={state} size="sm" className="max-w-64 flex-nowrap">
+    <Attachment state={attachment.status === "ready" && !compatibility.supported ? "error" : state} size="sm" className="max-w-64 flex-nowrap">
       <AttachmentMedia variant={visiblePreviewUrl ? "image" : "icon"}>
         {visiblePreviewUrl ? (
           <img

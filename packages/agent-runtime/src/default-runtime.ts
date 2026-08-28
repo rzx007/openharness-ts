@@ -78,6 +78,8 @@ interface OpenHarnessRuntimeOptions {
     jobs?: boolean;
     workflowRepository?: WorkflowRunRepository;
     imageToText?: boolean;
+    attachments?: boolean;
+    attachmentResourceRoot?: string;
   };
 }
 
@@ -247,6 +249,7 @@ export async function createOpenHarnessRuntime(
     cwd,
     options.sandboxReporter,
     options.sessionId,
+    options.hostCapabilities?.attachmentResourceRoot,
   );
   return bundle;
 }
@@ -330,12 +333,21 @@ async function attachSandboxRuntime(
   cwd: string,
   reporter?: SandboxRuntimeReporter,
   sessionId?: string,
+  attachmentResourceRoot?: string,
 ): Promise<void> {
   const sandboxRuntime = await startSandboxRuntime({
     settings: bundle.settings,
     cwd,
     sessionId,
     reporter,
+    ...(attachmentResourceRoot
+      ? {
+          managedReadOnlyMounts: [{
+            source: attachmentResourceRoot,
+            target: "/mnt/openharness-attachments",
+          }],
+        }
+      : {}),
   });
   bundle.sandboxStatus = sandboxRuntime.status;
 

@@ -429,6 +429,28 @@ describe("docker backend argv builders", () => {
     expect(argv[argv.indexOf("--network") + 1]).toBe("none");
   });
 
+  it("adds host-managed attachment resources as a read-only mount", () => {
+    const argv = buildDockerRunArgs({
+      sessionId: "session-1",
+      cwd: "D:/repo",
+      config: { enabled: true, backend: "docker" },
+      managedReadOnlyMounts: [{
+        source: "D:/daemon/session-resources/abc",
+        target: "/mnt/openharness-attachments",
+      }],
+    });
+
+    expect(argv).toContain(
+      `${resolve("D:/daemon/session-resources/abc")}:/mnt/openharness-attachments:ro`,
+    );
+    expect(argv.join(" ")).not.toContain("/blobs/");
+    const base = normalizeSandboxConfig({ enabled: true, backend: "docker" });
+    expect(dockerSandboxConfigHash(base, "D:/repo", [{
+      source: "D:/daemon/session-resources/abc",
+      target: "/mnt/openharness-attachments",
+    }])).not.toBe(dockerSandboxConfigHash(base, "D:/repo"));
+  });
+
   it("omits --rm and uses a project container name for reusable docker containers", () => {
     const cwd = "D:/repo";
     const argv = buildDockerRunArgs({

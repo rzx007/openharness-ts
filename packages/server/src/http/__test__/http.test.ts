@@ -995,6 +995,137 @@ describe("OpenHarnessHttpServer", () => {
     }
   });
 
+  it("routes real text uploads and blocks document or disguised binary bytes before the agent runs", async () => {
+    const received: Array<{ sessionId: string; content: unknown }> = [];
+    const runtimeFactory: TestAgentProgramFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt(input) {
+            received.push({
+              sessionId: input.session.id,
+              content: input.input.content,
+            });
+            return { messages: [] };
+          },
+          async close() {},
+        };
+      },
+    };
+
+    await withServer(
+      async ({ baseUrl, token, server }) => {
+        const upload = async (
+          displayName: string,
+          mediaType: string,
+          body: BodyInit,
+        ): Promise<string> => {
+          const response = await fetch(`${baseUrl}/attachments`, {
+            method: "POST",
+            headers: {
+              ...auth(token),
+              "content-type": mediaType,
+              "x-openharness-filename": encodeURIComponent(displayName),
+            },
+            body,
+          });
+          expect(response.status).toBe(201);
+          return ((await response.json()) as { id: string }).id;
+        };
+        const submit = async (
+          suffix: string,
+          assetId: string,
+        ): Promise<ReturnType<SessionStore["getRun"]>> => {
+          const sessionId = `text-routing-${suffix}`;
+          const inputId = `input-${suffix}`;
+          const created = await fetch(`${baseUrl}/sessions`, {
+            method: "POST",
+            headers: { ...auth(token), "content-type": "application/json" },
+            body: JSON.stringify({ id: sessionId, cwd: process.cwd(), model: "m" }),
+          });
+          expect(created.status).toBe(201);
+          const admitted = await fetch(`${baseUrl}/sessions/${sessionId}/prompts`, {
+            method: "POST",
+            headers: { ...auth(token), "content-type": "application/json" },
+            body: JSON.stringify({
+              id: inputId,
+              content: "inspect",
+              attachments: [{ assetId, intent: "auto" }],
+            }),
+          });
+          expect(admitted.status).toBe(202);
+          const runId = ((await admitted.json()) as { run: { id: string } }).run.id;
+          await waitUntil(() => {
+            const status = server.store.getRun(runId)?.status;
+            return status === "completed" || status === "failed" || status === "interrupted";
+          });
+          return server.store.getRun(runId);
+        };
+
+        const utf8 = await upload("notes.txt", "text/plain", "第一行\r\n第二行");
+        const utf8Bom = await upload(
+          "bom.md",
+          "text/markdown",
+          new Blob([new Uint8Array([0xef, 0xbb, 0xbf]), "# 标题"]),
+        );
+        const utf16le = await upload(
+          "windows.log",
+          "text/plain",
+          new Blob([new Uint8Array([0xff, 0xfe, 0x41, 0x00, 0x0a, 0x00, 0x42, 0x00])]),
+        );
+        const large = await upload(
+          "large.log",
+          "text/plain",
+          new Blob([new Uint8Array(5 * 1024 * 1024).fill(0x61)]),
+        );
+        const pdf = await upload("manual.pdf", "application/pdf", "%PDF-1.7\ncontent");
+        const docx = await upload(
+          "report.docx",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])]),
+        );
+        const disguisedBinary = await upload(
+          "fake.txt",
+          "text/plain",
+          new Blob([new Uint8Array([0x00, 0x01, 0x02, 0x03])]),
+        );
+
+        const inlineRuns = await Promise.all([
+          submit("utf8", utf8),
+          submit("bom", utf8Bom),
+          submit("utf16", utf16le),
+          submit("large", large),
+        ]);
+        expect(inlineRuns.every((run) => run?.status === "completed")).toBe(true);
+        const blockedRuns = await Promise.all([
+          submit("pdf", pdf),
+          submit("docx", docx),
+          submit("binary", disguisedBinary),
+        ]);
+        expect(blockedRuns.map((run) => run?.status)).toEqual([
+          "failed",
+          "failed",
+          "failed",
+        ]);
+        expect(blockedRuns.map((run) => (run?.metadata.attachmentRouting as any)?.code)).toEqual([
+          "attachment_document_unsupported",
+          "attachment_document_unsupported",
+          "attachment_text_encoding_unsupported",
+        ]);
+
+        expect(received).toHaveLength(4);
+        const contentFor = (sessionId: string) =>
+          JSON.stringify(received.find((item) => item.sessionId === sessionId)?.content);
+        expect(contentFor("text-routing-utf8")).toContain("第一行\\n第二行");
+        expect(contentFor("text-routing-bom")).toContain("# 标题");
+        expect(contentFor("text-routing-utf16")).toContain("A\\nB");
+        const largeContent = contentFor("text-routing-large");
+        expect(largeContent).toContain(`attachment://${large}/large.log`);
+        expect(largeContent.length).toBeLessThan(10_000);
+      },
+      { runtimeFactory },
+    );
+  });
+
   it("aggregates application, listener, and SSE close failures after attempting every stage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-close-matrix-"));
     const server = new OpenHarnessHttpServer({

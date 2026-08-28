@@ -1,5 +1,6 @@
 import type { SessionInputAttachmentRecord } from "@openharness/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { AttachmentTextDecodingError } from "@openharness/services";
 
 import { AttachmentCapabilityRouter } from "../attachment-capability-router.js";
 
@@ -31,9 +32,17 @@ function harness() {
     mediaType: "image/png",
     sizeBytes: 4,
   }));
+  const readReadyText = vi.fn(async (assetId: string) => ({
+    assetId,
+    displayName: `${assetId}.txt`,
+    mediaType: "text/plain",
+    encoding: "utf-8" as const,
+    text: "hello from attachment",
+  }));
   return {
     resolveReadyContentPath,
-    router: new AttachmentCapabilityRouter({ resolveReadyContentPath }),
+    readReadyText,
+    router: new AttachmentCapabilityRouter({ resolveReadyContentPath, readReadyText }),
   };
 }
 
@@ -132,7 +141,7 @@ describe("AttachmentCapabilityRouter", () => {
   });
 
   it("blocks unsupported content before blob I/O", async () => {
-    const { router, resolveReadyContentPath } = harness();
+    const { router, resolveReadyContentPath, readReadyText } = harness();
     await expect(
       router.route({
         text: "read",
@@ -148,8 +157,97 @@ describe("AttachmentCapabilityRouter", () => {
           imageMediaTypes: ["image/png"],
         },
       }),
-    ).rejects.toMatchObject({ code: "attachment_kind_unsupported" });
+    ).rejects.toMatchObject({ code: "attachment_document_unsupported" });
     expect(resolveReadyContentPath).not.toHaveBeenCalled();
+    expect(readReadyText).not.toHaveBeenCalled();
+  });
+
+  it("inlines a small text attachment with an explicit untrusted-data boundary", async () => {
+    const { router, readReadyText, resolveReadyContentPath } = harness();
+    const result = await router.route({
+      text: "summarize",
+      attachments: [attachment("notes", 0, {
+        displayName: "notes.txt",
+        mediaType: "text/plain",
+        sizeBytes: 21,
+      })],
+      modelCapabilities: { image: "unsupported" },
+      providerCapabilities: { image: "unsupported", imageMediaTypes: [] },
+    });
+
+    expect(readReadyText).toHaveBeenCalledWith("notes", expect.anything());
+    expect(resolveReadyContentPath).not.toHaveBeenCalled();
+    expect(result.decisions).toEqual([
+      expect.objectContaining({ assetId: "notes", route: "text_inline", complete: true }),
+    ]);
+    expect(result.content).toEqual([
+      { type: "text", text: "summarize" },
+      { type: "text", text: expect.stringContaining("hello from attachment") },
+    ]);
+  });
+
+  it("exposes a bounded preview and attachment URI for large text", async () => {
+    const { router, readReadyText } = harness();
+    readReadyText.mockResolvedValueOnce({
+      assetId: "large",
+      displayName: "large.log",
+      mediaType: "text/plain",
+      encoding: "utf-8",
+      text: "x".repeat(16_001),
+    });
+    const result = await router.route({
+      text: "",
+      attachments: [attachment("large", 0, {
+        displayName: "large.log",
+        mediaType: "text/plain",
+        sizeBytes: 16_001,
+      })],
+      modelCapabilities: { image: "unsupported" },
+      providerCapabilities: { image: "unsupported", imageMediaTypes: [] },
+    });
+
+    expect(result.decisions).toEqual([
+      expect.objectContaining({
+        route: "text_resource",
+        complete: false,
+        resourceUri: "attachment://large/large.log",
+      }),
+    ]);
+    const block = result.content[0] as { type: "text"; text: string };
+    expect(block.text).toContain("attachment://large/large.log");
+    expect(block.text).not.toContain("x".repeat(3_001));
+  });
+
+  it.each([
+    ["report.docx", "application/zip", "attachment_document_unsupported"],
+    ["table.xlsx", "application/zip", "attachment_document_unsupported"],
+    ["slides.pptx", "application/zip", "attachment_document_unsupported"],
+    ["data.zip", "application/zip", "attachment_archive_unsupported"],
+    ["program.bin", "application/octet-stream", "attachment_binary_unsupported"],
+  ])("blocks %s with a stable reason", async (displayName, mediaType, code) => {
+    const { router, readReadyText, resolveReadyContentPath } = harness();
+    await expect(router.route({
+      text: "read",
+      attachments: [attachment("blocked", 0, { displayName, mediaType })],
+      modelCapabilities: { image: "native" },
+      providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
+    })).rejects.toMatchObject({ code });
+    expect(readReadyText).not.toHaveBeenCalled();
+    expect(resolveReadyContentPath).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unsupported_encoding", "attachment_text_encoding_unsupported"],
+    ["invalid_text", "attachment_text_invalid"],
+  ] as const)("preserves the stable %s text failure", async (kind, code) => {
+    const { router, readReadyText } = harness();
+    readReadyText.mockRejectedValueOnce(new AttachmentTextDecodingError(kind, "bad text"));
+    await expect(router.route({
+      text: "read",
+      attachments: [attachment("bad", 0, { displayName: "bad.txt", mediaType: "text/plain" })],
+      modelCapabilities: { image: "unsupported" },
+      providerCapabilities: { image: "unsupported", imageMediaTypes: [] },
+    })).rejects.toMatchObject({ code });
   });
 
   it("materializes text and images in stable attachment order", async () => {
@@ -183,7 +281,10 @@ describe("AttachmentCapabilityRouter", () => {
         sizeBytes: 4,
       })
       .mockRejectedValueOnce(new Error("missing blob"));
-    const router = new AttachmentCapabilityRouter({ resolveReadyContentPath });
+    const router = new AttachmentCapabilityRouter({
+      resolveReadyContentPath,
+      readReadyText: vi.fn(),
+    });
 
     await expect(
       router.route({

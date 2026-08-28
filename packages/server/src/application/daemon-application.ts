@@ -75,6 +75,8 @@ import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capa
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
 import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
+import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
+import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -148,6 +150,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly channels: ChannelApplicationService;
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
+  private readonly attachmentResources: SessionAttachmentResources;
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -200,6 +203,10 @@ export class DaemonApplication implements DurableAgentApplication {
           }),
           limits: options.attachmentLimits,
         });
+      this.attachmentResources = new SessionAttachmentResources({
+        root: join(dirname(store.path), "attachment-session-resources"),
+        attachments: this.attachments,
+      });
       const ocrEngine = new LightOcrEngine();
       this.localOcr = new LocalOcrService({
         engine: ocrEngine,
@@ -312,6 +319,12 @@ export class DaemonApplication implements DurableAgentApplication {
           attachments: this.attachments,
           recognize: (input) => this.localOcr.recognize(input),
         }),
+        attachments: createAgentAttachmentResourceHost({
+          store,
+          attachments: this.attachments,
+        }),
+        attachmentResourceRoot: (session) =>
+          this.attachmentResources.prepareSessionSync(session.id),
         requestPermission: async (request, context) => {
           // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
           return await this.permissions.ask({
@@ -374,6 +387,8 @@ export class DaemonApplication implements DurableAgentApplication {
       const attachmentRouter = new AttachmentCapabilityRouter({
         resolveReadyContentPath: (assetId) =>
           this.attachments.resolveReadyContentPath(assetId),
+        readReadyText: (assetId, readOptions) =>
+          this.attachments.readReadyText(assetId, readOptions),
       });
       const runExecutor = new SessionRunExecutor({
         store,
@@ -383,6 +398,7 @@ export class DaemonApplication implements DurableAgentApplication {
         traceIdForRun: (runId) => this.traceIdForRun(runId),
         log: options.log,
         postRunMaintenance,
+        attachmentResources: this.attachmentResources,
         routeAttachments: (input) => attachmentRouter.route(input),
         resolveCapabilities: async (session) => {
           const settings = options.getSettingsForCwd
@@ -734,6 +750,11 @@ export class DaemonApplication implements DurableAgentApplication {
     }
     try {
       await closeExecutionRuntimes();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.attachmentResources.close();
     } catch (error) {
       failures.push(error);
     }

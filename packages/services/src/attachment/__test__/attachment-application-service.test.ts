@@ -77,6 +77,59 @@ function createHarness(options: {
 }
 
 describe("AttachmentApplicationService", () => {
+  it.each([
+    ["utf-8", Uint8Array.from(new TextEncoder().encode("你好\r\n世界")), "你好\n世界"],
+    ["utf-8 BOM", Uint8Array.from([0xef, 0xbb, 0xbf, 0x68, 0x69]), "hi"],
+    ["utf-16le", Uint8Array.from([0xff, 0xfe, 0x60, 0x4f, 0x7d, 0x59]), "你好"],
+    ["utf-16be", Uint8Array.from([0xfe, 0xff, 0x4f, 0x60, 0x59, 0x7d]), "你好"],
+  ])("reads real %s attachment bytes", async (_name, content, expected) => {
+    const { service, store } = createHarness();
+    try {
+      const asset = await service.import({
+        displayName: "notes.txt",
+        declaredMediaType: "text/plain",
+        content: streamOf([content]),
+      });
+      await expect(service.readReadyText(asset.id)).resolves.toMatchObject({ text: expected });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("rejects a binary payload disguised as text", async () => {
+    const { service, store } = createHarness();
+    try {
+      const asset = await service.import({
+        displayName: "disguised.txt",
+        declaredMediaType: "text/plain",
+        content: streamOf([Uint8Array.from([0x61, 0x00, 0x62])]),
+      });
+      await expect(service.readReadyText(asset.id)).rejects.toMatchObject({
+        kind: "unsupported_encoding",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reads a real 5 MiB log without changing its bytes", async () => {
+    const { service, store } = createHarness({ maxBytesPerFile: 6 * 1024 * 1024 });
+    try {
+      const content = new Uint8Array(5 * 1024 * 1024).fill(0x78);
+      const asset = await service.import({
+        displayName: "large.log",
+        declaredMediaType: "text/plain",
+        content: streamOf([content]),
+      });
+      const decoded = await service.readReadyText(asset.id);
+      expect(decoded.text).toHaveLength(5 * 1024 * 1024);
+      expect(decoded.text.startsWith("xxxx")).toBe(true);
+      expect(decoded.text.endsWith("xxxx")).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
   it("imports ready assets and reuses identical blob bytes", async () => {
     const { root, store, service } = createHarness({
       ids: ["att_first", "att_second"],

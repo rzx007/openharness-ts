@@ -2,6 +2,7 @@ import type { StreamingMessageClient } from "./client";
 import type {
   AgentBackgroundShellHost,
   AgentImageToTextHost,
+  AgentAttachmentResourceHost,
   McpAuthHost,
   ToolRegistry,
 } from "./tools";
@@ -399,6 +400,7 @@ export interface QueryEngine {
   setJobs(jobs: AgentJobHost | undefined): void;
   setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void;
   setImageToText(imageToText: AgentImageToTextHost | undefined): void;
+  setAttachments(attachments: AgentAttachmentResourceHost | undefined): void;
 }
 
 export interface MemoryRetriever {

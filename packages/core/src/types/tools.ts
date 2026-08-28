@@ -60,6 +60,24 @@ export interface AgentImageToTextHost {
   ): Promise<AgentImageToTextResult>;
 }
 
+export interface AgentAttachmentTextSlice {
+  displayName: string;
+  mediaType: string;
+  encoding: "utf-8" | "utf-16le" | "utf-16be";
+  content: string;
+  startLine: number;
+  endLine: number;
+  hasMore: boolean;
+}
+
+/** Host-owned access to immutable text attachments referenced by the current session. */
+export interface AgentAttachmentResourceHost {
+  readText(
+    input: { assetId: string; offset: number; limit: number },
+    context: { sessionId?: string; signal?: AbortSignal },
+  ): Promise<AgentAttachmentTextSlice>;
+}
+
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
@@ -87,6 +105,8 @@ export interface ToolContext {
   backgroundShell?: AgentBackgroundShellHost;
   /** Host-owned local OCR capability. Omitted when OCR is unavailable. */
   imageToText?: AgentImageToTextHost;
+  /** Session-authorized immutable text attachment access. */
+  attachments?: AgentAttachmentResourceHost;
   agent?: AgentExecutionContext;
 }
 

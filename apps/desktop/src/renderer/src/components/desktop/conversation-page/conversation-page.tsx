@@ -11,7 +11,10 @@ import {
   MessageScrollerViewport,
 } from "@renderer/components/ui/message-scroller"
 import { Spinner } from "@renderer/components/ui/spinner"
-import { disabledDesktopAttachmentSupport } from "@shared/attachment-types"
+import {
+  areDesktopAttachmentsSendable,
+  disabledDesktopAttachmentSupport,
+} from "@shared/attachment-types"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
   NEW_CONVERSATION_SCOPE,
@@ -138,7 +141,7 @@ function ConversationPane({
 
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
-    const ready = attachments.every((attachment) => attachment.status === "ready")
+    const ready = areDesktopAttachmentsSendable(attachments)
     if ((!content && attachments.length === 0) || !ready || sending || archived) return
     const submittedSessionId = activeSessionId
     const commandLine = skillCommandInvocationLine(content, skillCommands) ?? undefined
@@ -193,7 +196,7 @@ function ConversationPane({
   const skillCommands =
     commandCwd && skillCommandSnapshot?.cwd === commandCwd ? skillCommandSnapshot.commands : []
   const canSubmit =
-    attachments.every((attachment) => attachment.status === "ready") &&
+    areDesktopAttachmentsSendable(attachments) &&
     Boolean(draft.trim() || attachments.length > 0)
 
   const pasteAttachments = async (files: readonly File[]): Promise<void> => {

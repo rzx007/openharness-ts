@@ -2311,6 +2311,17 @@ export class SessionStore {
     );
   }
 
+  listSessionInputAttachments(sessionId: string): SessionInputAttachmentRecord[] {
+    assertSession(this.state, sessionId);
+    return clone(
+      Object.values(this.state.inputAttachments)
+        .filter((reference) => reference.sessionId === sessionId)
+        .sort((left, right) =>
+          left.createdAt - right.createdAt || left.seq - right.seq,
+        ),
+    );
+  }
+
   countInputAttachmentReferences(assetId: string): number {
     return Object.values(this.state.inputAttachments).filter(
       (reference) => reference.assetId === assetId,

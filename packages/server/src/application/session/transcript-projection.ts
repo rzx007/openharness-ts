@@ -106,6 +106,8 @@ export class SessionTranscriptProjection {
         metadata: {
           route: decision.route,
           ...(decision.reason ? { reason: decision.reason } : {}),
+          ...(decision.complete !== undefined ? { complete: decision.complete } : {}),
+          ...(decision.resourceUri ? { resourceUri: decision.resourceUri } : {}),
         },
       });
     }

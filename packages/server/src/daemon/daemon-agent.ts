@@ -14,6 +14,7 @@ import type {
   AgentScheduleEffects,
   AgentBackgroundShellHost,
   AgentImageToTextHost,
+  AgentAttachmentResourceHost,
   AgentEffects,
   AgentEventListener,
   Settings,
@@ -70,6 +71,8 @@ export interface DaemonAgentLoaderOptions {
   createBackgroundShellHost?(session: SessionRecord): AgentBackgroundShellHost;
   workflowRepository?: WorkflowRunRepository;
   imageToText?: AgentImageToTextHost;
+  attachments?: AgentAttachmentResourceHost;
+  attachmentResourceRoot?(session: SessionRecord): string;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
    * 要等 Agent 造好才能建（投影要用 agent.id），但 onEvent 在造 Agent 时就得先挂上。
@@ -124,6 +127,7 @@ export function createDaemonAgentLoader(
     const terminal = options.createTerminalHost?.(session);
     const jobs = options.createJobHost?.(session);
     const backgroundShell = options.createBackgroundShellHost?.(session);
+    const attachmentResourceRoot = options.attachmentResourceRoot?.(session);
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
@@ -139,6 +143,8 @@ export function createDaemonAgentLoader(
           ? { workflowRepository: options.workflowRepository }
           : {}),
         ...(options.imageToText ? { imageToText: options.imageToText } : {}),
+        ...(options.attachments ? { attachments: options.attachments } : {}),
+        ...(attachmentResourceRoot ? { attachmentResourceRoot } : {}),
       },
       ...(options.createEventSink
         ? {

@@ -2,6 +2,7 @@ import type {
   AgentChildBudget,
   AgentBackgroundShellHost,
   AgentImageToTextHost,
+  AgentAttachmentResourceHost,
   AgentEffects,
   AgentScheduleEffects,
   PermissionMode,
@@ -30,6 +31,9 @@ export interface AgentHostCapabilities {
   childEnvironment?: AgentChildEnvironmentProvider;
   workflowRepository?: WorkflowRunRepository;
   imageToText?: AgentImageToTextHost;
+  attachments?: AgentAttachmentResourceHost;
+  /** Stable per-session directory exposed read-only inside Docker. */
+  attachmentResourceRoot?: string;
 }
 
 /** Opinionated runtime configuration exposed by the programmatic agent API. */
