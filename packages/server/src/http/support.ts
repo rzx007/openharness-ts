@@ -3,7 +3,10 @@ import {
   type ProtocolError,
 } from "@openharness/protocol";
 import type { Context } from "hono";
-import { isAttachmentError } from "@openharness/services";
+import {
+  isAttachmentError,
+  type AttachmentErrorCode,
+} from "@openharness/services";
 import {
   APPLICATION_ERROR_HTTP_STATUS,
   ApplicationError,
@@ -119,7 +122,15 @@ const ATTACHMENT_ERROR_HTTP_STATUS = {
   attachment_not_ready: 409,
   attachment_aborted: 408,
   attachment_storage_failed: 500,
-} as const;
+  prompt_content_required: 400,
+  attachment_duplicate_reference: 400,
+  prompt_id_conflict: 409,
+  attachment_in_use: 409,
+  attachment_structured_steer_unsupported: 409,
+  attachment_count_exceeded: 413,
+  attachment_prompt_size_exceeded: 413,
+  attachment_session_size_exceeded: 413,
+} as const satisfies Record<AttachmentErrorCode, number>;
 
 export function attachmentErrorResponse(error: unknown): Response {
   if (!isAttachmentError(error)) {

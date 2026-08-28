@@ -8,7 +8,11 @@ import { isDeepStrictEqual } from "node:util";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { parseAttachmentAssetRecord } from "@openharness/protocol";
+import {
+  DEFAULT_ATTACHMENT_LIMITS,
+  parseAttachmentAssetRecord,
+  parseAttachmentLimits,
+} from "@openharness/protocol";
 
 import type {
   AdmitPromptInput,
@@ -57,7 +61,10 @@ import type {
   ChannelDeliveryRecord,
   ChannelDeliveryStatus,
   AttachmentAssetRecord,
+  AttachmentLimits,
+  SessionInputAttachmentRecord,
 } from "@openharness/protocol";
+import { AttachmentError } from "../attachment/attachment-errors.js";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
 import {
   defaultDurableEventRegistry,
@@ -86,6 +93,11 @@ import {
   type SessionStoreOptions,
   type SessionState,
 } from "./store-state.js";
+import {
+  normalizePromptAttachments,
+  promptAttachmentFingerprint,
+  uniqueReferencedBytes,
+} from "./prompt-attachments.js";
 
 export type { SessionStoreOptions } from "./store-state.js";
 
@@ -179,6 +191,7 @@ export class SessionStore {
   private readonly deltaFlushIntervalMs: number;
   private readonly deltaFlushBytes: number;
   private readonly eventRegistry: DurableEventRegistry;
+  private readonly attachmentLimits: AttachmentLimits;
   private readonly dirtyDeltaPartIds = new Set<string>();
   private pendingDeltaBytes = 0;
   private deltaFlushTimer?: ReturnType<typeof setTimeout>;
@@ -199,6 +212,10 @@ export class SessionStore {
       options.deltaFlushBytes ?? DEFAULT_DELTA_FLUSH_BYTES,
     );
     this.eventRegistry = options.eventRegistry ?? defaultDurableEventRegistry;
+    this.attachmentLimits = parseAttachmentLimits({
+      ...DEFAULT_ATTACHMENT_LIMITS,
+      ...options.attachmentLimits,
+    });
     mkdirSync(dirname(this.path), { recursive: true });
     this.database = new Database(this.path);
     try {
@@ -993,6 +1010,13 @@ export class SessionStore {
     for (const [id, input] of Object.entries(this.state.inputs)) {
       if (sessionIdSet.has(input.sessionId)) delete this.state.inputs[id];
     }
+    for (const [id, reference] of Object.entries(
+      this.state.inputAttachments,
+    )) {
+      if (sessionIdSet.has(reference.sessionId)) {
+        delete this.state.inputAttachments[id];
+      }
+    }
     for (const [id, message] of Object.entries(this.state.messages)) {
       if (sessionIdSet.has(message.sessionId)) delete this.state.messages[id];
     }
@@ -1082,38 +1106,161 @@ export class SessionStore {
   }
 
   admitPrompt(input: AdmitPromptInput): SessionInputRecord {
-    const session = assertSession(this.state, input.sessionId);
-    assertMutableSession(session);
-    const id = input.id ?? randomUUID();
-    if (this.state.inputs[id])
-      throw new Error(`Session input already exists: ${id}`);
-    const timestamp = now();
-    const seq = maxSeq(this.state.inputs, input.sessionId) + 1;
-    const row: SessionInputRecord = {
-      id,
-      sessionId: input.sessionId,
-      seq,
-      delivery: input.delivery ?? "queue",
-      content: input.content,
-      attachments: [],
-      metadata: input.metadata ?? {},
-      createdAt: timestamp,
-    };
-    this.state.inputs[id] = row;
-    session.updatedAt = timestamp;
-    if (seq === 1 && isPlaceholderSessionTitle(session.title)) {
-      const title = formatSessionTitle(input.content);
-      if (title) session.title = title;
-    }
-    this.mutations.inputs.add(id);
-    this.mutations.sessions.add(input.sessionId);
-    this.appendEventInMemory({
-      type: "session.input.admitted",
-      sessionId: input.sessionId,
-      payload: { input: row },
+    return this.transaction(() => {
+      const session = assertSession(this.state, input.sessionId);
+      assertMutableSession(session);
+      const normalized = normalizePromptAttachments(input.attachments);
+      if (input.content.trim().length === 0 && normalized.length === 0) {
+        throw new AttachmentError(
+          "prompt_content_required",
+          "Prompt text and attachments cannot both be empty",
+        );
+      }
+      if (normalized.length > this.attachmentLimits.maxFilesPerPrompt) {
+        throw new AttachmentError(
+          "attachment_count_exceeded",
+          `Prompt references ${normalized.length} files; limit is ${this.attachmentLimits.maxFilesPerPrompt}`,
+        );
+      }
+
+      const id = input.id ?? randomUUID();
+      const delivery =
+        normalized.length > 0 && input.delivery === "steer"
+          ? "queue"
+          : (input.delivery ?? "queue");
+      const metadata = input.metadata ?? {};
+      const existing = this.state.inputs[id];
+      if (existing) {
+        const existingRequested = existing.attachments.map((reference) => ({
+          assetId: reference.assetId,
+          intent: reference.intent,
+          ...(typeof reference.metadata.requestedDisplayName === "string"
+            ? { displayName: reference.metadata.requestedDisplayName }
+            : {}),
+        }));
+        const same =
+          existing.sessionId === input.sessionId &&
+          existing.content === input.content &&
+          existing.delivery === delivery &&
+          isDeepStrictEqual(
+            metadataWithoutTrace(existing.metadata),
+            metadataWithoutTrace(metadata),
+          ) &&
+          promptAttachmentFingerprint(existingRequested) ===
+            promptAttachmentFingerprint(normalized);
+        if (!same) {
+          throw new AttachmentError(
+            "prompt_id_conflict",
+            `Input ${id} already exists with different content`,
+          );
+        }
+        return clone(existing);
+      }
+
+      const assets = normalized.map((reference) => {
+        const asset = this.getAttachment(reference.assetId, {
+          includeDeleted: true,
+        });
+        if (!asset || asset.status === "deleted") {
+          throw new AttachmentError(
+            "attachment_not_found",
+            `Attachment ${reference.assetId} was not found`,
+          );
+        }
+        if (
+          asset.status !== "ready" ||
+          asset.sizeBytes === undefined ||
+          asset.mediaType === undefined
+        ) {
+          throw new AttachmentError(
+            "attachment_not_ready",
+            `Attachment ${reference.assetId} is ${asset.status}`,
+          );
+        }
+        if (asset.sizeBytes > this.attachmentLimits.maxBytesPerFile) {
+          throw new AttachmentError(
+            "attachment_too_large",
+            `Attachment ${reference.assetId} exceeds the per-file limit`,
+          );
+        }
+        return { reference, asset };
+      });
+      const promptBytes = assets.reduce(
+        (total, entry) => total + entry.asset.sizeBytes!,
+        0,
+      );
+      if (promptBytes > this.attachmentLimits.maxBytesPerPrompt) {
+        throw new AttachmentError(
+          "attachment_prompt_size_exceeded",
+          `Prompt attachments use ${promptBytes} bytes; limit is ${this.attachmentLimits.maxBytesPerPrompt}`,
+        );
+      }
+      const sessionBytes = uniqueReferencedBytes(
+        Object.values(this.state.inputAttachments).filter(
+          (reference) => reference.sessionId === input.sessionId,
+        ),
+        assets.map(({ asset }) => ({
+          assetId: asset.id,
+          sizeBytes: asset.sizeBytes!,
+        })),
+      );
+      if (sessionBytes > this.attachmentLimits.maxSessionReferencedBytes) {
+        throw new AttachmentError(
+          "attachment_session_size_exceeded",
+          `Session attachments use ${sessionBytes} bytes; limit is ${this.attachmentLimits.maxSessionReferencedBytes}`,
+        );
+      }
+
+      const timestamp = now();
+      const seq = maxSeq(this.state.inputs, input.sessionId) + 1;
+      const attachments: SessionInputAttachmentRecord[] = assets.map(
+        ({ reference, asset }, attachmentSeq) => ({
+          id: randomUUID(),
+          sessionId: input.sessionId,
+          inputId: id,
+          assetId: asset.id,
+          seq: attachmentSeq,
+          intent: reference.intent,
+          displayName: reference.displayName ?? asset.displayName,
+          mediaType: asset.mediaType!,
+          sizeBytes: asset.sizeBytes!,
+          metadata:
+            reference.displayName === undefined
+              ? {}
+              : { requestedDisplayName: reference.displayName },
+          createdAt: timestamp,
+        }),
+      );
+      const row: SessionInputRecord = {
+        id,
+        sessionId: input.sessionId,
+        seq,
+        delivery,
+        content: input.content,
+        attachments,
+        metadata,
+        createdAt: timestamp,
+      };
+      this.state.inputs[id] = row;
+      for (const reference of attachments) {
+        this.state.inputAttachments[reference.id] = reference;
+        this.mutations.inputAttachments.add(reference.id);
+      }
+      session.updatedAt = timestamp;
+      if (seq === 1 && isPlaceholderSessionTitle(session.title)) {
+        const title = formatSessionTitle(input.content);
+        if (title) session.title = title;
+      }
+      this.mutations.inputs.add(id);
+      this.mutations.sessions.add(input.sessionId);
+      this.appendEventInMemory({
+        type: "session.input.admitted",
+        sessionId: input.sessionId,
+        payload: { input: row },
+      });
+      this.save();
+      return clone(row);
     });
-    this.save();
-    return clone(row);
   }
 
   async backupDatabase(destination: string): Promise<void> {
@@ -1756,6 +1903,8 @@ export class SessionStore {
         ...input.prompt,
         delivery: "queue",
       });
+      const existingRun = this.findOwningRunByInput(admitted.id);
+      if (existingRun) return { input: admitted, run: existingRun };
       const run = this.createRun({
         id: input.run?.id,
         sessionId: admitted.sessionId,
@@ -1812,6 +1961,20 @@ export class SessionStore {
   getInput(inputId: string): SessionInputRecord | undefined {
     const input = this.state.inputs[inputId];
     return input ? clone(input) : undefined;
+  }
+
+  listInputAttachments(inputId: string): SessionInputAttachmentRecord[] {
+    return clone(
+      Object.values(this.state.inputAttachments)
+        .filter((reference) => reference.inputId === inputId)
+        .sort((left, right) => left.seq - right.seq),
+    );
+  }
+
+  countInputAttachmentReferences(assetId: string): number {
+    return Object.values(this.state.inputAttachments).filter(
+      (reference) => reference.assetId === assetId,
+    ).length;
   }
 
   listInputs(sessionId: string): SessionInputRecord[] {
@@ -2371,15 +2534,28 @@ export class SessionStore {
   }
 
   findRunByInput(inputId: string): SessionRunRecord | undefined {
-    const direct = Object.values(this.state.runs).find(
-      (candidate) => candidate.inputId === inputId,
-    );
+    const direct = this.findOwningRunByInput(inputId);
     if (direct) return clone(direct);
     const promoted = Object.values(this.state.messages).find(
       (message) => message.inputId === inputId && message.runId,
     );
     const run = promoted?.runId ? this.state.runs[promoted.runId] : undefined;
     return run ? clone(run) : undefined;
+  }
+
+  listRunsByInput(inputId: string): SessionRunRecord[] {
+    return clone(
+      Object.values(this.state.runs)
+        .filter((candidate) => candidate.inputId === inputId)
+        .sort(
+          (left, right) =>
+            left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+        ),
+    );
+  }
+
+  findOwningRunByInput(inputId: string): SessionRunRecord | undefined {
+    return this.listRunsByInput(inputId)[0];
   }
 
   listRuns(sessionId: string): SessionRunRecord[] {
@@ -3174,6 +3350,28 @@ export class SessionStore {
       state.inputs[input.id] = input;
     }
     for (const row of this.database
+      .prepare(
+        "SELECT * FROM session_input_attachment ORDER BY input_id, seq",
+      )
+      .all() as Array<Record<string, unknown>>) {
+      const reference: SessionInputAttachmentRecord = {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        inputId: row.input_id as string,
+        assetId: row.asset_id as string,
+        seq: row.seq as number,
+        intent: row.intent as SessionInputAttachmentRecord["intent"],
+        displayName: row.display_name as string,
+        mediaType: row.media_type as string,
+        sizeBytes: row.size_bytes as number,
+        metadata: decode(row.metadata_json as string),
+        createdAt: row.created_at as number,
+      };
+      state.inputAttachments[reference.id] = reference;
+      const input = state.inputs[reference.inputId];
+      if (input) input.attachments.push(reference);
+    }
+    for (const row of this.database
       .prepare("SELECT * FROM session_message")
       .all() as Array<Record<string, unknown>>) {
       const message: SessionMessageRecord = {
@@ -3411,6 +3609,12 @@ export class SessionStore {
     if (this.dirtyDeltaPartIds.size > 0)
       this.persistDeltaPartRows([...this.dirtyDeltaPartIds]);
 
+    const deleteInputAttachment = this.database.prepare(
+      "DELETE FROM session_input_attachment WHERE id = ?",
+    );
+    for (const id of this.mutations.deletedInputAttachments) {
+      deleteInputAttachment.run(id);
+    }
     const deletePart = this.database.prepare(
       "DELETE FROM session_message_part WHERE id = ?",
     );
@@ -3466,6 +3670,36 @@ export class SessionStore {
           encode(value.metadata),
           value.createdAt,
         );
+    }
+
+    const upsertInputAttachment = this.database.prepare(`
+      INSERT INTO session_input_attachment (
+        id, session_id, input_id, asset_id, seq, intent, display_name,
+        media_type, size_bytes, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,
+        input_id=excluded.input_id, asset_id=excluded.asset_id, seq=excluded.seq,
+        intent=excluded.intent, display_name=excluded.display_name,
+        media_type=excluded.media_type, size_bytes=excluded.size_bytes,
+        metadata_json=excluded.metadata_json, created_at=excluded.created_at
+    `);
+    for (const id of this.mutations.inputAttachments) {
+      const value = this.state.inputAttachments[id];
+      if (value) {
+        upsertInputAttachment.run(
+          value.id,
+          value.sessionId,
+          value.inputId,
+          value.assetId,
+          value.seq,
+          value.intent,
+          value.displayName,
+          value.mediaType,
+          value.sizeBytes,
+          encode(value.metadata),
+          value.createdAt,
+        );
+      }
     }
 
     const upsertMessage = this.database.prepare(`
@@ -3870,4 +4104,11 @@ function normalizeProjectPath(path: string): string {
   return process.platform === "win32"
     ? normalized.toLocaleLowerCase()
     : normalized;
+}
+
+function metadataWithoutTrace(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const { traceId: _traceId, ...stable } = metadata;
+  return stable;
 }

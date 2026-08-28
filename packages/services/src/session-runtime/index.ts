@@ -21,3 +21,12 @@ export type {
   PreparedDurableEvent,
 } from "./event-registry.js";
 export { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
+export {
+  normalizePromptAttachments,
+  promptAttachmentFingerprint,
+  uniqueReferencedBytes,
+} from "./prompt-attachments.js";
+export type {
+  NormalizedPromptAttachment,
+  ReferencedAttachmentSize,
+} from "./prompt-attachments.js";

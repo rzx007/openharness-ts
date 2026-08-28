@@ -1,8 +1,10 @@
 import type {
   PermissionRequestRecord,
+  AttachmentLimits,
   ScheduledRunRecord,
   ScheduledTaskRecord,
   SessionEventRecord,
+  SessionInputAttachmentRecord,
   SessionInputRecord,
   SessionMessagePartRecord,
   SessionMessageRecord,
@@ -17,6 +19,7 @@ export interface SessionState {
   nextEventSeq: number;
   sessions: Record<string, SessionRecord>;
   inputs: Record<string, SessionInputRecord>;
+  inputAttachments: Record<string, SessionInputAttachmentRecord>;
   messages: Record<string, SessionMessageRecord>;
   parts: Record<string, SessionMessagePartRecord>;
   events: SessionEventRecord[];
@@ -32,11 +35,13 @@ export interface SessionStoreOptions {
   deltaFlushBytes?: number;
   /** Dedicated extension point for tests or plugins that own additional event contracts. */
   eventRegistry?: DurableEventRegistry;
+  attachmentLimits?: Partial<AttachmentLimits>;
 }
 
 export interface StoreMutations {
   sessions: Set<string>;
   inputs: Set<string>;
+  inputAttachments: Set<string>;
   messages: Set<string>;
   parts: Set<string>;
   runs: Set<string>;
@@ -46,6 +51,7 @@ export interface StoreMutations {
   events: Set<string>;
   deletedMessages: Set<string>;
   deletedParts: Set<string>;
+  deletedInputAttachments: Set<string>;
 }
 
 export const DEFAULT_DELTA_FLUSH_INTERVAL_MS = 150;
@@ -61,6 +67,7 @@ export function emptyState(): SessionState {
     nextEventSeq: 1,
     sessions: {},
     inputs: {},
+    inputAttachments: {},
     messages: {},
     parts: {},
     events: [],
@@ -91,6 +98,7 @@ export function emptyMutations(): StoreMutations {
   return {
     sessions: new Set(),
     inputs: new Set(),
+    inputAttachments: new Set(),
     messages: new Set(),
     parts: new Set(),
     runs: new Set(),
@@ -100,6 +108,7 @@ export function emptyMutations(): StoreMutations {
     events: new Set(),
     deletedMessages: new Set(),
     deletedParts: new Set(),
+    deletedInputAttachments: new Set(),
   };
 }
 
@@ -107,6 +116,7 @@ export function cloneMutations(value: StoreMutations): StoreMutations {
   return {
     sessions: new Set(value.sessions),
     inputs: new Set(value.inputs),
+    inputAttachments: new Set(value.inputAttachments),
     messages: new Set(value.messages),
     parts: new Set(value.parts),
     runs: new Set(value.runs),
@@ -116,6 +126,7 @@ export function cloneMutations(value: StoreMutations): StoreMutations {
     events: new Set(value.events),
     deletedMessages: new Set(value.deletedMessages),
     deletedParts: new Set(value.deletedParts),
+    deletedInputAttachments: new Set(value.deletedInputAttachments),
   };
 }
 

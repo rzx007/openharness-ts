@@ -55,6 +55,26 @@ function withStore(
   }
 }
 
+function createReadyAttachment(
+  store: SessionStore,
+  id: string,
+  sizeBytes = 100,
+): void {
+  store.createImportingAttachment({
+    id,
+    displayName: `${id}.png`,
+    declaredMediaType: "image/png",
+    stagingName: `${id}.part`,
+    createdAt: 10,
+  });
+  store.markAttachmentReady(id, {
+    sha256: "a".repeat(64),
+    sizeBytes,
+    mediaType: "image/png",
+    updatedAt: 11,
+  });
+}
+
 describe("SessionStore", () => {
   it("rejects a format 1 database before running new migrations", () => {
     const root = mkdtempSync(join(tmpdir(), "ohs-format-1-"));
@@ -143,6 +163,263 @@ describe("SessionStore", () => {
       expect(
         store.createRun({ id: "r2", sessionId: "s1", inputId: input.id }),
       ).toMatchObject({ id: "r2" });
+    });
+  });
+
+  it("persists ordered attachment snapshots and restores them in one input", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "asset-a", 40);
+      createReadyAttachment(store, "asset-b", 60);
+
+      const admitted = store.admitPrompt({
+        id: "with-files",
+        sessionId: "s1",
+        content: "compare",
+        attachments: [
+          { assetId: "asset-b", intent: "ocr", displayName: "B renamed" },
+          { assetId: "asset-a" },
+        ],
+      });
+      expect(admitted.attachments).toEqual([
+        expect.objectContaining({
+          inputId: "with-files",
+          assetId: "asset-b",
+          seq: 0,
+          intent: "ocr",
+          displayName: "B renamed",
+          mediaType: "image/png",
+          sizeBytes: 60,
+        }),
+        expect.objectContaining({
+          inputId: "with-files",
+          assetId: "asset-a",
+          seq: 1,
+          intent: "auto",
+          displayName: "asset-a.png",
+          mediaType: "image/png",
+          sizeBytes: 40,
+        }),
+      ]);
+      expect(store.listInputAttachments("with-files")).toEqual(
+        admitted.attachments,
+      );
+
+      store.close();
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getInput("with-files")?.attachments).toEqual(
+        admitted.attachments,
+      );
+      reloaded.close();
+    });
+  });
+
+  it("rejects unavailable, duplicate, empty, and over-quota references", () => {
+    withStore(
+      (store) => {
+        store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+        createReadyAttachment(store, "ready-a", 70);
+        createReadyAttachment(store, "ready-b", 50);
+        store.createImportingAttachment({
+          id: "importing",
+          displayName: "importing.png",
+          stagingName: "importing.part",
+        });
+        store.createImportingAttachment({
+          id: "failed",
+          displayName: "failed.png",
+          stagingName: "failed.part",
+        });
+        store.failAttachmentImport("failed", "broken");
+        createReadyAttachment(store, "deleted", 1);
+        store.softDeleteAttachment("deleted");
+
+        expect(() =>
+          store.admitPrompt({ id: "empty", sessionId: "s1", content: "" }),
+        ).toThrow(/prompt_content_required/);
+        expect(() =>
+          store.admitPrompt({
+            id: "unknown",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "missing" }],
+          }),
+        ).toThrow(/attachment_not_found/);
+        for (const assetId of ["importing", "failed"]) {
+          expect(() =>
+            store.admitPrompt({
+              id: `not-ready-${assetId}`,
+              sessionId: "s1",
+              content: "x",
+              attachments: [{ assetId }],
+            }),
+          ).toThrow(/attachment_not_ready/);
+        }
+        expect(() =>
+          store.admitPrompt({
+            id: "deleted",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "deleted" }],
+          }),
+        ).toThrow(/attachment_not_found/);
+        expect(() =>
+          store.admitPrompt({
+            id: "duplicate",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "ready-a" }, { assetId: "ready-a" }],
+          }),
+        ).toThrow(/attachment_duplicate_reference/);
+        expect(() =>
+          store.admitPrompt({
+            id: "too-many",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "ready-a" }, { assetId: "ready-b" }],
+          }),
+        ).toThrow(/attachment_count_exceeded/);
+
+        store.admitPrompt({
+          id: "session-first",
+          sessionId: "s1",
+          content: "x",
+          attachments: [{ assetId: "ready-a" }],
+        });
+        expect(
+          store.admitPrompt({
+            id: "session-same-asset",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "ready-a" }],
+          }),
+        ).toMatchObject({ id: "session-same-asset" });
+        expect(() =>
+          store.admitPrompt({
+            id: "session-over",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "ready-b" }],
+          }),
+        ).toThrow(/attachment_session_size_exceeded/);
+      },
+      {
+        attachmentLimits: {
+          maxFilesPerPrompt: 1,
+          maxBytesPerFile: 100,
+          maxBytesPerPrompt: 100,
+          maxSessionReferencedBytes: 100,
+          resumableThresholdBytes: 50,
+        },
+      },
+    );
+  });
+
+  it("enforces the combined byte limit for one prompt", () => {
+    withStore(
+      (store) => {
+        store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+        createReadyAttachment(store, "asset-a", 60);
+        createReadyAttachment(store, "asset-b", 50);
+        expect(() =>
+          store.admitPrompt({
+            id: "prompt-over",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "asset-a" }, { assetId: "asset-b" }],
+          }),
+        ).toThrow(/attachment_prompt_size_exceeded/);
+      },
+      {
+        attachmentLimits: {
+          maxFilesPerPrompt: 2,
+          maxBytesPerFile: 100,
+          maxBytesPerPrompt: 100,
+          maxSessionReferencedBytes: 200,
+          resumableThresholdBytes: 50,
+        },
+      },
+    );
+  });
+
+  it("returns the first input and owning run for an identical admission retry", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "asset-a", 40);
+      const first = store.admitPromptWithRun({
+        prompt: {
+          id: "retry-input",
+          sessionId: "s1",
+          content: "x",
+          attachments: [{ assetId: "asset-a", intent: "ocr" }],
+          metadata: { source: "client", traceId: "first-trace" },
+        },
+        run: { id: "first-run" },
+      });
+      const retried = store.admitPromptWithRun({
+        prompt: {
+          id: "retry-input",
+          sessionId: "s1",
+          content: "x",
+          attachments: [{ assetId: "asset-a", intent: "ocr" }],
+          metadata: { source: "client", traceId: "retry-trace" },
+        },
+        run: { id: "unused-retry-run" },
+      });
+
+      expect(retried).toEqual(first);
+      expect(store.listRunsByInput("retry-input")).toHaveLength(1);
+      expect(store.getRun("unused-retry-run")).toBeUndefined();
+      expect(() =>
+        store.admitPrompt({
+          id: "retry-input",
+          sessionId: "s1",
+          content: "changed",
+          attachments: [{ assetId: "asset-a", intent: "ocr" }],
+          metadata: { source: "client" },
+        }),
+      ).toThrow(/prompt_id_conflict/);
+    });
+  });
+
+  it("rolls back input, refs, run, and admission event when ref persistence fails", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "asset-a", 40);
+      const database = (store as any).database as Database.Database;
+      database.exec(`
+        CREATE TRIGGER fail_attachment_ref_insert
+        BEFORE INSERT ON session_input_attachment
+        BEGIN
+          SELECT RAISE(ABORT, 'forced attachment ref failure');
+        END;
+      `);
+
+      expect(() =>
+        store.admitPromptWithRun({
+          prompt: {
+            id: "atomic-file-input",
+            sessionId: "s1",
+            content: "x",
+            attachments: [{ assetId: "asset-a" }],
+          },
+          run: { id: "atomic-file-run" },
+        }),
+      ).toThrow("forced attachment ref failure");
+
+      expect(store.getInput("atomic-file-input")).toBeUndefined();
+      expect(store.listInputAttachments("atomic-file-input")).toEqual([]);
+      expect(store.getRun("atomic-file-run")).toBeUndefined();
+      expect(
+        store
+          .listEvents()
+          .some(
+            (event) =>
+              event.type === "session.input.admitted" &&
+              (event.payload.input as { id?: string } | undefined)?.id ===
+                "atomic-file-input",
+          ),
+      ).toBe(false);
     });
   });
 
@@ -747,6 +1024,7 @@ describe("SessionStore", () => {
   it("atomically admits a queued prompt with its owning run", () => {
     withStore((store, path) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "atomic-asset", 40);
       const database = (store as any).database as Database.Database;
       database.exec(`
         CREATE TRIGGER fail_atomic_run_insert
@@ -758,12 +1036,18 @@ describe("SessionStore", () => {
 
       expect(() =>
         store.admitPromptWithRun({
-          prompt: { id: "atomic-input", sessionId: "s1", content: "hello" },
+          prompt: {
+            id: "atomic-input",
+            sessionId: "s1",
+            content: "hello",
+            attachments: [{ assetId: "atomic-asset" }],
+          },
           run: { id: "atomic-run", metadata: { traceId: "trace-atomic" } },
         }),
       ).toThrow("forced run insert failure");
 
       expect(store.getInput("atomic-input")).toBeUndefined();
+      expect(store.listInputAttachments("atomic-input")).toEqual([]);
       expect(store.getRun("atomic-run")).toBeUndefined();
       expect(store.listEvents().map((event) => event.type)).not.toContain(
         "session.input.admitted",
@@ -775,7 +1059,12 @@ describe("SessionStore", () => {
 
       database.exec("DROP TRIGGER fail_atomic_run_insert");
       const admitted = store.admitPromptWithRun({
-        prompt: { id: "atomic-input", sessionId: "s1", content: "hello" },
+        prompt: {
+          id: "atomic-input",
+          sessionId: "s1",
+          content: "hello",
+          attachments: [{ assetId: "atomic-asset" }],
+        },
         run: { id: "atomic-run", metadata: { traceId: "trace-atomic" } },
       });
       expect(admitted).toMatchObject({
