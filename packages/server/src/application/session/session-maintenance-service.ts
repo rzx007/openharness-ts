@@ -94,6 +94,7 @@ export class SessionMaintenanceService {
     const session = this.requireSession(sessionId);
     return await writeSessionExport({
       session,
+      inputs: this.context.store.listInputs(sessionId),
       messages: this.context.store.listMessages(sessionId),
       parts: this.context.store.listMessageParts(sessionId),
       format: input.format,

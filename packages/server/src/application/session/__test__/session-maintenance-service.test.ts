@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { SessionStore } from "@openharness/services";
 
 import { SessionMaintenanceService } from "../session-maintenance-service.js";
 import { DaemonOperationGate } from "../../control/daemon-operation-gate.js";
@@ -49,6 +53,50 @@ function createMaintenance(agent: Record<string, any>, options: { personalizatio
 }
 
 describe("SessionMaintenanceService", () => {
+  it("keeps durable prompt attachment references unchanged while compacting the transcript", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oh-compact-attachments-"));
+    const store = new SessionStore({ path: join(dir, "sessions.db") });
+    try {
+      store.createSession({ id: "s1", cwd: "/repo", model: "gpt-test" });
+      store.createImportingAttachment({ id: "att-1", displayName: "screen.png", stagingName: "att-1.part" });
+      store.markAttachmentReady("att-1", {
+        mediaType: "image/png", sizeBytes: 42, sha256: "a".repeat(64),
+      });
+      const input = store.admitPrompt({
+        id: "input-1", sessionId: "s1", content: "", attachments: [{ assetId: "att-1", intent: "ocr" }],
+      });
+      const before = store.listInputAttachments(input.id);
+      const compact = vi.fn(async () => ({
+        history: [{ type: "assistant", content: "summary without invented OCR" }],
+        beforeMessageCount: 2,
+        afterMessageCount: 1,
+      }));
+      const maintenance = new SessionMaintenanceService({
+        store,
+        runEngine: { hasWork: () => false, hasActiveRunsForCwd: () => false } as any,
+        agentPool: {
+          configured: true,
+          acquireSession: async () => ({ compact }),
+          hasActiveWorkForSession: () => false,
+          hasActiveWorkForCwd: () => false,
+        } as any,
+        liveChildren: { has: () => false },
+        operationGate: new DaemonOperationGate(),
+        events: { checkpoint: () => 0, publishSince: () => {} },
+      });
+
+      await maintenance.compact("s1");
+
+      expect(store.listInputAttachments(input.id)).toEqual(before);
+      expect(store.listMessageParts("s1").map((part) => part.text).filter(Boolean)).toEqual([
+        "summary without invented OCR",
+      ]);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists the compacted transcript and broadcasts the replacement", async () => {
     const compact = vi.fn(async () => ({ history: [], beforeMessageCount: 3, afterMessageCount: 2 }));
     const { maintenance, store, broadcastSince, replaced } = createMaintenance({ compact });

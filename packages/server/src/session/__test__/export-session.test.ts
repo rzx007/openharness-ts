@@ -40,30 +40,75 @@ describe("writeSessionExport", () => {
         metadata: {},
         createdAt: 1,
         updatedAt: 1,
+      }, {
+        id: "p2",
+        sessionId: "s1",
+        messageId: "m1",
+        seq: 2,
+        type: "attachment" as const,
+        status: "completed" as const,
+        assetId: "att_1",
+        intent: "auto" as const,
+        displayName: "screen.png",
+        mediaType: "image/png",
+        sizeBytes: 42,
+        metadata: { inputAttachmentId: "ref_1" },
+        createdAt: 1,
+        updatedAt: 1,
+      }];
+      const inputs = [{
+        id: "i1",
+        sessionId: "s1",
+        seq: 1,
+        delivery: "queue" as const,
+        content: "hello export",
+        attachments: [{
+          id: "ref_1",
+          sessionId: "s1",
+          inputId: "i1",
+          assetId: "att_1",
+          seq: 0,
+          intent: "auto" as const,
+          displayName: "screen.png",
+          mediaType: "image/png",
+          sizeBytes: 42,
+          metadata: {},
+          createdAt: 1,
+        }],
+        metadata: {},
+        createdAt: 1,
       }];
 
       const md = await writeSessionExport({
         session,
         messages,
         parts,
+        inputs,
         format: "md",
         filename: join(dir, "out.md"),
       });
-      expect(readFileSync(md.filepath, "utf8")).toContain("hello export");
+      const markdown = readFileSync(md.filepath, "utf8");
+      expect(markdown).toContain("hello export");
+      expect(markdown).toContain("[附件: screen.png | image/png | 42 bytes | assetId=att_1]");
+      expect(markdown).not.toMatch(/storage|blob|sha256/i);
 
       const json = await writeSessionExport({
         session,
         messages,
         parts,
+        inputs,
         format: "json",
         filename: join(dir, "out.json"),
       });
       const parsed = JSON.parse(readFileSync(json.filepath, "utf8")) as {
         message_count: number;
-        messages: Array<{ content: string }>;
+        inputs: typeof inputs;
+        messages: Array<{ content: string; parts: typeof parts }>;
       };
       expect(parsed.message_count).toBe(1);
       expect(parsed.messages[0]?.content).toBe("hello export");
+      expect(parsed.inputs).toEqual(inputs);
+      expect(parsed.messages[0]?.parts).toEqual(parts);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

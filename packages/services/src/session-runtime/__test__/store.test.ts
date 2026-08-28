@@ -544,6 +544,36 @@ describe("SessionStore", () => {
     );
   });
 
+  it("reloads 1000 inputs with ordered attachment references from one durable snapshot", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "scale-session", cwd: process.cwd(), model: "m" });
+      createReadyAttachment(store, "scale-a", 10);
+      createReadyAttachment(store, "scale-b", 20);
+      for (let index = 0; index < 1_000; index++) {
+        store.admitPrompt({
+          id: `scale-input-${index}`,
+          sessionId: "scale-session",
+          content: `input ${index}`,
+          attachments: [
+            { assetId: "scale-b", intent: "ocr" },
+            { assetId: "scale-a", intent: "auto" },
+          ],
+        });
+      }
+
+      store.close();
+      const reloaded = new SessionStore({ path });
+      const inputs = reloaded.listInputs("scale-session");
+      expect(inputs).toHaveLength(1_000);
+      expect(inputs.every((input) => input.attachments.length === 2)).toBe(true);
+      expect(inputs[999]?.attachments.map((reference) => reference.assetId)).toEqual([
+        "scale-b",
+        "scale-a",
+      ]);
+      reloaded.close();
+    });
+  });
+
   it("enforces the combined byte limit for one prompt", () => {
     withStore(
       (store) => {

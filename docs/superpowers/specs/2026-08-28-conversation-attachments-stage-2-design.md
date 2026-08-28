@@ -1,6 +1,10 @@
 # 对话附件阶段 2：Prompt 引用与持久化历史设计
 
-**状态：已确认，等待实现计划。**
+**状态：已实现（2026-08-28）。**
+
+实现证据：Protocol 35 项、Services 179 项、Server 353 项、Client 63 项测试通过；storage format 2 的 migration 检查、全仓 57 个类型检查任务、文档检查和 `git diff --check` 通过。真实 HTTP 用例覆盖两个附件上传、纯附件 Prompt、Snapshot/事件回放、同库同 Blob 根重启、fork、逐分支删除与最后引用解除；另外覆盖提交成功但事件发布失败后的重启恢复、1000 条多引用输入重载，以及并发相同 ID 只生成一条 input、一组 refs 和一个 owning run。
+
+审查结论：阶段 2 只交付 durable 引用和历史闭环；没有接入 Provider 图片输入、OCR、`ImageToText` 改造、PDF 提取、工具挂载或 Data URL。阶段 3—5 尚未开始。
 
 ## 目标
 

@@ -763,6 +763,238 @@ describe("OpenHarnessHttpServer", () => {
     }
   });
 
+  it("keeps prompt attachment references through restart, replay, fork, and branch deletion", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ohs-attachment-lifecycle-"));
+    const storePath = join(dir, "sessions.db");
+    const token = "attachment-lifecycle-secret";
+    const runtimeFactory: TestAgentProgramFactory = {
+      async createRuntime() {
+        return {
+          async runPrompt() {
+            return { messages: [] };
+          },
+          async close() {},
+        };
+      },
+    };
+    let first: OpenHarnessHttpServer | undefined;
+    let second: OpenHarnessHttpServer | undefined;
+    try {
+      first = new OpenHarnessHttpServer({
+        storePath,
+        token,
+        createAgent: adaptTestAgentFactory(runtimeFactory),
+        logger: () => {},
+      });
+      const firstListen = await first.listen();
+      const upload = async (name: string, body: string) => {
+        const response = await fetch(`${firstListen.url}/attachments`, {
+          method: "POST",
+          headers: {
+            ...auth(token),
+            "content-type": "application/pdf",
+            "x-openharness-filename": encodeURIComponent(name),
+          },
+          body,
+        });
+        expect(response.status).toBe(201);
+        return (await response.json()) as { id: string };
+      };
+      const firstAsset = await upload("first.pdf", "%PDF-1.7\nfirst");
+      const secondAsset = await upload("second.pdf", "%PDF-1.7\nsecond");
+
+      const created = await fetch(`${firstListen.url}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "attachment-session", cwd: process.cwd(), model: "m" }),
+      });
+      expect(created.status).toBe(201);
+      const admitted = await fetch(`${firstListen.url}/sessions/attachment-session/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "attachment-input",
+          content: "",
+          attachments: [
+            { assetId: secondAsset.id, intent: "auto" },
+            { assetId: firstAsset.id, intent: "ocr", displayName: "scan.pdf" },
+          ],
+        }),
+      });
+      expect(admitted.status).toBe(202);
+      await expect(admitted.json()).resolves.toMatchObject({
+        input: {
+          id: "attachment-input",
+          attachments: [
+            { assetId: secondAsset.id, seq: 0, intent: "auto" },
+            { assetId: firstAsset.id, seq: 1, intent: "ocr", displayName: "scan.pdf" },
+          ],
+        },
+      });
+      const beforeRestart = (await (
+        await fetch(`${firstListen.url}/sessions/attachment-session/state`, { headers: auth(token) })
+      ).json()) as { inputs: Array<{ id: string; attachments: Array<{ assetId: string }> }> };
+      expect(beforeRestart.inputs[0]?.attachments.map((row) => row.assetId)).toEqual([
+        secondAsset.id,
+        firstAsset.id,
+      ]);
+
+      await fetch(`${firstListen.url}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "concurrent-admission", cwd: process.cwd(), model: "m" }),
+      });
+      const duplicateRequest = () => fetch(`${firstListen.url}/sessions/concurrent-admission/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "same-attachment-input",
+          content: "inspect",
+          attachments: [{ assetId: secondAsset.id, intent: "auto" }],
+        }),
+      });
+      const duplicateResponses = await Promise.all([duplicateRequest(), duplicateRequest()]);
+      expect(duplicateResponses.map((response) => response.status)).toEqual([202, 202]);
+      expect(first.store.listInputs("concurrent-admission")).toHaveLength(1);
+      expect(first.store.listInputAttachments("same-attachment-input")).toHaveLength(1);
+      expect(first.store.listRuns("concurrent-admission")).toHaveLength(1);
+
+      const recoverySession = await fetch(`${firstListen.url}/sessions`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({ id: "publish-recovery", cwd: process.cwd(), model: "m" }),
+      });
+      expect(recoverySession.status).toBe(201);
+      const publisher = (first.application as any).eventPublisher;
+      const originalPublishSince = publisher.publishSince.bind(publisher);
+      publisher.publishSince = () => {
+        throw new Error("publish failed after commit");
+      };
+      const publishFailed = await fetch(`${firstListen.url}/sessions/publish-recovery/prompts`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "committed-before-publish",
+          content: "",
+          attachments: [{ assetId: firstAsset.id, intent: "auto" }],
+        }),
+      });
+      expect(publishFailed.status).toBe(404);
+      publisher.publishSince = originalPublishSince;
+
+      await first.close();
+      first = undefined;
+      second = new OpenHarnessHttpServer({
+        storePath,
+        token,
+        createAgent: adaptTestAgentFactory(runtimeFactory),
+        logger: () => {},
+      });
+      const secondListen = await second.listen();
+      const afterRestart = (await (
+        await fetch(`${secondListen.url}/sessions/attachment-session/state`, { headers: auth(token) })
+      ).json()) as {
+        inputs: Array<{ id: string; attachments: Array<{ assetId: string }> }>;
+        parts: Array<{ type: string; assetId?: string }>;
+      };
+      expect(afterRestart.inputs[0]?.attachments.map((row) => row.assetId)).toEqual([
+        secondAsset.id,
+        firstAsset.id,
+      ]);
+      expect(afterRestart.parts.filter((part) => part.type === "attachment").map((part) => part.assetId)).toEqual([
+        secondAsset.id,
+        firstAsset.id,
+      ]);
+      const replay = (await (
+        await fetch(`${secondListen.url}/events?sessionId=attachment-session`, { headers: auth(token) })
+      ).json()) as { events: Array<{ type: string; payload: Record<string, any> }> };
+      expect(replay.events.find((event) => event.type === "session.input.admitted")?.payload.input.attachments)
+        .toHaveLength(2);
+      const abortReplay = new AbortController();
+      const sseReplay = await fetch(
+        `${secondListen.url}/events/stream?sessionId=attachment-session`,
+        { headers: auth(token), signal: abortReplay.signal },
+      );
+      const replayReader = sseReplay.body!.getReader();
+      const replayDecoder = new TextDecoder();
+      let replayText = "";
+      for (let index = 0; index < 20 && !replayText.includes("attachment-input"); index++) {
+        const chunk = await replayReader.read();
+        if (chunk.done) break;
+        replayText += replayDecoder.decode(chunk.value, { stream: true });
+      }
+      await replayReader.cancel();
+      abortReplay.abort();
+      expect(replayText).toContain("session.input.admitted");
+      expect(replayText).toContain(secondAsset.id);
+      expect(replayText).toContain(firstAsset.id);
+      const recoveredAfterPublishFailure = (await (
+        await fetch(`${secondListen.url}/sessions/publish-recovery/state`, { headers: auth(token) })
+      ).json()) as {
+        inputs: Array<{ id: string; attachments: Array<{ assetId: string }> }>;
+        runs: Array<{ inputId?: string }>;
+      };
+      expect(recoveredAfterPublishFailure.inputs).toEqual([
+        expect.objectContaining({
+          id: "committed-before-publish",
+          attachments: [expect.objectContaining({ assetId: firstAsset.id })],
+        }),
+      ]);
+      expect(recoveredAfterPublishFailure.runs).toEqual([
+        expect.objectContaining({ inputId: "committed-before-publish" }),
+      ]);
+
+      const forkedResponse = await fetch(`${secondListen.url}/sessions/attachment-session/fork`, {
+        method: "POST",
+        headers: { ...auth(token), "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(forkedResponse.status).toBe(201);
+      const forked = (await forkedResponse.json()) as { session: { id: string } };
+      const removedFork = await fetch(`${secondListen.url}/sessions/${forked.session.id}/hard`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+      expect(removedFork.status).toBe(200);
+      const stillReadable = await fetch(`${secondListen.url}/attachments/${firstAsset.id}/content`, {
+        headers: auth(token),
+      });
+      expect(stillReadable.status).toBe(200);
+      const stillProtected = await fetch(`${secondListen.url}/attachments/${firstAsset.id}`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+      expect(stillProtected.status).toBe(409);
+
+      const removedParent = await fetch(`${secondListen.url}/sessions/attachment-session/hard`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+      expect(removedParent.status).toBe(200);
+      const removedRecovery = await fetch(`${secondListen.url}/sessions/publish-recovery/hard`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+      expect(removedRecovery.status).toBe(200);
+      const removedConcurrent = await fetch(`${secondListen.url}/sessions/concurrent-admission/hard`, {
+        method: "DELETE",
+        headers: auth(token),
+      });
+      expect(removedConcurrent.status).toBe(200);
+      for (const asset of [firstAsset, secondAsset]) {
+        const deleted = await fetch(`${secondListen.url}/attachments/${asset.id}`, {
+          method: "DELETE",
+          headers: auth(token),
+        });
+        expect(deleted.status).toBe(200);
+      }
+    } finally {
+      await first?.close();
+      await second?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("aggregates application, listener, and SSE close failures after attempting every stage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-close-matrix-"));
     const server = new OpenHarnessHttpServer({

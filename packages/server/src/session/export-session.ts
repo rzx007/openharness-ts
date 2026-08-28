@@ -2,12 +2,18 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { getDataDir } from "@openharness/core";
 
-import type { SessionMessagePartRecord, SessionMessageRecord, SessionRecord } from "@openharness/protocol";
+import type {
+  SessionInputRecord,
+  SessionMessagePartRecord,
+  SessionMessageRecord,
+  SessionRecord,
+} from "@openharness/protocol";
 
 export type SessionExportFormat = "md" | "json";
 
 export interface BuildSessionExportInput {
   session: SessionRecord;
+  inputs: SessionInputRecord[];
   messages: SessionMessageRecord[];
   parts: SessionMessagePartRecord[];
   format: SessionExportFormat;
@@ -36,6 +42,22 @@ function textFromParts(parts: SessionMessagePartRecord[]): string {
     .join("");
 }
 
+function markdownFromParts(parts: SessionMessagePartRecord[]): string {
+  return parts
+    .flatMap((part) => {
+      if (part.type === "text" || part.type === "reasoning") {
+        return part.text ? [part.text] : [];
+      }
+      if (part.type === "attachment") {
+        return [
+          `[附件: ${part.displayName} | ${part.mediaType} | ${part.sizeBytes} bytes | assetId=${part.assetId}]`,
+        ];
+      }
+      return [];
+    })
+    .join("\n");
+}
+
 function buildMarkdown(input: BuildSessionExportInput): string {
   const lines = [
     "# OpenHarness Conversation Export",
@@ -52,11 +74,11 @@ function buildMarkdown(input: BuildSessionExportInput): string {
   for (const message of [...input.messages].sort((a, b) => a.seq - b.seq)) {
     const messageParts = partsForMessage(message.id, input.parts);
     if (message.role === "user") {
-      lines.push("## User", "", textFromParts(messageParts), "", "---", "");
+      lines.push("## User", "", markdownFromParts(messageParts), "", "---", "");
       continue;
     }
     if (message.role === "system") {
-      lines.push("## System", "", textFromParts(messageParts), "", "---", "");
+      lines.push("## System", "", markdownFromParts(messageParts), "", "---", "");
       continue;
     }
 
@@ -89,11 +111,12 @@ function buildJson(input: BuildSessionExportInput): string {
     .map((message) => {
       const messageParts = partsForMessage(message.id, input.parts);
       if (message.role === "user" || message.role === "system") {
-        return { role: message.role, content: textFromParts(messageParts) };
+        return { role: message.role, content: textFromParts(messageParts), parts: messageParts };
       }
       return {
         role: "assistant",
         content: textFromParts(messageParts) || null,
+        parts: messageParts,
         tool_uses: messageParts
           .filter((part) => part.type === "tool" && part.toolUseId && part.toolName)
           .map((part) => ({
@@ -112,6 +135,7 @@ function buildJson(input: BuildSessionExportInput): string {
       model: input.session.model,
       exported_at: new Date().toISOString(),
       message_count: input.messages.length,
+      inputs: [...input.inputs].sort((a, b) => a.seq - b.seq),
       messages,
     },
     null,

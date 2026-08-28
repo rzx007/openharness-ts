@@ -1111,7 +1111,7 @@ daemon 启动时：
 
 ### 阶段 1：附件领域、存储与基础 HTTP API
 
-> **状态：已完成（2026-08-28）。** 已交付 migration `0013_attachments`、`features.attachments: 1`、`attachments.limits`、`uploadModes: ["single"]`，以及基于 `POST /attachments` 原始请求体的单文件流式上传协议。阶段 2 的 prompt 引用、阶段 3 的 Composer、阶段 4 的原生图片路由和阶段 5 的本地 OCR / `ImageToText` 改造仍未开始。
+> **状态：已完成（2026-08-28）。** 已交付 migration `0013_attachments`、`features.attachments: 1`、`attachments.limits`、`uploadModes: ["single"]`，以及基于 `POST /attachments` 原始请求体的单文件流式上传协议。阶段 2 已完成；阶段 3 的 Composer、阶段 4 的原生图片路由和阶段 5 的本地 OCR / `ImageToText` 改造仍未开始。
 
 #### 目标
 
@@ -1148,6 +1148,8 @@ daemon 启动时：
 - 数据库 migration、Blob/asset 一致性集成验证和相关类型检查通过。
 
 ### 阶段 2：Prompt 协议、durable 引用与 Transcript
+
+> **状态：已完成（2026-08-28）。** 已交付 storage format 2、`session_input_attachment`、原子 input/ref/run admission、typed attachment part、Snapshot/SSE/Client 透传、queue/retry/edit/fork/restart 引用保持、删除保护、导出和 compaction 保留规则。阶段 3—5 未提前实现。
 
 #### 目标
 
