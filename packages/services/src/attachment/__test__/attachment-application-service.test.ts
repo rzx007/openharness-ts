@@ -169,6 +169,55 @@ describe("AttachmentApplicationService", () => {
     }
   });
 
+  it("protects referenced assets until the final conversation reference is removed", async () => {
+    const { root, store, service } = createHarness({ ids: ["att_shared"] });
+    try {
+      const asset = await service.import({
+        displayName: "shared.txt",
+        declaredMediaType: "text/plain",
+        content: streamOf([bytes("shared bytes")]),
+      });
+      store.createSession({ id: "parent", cwd: process.cwd(), model: "m" });
+      store.createSession({ id: "child", cwd: process.cwd(), model: "m" });
+      store.admitPrompt({
+        id: "parent-input",
+        sessionId: "parent",
+        content: "parent",
+        attachments: [{ assetId: asset.id }],
+      });
+      store.admitPrompt({
+        id: "child-input",
+        sessionId: "child",
+        content: "child",
+        attachments: [{ assetId: asset.id }],
+      });
+      const blobPath = join(
+        root,
+        "attachments",
+        "blobs",
+        asset.sha256!.slice(0, 2),
+        asset.sha256!,
+      );
+
+      expect(() => service.delete(asset.id)).toThrow(
+        "attachment_in_use: attachment is referenced by a conversation",
+      );
+      store.deleteSessionTree("child");
+      expect(() => service.delete(asset.id)).toThrow(
+        "attachment_in_use: attachment is referenced by a conversation",
+      );
+      store.deleteSessionTree("parent");
+
+      expect(service.delete(asset.id)).toMatchObject({
+        id: "att_shared",
+        status: "deleted",
+      });
+      expect(existsSync(blobPath)).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
   it("classifies interrupted imports and removes expired staging on recovery", async () => {
     const { root, store, service } = createHarness({
       now: 10_000,

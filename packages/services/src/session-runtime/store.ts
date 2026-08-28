@@ -398,6 +398,26 @@ export class SessionStore {
     return this.getAttachment(id, { includeDeleted: true })!;
   }
 
+  softDeleteUnreferencedAttachment(
+    id: string,
+    deletedAt = now(),
+  ): AttachmentAssetRecord {
+    return this.database.transaction(() => {
+      const references = this.database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM session_input_attachment WHERE asset_id = ?",
+        )
+        .get(id) as { count: number };
+      if (references.count > 0) {
+        throw new AttachmentError(
+          "attachment_in_use",
+          "attachment is referenced by a conversation",
+        );
+      }
+      return this.softDeleteAttachment(id, deletedAt);
+    }).immediate();
+  }
+
   private attachmentTransitionError(id: string, expected: string): Error {
     const current = this.getAttachment(id, { includeDeleted: true });
     return current

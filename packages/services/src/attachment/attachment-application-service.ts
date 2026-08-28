@@ -139,7 +139,7 @@ export class AttachmentApplicationService {
         "only ready attachments can be deleted",
       );
     }
-    return this.store.softDeleteAttachment(id, this.now());
+    return this.store.softDeleteUnreferencedAttachment(id, this.now());
   }
 
   async recover(): Promise<AttachmentRecoveryResult> {

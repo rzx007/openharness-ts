@@ -227,6 +227,48 @@ describe("attachment routes", () => {
     });
   });
 
+  it("returns a stable 409 when deleting an attachment still in use", async () => {
+    const localPath = "C:\\private\\store.db";
+    const app = createAttachmentRoutes(
+      createService({
+        delete: vi.fn(() => {
+          throw new AttachmentError(
+            "attachment_in_use",
+            "attachment is referenced by a conversation",
+          );
+        }),
+      }),
+    );
+
+    const response = await app.request("/att_test", { method: "DELETE" });
+    expect(response.status).toBe(409);
+    const body = await response.text();
+    expect(body).toContain(
+      "attachment_in_use: attachment is referenced by a conversation",
+    );
+    expect(body).not.toContain(localPath);
+    expect(body).not.toContain("session_input_attachment");
+    expect(body).not.toContain("SQLITE_CONSTRAINT");
+  });
+
+  it("hides unexpected database failures during attachment deletion", async () => {
+    const app = createAttachmentRoutes(
+      createService({
+        delete: vi.fn(() => {
+          throw new Error(
+            "SQLITE_CONSTRAINT at C:\\private\\store.db session_input_attachment",
+          );
+        }),
+      }),
+    );
+
+    const response = await app.request("/att_test", { method: "DELETE" });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Attachment request failed",
+    });
+  });
+
   it("maps content preflight failures before sending download headers", async () => {
     const localPath = "C:\\private\\attachments\\blobs\\aa\\secret";
     const app = createAttachmentRoutes(
