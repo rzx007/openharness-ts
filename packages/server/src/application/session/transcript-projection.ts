@@ -6,6 +6,7 @@ import type {
   SessionInputRecord,
   SessionMessagePartStatus,
 } from "@openharness/protocol";
+import type { AttachmentRoutingDecision } from "../attachment-routing/attachment-routing-types.js";
 
 type ActiveToolPart = {
   partId: string;
@@ -50,13 +51,18 @@ export class SessionTranscriptProjection {
     runId: string,
     input: SessionInputRecord,
   ): ActiveTranscriptProjectionState {
-    const userMessage = this.store.createMessage({
-      sessionId,
-      role: "user",
-      runId,
-      inputId,
-    });
-    this.projectUserInput(userMessage.id, input);
+    const existingUserMessage = this.store
+      .listMessages(sessionId)
+      .find((message) => message.inputId === inputId);
+    if (!existingUserMessage) {
+      const userMessage = this.store.createMessage({
+        sessionId,
+        role: "user",
+        runId,
+        inputId,
+      });
+      this.projectUserInput(userMessage.id, input);
+    }
     return {
       sessionId,
       runId,
@@ -64,6 +70,45 @@ export class SessionTranscriptProjection {
       assistantTurnCompleted: false,
       toolParts: new Map(),
     };
+  }
+
+  projectAttachmentTransformations(input: {
+    sessionId: string;
+    inputId: string;
+    runId: string;
+    input: SessionInputRecord;
+    decisions: AttachmentRoutingDecision[];
+    status: Extract<SessionMessagePartStatus, "completed" | "failed">;
+    errorCode?: string;
+  }): void {
+    let userMessage = this.store
+      .listMessages(input.sessionId)
+      .find((message) => message.inputId === input.inputId);
+    if (!userMessage) {
+      userMessage = this.store.createMessage({
+        sessionId: input.sessionId,
+        role: "user",
+        runId: input.runId,
+        inputId: input.inputId,
+      });
+      this.projectUserInput(userMessage.id, input.input);
+    }
+    for (const decision of input.decisions) {
+      this.store.upsertMessagePart({
+        id: `attachment-transform:${input.runId}:${decision.assetId}`,
+        sessionId: input.sessionId,
+        messageId: userMessage.id,
+        type: "transformation",
+        status: input.status,
+        assetId: decision.assetId,
+        kind: "direct",
+        ...(input.errorCode ? { transformationError: input.errorCode } : {}),
+        metadata: {
+          route: decision.route,
+          ...(decision.reason ? { reason: decision.reason } : {}),
+        },
+      });
+    }
   }
 
   projectSteeredInputs(state: ActiveTranscriptProjectionState, pending: SessionInputRecord[]): void {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   modelInputCapabilities,
   resolveEffectiveImageSupport,
+  resolveRuntimeAttachmentCapabilities,
 } from "../attachment-capabilities.js";
 
 describe("attachment input capabilities", () => {
@@ -31,5 +32,35 @@ describe("attachment input capabilities", () => {
       { image: "unsupported" },
       { image: "native", imageMediaTypes: ["image/png"] },
     )).toBe("unsupported");
+  });
+});
+
+describe("resolveRuntimeAttachmentCapabilities", () => {
+  it("uses an explicit custom model capability and openai adapter", () => {
+    expect(resolveRuntimeAttachmentCapabilities({
+      runtime: { model: "vision-local", provider: "my-provider" },
+      settings: {
+        model: "vision-local",
+        provider: "my-provider",
+        apiFormat: "openai",
+        maxTurns: 10,
+        permission: { mode: "default" },
+        customProviders: [{
+          id: "my-provider",
+          displayName: "Mine",
+          baseUrl: "http://localhost/v1",
+          apiFormat: "openai",
+          models: [{ id: "vision-local", displayName: "Vision", imageInputSupport: "native" }],
+        }],
+      } as any,
+      modelProviders: [{
+        name: "my-provider",
+        displayName: "Mine",
+        models: [{ id: "vision-local", label: "Vision", provider: "Mine", providerName: "my-provider", inputCapabilities: { image: "native" } }],
+      }],
+    })).toMatchObject({
+      modelCapabilities: { image: "native" },
+      providerCapabilities: { image: "native" },
+    });
   });
 });
