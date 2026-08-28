@@ -925,13 +925,31 @@ describe("OpenHarnessClient", () => {
       },
     });
 
-    await client.admitPrompt("s1", { content: "hello" });
+    const attachments = [
+      { assetId: "att-b", intent: "auto" as const },
+      { assetId: "att-a", intent: "ocr" as const, displayName: "receipt.png" },
+    ];
+    await client.admitPrompt("s1", { content: "hello", attachments });
+    await client.editLatestPrompt("s1", {
+      id: "edit-1",
+      content: "replacement",
+      sourceMessageId: "message-1",
+      attachments,
+    });
     const body = JSON.parse(String(calls[0]!.body)) as {
       id?: string;
       content: string;
+      attachments: unknown[];
     };
     expect(body.content).toBe("hello");
     expect(body.id).toEqual(expect.any(String));
+    expect(body.attachments).toEqual(attachments);
+    expect(JSON.parse(String(calls[1]!.body))).toMatchObject({
+      id: "edit-1",
+      content: "replacement",
+      sourceMessageId: "message-1",
+      attachments,
+    });
   });
 
   it("targets one durable queued prompt for promotion and cancellation", async () => {

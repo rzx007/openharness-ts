@@ -654,6 +654,10 @@ describe("run execution routes", () => {
         id: "edit-1",
         content: "replacement",
         sourceMessageId: "message-1",
+        attachments: [
+          { assetId: "att-b", intent: "auto" },
+          { assetId: "att-a", intent: "ocr", displayName: "receipt.png" },
+        ],
       }),
     });
 
@@ -662,6 +666,10 @@ describe("run execution routes", () => {
       id: "edit-1",
       content: "replacement",
       sourceMessageId: "message-1",
+      attachments: [
+        { assetId: "att-b", intent: "auto" },
+        { assetId: "att-a", intent: "ocr", displayName: "receipt.png" },
+      ],
       traceId: "trace-edit",
     });
   });
@@ -745,6 +753,10 @@ describe("run execution routes", () => {
         id: "i1",
         delivery: "steer",
         content: "hello",
+        attachments: [
+          { assetId: "att-b", intent: "auto" },
+          { assetId: "att-a", intent: "ocr", displayName: "receipt.png" },
+        ],
         metadata: { source: "test" },
       }),
     });
@@ -754,7 +766,10 @@ describe("run execution routes", () => {
       id: "i1",
       delivery: "steer",
       content: "hello",
-      attachments: [],
+      attachments: [
+        { assetId: "att-b", intent: "auto" },
+        { assetId: "att-a", intent: "ocr", displayName: "receipt.png" },
+      ],
       metadata: { source: "test" },
       traceId: "trace-1",
     });

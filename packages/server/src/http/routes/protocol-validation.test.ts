@@ -72,6 +72,63 @@ describe("protocol validation at HTTP routes", () => {
     expect(admitPrompt).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["non-array attachments", { attachments: {} }, "attachments"],
+    ["an attachment without assetId", { attachments: [{ intent: "auto" }] }, "attachments[0].assetId"],
+    ["an unknown attachment intent", { attachments: [{ assetId: "att-1", intent: "scan" }] }, "attachments[0].intent"],
+  ])("rejects %s before admitting input", async (_name, invalid, field) => {
+    const admitPrompt = vi.fn();
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt,
+        editLatestPrompt: vi.fn(),
+        resumeRun: vi.fn(),
+        interruptSession: vi.fn(),
+      },
+      traces: { get: vi.fn() },
+    });
+    const response = await app.request("/s1/prompts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "hello", ...invalid }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(invalidRequest(field));
+    expect(admitPrompt).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["non-array attachments", { attachments: {} }, "attachments"],
+    ["an attachment without assetId", { attachments: [{ intent: "auto" }] }, "attachments[0].assetId"],
+    ["an unknown attachment intent", { attachments: [{ assetId: "att-1", intent: "scan" }] }, "attachments[0].intent"],
+  ])("rejects %s before editing input", async (_name, invalid, field) => {
+    const editLatestPrompt = vi.fn();
+    const app = createRunExecutionRoutes({
+      application: {
+        admitPrompt: vi.fn(),
+        editLatestPrompt,
+        resumeRun: vi.fn(),
+        interruptSession: vi.fn(),
+      },
+      traces: { get: vi.fn() },
+    });
+    const response = await app.request("/s1/prompts/latest/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "edit-1",
+        content: "hello",
+        sourceMessageId: "message-1",
+        ...invalid,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(invalidRequest(field));
+    expect(editLatestPrompt).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid Permission decision before replying", async () => {
     const reply = vi.fn();
     const app = createPermissionRoutes({

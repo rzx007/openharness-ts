@@ -1,5 +1,8 @@
 import { Hono } from "hono";
-import { parseAdmitPromptRequest } from "@openharness/protocol";
+import {
+  parseAdmitPromptRequest,
+  parsePromptAttachments,
+} from "@openharness/protocol";
 
 import {
   applicationErrorResponse,
@@ -56,7 +59,14 @@ export function createRunExecutionRoutes(
     .post("/:sessionId/prompts/latest/edit", async (c) => {
       const sessionId = c.req.param("sessionId");
       if (!sessionId) return errorResponse(400, "sessionId is required");
-      const body = await readJson(c);
+      let body;
+      let attachments;
+      try {
+        body = await readJson(c);
+        attachments = parsePromptAttachments(body.attachments);
+      } catch (error) {
+        return protocolValidationErrorResponse(error);
+      }
       if (typeof body.id !== "string" || !body.id.trim())
         return errorResponse(400, "id is required");
       if (typeof body.content !== "string")
@@ -74,6 +84,7 @@ export function createRunExecutionRoutes(
           id: body.id,
           content: body.content,
           sourceMessageId: body.sourceMessageId,
+          attachments,
           ...(isRecord(body.metadata) ? { metadata: body.metadata } : {}),
           traceId: context.traces.get(c.req.raw),
         });

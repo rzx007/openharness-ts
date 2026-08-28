@@ -123,6 +123,7 @@ export interface EditLatestClientPromptInput {
   id: string;
   content: string;
   sourceMessageId: string;
+  attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
 }
 
@@ -151,6 +152,7 @@ export interface AdmitClientPromptInput {
   id?: string;
   content: string;
   delivery?: InputDelivery;
+  attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
 }
 
@@ -489,6 +491,8 @@ export interface OpenHarnessClientState {
   buckets: Record<string, SessionBucket>;
   /** Durable replay events indexed by seq; live text deltas are not retained. */
   eventsBySeq: Record<number, SessionEventRecord>;
+  /** Latest atomic snapshot cursor for each session; older delayed SSE events are ignored. */
+  snapshotCursorBySession: Record<string, number>;
   /** Highest ordered transient event seq already applied; prevents SSE reconnect replay. */
   transientCursor: number;
   /** 当前已应用到的最大事件序号，用作 SSE cursor。 */

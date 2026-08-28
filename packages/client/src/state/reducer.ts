@@ -44,6 +44,7 @@ export function createInitialClientState(): OpenHarnessClientState {
     sessionOrder: [],
     buckets: {},
     eventsBySeq: {},
+    snapshotCursorBySession: {},
     transientCursor: 0,
     lastSeq: 0,
   };
@@ -90,6 +91,13 @@ export function applySessionSnapshot(
         permissions: Object.fromEntries(snapshot.permissions.map((request) => [request.id, request])),
       },
     },
+    snapshotCursorBySession: {
+      ...state.snapshotCursorBySession,
+      [snapshot.session.id]: Math.max(
+        state.snapshotCursorBySession[snapshot.session.id] ?? 0,
+        snapshot.cursor,
+      ),
+    },
     transientCursor: Math.max(state.transientCursor, snapshot.cursor),
     lastSeq: Math.max(state.lastSeq, snapshot.cursor),
   };
@@ -106,6 +114,10 @@ export function applyEvent(
     throw new UnsupportedSessionEventSchemaVersionError(event);
   }
   const transient = event.type === "session.message.part.delta";
+  const snapshotCursor = event.sessionId
+    ? state.snapshotCursorBySession[event.sessionId] ?? 0
+    : 0;
+  if (event.seq <= snapshotCursor) return state;
   if (transient && event.seq <= state.transientCursor) return state;
   if (!transient && state.eventsBySeq[event.seq]) return state;
   if (!transient) state.eventsBySeq[event.seq] = event;

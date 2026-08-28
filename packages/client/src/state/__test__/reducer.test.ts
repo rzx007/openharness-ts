@@ -12,6 +12,7 @@ import { hydrateState } from "../sync.js";
 import type {
   PermissionRequestRecord,
   SessionEventRecord,
+  SessionInputRecord,
   SessionMessagePartRecord,
   SessionMessageRecord,
   SessionRecord,
@@ -37,6 +38,36 @@ function event(seq: number, type: string, payload: Record<string, unknown>, sess
 }
 
 describe("session event reducer", () => {
+  it("keeps the newest complete input attachment record regardless of snapshot/event arrival order", () => {
+    const older: SessionInputRecord = {
+      id: "input-1", sessionId: "s1", seq: 1, delivery: "queue", content: "look",
+      attachments: [{
+        id: "ref-old", sessionId: "s1", inputId: "input-1", assetId: "att-old", seq: 1,
+        intent: "auto", displayName: "old.png", mediaType: "image/png", sizeBytes: 10,
+        metadata: {}, createdAt: 1,
+      }],
+      metadata: {}, createdAt: 1,
+    };
+    const newer: SessionInputRecord = {
+      ...older,
+      attachments: [{
+        id: "ref-new", sessionId: "s1", inputId: "input-1", assetId: "att-new", seq: 1,
+        intent: "ocr", displayName: "new.png", mediaType: "image/png", sizeBytes: 20,
+        metadata: {}, createdAt: 2,
+      }],
+    };
+    const snapshot = {
+      cursor: 2, session: session("s1", 2), inputs: [newer], messages: [], parts: [], runs: [], permissions: [],
+    };
+    const admitted = event(1, "session.input.admitted", { input: older });
+
+    const eventThenSnapshot = applySessionSnapshot(applyEvent(createInitialClientState(), admitted), snapshot);
+    const snapshotThenEvent = applyEvent(applySessionSnapshot(createInitialClientState(), snapshot), admitted);
+
+    expect(eventThenSnapshot.buckets.s1?.inputs).toEqual([newer]);
+    expect(snapshotThenEvent.buckets.s1?.inputs).toEqual([newer]);
+  });
+
   it("rejects an unknown event schema version without advancing the cursor", () => {
     const state = createInitialClientState();
     const incompatible = {
