@@ -83,6 +83,15 @@ import type {
   DesktopPluginSnapshot,
 } from "./plugin-types"
 import type { DesktopSettingsSnapshot, UpdateDesktopWorkStyleInput } from "./settings-types"
+import type {
+  CancelDesktopAttachmentUploadInput,
+  DesktopAttachmentAssetInput,
+  DesktopAttachmentCandidate,
+  DesktopAttachmentPreview,
+  DesktopAttachmentUploadEvent,
+  StartDesktopAttachmentUploadInput,
+  UploadDesktopAttachmentMemoryInput,
+} from "./attachment-types"
 
 export type DesktopAPI = {
   app: {
@@ -129,6 +138,21 @@ export type DesktopAPI = {
   clipboard: {
     readText: () => Promise<string>
     writeText: (text: string) => Promise<void>
+  }
+  attachments: {
+    pickFiles: () => Promise<DesktopAttachmentCandidate[]>
+    pickImages: () => Promise<DesktopAttachmentCandidate[]>
+    stageDroppedFiles: (files: readonly File[]) => Promise<DesktopAttachmentCandidate[]>
+    uploadClipboardImage: (input: UploadDesktopAttachmentMemoryInput) => Promise<{ taskId: string }>
+    startUpload: (input: StartDesktopAttachmentUploadInput) => Promise<{ taskId: string }>
+    cancelUpload: (input: CancelDesktopAttachmentUploadInput) => Promise<void>
+    deleteUnreferenced: (
+      input: DesktopAttachmentAssetInput
+    ) => Promise<{ deleted: boolean; inUse: boolean }>
+    readPreview: (input: DesktopAttachmentAssetInput) => Promise<DesktopAttachmentPreview>
+    open: (input: DesktopAttachmentAssetInput) => Promise<void>
+    saveAs: (input: DesktopAttachmentAssetInput) => Promise<{ saved: boolean }>
+    onUploadEvent: (listener: (event: DesktopAttachmentUploadEvent) => void) => () => void
   }
   terminal: {
     create: (input: DesktopTerminalCreateInput) => Promise<DesktopTerminalRecord>

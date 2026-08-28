@@ -1,0 +1,46 @@
+import { describe, expect, it, vi } from "vitest"
+
+const electron = vi.hoisted(() => ({
+  invoke: vi.fn(async () => []),
+  on: vi.fn(),
+  removeListener: vi.fn(),
+  getPathForFile: vi.fn((file: { name: string }) =>
+    file.name === "missing.png" ? "" : `C:\\drop\\${file.name}`
+  ),
+}))
+
+vi.mock("electron", () => ({
+  ipcRenderer: {
+    invoke: electron.invoke,
+    on: electron.on,
+    removeListener: electron.removeListener,
+  },
+  webUtils: { getPathForFile: electron.getPathForFile },
+}))
+
+import { IpcChannels, IpcEvents } from "../shared/ipc-channels"
+import { desktopAPI } from "./desktop-api"
+
+describe("desktop attachment preload bridge", () => {
+  it("turns dropped File objects into paths inside preload and does not expose those paths back", async () => {
+    const files = [{ name: "report.pdf" }, { name: "missing.png" }] as unknown as File[]
+
+    await desktopAPI.attachments.stageDroppedFiles(files)
+
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.attachmentStageDropped, [
+      "C:\\drop\\report.pdf",
+    ])
+  })
+
+  it("subscribes and unsubscribes the narrow upload event", () => {
+    const listener = vi.fn()
+    const unsubscribe = desktopAPI.attachments.onUploadEvent(listener)
+
+    expect(electron.on).toHaveBeenCalledWith(IpcEvents.attachmentUploadEvent, expect.any(Function))
+    unsubscribe()
+    expect(electron.removeListener).toHaveBeenCalledWith(
+      IpcEvents.attachmentUploadEvent,
+      expect.any(Function)
+    )
+  })
+})

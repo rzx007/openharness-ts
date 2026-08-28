@@ -5,6 +5,7 @@ import { join } from "node:path"
 import type { AttachmentAssetRecord, UploadAttachmentInput } from "@openharness/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import type { DesktopAttachmentUploadEvent } from "../../../shared/attachment-types"
 import {
   createAttachmentService,
   type AttachmentFileSystem,
@@ -172,12 +173,46 @@ describe("DesktopAttachmentService asset actions", () => {
 })
 
 describe("DesktopAttachmentService uploads", () => {
+  it("uploads a pathless clipboard image and enforces the same byte limit", async () => {
+    const uploads: UploadAttachmentInput[] = []
+    const service = createService({
+      uploadAttachment: async (input) => {
+        uploads.push(input)
+        return readyAsset(
+          "asset-clipboard",
+          input.displayName,
+          await consume(input.body),
+          "image/png"
+        )
+      },
+    })
+
+    const { taskId } = await service.uploadMemory(3, {
+      draftId: "draft-clipboard",
+      displayName: "clipboard.png",
+      mediaType: "image/png",
+      bytes: Uint8Array.of(1, 2, 3),
+    })
+    await service.whenIdle()
+
+    expect(taskId).toEqual(expect.any(String))
+    expect(uploads).toHaveLength(1)
+    await expect(
+      service.uploadMemory(3, {
+        draftId: "draft-large",
+        displayName: "large.png",
+        mediaType: "image/png",
+        bytes: new Uint8Array(2_000_001),
+      })
+    ).rejects.toMatchObject({ code: "attachment_file_too_large" })
+  })
+
   it("streams bytes, reports monotonic progress, and emits a ready asset", async () => {
     const filePath = await temporaryFile(
       "stream.bin",
       Uint8Array.from({ length: 192_000 }, (_, i) => i)
     )
-    const events: Array<Record<string, unknown>> = []
+    const events: DesktopAttachmentUploadEvent[] = []
     const service = createService({
       emit: (_ownerId, event) => events.push(event),
       uploadAttachment: async (input) => {
@@ -208,7 +243,7 @@ describe("DesktopAttachmentService uploads", () => {
   it("aborts a running task and ignores a client completion that arrives late", async () => {
     let resolveUpload!: (asset: AttachmentAssetRecord) => void
     let uploadSignal: AbortSignal | undefined
-    const events: Array<Record<string, unknown>> = []
+    const events: DesktopAttachmentUploadEvent[] = []
     const service = createService({
       emit: (_ownerId, event) => events.push(event),
       uploadAttachment: (input) => {
@@ -276,7 +311,7 @@ describe("DesktopAttachmentService uploads", () => {
 
 function createService(
   overrides: {
-    emit?: (ownerId: number, event: Record<string, unknown>) => void
+    emit?: (ownerId: number, event: DesktopAttachmentUploadEvent) => void
     uploadAttachment?: (input: UploadAttachmentInput) => Promise<AttachmentAssetRecord>
     onOpenSource?: (path: string) => void
     now?: () => number

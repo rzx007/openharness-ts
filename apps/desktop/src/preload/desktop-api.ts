@@ -1,4 +1,4 @@
-import { ipcRenderer } from "electron"
+import { ipcRenderer, webUtils } from "electron"
 
 import {
   IpcChannels,
@@ -10,6 +10,7 @@ import {
 import type { DesktopTerminalEvent } from "../shared/terminal-types"
 import type { DesktopAuxSessionUpdate, DesktopDaemonStatus } from "../shared/session-types"
 import type { DesktopAPI } from "../shared/desktop-api-contract"
+import type { DesktopAttachmentUploadEvent } from "../shared/attachment-types"
 
 const invoke = <C extends IpcChannel>(
   channel: C,
@@ -76,6 +77,47 @@ export const desktopAPI = {
   clipboard: {
     readText: () => invoke(IpcChannels.clipboardReadText),
     writeText: (text: string) => invoke(IpcChannels.clipboardWriteText, text),
+  },
+  attachments: {
+    pickFiles: () => invoke(IpcChannels.attachmentPickFiles),
+    pickImages: () => invoke(IpcChannels.attachmentPickImages),
+    stageDroppedFiles: (files: readonly File[]) =>
+      invoke(
+        IpcChannels.attachmentStageDropped,
+        files
+          .map((file) => {
+            try {
+              return webUtils.getPathForFile(file)
+            } catch {
+              return ""
+            }
+          })
+          .filter((path): path is string => Boolean(path))
+      ),
+    uploadClipboardImage: (
+      input: IpcInvokeMap[typeof IpcChannels.attachmentUploadMemory]["args"][0]
+    ) => invoke(IpcChannels.attachmentUploadMemory, input),
+    startUpload: (input: IpcInvokeMap[typeof IpcChannels.attachmentStartUpload]["args"][0]) =>
+      invoke(IpcChannels.attachmentStartUpload, input),
+    cancelUpload: (input: IpcInvokeMap[typeof IpcChannels.attachmentCancelUpload]["args"][0]) =>
+      invoke(IpcChannels.attachmentCancelUpload, input),
+    deleteUnreferenced: (
+      input: IpcInvokeMap[typeof IpcChannels.attachmentDeleteUnreferenced]["args"][0]
+    ) => invoke(IpcChannels.attachmentDeleteUnreferenced, input),
+    readPreview: (input: IpcInvokeMap[typeof IpcChannels.attachmentReadPreview]["args"][0]) =>
+      invoke(IpcChannels.attachmentReadPreview, input),
+    open: (input: IpcInvokeMap[typeof IpcChannels.attachmentOpen]["args"][0]) =>
+      invoke(IpcChannels.attachmentOpen, input),
+    saveAs: (input: IpcInvokeMap[typeof IpcChannels.attachmentSaveAs]["args"][0]) =>
+      invoke(IpcChannels.attachmentSaveAs, input),
+    onUploadEvent: (listener: (event: DesktopAttachmentUploadEvent) => void): (() => void) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        value: DesktopAttachmentUploadEvent
+      ): void => listener(value)
+      ipcRenderer.on(IpcEvents.attachmentUploadEvent, wrapped)
+      return () => ipcRenderer.removeListener(IpcEvents.attachmentUploadEvent, wrapped)
+    },
   },
   terminal: {
     create: (input: IpcInvokeMap[typeof IpcChannels.terminalCreate]["args"][0]) =>

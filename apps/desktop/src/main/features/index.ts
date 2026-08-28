@@ -1,4 +1,5 @@
 import type { IpcContribution } from "../core/ipc/types"
+import { attachmentIpcContribution } from "./attachment/ipc"
 import { clipboardIpcContribution } from "./clipboard/ipc"
 import { gitIpcContribution } from "./git/ipc"
 import { petIpcContribution } from "./pet/ipc"
@@ -13,6 +14,7 @@ import { windowControlsIpcContribution } from "./window-controls/ipc"
 import { workspaceIpcContribution } from "./workspace/ipc"
 
 export const allIpcContributions: IpcContribution[] = [
+  attachmentIpcContribution,
   windowControlsIpcContribution,
   trayIpcContribution,
   petIpcContribution,

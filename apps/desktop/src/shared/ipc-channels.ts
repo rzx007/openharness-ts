@@ -75,6 +75,14 @@ import type {
   DesktopPluginSnapshot,
 } from "./plugin-types"
 import type { DesktopSettingsSnapshot, UpdateDesktopWorkStyleInput } from "./settings-types"
+import type {
+  CancelDesktopAttachmentUploadInput,
+  DesktopAttachmentAssetInput,
+  DesktopAttachmentCandidate,
+  DesktopAttachmentPreview,
+  StartDesktopAttachmentUploadInput,
+  UploadDesktopAttachmentMemoryInput,
+} from "./attachment-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -134,6 +142,17 @@ export const IpcChannels = {
   sessionArchive: "session:archive",
   sessionDelete: "session:delete",
 
+  attachmentPickFiles: "attachment:pick-files",
+  attachmentPickImages: "attachment:pick-images",
+  attachmentStageDropped: "attachment:stage-dropped",
+  attachmentUploadMemory: "attachment:upload-memory",
+  attachmentStartUpload: "attachment:start-upload",
+  attachmentCancelUpload: "attachment:cancel-upload",
+  attachmentDeleteUnreferenced: "attachment:delete-unreferenced",
+  attachmentReadPreview: "attachment:read-preview",
+  attachmentOpen: "attachment:open",
+  attachmentSaveAs: "attachment:save-as",
+
   workspaceListFiles: "workspace:list-files",
   workspaceReadFile: "workspace:read-file",
   workspaceRevealPath: "workspace:reveal-path",
@@ -187,6 +206,7 @@ export const IpcEvents = {
   sessionUpdated: "session:updated",
   sessionAuxUpdated: "session:aux-updated",
   sessionDaemonStatusChanged: "session:daemon-status-changed",
+  attachmentUploadEvent: "attachment:upload-event",
   terminalData: "terminal:data",
   terminalStatus: "terminal:status",
   terminalExit: "terminal:exit",
@@ -358,6 +378,41 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionDelete]: {
     args: [sessionId: string]
     result: string[]
+  }
+
+  [IpcChannels.attachmentPickFiles]: { args: []; result: DesktopAttachmentCandidate[] }
+  [IpcChannels.attachmentPickImages]: { args: []; result: DesktopAttachmentCandidate[] }
+  [IpcChannels.attachmentStageDropped]: {
+    args: [paths: string[]]
+    result: DesktopAttachmentCandidate[]
+  }
+  [IpcChannels.attachmentUploadMemory]: {
+    args: [input: UploadDesktopAttachmentMemoryInput]
+    result: { taskId: string }
+  }
+  [IpcChannels.attachmentStartUpload]: {
+    args: [input: StartDesktopAttachmentUploadInput]
+    result: { taskId: string }
+  }
+  [IpcChannels.attachmentCancelUpload]: {
+    args: [input: CancelDesktopAttachmentUploadInput]
+    result: void
+  }
+  [IpcChannels.attachmentDeleteUnreferenced]: {
+    args: [input: DesktopAttachmentAssetInput]
+    result: { deleted: boolean; inUse: boolean }
+  }
+  [IpcChannels.attachmentReadPreview]: {
+    args: [input: DesktopAttachmentAssetInput]
+    result: DesktopAttachmentPreview
+  }
+  [IpcChannels.attachmentOpen]: {
+    args: [input: DesktopAttachmentAssetInput]
+    result: void
+  }
+  [IpcChannels.attachmentSaveAs]: {
+    args: [input: DesktopAttachmentAssetInput]
+    result: { saved: boolean }
   }
 
   [IpcChannels.workspaceListFiles]: {

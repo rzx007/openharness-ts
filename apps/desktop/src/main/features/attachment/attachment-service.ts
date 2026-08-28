@@ -9,7 +9,11 @@ import type {
   UploadAttachmentInput,
 } from "@openharness/client"
 
-import type { DesktopAttachmentCandidate } from "../../../shared/attachment-types"
+import type {
+  DesktopAttachmentCandidate,
+  DesktopAttachmentError,
+  DesktopAttachmentUploadEvent,
+} from "../../../shared/attachment-types"
 
 interface AttachmentClient {
   uploadAttachment(input: UploadAttachmentInput): Promise<AttachmentAssetRecord>
@@ -32,7 +36,7 @@ export interface AttachmentFileSystem {
 export interface AttachmentServiceDependencies {
   sourceTokenTtlMs: number
   maxBytesPerFile: number
-  emit(ownerId: number, event: Record<string, unknown>): void
+  emit(ownerId: number, event: DesktopAttachmentUploadEvent): void
   getClient(): Promise<AttachmentClient>
   now?: () => number
   fileSystem?: Partial<AttachmentFileSystem>
@@ -43,14 +47,16 @@ export interface AttachmentServiceDependencies {
   temporaryFileTtlMs?: number
 }
 
-interface SourceRecord {
+interface SourceMetadata {
   ownerId: number
-  absolutePath: string
   displayName: string
   declaredMediaType: string
   sizeBytes: number
   expiresAt: number
 }
+
+type SourceRecord = SourceMetadata &
+  ({ kind: "path"; absolutePath: string } | { kind: "memory"; bytes: Uint8Array })
 
 interface UploadTask {
   ownerId: number
@@ -59,7 +65,7 @@ interface UploadTask {
   source: SourceRecord
   state: "queued" | "running" | "cancelled"
   controller: AbortController
-  stream: ReturnType<typeof createReadStream> | null
+  stream: Readable | null
 }
 
 export class DesktopAttachmentServiceError extends Error {
@@ -76,6 +82,25 @@ export class DesktopAttachmentServiceError extends Error {
 export interface StartAttachmentUploadInput {
   draftId: string
   sourceToken: string
+}
+
+type UploadTaskEvent =
+  | { type: "progress"; bytesRead: number; totalBytes: number }
+  | {
+      type: "success"
+      assetId: string
+      displayName: string
+      mediaType: string
+      sizeBytes: number
+    }
+  | { type: "failed"; error: DesktopAttachmentError }
+  | { type: "cancelled" }
+
+export interface UploadMemoryAttachmentInput {
+  draftId: string
+  displayName: string
+  mediaType: string
+  bytes: Uint8Array
 }
 
 export class DesktopAttachmentService {
@@ -161,6 +186,40 @@ export class DesktopAttachmentService {
     this.emit(task, { type: "cancelled" })
     this.pumpQueue()
     this.resolveIdleIfNeeded()
+  }
+
+  async uploadMemory(
+    ownerId: number,
+    input: UploadMemoryAttachmentInput
+  ): Promise<{ taskId: string }> {
+    if (!SAFE_PREVIEW_MEDIA_TYPES.has(input.mediaType)) {
+      throw serviceError("attachment_clipboard_unsupported")
+    }
+    if (input.bytes.byteLength > this.dependencies.maxBytesPerFile) {
+      throw serviceError("attachment_file_too_large")
+    }
+    const taskId = crypto.randomUUID()
+    const task: UploadTask = {
+      ownerId,
+      taskId,
+      draftId: input.draftId,
+      source: {
+        kind: "memory",
+        ownerId,
+        bytes: input.bytes,
+        displayName: safeDisplayName(input.displayName),
+        declaredMediaType: input.mediaType,
+        sizeBytes: input.bytes.byteLength,
+        expiresAt: this.now(),
+      },
+      state: "queued",
+      controller: new AbortController(),
+      stream: null,
+    }
+    this.tasks.set(taskKey(ownerId, taskId), task)
+    this.queue.push(task)
+    this.pumpQueue()
+    return { taskId }
   }
 
   async disposeOwner(ownerId: number): Promise<void> {
@@ -276,6 +335,7 @@ export class DesktopAttachmentService {
       const draftId = crypto.randomUUID()
       const declaredMediaType = inferMediaType(displayName)
       this.sources.set(sourceToken, {
+        kind: "path",
         ownerId,
         absolutePath: canonicalPath,
         displayName,
@@ -305,8 +365,13 @@ export class DesktopAttachmentService {
     let bytesRead = 0
     let lastProgressAt = 0
     try {
-      this.dependencies.onOpenSource?.(task.source.absolutePath)
-      const nodeStream = this.fileSystem.createReadStream(task.source.absolutePath)
+      const nodeStream =
+        task.source.kind === "path"
+          ? this.fileSystem.createReadStream(task.source.absolutePath)
+          : Readable.from([task.source.bytes])
+      if (task.source.kind === "path") {
+        this.dependencies.onOpenSource?.(task.source.absolutePath)
+      }
       task.stream = nodeStream
       task.controller.signal.addEventListener("abort", () => nodeStream.destroy(), { once: true })
       const source = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>
@@ -355,7 +420,7 @@ export class DesktopAttachmentService {
     }
   }
 
-  private emit(task: UploadTask, event: Record<string, unknown>): void {
+  private emit(task: UploadTask, event: UploadTaskEvent): void {
     this.dependencies.emit(task.ownerId, {
       ...event,
       draftId: task.draftId,
@@ -419,11 +484,12 @@ function serviceError(code: string): DesktopAttachmentServiceError {
     attachment_open_unavailable: "当前环境不能打开附件。",
     attachment_open_failed: "附件打开失败。",
     attachment_save_unavailable: "当前环境不能保存附件。",
+    attachment_clipboard_unsupported: "剪贴板中的内容不是可上传的图片。",
   }
   return new DesktopAttachmentServiceError(code, messages[code] ?? "附件操作失败。")
 }
 
-function toPublicError(error: unknown): { code: string; message: string; retryable: boolean } {
+function toPublicError(error: unknown): DesktopAttachmentError {
   if (error instanceof DesktopAttachmentServiceError) {
     return { code: error.code, message: error.message, retryable: error.retryable }
   }

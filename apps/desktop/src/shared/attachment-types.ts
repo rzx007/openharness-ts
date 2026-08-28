@@ -50,6 +50,57 @@ export interface DesktopPromptAttachmentInput {
   displayName: string
 }
 
+export interface StartDesktopAttachmentUploadInput {
+  draftId: string
+  sourceToken: string
+}
+
+export interface UploadDesktopAttachmentMemoryInput {
+  draftId: string
+  bytes: ArrayBuffer
+  displayName: string
+  mediaType: string
+}
+
+export interface CancelDesktopAttachmentUploadInput {
+  taskId: string
+}
+
+export interface DesktopAttachmentAssetInput {
+  assetId: string
+}
+
+export interface DesktopAttachmentPreview {
+  bytes: Uint8Array
+  mediaType: string
+}
+
+interface DesktopAttachmentUploadEventBase {
+  draftId: string
+  taskId: string
+}
+
+export type DesktopAttachmentUploadEvent =
+  | (DesktopAttachmentUploadEventBase & {
+      type: "progress"
+      bytesRead: number
+      totalBytes: number
+    })
+  | (DesktopAttachmentUploadEventBase & {
+      type: "success"
+      assetId: string
+      displayName: string
+      mediaType: string
+      sizeBytes: number
+    })
+  | (DesktopAttachmentUploadEventBase & {
+      type: "failed"
+      error: DesktopAttachmentError
+    })
+  | (DesktopAttachmentUploadEventBase & {
+      type: "cancelled"
+    })
+
 export function resolveDesktopAttachmentSupport(
   capabilities: ServerCapabilities,
   environment: DesktopAttachmentSupportEnvironment
