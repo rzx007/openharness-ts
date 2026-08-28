@@ -2512,4 +2512,40 @@ describe("SessionStore", () => {
       }
     });
   });
+
+  it("persists versioned attachment representations and reuses only completed cache entries", () => {
+    withStore((store, path) => {
+      createReadyAttachment(store, "att-ocr");
+      const running = store.createAttachmentRepresentation({
+        id: "rep-1",
+        assetId: "att-ocr",
+        kind: "ocr_text",
+        processor: "light-ocr",
+        processorVersion: "0.5.7",
+        cacheKey: "cache-a",
+        mediaType: "text/plain",
+        createdAt: 100,
+      });
+      expect(running.status).toBe("running");
+      expect(store.findCompletedAttachmentRepresentation("att-ocr", "ocr_text", "cache-a"))
+        .toBeUndefined();
+
+      const completed = store.completeAttachmentRepresentation("rep-1", {
+        text: "hello",
+        metadata: { lineCount: 1 },
+        updatedAt: 101,
+      });
+      expect(completed).toMatchObject({ status: "completed", text: "hello" });
+      expect(store.findCompletedAttachmentRepresentation("att-ocr", "ocr_text", "cache-a"))
+        .toEqual(completed);
+
+      store.close();
+      const reloaded = new SessionStore({ path });
+      try {
+        expect(reloaded.getAttachmentRepresentation("rep-1")).toEqual(completed);
+      } finally {
+        reloaded.close();
+      }
+    });
+  });
 });

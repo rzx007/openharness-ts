@@ -27,12 +27,14 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@arcships/light-ocr": "0.5.7",
     "@openharness/core": "workspace:*",
     "@openharness/memory": "workspace:*",
     "@openharness/protocol": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "better-sqlite3": "^13.0.2",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "sharp": "0.34.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

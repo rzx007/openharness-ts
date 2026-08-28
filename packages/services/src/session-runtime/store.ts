@@ -61,6 +61,8 @@ import type {
   ChannelDeliveryRecord,
   ChannelDeliveryStatus,
   AttachmentAssetRecord,
+  AttachmentRepresentationRecord,
+  AttachmentRepresentationKind,
   AttachmentLimits,
   SessionInputAttachmentRecord,
 } from "@openharness/protocol";
@@ -70,6 +72,17 @@ import {
   defaultDurableEventRegistry,
   type DurableEventRegistry,
 } from "./event-registry.js";
+
+export interface CreateAttachmentRepresentationInput {
+  id: string;
+  assetId: string;
+  kind: AttachmentRepresentationKind;
+  processor: string;
+  processorVersion: string;
+  cacheKey: string;
+  mediaType: string;
+  createdAt?: number;
+}
 
 import {
   DEFAULT_DELTA_FLUSH_BYTES,
@@ -375,6 +388,63 @@ export class SessionStore {
       ...attachmentAssetFromRow(row),
       stagingName: String(row.staging_name),
     }));
+  }
+
+  createAttachmentRepresentation(input: CreateAttachmentRepresentationInput): AttachmentRepresentationRecord {
+    const createdAt = input.createdAt ?? now();
+    this.database.prepare(
+      `INSERT INTO attachment_representation (
+        id, asset_id, kind, status, processor, processor_version, cache_key,
+        media_type, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, '{}', ?, ?)`,
+    ).run(
+      input.id, input.assetId, input.kind, input.processor,
+      input.processorVersion, input.cacheKey, input.mediaType, createdAt, createdAt,
+    );
+    return this.getAttachmentRepresentation(input.id)!;
+  }
+
+  getAttachmentRepresentation(id: string): AttachmentRepresentationRecord | undefined {
+    const row = this.database.prepare("SELECT * FROM attachment_representation WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? attachmentRepresentationFromRow(row) : undefined;
+  }
+
+  findCompletedAttachmentRepresentation(
+    assetId: string,
+    kind: AttachmentRepresentationKind,
+    cacheKey: string,
+  ): AttachmentRepresentationRecord | undefined {
+    const row = this.database.prepare(
+      `SELECT * FROM attachment_representation
+       WHERE asset_id = ? AND kind = ? AND cache_key = ? AND status = 'completed'
+       LIMIT 1`,
+    ).get(assetId, kind, cacheKey) as Record<string, unknown> | undefined;
+    return row ? attachmentRepresentationFromRow(row) : undefined;
+  }
+
+  completeAttachmentRepresentation(
+    id: string,
+    input: { text: string; metadata: Record<string, unknown>; updatedAt?: number },
+  ): AttachmentRepresentationRecord {
+    const updatedAt = input.updatedAt ?? now();
+    const result = this.database.prepare(
+      `UPDATE attachment_representation
+       SET status = 'completed', text = ?, error = NULL, metadata_json = ?, updated_at = ?
+       WHERE id = ? AND status = 'running'`,
+    ).run(input.text, encode(input.metadata), updatedAt, id);
+    if (result.changes !== 1) throw new Error(`Attachment representation ${id} is not running`);
+    return this.getAttachmentRepresentation(id)!;
+  }
+
+  failAttachmentRepresentation(id: string, error: string, updatedAt = now()): AttachmentRepresentationRecord {
+    const result = this.database.prepare(
+      `UPDATE attachment_representation
+       SET status = 'failed', error = ?, updated_at = ?
+       WHERE id = ? AND status = 'running'`,
+    ).run(error, updatedAt, id);
+    if (result.changes !== 1) throw new Error(`Attachment representation ${id} is not running`);
+    return this.getAttachmentRepresentation(id)!;
   }
 
   softDeleteAttachment(id: string, deletedAt = now()): AttachmentAssetRecord {
@@ -4315,6 +4385,24 @@ function attachmentAssetFromRow(
       ? { deletedAt: row.deleted_at }
       : {}),
   });
+}
+
+function attachmentRepresentationFromRow(row: Record<string, unknown>): AttachmentRepresentationRecord {
+  return {
+    id: String(row.id),
+    assetId: String(row.asset_id),
+    kind: String(row.kind) as AttachmentRepresentationRecord["kind"],
+    status: String(row.status) as AttachmentRepresentationRecord["status"],
+    processor: String(row.processor),
+    processorVersion: String(row.processor_version),
+    cacheKey: String(row.cache_key),
+    mediaType: String(row.media_type),
+    ...(row.text !== null && row.text !== undefined ? { text: String(row.text) } : {}),
+    ...(row.error !== null && row.error !== undefined ? { error: String(row.error) } : {}),
+    metadata: decode(String(row.metadata_json)),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }
 
 function externalConversationFromRow(

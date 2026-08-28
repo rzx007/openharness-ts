@@ -98,6 +98,29 @@ export const attachmentAssets = sqliteTable(
   ],
 );
 
+export const attachmentRepresentations = sqliteTable(
+  "attachment_representation",
+  {
+    id: text("id").primaryKey(),
+    assetId: text("asset_id").notNull().references(() => attachmentAssets.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    processor: text("processor").notNull(),
+    processorVersion: text("processor_version").notNull(),
+    cacheKey: text("cache_key").notNull(),
+    mediaType: text("media_type").notNull(),
+    text: text("text"),
+    error: text("error"),
+    metadataJson: text("metadata_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("attachment_representation_asset_kind_cache_unique").on(table.assetId, table.kind, table.cacheKey),
+    index("attachment_representation_asset_idx").on(table.assetId, table.createdAt),
+  ],
+);
+
 export const sessionInputAttachments = sqliteTable(
   "session_input_attachment",
   {
