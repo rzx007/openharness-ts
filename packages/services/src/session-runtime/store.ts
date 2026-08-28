@@ -2160,6 +2160,27 @@ export class SessionStore {
           ...(input.input !== undefined ? { input: input.input } : {}),
           ...(input.output !== undefined ? { output: input.output } : {}),
           ...(input.isError !== undefined ? { isError: input.isError } : {}),
+          ...(input.assetId !== undefined ? { assetId: input.assetId } : {}),
+          ...(input.intent !== undefined ? { intent: input.intent } : {}),
+          ...(input.displayName !== undefined
+            ? { displayName: input.displayName }
+            : {}),
+          ...(input.mediaType !== undefined
+            ? { mediaType: input.mediaType }
+            : {}),
+          ...(input.sizeBytes !== undefined
+            ? { sizeBytes: input.sizeBytes }
+            : {}),
+          ...(input.kind !== undefined ? { kind: input.kind } : {}),
+          ...(input.representationId !== undefined
+            ? { representationId: input.representationId }
+            : {}),
+          ...(input.processor !== undefined
+            ? { processor: input.processor }
+            : {}),
+          ...(input.transformationError !== undefined
+            ? { transformationError: input.transformationError }
+            : {}),
           metadata: input.metadata
             ? { ...existing.metadata, ...input.metadata }
             : existing.metadata,
@@ -2180,6 +2201,27 @@ export class SessionStore {
           ...(input.input !== undefined ? { input: input.input } : {}),
           ...(input.output !== undefined ? { output: input.output } : {}),
           ...(input.isError !== undefined ? { isError: input.isError } : {}),
+          ...(input.assetId !== undefined ? { assetId: input.assetId } : {}),
+          ...(input.intent !== undefined ? { intent: input.intent } : {}),
+          ...(input.displayName !== undefined
+            ? { displayName: input.displayName }
+            : {}),
+          ...(input.mediaType !== undefined
+            ? { mediaType: input.mediaType }
+            : {}),
+          ...(input.sizeBytes !== undefined
+            ? { sizeBytes: input.sizeBytes }
+            : {}),
+          ...(input.kind !== undefined ? { kind: input.kind } : {}),
+          ...(input.representationId !== undefined
+            ? { representationId: input.representationId }
+            : {}),
+          ...(input.processor !== undefined
+            ? { processor: input.processor }
+            : {}),
+          ...(input.transformationError !== undefined
+            ? { transformationError: input.transformationError }
+            : {}),
           metadata: input.metadata ?? {},
           createdAt: timestamp,
           updatedAt: timestamp,

@@ -1,5 +1,6 @@
 import type { ContentBlock, Message, TextBlock, ToolUseBlock } from "@openharness/core";
 import type {
+  AttachmentIntent,
   ReplaceTranscriptMessageInput,
   ReplaceTranscriptPartInput,
   SessionMessagePartRecord,
@@ -8,10 +9,23 @@ import type {
 
 type UserMessageContent = Extract<Message, { type: "user" }>["content"];
 
-export function transcriptToAgentMessages(
+export interface AgentTranscriptAttachment {
+  assetId: string;
+  intent: AttachmentIntent;
+  displayName: string;
+  mediaType: string;
+  sizeBytes: number;
+}
+
+export interface AgentTranscript {
+  messages: Message[];
+  attachmentsByMessageId: Record<string, AgentTranscriptAttachment[]>;
+}
+
+export function buildAgentTranscript(
   messages: SessionMessageRecord[],
   parts: SessionMessagePartRecord[],
-): Message[] {
+): AgentTranscript {
   const byMessage = new Map<string, SessionMessagePartRecord[]>();
   for (const part of parts) {
     const rows = byMessage.get(part.messageId) ?? [];
@@ -20,8 +34,11 @@ export function transcriptToAgentMessages(
   }
 
   const output: Message[] = [];
+  const attachmentsByMessageId: Record<string, AgentTranscriptAttachment[]> = {};
   for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
     const messageParts = (byMessage.get(message.id) ?? []).sort((a, b) => a.seq - b.seq);
+    const attachments = attachmentsFromParts(messageParts);
+    if (attachments.length > 0) attachmentsByMessageId[message.id] = attachments;
     if (message.role === "user") {
       output.push({ type: "user", content: textFromParts(messageParts) });
       continue;
@@ -60,7 +77,7 @@ export function transcriptToAgentMessages(
       });
     }
   }
-  return output;
+  return { messages: output, attachmentsByMessageId };
 }
 
 export function agentMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessageInput[] {
@@ -151,6 +168,32 @@ function textFromParts(parts: SessionMessagePartRecord[]): string {
     .filter((part) => part.type === "text" || part.type === "reasoning")
     .map((part) => part.text ?? "")
     .join("");
+}
+
+function attachmentsFromParts(
+  parts: SessionMessagePartRecord[],
+): AgentTranscriptAttachment[] {
+  const attachments: AgentTranscriptAttachment[] = [];
+  for (const part of parts) {
+    if (
+      part.type !== "attachment" ||
+      part.assetId === undefined ||
+      part.intent === undefined ||
+      part.displayName === undefined ||
+      part.mediaType === undefined ||
+      part.sizeBytes === undefined
+    ) {
+      continue;
+    }
+    attachments.push({
+      assetId: part.assetId,
+      intent: part.intent,
+      displayName: part.displayName,
+      mediaType: part.mediaType,
+      sizeBytes: part.sizeBytes,
+    });
+  }
+  return attachments;
 }
 
 function contentBlocksFromOutput(output: unknown): ContentBlock[] {

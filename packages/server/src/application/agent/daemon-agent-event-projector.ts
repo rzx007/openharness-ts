@@ -340,7 +340,7 @@ export class DaemonAgentEventProjector {
         });
         this.context.store.updateRunAttempt(attempt.id, { status: "running" });
       }
-      return this.context.transcriptProjection.beginRun(sessionId, inputId, runId, input.content);
+      return this.context.transcriptProjection.beginRun(sessionId, inputId, runId, input);
     });
     this.transcripts.set(runId, transcript);
     this.context.log({

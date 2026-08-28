@@ -149,6 +149,67 @@ describe("SessionStore", () => {
     });
   });
 
+  it("persists and reloads typed attachment and transformation parts", () => {
+    withStore((store, path) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "user",
+      });
+      store.upsertMessagePart({
+        id: "attachment-part",
+        sessionId: "s1",
+        messageId: message.id,
+        type: "attachment",
+        status: "completed",
+        assetId: "att-1",
+        intent: "vision",
+        displayName: "screen.png",
+        mediaType: "image/png",
+        sizeBytes: 42,
+        metadata: { inputAttachmentId: "ref-1" },
+      });
+      store.upsertMessagePart({
+        id: "transformation-part",
+        sessionId: "s1",
+        messageId: message.id,
+        type: "transformation",
+        status: "completed",
+        assetId: "att-1",
+        kind: "document_extract",
+        representationId: "rep-1",
+        processor: "light-ocr",
+        transformationError: "none",
+      });
+
+      store.close();
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.listMessageParts("s1")).toEqual([
+        expect.objectContaining({
+          id: "attachment-part",
+          type: "attachment",
+          assetId: "att-1",
+          intent: "vision",
+          displayName: "screen.png",
+          mediaType: "image/png",
+          sizeBytes: 42,
+          metadata: { inputAttachmentId: "ref-1" },
+        }),
+        expect.objectContaining({
+          id: "transformation-part",
+          type: "transformation",
+          assetId: "att-1",
+          kind: "document_extract",
+          representationId: "rep-1",
+          processor: "light-ocr",
+          transformationError: "none",
+        }),
+      ]);
+      reloaded.close();
+    });
+  });
+
   it("allows one input to own multiple runs", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });

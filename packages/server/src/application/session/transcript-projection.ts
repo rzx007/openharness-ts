@@ -48,7 +48,7 @@ export class SessionTranscriptProjection {
     sessionId: string,
     inputId: string,
     runId: string,
-    content: string,
+    input: SessionInputRecord,
   ): ActiveTranscriptProjectionState {
     const userMessage = this.store.createMessage({
       sessionId,
@@ -56,13 +56,7 @@ export class SessionTranscriptProjection {
       runId,
       inputId,
     });
-    this.store.upsertMessagePart({
-      sessionId,
-      messageId: userMessage.id,
-      type: "text",
-      status: "completed",
-      text: content,
-    });
+    this.projectUserInput(userMessage.id, input);
     return {
       sessionId,
       runId,
@@ -84,13 +78,7 @@ export class SessionTranscriptProjection {
         runId: state.runId,
         inputId: steered.id,
       });
-      this.store.upsertMessagePart({
-        sessionId: state.sessionId,
-        messageId: userMessage.id,
-        type: "text",
-        status: "completed",
-        text: steered.content,
-      });
+      this.projectUserInput(userMessage.id, steered);
     }
   }
 
@@ -269,5 +257,33 @@ export class SessionTranscriptProjection {
     });
     state.assistantMessageId = message.id;
     return message.id;
+  }
+
+  private projectUserInput(messageId: string, input: SessionInputRecord): void {
+    if (input.content.trim().length > 0) {
+      this.store.upsertMessagePart({
+        sessionId: input.sessionId,
+        messageId,
+        type: "text",
+        status: "completed",
+        text: input.content,
+      });
+    }
+    for (const attachment of [...input.attachments].sort(
+      (a, b) => a.seq - b.seq,
+    )) {
+      this.store.upsertMessagePart({
+        sessionId: input.sessionId,
+        messageId,
+        type: "attachment",
+        status: "completed",
+        assetId: attachment.assetId,
+        intent: attachment.intent,
+        displayName: attachment.displayName,
+        mediaType: attachment.mediaType,
+        sizeBytes: attachment.sizeBytes,
+        metadata: { inputAttachmentId: attachment.id },
+      });
+    }
   }
 }

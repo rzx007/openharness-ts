@@ -26,7 +26,7 @@ import type {
   SessionRecord,
 } from "@openharness/protocol";
 
-import { transcriptToAgentMessages } from "../application/agent/agent-transcript.js";
+import { buildAgentTranscript } from "../application/agent/agent-transcript.js";
 
 export interface CreateDaemonAgentContext {
   session: SessionRecord;
@@ -163,7 +163,8 @@ export function createDaemonAgentLoader(
     try {
       // 重启 daemon / 热加载 session 时，内存 Agent 是空的；必须先灌历史再对外暴露，
       // 否则下一句 prompt 会丢上下文。
-      agent.loadHistory(transcriptToAgentMessages(history, parts));
+      const transcript = buildAgentTranscript(history, parts);
+      agent.loadHistory(transcript.messages);
       // Agent 有了，投影才能建。先把纸箱里攒的事件按顺序喂给它。
       eventSink = options.createEventSink?.(agent, session);
       if (eventSink && pendingEvents.length > 0) {

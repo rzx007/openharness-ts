@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SessionInputRecord } from "@openharness/protocol";
 
 import { SessionTranscriptProjection } from "../transcript-projection.js";
 
@@ -36,11 +37,27 @@ function createStore() {
   };
 }
 
+function createInput(
+  overrides: Partial<SessionInputRecord> = {},
+): SessionInputRecord {
+  return {
+    id: "i1",
+    sessionId: "s1",
+    seq: 1,
+    delivery: "follow_up",
+    content: "hello",
+    attachments: [],
+    metadata: {},
+    createdAt: 1,
+    ...overrides,
+  };
+}
+
 describe("SessionTranscriptProjection", () => {
   it("projects text deltas into live message-part events", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store);
-    const state = projection.beginRun("s1", "i1", "r1", "hello");
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
 
     const applied = projection.projectStreamEvent(state, { type: "text_delta", delta: "world" });
 
@@ -66,7 +83,7 @@ describe("SessionTranscriptProjection", () => {
   it("marks a preamble before tools as commentary", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store);
-    const state = projection.beginRun("s1", "i1", "r1", "hello");
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
 
     projection.projectStreamEvent(state, { type: "text_delta", delta: "I will inspect it." });
     projection.projectStreamEvent(state, {
@@ -85,7 +102,7 @@ describe("SessionTranscriptProjection", () => {
   it("marks a tool-free completed response as the final answer", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store);
-    const state = projection.beginRun("s1", "i1", "r1", "hello");
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
 
     projection.projectStreamEvent(state, { type: "text_delta", delta: "Done." });
     projection.projectStreamEvent(state, { type: "complete", stopReason: "stop" });
@@ -101,7 +118,7 @@ describe("SessionTranscriptProjection", () => {
   it("keeps tool names available when completing tool parts", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store);
-    const state = projection.beginRun("s1", "i1", "r1", "hello");
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
 
     projection.projectStreamEvent(state, {
       type: "tool_use_start",
@@ -171,19 +188,141 @@ describe("SessionTranscriptProjection", () => {
       assistantTurnCompleted: false,
       toolParts: new Map(),
     };
-    const input = {
+    const input = createInput({
       id: "steer-1",
-      sessionId: "s1",
       seq: 2,
       delivery: "steer" as const,
       content: "continue",
-      metadata: {},
-      createdAt: 1,
-    };
+    });
 
     projection.projectSteeredInputs(state, [input]);
     projection.projectSteeredInputs(state, [input]);
 
     expect(store.createMessage).toHaveBeenCalledOnce();
+  });
+
+  it("projects an attachment-only input without an empty text part", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const input = createInput({
+      content: "",
+      attachments: [{
+        id: "ref-1",
+        sessionId: "s1",
+        inputId: "i1",
+        assetId: "att-1",
+        seq: 0,
+        intent: "vision",
+        displayName: "screen.png",
+        mediaType: "image/png",
+        sizeBytes: 42,
+        metadata: {},
+        createdAt: 1,
+      }],
+    });
+
+    projection.beginRun("s1", "i1", "r1", input);
+
+    expect(store.upsertMessagePart).toHaveBeenCalledOnce();
+    expect(store.upsertMessagePart).toHaveBeenCalledWith({
+      sessionId: "s1",
+      messageId: "m1",
+      type: "attachment",
+      status: "completed",
+      assetId: "att-1",
+      intent: "vision",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      sizeBytes: 42,
+      metadata: { inputAttachmentId: "ref-1" },
+    });
+  });
+
+  it("projects text before attachments and keeps attachment reference order", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const input = createInput({
+      content: "inspect these",
+      attachments: [
+        {
+          id: "ref-2",
+          sessionId: "s1",
+          inputId: "i1",
+          assetId: "att-2",
+          seq: 2,
+          intent: "ocr",
+          displayName: "second.png",
+          mediaType: "image/png",
+          sizeBytes: 22,
+          metadata: {},
+          createdAt: 1,
+        },
+        {
+          id: "ref-1",
+          sessionId: "s1",
+          inputId: "i1",
+          assetId: "att-1",
+          seq: 1,
+          intent: "vision",
+          displayName: "first.png",
+          mediaType: "image/png",
+          sizeBytes: 11,
+          metadata: {},
+          createdAt: 1,
+        },
+      ],
+    });
+
+    projection.beginRun("s1", "i1", "r1", input);
+
+    expect(store.upsertMessagePart.mock.calls.map(([part]) => part.type)).toEqual([
+      "text",
+      "attachment",
+      "attachment",
+    ]);
+    expect(store.upsertMessagePart.mock.calls.map(([part]) => part.assetId).filter(Boolean)).toEqual([
+      "att-1",
+      "att-2",
+    ]);
+  });
+
+  it("uses the same attachment projection for steered inputs", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = {
+      sessionId: "s1",
+      runId: "r1",
+      inputId: "i1",
+      assistantTurnCompleted: false,
+      toolParts: new Map(),
+    };
+    const input = createInput({
+      id: "steer-1",
+      seq: 2,
+      delivery: "steer",
+      content: "",
+      attachments: [{
+        id: "ref-steer",
+        sessionId: "s1",
+        inputId: "steer-1",
+        assetId: "att-steer",
+        seq: 0,
+        intent: "document",
+        displayName: "notes.pdf",
+        mediaType: "application/pdf",
+        sizeBytes: 99,
+        metadata: {},
+        createdAt: 1,
+      }],
+    });
+
+    projection.projectSteeredInputs(state, [input]);
+
+    expect(store.upsertMessagePart).toHaveBeenCalledOnce();
+    expect(store.upsertMessagePart).toHaveBeenCalledWith(expect.objectContaining({
+      type: "attachment",
+      assetId: "att-steer",
+      metadata: { inputAttachmentId: "ref-steer" },
+    }));
   });
 });
