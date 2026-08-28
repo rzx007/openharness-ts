@@ -1235,6 +1235,8 @@ daemon 启动时：
 
 ### 阶段 4：结构化运行时与原生图片能力
 
+> **状态：设计已确认，待实施（2026-08-28）。** 详细设计见 `docs/superpowers/specs/2026-08-28-conversation-attachments-stage-4-design.md`。本阶段只打通原生图片；模型或 adapter 不支持/未知时在 Provider 请求前明确阻止，不丢附件、不发送纯文本、不调用 `ImageToText`。
+
 #### 目标
 
 把 durable attachment refs 转为 Core `ContentBlock[]`，建立统一 capability model，并打通 OpenAI、Codex 和 Anthropic 的原生图片输入。
