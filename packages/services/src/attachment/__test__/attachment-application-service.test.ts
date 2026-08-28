@@ -106,6 +106,18 @@ describe("AttachmentApplicationService", () => {
       });
       const opened = await service.openContent(first.id);
       expect(opened.sha256).toBe(first.sha256);
+      await expect(service.resolveReadyContentPath(first.id)).resolves.toEqual({
+        assetId: first.id,
+        path: join(
+          root,
+          "attachments",
+          "blobs",
+          first.sha256!.slice(0, 2),
+          first.sha256!,
+        ),
+        mediaType: "text/plain",
+        sizeBytes: 5,
+      });
       expect(
         existsSync(
           join(

@@ -45,7 +45,6 @@ export interface ImageSource {
   mediaType: string;
   path: string;
   sizeBytes?: number;
-  originalPath?: string;
 }
 
 export interface ToolUseBlock {

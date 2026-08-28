@@ -37,6 +37,13 @@ export interface OpenAttachmentContentResult {
   content: ReadableStream<Uint8Array>;
 }
 
+export interface ResolvedAttachmentContentPath {
+  assetId: string;
+  path: string;
+  mediaType: string;
+  sizeBytes: number;
+}
+
 export interface AttachmentRecoveryResult {
   failedImportIds: string[];
   removedStagingNames: string[];
@@ -128,6 +135,29 @@ export class AttachmentApplicationService {
       sizeBytes: asset.sizeBytes,
       mediaType: asset.mediaType,
       content: await this.blobs.open(asset.sha256, asset.sizeBytes, range),
+    };
+  }
+
+  async resolveReadyContentPath(
+    id: string,
+  ): Promise<ResolvedAttachmentContentPath> {
+    const asset = this.get(id);
+    if (
+      asset.status !== "ready" ||
+      !asset.sha256 ||
+      asset.sizeBytes === undefined ||
+      !asset.mediaType
+    ) {
+      throw new AttachmentError(
+        "attachment_not_ready",
+        "attachment content is not ready",
+      );
+    }
+    return {
+      assetId: asset.id,
+      path: await this.blobs.resolveReadOnlyPath(asset.sha256, asset.sizeBytes),
+      mediaType: asset.mediaType,
+      sizeBytes: asset.sizeBytes,
     };
   }
 
