@@ -7,7 +7,7 @@ import type {
   ToolDefinition,
   ContentBlock,
 } from "@openharness/core";
-import type { ProviderConfig } from "./registry";
+import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
 import { abortableDelay } from "./retry";
 
@@ -133,6 +133,7 @@ async function convertMultimodalContentToOpenAI(
 async function imageBlockToDataUrl(
   block: Extract<ContentBlock, { type: "image" }>,
 ): Promise<string> {
+  assertNativeImageMediaType(block.source.mediaType);
   const raw = await readFile(block.source.path);
   return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
 }

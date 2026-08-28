@@ -141,6 +141,13 @@ describe("convertUserContentToOpenAI", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("rejects media types outside the adapter contract", async () => {
+    await expect(convertUserContentToOpenAI([{
+      type: "image",
+      source: { type: "file", mediaType: "image/bmp", path: "ignored.bmp" },
+    }])).rejects.toThrow("Unsupported image media type: image/bmp");
+  });
 });
 
 // Access the private convertMessages via a tiny subclass for reasoning tests.

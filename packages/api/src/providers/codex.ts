@@ -8,7 +8,7 @@ import type {
   StreamMessageParams,
   ToolDefinition,
 } from "@openharness/core";
-import type { ProviderConfig } from "./registry";
+import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -252,6 +252,7 @@ async function convertUserContent(content: string | ContentBlock[]): Promise<Arr
 async function imageBlockToDataUrl(
   block: Extract<ContentBlock, { type: "image" }>,
 ): Promise<string> {
+  assertNativeImageMediaType(block.source.mediaType);
   const raw = await readFile(block.source.path);
   return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
 }

@@ -1,12 +1,18 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { readFile } from "node:fs/promises";
 import type {
   StreamingMessageClient,
   StreamMessageParams,
   StreamEvent,
   Message,
   ToolDefinition,
+  ContentBlock,
 } from "@openharness/core";
-import type { ProviderConfig } from "./registry";
+import {
+  assertNativeImageMediaType,
+  type NativeImageMediaType,
+  type ProviderConfig,
+} from "./registry";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
 import { abortableDelay } from "./retry";
 
@@ -26,7 +32,11 @@ export class AnthropicClient implements StreamingMessageClient {
   }
 
   async *streamMessage(params: StreamMessageParams): AsyncIterable<StreamEvent> {
-    const messages = this.convertMessages(params.messages);
+    params.abortSignal?.throwIfAborted();
+    const messages = await this.convertMessages(
+      params.messages,
+      params.abortSignal,
+    );
     const tools = params.tools?.map((t) => this.convertTool(t));
 
     let lastError: Error | undefined;
@@ -149,17 +159,20 @@ export class AnthropicClient implements StreamingMessageClient {
     return error instanceof Error ? error : new Error(message);
   }
 
-  private convertMessages(messages: Message[]): Anthropic.MessageParam[] {
-    return messages.map((msg) => {
+  private async convertMessages(
+    messages: Message[],
+    signal?: AbortSignal,
+  ): Promise<Anthropic.MessageParam[]> {
+    const converted: Anthropic.MessageParam[] = [];
+    for (const msg of messages) {
+      signal?.throwIfAborted();
       switch (msg.type) {
         case "user":
-          return {
+          converted.push({
             role: "user" as const,
-            content:
-              typeof msg.content === "string"
-                ? msg.content
-                : (msg.content as Anthropic.TextBlockParam[]),
-          };
+            content: await convertUserContentToAnthropic(msg.content, signal),
+          });
+          break;
         case "assistant": {
           const content: Anthropic.ContentBlockParam[] = [];
           if (msg.content) {
@@ -175,13 +188,14 @@ export class AnthropicClient implements StreamingMessageClient {
               });
             }
           }
-          return {
+          converted.push({
             role: "assistant" as const,
             content,
-          };
+          });
+          break;
         }
         case "tool_result":
-          return {
+          converted.push({
             role: "user" as const,
             content: [
               {
@@ -191,14 +205,16 @@ export class AnthropicClient implements StreamingMessageClient {
                 is_error: msg.isError,
               } as Anthropic.ToolResultBlockParam,
             ],
-          };
+          });
+          break;
         default:
-          return {
+          converted.push({
             role: "user" as const,
             content: JSON.stringify(msg),
-          };
+          });
       }
-    });
+    }
+    return converted;
   }
 
   private convertTool(tool: ToolDefinition): Anthropic.Tool {
@@ -208,4 +224,30 @@ export class AnthropicClient implements StreamingMessageClient {
       input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
     };
   }
+}
+
+export async function convertUserContentToAnthropic(
+  content: string | ContentBlock[],
+  signal?: AbortSignal,
+): Promise<string | Anthropic.ContentBlockParam[]> {
+  if (typeof content === "string") return content;
+  const converted: Anthropic.ContentBlockParam[] = [];
+  for (const block of content) {
+    signal?.throwIfAborted();
+    if (block.type === "text") {
+      if (block.text) converted.push({ type: "text", text: block.text });
+      continue;
+    }
+    assertNativeImageMediaType(block.source.mediaType);
+    const data = await readFile(block.source.path, { signal });
+    converted.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: block.source.mediaType as NativeImageMediaType,
+        data: data.toString("base64"),
+      },
+    });
+  }
+  return converted;
 }
