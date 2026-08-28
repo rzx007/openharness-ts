@@ -28,7 +28,7 @@ describe("visibleTranscriptParts", () => {
     expect(visibleTranscriptParts(parts, true)).toBe(parts)
   })
 
-  it("renders typed attachment and transformation parts without fake text", () => {
+  it("renders attachments above user text and hides internal transformation parts", () => {
     const message: DesktopSessionMessage = {
       id: "message-1",
       sessionId: "session-1",
@@ -44,10 +44,22 @@ describe("visibleTranscriptParts", () => {
         message,
         parts: [
           {
-            id: "attachment-1",
+            id: "text-1",
             sessionId: "session-1",
             messageId: "message-1",
             seq: 0,
+            type: "text",
+            status: "completed",
+            text: "解析一下",
+            metadata: {},
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: "attachment-1",
+            sessionId: "session-1",
+            messageId: "message-1",
+            seq: 1,
             type: "attachment",
             status: "completed",
             assetId: "asset-1",
@@ -63,7 +75,7 @@ describe("visibleTranscriptParts", () => {
             id: "transformation-1",
             sessionId: "session-1",
             messageId: "message-1",
-            seq: 1,
+            seq: 2,
             type: "transformation",
             status: "completed",
             assetId: "asset-1",
@@ -83,9 +95,30 @@ describe("visibleTranscriptParts", () => {
     )
 
     expect(html).toContain("evidence.pdf")
-    expect(html).toContain("附件已处理")
+    expect(html.indexOf("evidence.pdf")).toBeLessThan(html.indexOf("解析一下"))
+    expect(html).not.toContain("附件已处理")
+    expect(html).not.toContain("已作为原生图片输入")
     expect(html).toContain('aria-label="重新编辑"')
     expect(html).not.toContain("已发送消息")
+  })
+
+  it("removes internal transformation parts from the visible transcript", () => {
+    const transformation = {
+      id: "transformation-1",
+      sessionId: "session-1",
+      messageId: "message-1",
+      seq: 1,
+      type: "transformation" as const,
+      status: "completed" as const,
+      assetId: "asset-1",
+      kind: "direct" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+
+    expect(visibleTranscriptParts([transformation], true)).toEqual([])
+    expect(visibleTranscriptParts([transformation], false)).toEqual([])
   })
 })
 

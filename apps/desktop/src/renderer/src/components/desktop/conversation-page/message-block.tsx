@@ -23,9 +23,8 @@ import type {
   DesktopAttachmentSessionPart,
   DesktopSessionMessage,
   DesktopSessionPart,
-  DesktopTransformationSessionPart,
 } from "@shared/session-types"
-import { MessageAttachment, MessageTransformation } from "./message-attachment"
+import { MessageAttachment } from "./message-attachment"
 
 const collapsibleUserMessageChars = 900
 const collapsibleUserMessageLines = 14
@@ -89,14 +88,10 @@ export function MessageBlock({
     const attachmentParts = parts
       .filter((part): part is DesktopAttachmentSessionPart => part.type === "attachment")
       .sort((left, right) => left.seq - right.seq)
-    const transformationParts = parts
-      .filter((part): part is DesktopTransformationSessionPart => part.type === "transformation")
-      .sort((left, right) => left.seq - right.seq)
     return (
       <UserMessageBlock
         content={content}
         attachmentParts={attachmentParts}
-        transformationParts={transformationParts}
         timestamp={message.updatedAt}
         userActions={userActions}
       />
@@ -123,13 +118,11 @@ export function MessageBlock({
 function UserMessageBlock({
   content,
   attachmentParts,
-  transformationParts,
   timestamp,
   userActions,
 }: {
   content: string
   attachmentParts: DesktopAttachmentSessionPart[]
-  transformationParts: DesktopTransformationSessionPart[]
   timestamp: number
   userActions?: { canEdit: boolean; onEdit: (content: string) => void }
 }): React.JSX.Element {
@@ -161,6 +154,13 @@ function UserMessageBlock({
             <label className="sr-only" htmlFor="latest-message-editor">
               编辑最新消息
             </label>
+            {attachmentParts.length > 0 ? (
+              <AttachmentGroup aria-label="原消息附件" className="max-w-full justify-end">
+                {attachmentParts.map((part) => (
+                  <MessageAttachment key={part.id} part={part} readOnly />
+                ))}
+              </AttachmentGroup>
+            ) : null}
             <textarea
               id="latest-message-editor"
               autoFocus
@@ -178,13 +178,6 @@ function UserMessageBlock({
               }}
               className="min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground outline-none"
             />
-            {attachmentParts.length > 0 ? (
-              <AttachmentGroup aria-label="原消息附件" className="max-w-full justify-end">
-                {attachmentParts.map((part) => (
-                  <MessageAttachment key={part.id} part={part} readOnly />
-                ))}
-              </AttachmentGroup>
-            ) : null}
             <div className="flex items-center gap-1">
               <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
                 <X />
@@ -208,7 +201,6 @@ function UserMessageBlock({
   return (
     <Message align="end" className="group/msg">
       <MessageContent className="items-end">
-        {content.trim() ? <UserMessageBubble content={content} /> : null}
         {attachmentParts.length > 0 ? (
           <AttachmentGroup aria-label="消息附件" className="max-w-[78%] justify-end">
             {attachmentParts.map((part) => (
@@ -216,13 +208,7 @@ function UserMessageBlock({
             ))}
           </AttachmentGroup>
         ) : null}
-        {transformationParts.length > 0 ? (
-          <AttachmentGroup aria-label="附件处理状态" className="max-w-[78%] justify-end">
-            {transformationParts.map((part) => (
-              <MessageTransformation key={part.id} part={part} />
-            ))}
-          </AttachmentGroup>
-        ) : null}
+        {content.trim() ? <UserMessageBubble content={content} /> : null}
         <MessageToolbar align="end" timestamp={timestamp}>
           {content.trim() ? (
             <MessageActionButton

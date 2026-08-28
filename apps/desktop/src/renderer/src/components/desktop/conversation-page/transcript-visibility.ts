@@ -4,5 +4,9 @@ export function visibleTranscriptParts(
   parts: DesktopSessionPart[],
   showReasoning: boolean
 ): DesktopSessionPart[] {
-  return showReasoning ? parts : parts.filter((part) => part.type !== "reasoning")
+  if (showReasoning && !parts.some((part) => part.type === "transformation")) return parts
+
+  return parts.filter(
+    (part) => part.type !== "transformation" && (showReasoning || part.type !== "reasoning")
+  )
 }
