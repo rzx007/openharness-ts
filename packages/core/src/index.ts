@@ -73,6 +73,8 @@ export type {
   FeishuChannelSettings,
   CustomProviderSettings,
   CustomProviderModelSettings,
+  InputSupport,
+  ModelInputCapabilities,
   WorkStyle,
 } from "./types/settings";
 

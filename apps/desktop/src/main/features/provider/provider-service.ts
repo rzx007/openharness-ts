@@ -128,6 +128,9 @@ export function buildDesktopProviderSnapshot(input: {
     const models = (modelsByProvider.get(provider.name) ?? []).map((model) => ({
       id: model.id,
       label: model.label,
+      ...(model.inputCapabilities
+        ? { imageInputSupport: model.inputCapabilities.image }
+        : {}),
     }))
     return {
       name: provider.name,

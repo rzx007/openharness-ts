@@ -6,7 +6,8 @@ import { SessionTranscriptProjection } from "../transcript-projection.js";
 function createStore() {
   let messageSeq = 0;
   let partSeq = 0;
-  return {
+  const messages: any[] = [];
+  const store = {
     appendMessagePartDelta: vi.fn((input) => ({
       id: "e1",
       seq: 1,
@@ -15,15 +16,19 @@ function createStore() {
       payload: input,
       createdAt: 1,
     })),
-    createMessage: vi.fn((input) => ({
-      id: `m${++messageSeq}`,
-      seq: messageSeq,
-      metadata: {},
-      createdAt: 1,
-      updatedAt: 1,
-      ...input,
-    })),
-    listMessages: vi.fn(() => []),
+    createMessage: vi.fn((input) => {
+      const message = {
+        id: `m${++messageSeq}`,
+        seq: messageSeq,
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+        ...input,
+      };
+      messages.push(message);
+      return message;
+    }),
+    listMessages: vi.fn(() => messages),
     listMessageParts: vi.fn(() => []),
     updateRun: vi.fn(),
     upsertMessagePart: vi.fn((input) => ({
@@ -35,6 +40,7 @@ function createStore() {
       ...input,
     })),
   };
+  return store;
 }
 
 function createInput(
@@ -54,6 +60,31 @@ function createInput(
 }
 
 describe("SessionTranscriptProjection", () => {
+  it("projects direct and blocked attachment transformations onto one user message", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store as any);
+    const input = createInput({ attachments: [
+      { id: "ref-1", sessionId: "s1", inputId: "i1", assetId: "asset-1", seq: 0, intent: "auto", displayName: "a.png", mediaType: "image/png", sizeBytes: 4, metadata: {}, createdAt: 1 },
+    ] });
+
+    projection.projectAttachmentTransformations({
+      sessionId: "s1",
+      inputId: "i1",
+      runId: "r1",
+      input,
+      decisions: [{ assetId: "asset-1", intent: "auto", mediaType: "image/png", route: "native_image" }],
+      status: "completed",
+    });
+    projection.beginRun("s1", "i1", "r1", input);
+
+    expect(store.createMessage).toHaveBeenCalledTimes(1);
+    expect(store.upsertMessagePart).toHaveBeenCalledWith(expect.objectContaining({
+      type: "transformation",
+      kind: "direct",
+      assetId: "asset-1",
+      status: "completed",
+    }));
+  });
   it("projects text deltas into live message-part events", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store);

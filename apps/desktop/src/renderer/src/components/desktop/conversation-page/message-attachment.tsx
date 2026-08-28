@@ -90,10 +90,12 @@ export function MessageTransformation({
       </AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle>
-          {processing ? "正在处理附件" : failed ? "附件处理失败" : "附件已处理"}
+          {processing ? "正在处理附件" : failed ? "图片未发送" : "附件已处理"}
         </AttachmentTitle>
         <AttachmentDescription aria-live={failed ? "polite" : undefined}>
-          {part.transformationError ?? transformationLabel(part.kind)}
+          {part.transformationError
+            ? attachmentRoutingMessage(part.transformationError)
+            : transformationLabel(part.kind)}
         </AttachmentDescription>
       </AttachmentContent>
     </Attachment>
@@ -147,5 +149,30 @@ function formatBytes(bytes: number): string {
 function transformationLabel(kind: DesktopTransformationSessionPart["kind"]): string {
   if (kind === "document_extract") return "文档内容"
   if (kind === "tool_mount") return "工具资源"
-  return "直接使用"
+  return "已作为原生图片输入"
+}
+
+export function attachmentRoutingMessage(code: string): string {
+  switch (code) {
+    case "attachment_model_capability_unknown":
+      return "当前模型没有声明图片能力，请切换支持图片的模型后重试。"
+    case "attachment_model_unsupported":
+      return "当前模型不支持图片，请切换支持图片的模型后重试。"
+    case "attachment_provider_capability_unknown":
+      return "当前提供商没有声明图片能力，请检查模型配置后重试。"
+    case "attachment_provider_unsupported":
+      return "当前提供商不支持图片输入，请切换提供商后重试。"
+    case "attachment_intent_unavailable":
+      return "当前阶段还不能执行 OCR 或文档处理，请移除附件处理方式后重试。"
+    case "attachment_kind_unsupported":
+      return "当前阶段只支持把图片直接发送给模型。"
+    case "attachment_media_type_unsupported":
+      return "当前图片格式不受支持，请改用 PNG、JPEG、GIF 或 WebP。"
+    case "attachment_materialization_failed":
+      return "附件内容不可用，请重新上传后重试。"
+    case "attachment_routing_aborted":
+      return "附件处理已取消。"
+    default:
+      return "附件处理失败，请检查附件和模型设置后重试。"
+  }
 }

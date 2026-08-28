@@ -1,9 +1,12 @@
 export type DesktopProviderCredentialSource =
   "credentials" | "environment" | "subscription" | "local" | "configured" | "none"
 
+export type DesktopInputSupport = "native" | "unsupported" | "unknown"
+
 export interface DesktopProviderModel {
   id: string
   label: string
+  imageInputSupport?: DesktopInputSupport
 }
 
 export interface DesktopProviderInfo {
@@ -50,7 +53,11 @@ export interface DesktopCustomProviderInput {
   baseUrl: string
   apiFormat: "openai"
   apiKey?: string
-  models: Array<{ id: string; displayName: string }>
+  models: Array<{
+    id: string
+    displayName: string
+    imageInputSupport?: DesktopInputSupport
+  }>
   headers?: Record<string, string>
 }
 

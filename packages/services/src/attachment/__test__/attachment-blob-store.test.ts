@@ -212,6 +212,31 @@ describe("AttachmentBlobStore", () => {
     expect(String(missing)).not.toContain(root);
   });
 
+  it("resolves only an intact content-addressed regular file", async () => {
+    const { root, store } = createStore();
+    const imported = await store.import({
+      uploadId: "att-path",
+      content: streamOf([bytes("safe bytes")]),
+      maxBytes: 32,
+    });
+    const expected = join(
+      root,
+      "blobs",
+      imported.sha256.slice(0, 2),
+      imported.sha256,
+    );
+
+    await expect(
+      store.resolveReadOnlyPath(imported.sha256, imported.sizeBytes),
+    ).resolves.toBe(expected);
+    await expect(
+      store.resolveReadOnlyPath(imported.sha256, imported.sizeBytes + 1),
+    ).rejects.toMatchObject({ code: "attachment_storage_failed" });
+    await expect(store.resolveReadOnlyPath("../unsafe", 1)).rejects.toMatchObject({
+      code: "attachment_invalid_request",
+    });
+  });
+
   it("removes only expired unowned staging files", async () => {
     const now = 10_000;
     const { root, store } = createStore(() => now);

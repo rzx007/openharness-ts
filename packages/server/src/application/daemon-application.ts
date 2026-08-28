@@ -10,7 +10,11 @@ import {
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
-import type { AttachmentLimits, SessionRecord } from "@openharness/protocol";
+import {
+  readSessionRuntimeConfig,
+  type AttachmentLimits,
+  type SessionRecord,
+} from "@openharness/protocol";
 import {
   AttachmentApplicationService,
   AttachmentBlobStore,
@@ -65,6 +69,9 @@ import { ProjectApplicationService } from "./project-application-service.js";
 import { ChannelApplicationService } from "./channel/channel-application-service.js";
 import { SessionWorkflowRunRepository } from "./workflow/session-workflow-run-repository.js";
 import { ApplicationRetentionService } from "./retention/application-retention-service.js";
+import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capability-router.js";
+import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
+import { createDefaultModelService } from "./default-services/model-service.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -333,6 +340,10 @@ export class DaemonApplication implements DurableAgentApplication {
         autoDream: executeAutoDream,
       });
       // 车道轮到这条 run 时，真正 submitMessage 的地方。
+      const attachmentRouter = new AttachmentCapabilityRouter({
+        resolveReadyContentPath: (assetId) =>
+          this.attachments.resolveReadyContentPath(assetId),
+      });
       const runExecutor = new SessionRunExecutor({
         store,
         agentPool: this.agentPool,
@@ -341,6 +352,23 @@ export class DaemonApplication implements DurableAgentApplication {
         traceIdForRun: (runId) => this.traceIdForRun(runId),
         log: options.log,
         postRunMaintenance,
+        routeAttachments: (input) => attachmentRouter.route(input),
+        resolveCapabilities: async (session) => {
+          const settings = options.getSettingsForCwd
+            ? await options.getSettingsForCwd(session.cwd)
+            : (options.getSettings?.() ?? options.settings);
+          const modelProviders = await createDefaultModelService(
+            settings ? { current: settings } : undefined,
+          ).list();
+          return resolveRuntimeAttachmentCapabilities({
+            runtime: readSessionRuntimeConfig(
+              session,
+              settings?.provider ? { provider: settings.provider } : undefined,
+            ),
+            settings,
+            modelProviders,
+          });
+        },
       });
       // 每个会话一条车道：收下 prompt、排队、interrupt。HTTP 202 之后工作在这里继续。
       /**

@@ -97,9 +97,109 @@ describe("SessionRunExecutor", () => {
       error: "close failed",
     }));
   });
+
+  it("submits ordered native image blocks only after routing succeeds", async () => {
+    const store = createStore({ attachments: [attachment("asset-1", 0)] });
+    const submitMessage = vi.fn(() => completedHandle());
+    const projectAttachmentTransformations = vi.fn();
+    const executor = new SessionRunExecutor({
+      store: store as any,
+      agentPool: {
+        configured: true,
+        acquireSession: vi.fn(async () => ({ setModel: vi.fn(), submitMessage })),
+        close: vi.fn(),
+      } as any,
+      events: { checkpoint: () => 1, publishSince: vi.fn() },
+      transcriptProjection: {
+        finalizeRunParts: vi.fn(),
+        projectAttachmentTransformations,
+      },
+      resolveCapabilities: vi.fn(async () => ({
+        modelCapabilities: { image: "native" as const },
+        providerCapabilities: { image: "native" as const, imageMediaTypes: ["image/png"] },
+      })),
+      routeAttachments: vi.fn(async () => ({
+        content: [
+          { type: "text" as const, text: "hello" },
+          { type: "image" as const, source: { type: "file" as const, mediaType: "image/png", path: "D:/blobs/asset-1", sizeBytes: 4 } },
+        ],
+        decisions: [{ assetId: "asset-1", intent: "auto" as const, mediaType: "image/png", route: "native_image" as const }],
+      })),
+      traceIdForRun: () => "trace-1",
+      log: vi.fn(),
+    });
+
+    await executor.execute(
+      { sessionId: "s1", inputId: "input-1", runId: "run-1" },
+      { signal: new AbortController().signal, registerHandle: vi.fn() },
+    );
+
+    expect(submitMessage).toHaveBeenCalledWith(
+      [
+        { type: "text", text: "hello" },
+        { type: "image", source: expect.objectContaining({ path: "D:/blobs/asset-1" }) },
+      ],
+      expect.any(Object),
+    );
+    expect(projectAttachmentTransformations).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "completed" }),
+    );
+  });
+
+  it("settles a blocked attachment run without acquiring or closing an agent", async () => {
+    const store = createStore({ attachments: [attachment("asset-1", 0)] });
+    const acquireSession = vi.fn();
+    const close = vi.fn();
+    const projectAttachmentTransformations = vi.fn();
+    const executor = new SessionRunExecutor({
+      store: store as any,
+      agentPool: { configured: true, acquireSession, close } as any,
+      events: { checkpoint: () => 4, publishSince: vi.fn() },
+      transcriptProjection: {
+        finalizeRunParts: vi.fn(),
+        projectAttachmentTransformations,
+      },
+      resolveCapabilities: vi.fn(async () => ({
+        modelCapabilities: { image: "unsupported" as const },
+        providerCapabilities: { image: "native" as const, imageMediaTypes: ["image/png"] },
+      })),
+      routeAttachments: vi.fn(async () => {
+        const error = Object.assign(new Error("model does not support image input"), {
+          name: "AttachmentRoutingError",
+          code: "attachment_model_unsupported",
+          retryable: false,
+          assetIds: ["asset-1"],
+          decisions: [{ assetId: "asset-1", intent: "auto", mediaType: "image/png", route: "blocked", reason: "attachment_model_unsupported" }],
+        });
+        throw error;
+      }),
+      traceIdForRun: () => "trace-1",
+      log: vi.fn(),
+    });
+
+    await executor.execute(
+      { sessionId: "s1", inputId: "input-1", runId: "run-1" },
+      { signal: new AbortController().signal, registerHandle: vi.fn() },
+    );
+
+    expect(acquireSession).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(store.updateRun).toHaveBeenCalledWith("run-1", expect.objectContaining({
+      status: "failed",
+      metadata: expect.objectContaining({
+        attachmentRouting: expect.objectContaining({ code: "attachment_model_unsupported" }),
+      }),
+    }));
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ errorKind: "attachment_model_unsupported" }),
+    }));
+    expect(projectAttachmentTransformations).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed", errorCode: "attachment_model_unsupported" }),
+    );
+  });
 });
 
-function createStore() {
+function createStore(options: { attachments?: ReturnType<typeof attachment>[] } = {}) {
   const run = { id: "run-1", sessionId: "s1", inputId: "input-1", status: "pending" };
   return {
     transaction: <T>(work: () => T) => work(),
@@ -113,12 +213,29 @@ function createStore() {
       id: "input-1",
       sessionId: "s1",
       content: "hello",
+      attachments: options.attachments ?? [],
       delivery: "queue",
       metadata: { requestedBy: "test", traceId: "trace-1" },
     })),
     getRun: vi.fn(() => run),
     appendEvent: vi.fn(),
     updateRun: vi.fn((id, update) => Object.assign(run, update, { id })),
+  };
+}
+
+function attachment(assetId: string, seq: number) {
+  return {
+    id: `ref-${assetId}`,
+    sessionId: "s1",
+    inputId: "input-1",
+    assetId,
+    seq,
+    intent: "auto" as const,
+    displayName: `${assetId}.png`,
+    mediaType: "image/png",
+    sizeBytes: 4,
+    metadata: {},
+    createdAt: 1,
   };
 }
 

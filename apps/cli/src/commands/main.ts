@@ -171,7 +171,6 @@ async function attachmentToImageBlock(attachment: FrontendAttachment): Promise<C
       mediaType,
       path,
       sizeBytes: info.size,
-      originalPath: filePath,
     },
   };
 }

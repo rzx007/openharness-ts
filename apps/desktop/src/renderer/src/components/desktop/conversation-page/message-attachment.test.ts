@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopAttachmentSessionPart, DesktopSessionMessage } from "@shared/session-types"
 import { MessageBlock } from "./message-block"
-import { MessageAttachment } from "./message-attachment"
+import { attachmentRoutingMessage, MessageAttachment } from "./message-attachment"
 
 describe("MessageAttachment", () => {
   let container: HTMLDivElement
@@ -156,6 +156,23 @@ describe("MessageAttachment", () => {
         ?.click()
     )
     expect(onEdit).toHaveBeenCalledWith("")
+  })
+})
+
+describe("attachmentRoutingMessage", () => {
+  it("turns stable routing codes into actionable Chinese messages", () => {
+    expect(attachmentRoutingMessage("attachment_model_capability_unknown")).toBe(
+      "当前模型没有声明图片能力，请切换支持图片的模型后重试。"
+    )
+    expect(attachmentRoutingMessage("attachment_intent_unavailable")).toBe(
+      "当前阶段还不能执行 OCR 或文档处理，请移除附件处理方式后重试。"
+    )
+  })
+
+  it("does not expose unknown backend text directly", () => {
+    expect(attachmentRoutingMessage("unexpected_internal_error")).toBe(
+      "附件处理失败，请检查附件和模型设置后重试。"
+    )
   })
 })
 

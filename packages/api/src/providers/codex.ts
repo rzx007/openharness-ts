@@ -8,8 +8,8 @@ import type {
   StreamMessageParams,
   ToolDefinition,
 } from "@openharness/core";
-import type { ProviderConfig } from "./registry";
-import { AuthenticationFailure, RateLimitFailure, RequestFailure } from "../errors/index";
+import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
+import { AuthenticationFailure, RateLimitFailure, RequestFailure, requestFailure } from "../errors/index";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_AUTH_CLAIM = "https://api.openai.com/auth";
@@ -98,7 +98,7 @@ export class CodexSubscriptionClient implements StreamingMessageClient {
 
     if (!response.ok) {
       const payload = await response.text();
-      throw new RequestFailure(formatStatusError(response.status, payload), response.status);
+      throw requestFailure(formatStatusError(response.status, payload), response.status);
     }
     if (!response.body) {
       throw new RequestFailure("Codex response did not include a stream body.");
@@ -252,6 +252,7 @@ async function convertUserContent(content: string | ContentBlock[]): Promise<Arr
 async function imageBlockToDataUrl(
   block: Extract<ContentBlock, { type: "image" }>,
 ): Promise<string> {
+  assertNativeImageMediaType(block.source.mediaType);
   const raw = await readFile(block.source.path);
   return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
 }

@@ -1,6 +1,6 @@
 # 对话附件阶段 4：结构化运行时与原生图片能力设计
 
-**状态：设计已确认，待实施（2026-08-28）。**
+**状态：已完成（2026-08-28）。**
 
 ## 背景
 
@@ -339,3 +339,25 @@ git diff --check
 ## 实施边界
 
 阶段 4 完成后，系统已经具备可靠的原生图片路径，但不把“不支持图片时的体验”伪装成成功。阶段 5 再把 `ImageToText` 改为本地 OCR 工具，并由主 Agent 在不支持图片时主动调用；这两个阶段之间保持清晰边界。
+
+## 实施结果与验证证据
+
+阶段 4 已按本设计落地：
+
+- 内置模型从 catalog 输入模态得到 `native | unsupported | unknown`；自定义模型在设置页显式选择，缺省严格为 `unknown`。
+- `AttachmentBlobStore` 只返回 SHA-256 内容寻址目录中的普通文件，并校验精确大小；路由器先判断整批 intent、MIME 和能力，再按 `seq` 物化。
+- OpenAI Chat Completions、Codex Responses 与 Anthropic Messages 都有真实文件字节和顺序 contract test；Anthropic 已改成合法 base64 image source。
+- `SessionRunExecutor` 在获取 Agent 前完成附件预检。blocked run 不获取或关闭 Agent、不产生 Provider attempt，并写入稳定错误码、run metadata、事件和 failed transformation。
+- direct 路由提交 `[TextBlock?, ...ImageBlock[]]`，纯文本仍沿用原字符串输入；Desktop 展示 direct 状态和可操作的中文阻止原因。
+- Provider 返回明确的图片能力 400 拒绝时，归一化为 `provider_capability_mismatch`，不进行纯文本重发或动态改写模型配置。
+
+2026-08-28 的新鲜验证结果：
+
+- API：8 个测试文件、68 个测试通过；Provider 定向合同与错误分类为 32 个测试通过。
+- Agent Runtime：11 个测试文件、87 个测试通过。
+- Server：48 个测试文件、367 个测试通过。
+- Services：附件定向 14 个测试通过；全量 180 个测试中 179 个通过，唯一失败仍是 Windows 上既有的“停止 shell 时清理孙进程”超时，和本阶段无关，实施前基线也可稳定复现。
+- Desktop：本阶段新增/相关定向 10 个测试通过；全量 305 个测试中 304 个通过，另有一个既有 5,000 文件枚举超时；`session-service.test.ts` 因隔离工作树 Electron postinstall 未完整执行而无法收集，和本阶段源码无关。
+- Core、API、Services、Server、Desktop Node、Desktop Web、CLI 的直接 TypeScript 检查均通过。
+
+生产附件入口仍由 `OPENHARNESS_DESKTOP_ATTACHMENTS=1` 控制，默认未开放。`packages/tools/src/media/image-to-text.ts` 没有改动，也没有被接成自动降级；本地 OCR 继续归阶段 5。

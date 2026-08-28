@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCodexHeaders, CodexSubscriptionClient, resolveCodexUrl } from "./codex";
 
@@ -74,5 +77,47 @@ describe("CodexSubscriptionClient phases", () => {
       role: "assistant",
       phase: "commentary",
     })]);
+  });
+});
+
+describe("CodexSubscriptionClient native image input", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends ordered text and image input blocks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-codex-image-"));
+    try {
+      const imagePath = join(dir, "cached.png");
+      await writeFile(imagePath, Buffer.from([9, 8, 7]));
+      let requestBody: any;
+      vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(
+          `data: ${JSON.stringify({ type: "response.completed", response: { usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`,
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }));
+      const client = new CodexSubscriptionClient({
+        apiKey: jwt({
+          "https://api.openai.com/auth": { chatgpt_account_id: "acct_123" },
+        }),
+      });
+      for await (const _ of client.streamMessage({
+        model: "gpt-test",
+        messages: [{
+          type: "user",
+          content: [
+            { type: "text", text: "describe" },
+            { type: "image", source: { type: "file", mediaType: "image/png", path: imagePath } },
+          ],
+        }],
+      })) {}
+
+      expect(requestBody.input[0].content).toEqual([
+        { type: "input_text", text: "describe" },
+        { type: "input_image", image_url: `data:image/png;base64,${Buffer.from([9, 8, 7]).toString("base64")}` },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

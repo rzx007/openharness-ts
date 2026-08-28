@@ -23,6 +23,7 @@ export interface DesktopModel {
   reasoning?: boolean
   vision?: boolean
   inputModalities?: string[]
+  inputCapabilities?: { image: "native" | "unsupported" | "unknown" }
   toolCalling?: boolean
   status?: "active" | "beta"
 }

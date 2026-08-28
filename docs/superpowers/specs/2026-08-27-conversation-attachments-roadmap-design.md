@@ -1235,7 +1235,7 @@ daemon 启动时：
 
 ### 阶段 4：结构化运行时与原生图片能力
 
-> **状态：设计已确认，待实施（2026-08-28）。** 详细设计见 `docs/superpowers/specs/2026-08-28-conversation-attachments-stage-4-design.md`。本阶段只打通原生图片；模型或 adapter 不支持/未知时在 Provider 请求前明确阻止，不丢附件、不发送纯文本、不调用 `ImageToText`。
+> **状态：已完成（2026-08-28）。** 已交付三态模型能力、自定义模型显式图片能力、安全 Blob 物化、整批原生图片路由、OpenAI/Codex/Anthropic 请求转换、执行前阻止、run metadata/event/transformation 和 Desktop 中文反馈。模型或 adapter 不支持/未知时 Provider 调用为零；没有调用或修改 `ImageToText`，生产附件 feature gate 仍默认关闭。详细证据见 `docs/superpowers/specs/2026-08-28-conversation-attachments-stage-4-design.md`。
 
 #### 目标
 

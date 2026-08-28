@@ -5,9 +5,25 @@ import {
   detectProviderFromEnv,
   findByName,
   resolveProviderScopedBaseUrl,
+  providerInputCapabilities,
 } from "./registry.js";
 
 describe("PROVIDERS", () => {
+  it("declares the image request formats each adapter can construct", () => {
+    expect(providerInputCapabilities("openai_compat")).toEqual({
+      image: "native",
+      imageMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+    });
+    expect(providerInputCapabilities("codex")).toEqual({
+      image: "native",
+      imageMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+    });
+    expect(providerInputCapabilities("anthropic")).toEqual({
+      image: "native",
+      imageMediaTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+    });
+  });
+
   it("does not advertise local services that were not detected", () => {
     const names = PROVIDERS.map((provider) => provider.name);
     expect(names).not.toContain("ollama");

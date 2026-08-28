@@ -281,7 +281,11 @@ export interface CustomProviderInput {
   baseUrl: string;
   apiFormat: "openai";
   apiKey?: string;
-  models: Array<{ id: string; displayName: string }>;
+  models: Array<{
+    id: string;
+    displayName: string;
+    imageInputSupport?: "native" | "unsupported" | "unknown";
+  }>;
   headers?: Record<string, string>;
 }
 
@@ -296,6 +300,7 @@ export interface ModelInfo {
   reasoning?: boolean;
   vision?: boolean;
   inputModalities?: string[];
+  inputCapabilities?: { image: "native" | "unsupported" | "unknown" };
   toolCalling?: boolean;
   status?: "active" | "beta";
 }

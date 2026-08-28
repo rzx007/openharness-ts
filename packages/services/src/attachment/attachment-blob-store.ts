@@ -202,6 +202,28 @@ export class AttachmentBlobStore {
     }
   }
 
+  async resolveReadOnlyPath(
+    sha256: string,
+    expectedSizeBytes: number,
+  ): Promise<string> {
+    validateSha256(sha256);
+    const expectedSize = optionalNonNegativeSafeInteger(
+      expectedSizeBytes,
+      "expectedSizeBytes",
+    )!;
+    const blobPath = join(this.blobsRoot, sha256.slice(0, 2), sha256);
+    try {
+      const stats = await lstat(blobPath);
+      if (!stats.isFile() || stats.isSymbolicLink() || stats.size !== expectedSize) {
+        throw attachmentBytesUnavailable();
+      }
+      return blobPath;
+    } catch (error) {
+      if (isAttachmentError(error)) throw error;
+      throw attachmentBytesUnavailable();
+    }
+  }
+
   async recoverStaging(
     options: RecoverStagingOptions,
   ): Promise<RecoverStagingResult> {

@@ -11,11 +11,13 @@ export {
   detectProviderFromEnv,
   findByName,
   resolveProviderScopedBaseUrl,
+  providerInputCapabilities,
 } from "./providers/registry";
 export type {
   ProviderSpec,
   ProviderConfig,
   BackendType,
+  ProviderInputCapabilities,
 } from "./providers/registry";
 export {
   CODEX_DEFAULT_MODEL,

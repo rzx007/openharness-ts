@@ -26,6 +26,7 @@ export interface ProviderInfo {
 export interface CustomProviderModelInput {
   id: string;
   displayName: string;
+  imageInputSupport?: InputSupport;
 }
 
 export interface CustomProviderInput {
@@ -64,6 +65,7 @@ export interface ModelInfo {
   reasoning?: boolean;
   vision?: boolean;
   inputModalities?: string[];
+  inputCapabilities?: ModelInputCapabilities;
   toolCalling?: boolean;
   status?: "active" | "beta";
 }
@@ -263,3 +265,4 @@ export interface GitService {
     message: string;
   }): Promise<{ output: string }> | { output: string };
 }
+import type { InputSupport, ModelInputCapabilities } from "@openharness/core";
