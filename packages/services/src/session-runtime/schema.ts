@@ -98,6 +98,42 @@ export const attachmentAssets = sqliteTable(
   ],
 );
 
+export const sessionInputAttachments = sqliteTable(
+  "session_input_attachment",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    inputId: text("input_id")
+      .notNull()
+      .references(() => sessionInputs.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => attachmentAssets.id, { onDelete: "restrict" }),
+    seq: integer("seq").notNull(),
+    intent: text("intent").notNull(),
+    displayName: text("display_name").notNull(),
+    mediaType: text("media_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    metadataJson: text("metadata_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("session_input_attachment_input_seq_unique").on(
+      table.inputId,
+      table.seq,
+    ),
+    uniqueIndex("session_input_attachment_input_asset_unique").on(
+      table.inputId,
+      table.assetId,
+    ),
+    index("session_input_attachment_input_seq_idx").on(table.inputId, table.seq),
+    index("session_input_attachment_asset_idx").on(table.assetId),
+    index("session_input_attachment_session_idx").on(table.sessionId),
+  ],
+);
+
 export const sessionMessages = sqliteTable(
   "session_message",
   {
@@ -132,6 +168,15 @@ export const sessionMessageParts = sqliteTable(
     inputJson: text("input_json"),
     outputJson: text("output_json"),
     isError: integer("is_error"),
+    assetId: text("asset_id"),
+    attachmentIntent: text("attachment_intent"),
+    displayName: text("display_name"),
+    mediaType: text("media_type"),
+    sizeBytes: integer("size_bytes"),
+    transformationKind: text("transformation_kind"),
+    representationId: text("representation_id"),
+    processor: text("processor"),
+    transformationError: text("transformation_error"),
     metadataJson: text("metadata_json").notNull(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
@@ -158,7 +203,7 @@ export const sessionRuns = sqliteTable(
   },
   (table) => [
     index("session_run_session_idx").on(table.sessionId, table.createdAt),
-    uniqueIndex("session_run_input_unique").on(table.inputId),
+    index("session_run_input_idx").on(table.inputId),
   ],
 );
 

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS session_message_part (
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS session_run (
-  id TEXT PRIMARY KEY, session_id TEXT NOT NULL, input_id TEXT UNIQUE, status TEXT NOT NULL,
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL, input_id TEXT, status TEXT NOT NULL,
   started_at INTEGER, finished_at INTEGER, error TEXT, metadata_json TEXT NOT NULL,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
@@ -58,6 +58,8 @@ CREATE INDEX IF NOT EXISTS session_message_session_idx ON session_message(sessio
 CREATE INDEX IF NOT EXISTS session_part_message_idx ON session_message_part(message_id);
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS session_run_session_idx ON session_run(session_id, created_at);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS session_run_input_idx ON session_run(input_id);
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS session_task_session_idx ON session_task(session_id, created_at);
 --> statement-breakpoint

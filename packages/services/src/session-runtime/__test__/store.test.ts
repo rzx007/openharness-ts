@@ -1,18 +1,8 @@
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { describe, expect, it } from "vitest";
 
 import { SessionStore, type SessionStoreOptions } from "../store.js";
@@ -66,89 +56,22 @@ function withStore(
 }
 
 describe("SessionStore", () => {
-  it("migrates a real 0012 database to 0013 without losing prior data", () => {
-    const root = mkdtempSync(join(tmpdir(), "ohs-migration-0012-"));
+  it("rejects a format 1 database before running new migrations", () => {
+    const root = mkdtempSync(join(tmpdir(), "ohs-format-1-"));
     const path = join(root, "store.db");
-    const source = fileURLToPath(new URL("../migrations", import.meta.url));
-    const oldMigrations = join(root, "migrations");
-    mkdirSync(join(oldMigrations, "meta"), { recursive: true });
-    for (let index = 0; index <= 12; index += 1) {
-      const name = readFileSync(join(source, "meta", "_journal.json"), "utf8");
-      const journal = JSON.parse(name) as {
-        entries: Array<{ idx: number; tag: string }>;
-      };
-      const entry = journal.entries.find((candidate) => candidate.idx === index)!;
-      copyFileSync(
-        join(source, `${entry.tag}.sql`),
-        join(oldMigrations, `${entry.tag}.sql`),
-      );
-    }
-    const journal = JSON.parse(
-      readFileSync(join(source, "meta", "_journal.json"), "utf8"),
-    ) as { entries: Array<{ idx: number }>; [key: string]: unknown };
-    writeFileSync(
-      join(oldMigrations, "meta", "_journal.json"),
-      JSON.stringify({
-        ...journal,
-        entries: journal.entries.filter((entry) => entry.idx <= 12),
-      }),
-    );
-
     try {
       const legacy = new Database(path);
-      migrate(drizzle(legacy), { migrationsFolder: oldMigrations });
-      legacy
-        .prepare(
-          `INSERT INTO session (
-            id, cwd, title, model, status, metadata_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          "session-before-attachments",
-          "D:/legacy",
-          "Before attachments",
-          "test-model",
-          "idle",
-          "{}",
-          10,
-          11,
+      legacy.exec(`
+        CREATE TABLE application_storage_format (
+          id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+          version INTEGER NOT NULL
         );
-      expect(
-        legacy
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attachment_asset'",
-          )
-          .get(),
-      ).toBeUndefined();
+        INSERT INTO application_storage_format (id, version) VALUES (1, 1);
+      `);
       legacy.close();
-
-      const migrated = new SessionStore({ path });
-      expect(migrated.getSession("session-before-attachments")).toMatchObject({
-        id: "session-before-attachments",
-        title: "Before attachments",
-      });
-      migrated.createImportingAttachment({
-        id: "att-after-migration",
-        displayName: "after.txt",
-        stagingName: "att-after-migration.part",
-        createdAt: 12,
-      });
-      migrated.close();
-
-      const reopened = new SessionStore({ path });
-      expect(reopened.getSession("session-before-attachments")).toBeDefined();
-      expect(reopened.getAttachment("att-after-migration")).toMatchObject({
-        status: "importing",
-      });
-      reopened.close();
-
-      const verified = new Database(path, { readonly: true });
-      expect(
-        verified
-          .prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations")
-          .get(),
-      ).toEqual({ count: 14 });
-      verified.close();
+      expect(() => new SessionStore({ path })).toThrow(
+        /format 1.*move or delete/i,
+      );
     } finally {
       rmSync(root, {
         recursive: true,
@@ -157,6 +80,70 @@ describe("SessionStore", () => {
         retryDelay: 50,
       });
     }
+  });
+
+  it("creates a format 2 database with input attachment and typed part columns", () => {
+    withStore((_store, path) => {
+      const database = new Database(path, { readonly: true });
+      try {
+        expect(
+          database
+            .prepare("SELECT version FROM application_storage_format WHERE id = 1")
+            .get(),
+        ).toEqual({ version: 2 });
+
+        const refIndexes = database
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'session_input_attachment'",
+          )
+          .all()
+          .map((row) => (row as { name: string }).name);
+        expect(refIndexes).toEqual(
+          expect.arrayContaining([
+            "session_input_attachment_input_seq_idx",
+            "session_input_attachment_asset_idx",
+            "session_input_attachment_session_idx",
+          ]),
+        );
+
+        const partColumns = database
+          .prepare("PRAGMA table_info(session_message_part)")
+          .all()
+          .map((row) => (row as { name: string }).name);
+        expect(partColumns).toEqual(
+          expect.arrayContaining([
+            "asset_id",
+            "attachment_intent",
+            "display_name",
+            "media_type",
+            "size_bytes",
+            "transformation_kind",
+            "representation_id",
+            "processor",
+            "transformation_error",
+          ]),
+        );
+      } finally {
+        database.close();
+      }
+    });
+  });
+
+  it("allows one input to own multiple runs", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const input = store.admitPrompt({
+        id: "i1",
+        sessionId: "s1",
+        content: "retry",
+      });
+      expect(
+        store.createRun({ id: "r1", sessionId: "s1", inputId: input.id }),
+      ).toMatchObject({ id: "r1" });
+      expect(
+        store.createRun({ id: "r2", sessionId: "s1", inputId: input.id }),
+      ).toMatchObject({ id: "r2" });
+    });
   });
 
   it("persists an attachment from importing to ready", () => {

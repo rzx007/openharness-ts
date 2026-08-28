@@ -3,4 +3,4 @@ CREATE TABLE `application_storage_format` (
 	`version` integer NOT NULL
 );
 --> statement-breakpoint
-INSERT INTO `application_storage_format` (`id`, `version`) VALUES (1, 1);
+INSERT INTO `application_storage_format` (`id`, `version`) VALUES (1, 2);

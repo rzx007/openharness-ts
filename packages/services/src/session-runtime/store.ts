@@ -3127,9 +3127,9 @@ export class SessionStore {
     const row = this.database
       .prepare("SELECT version FROM application_storage_format WHERE id = 1")
       .get() as { version?: unknown } | undefined;
-    if (row?.version !== 1) {
+    if (row?.version !== 2) {
       throw new Error(
-        `Unsupported OpenHarness database format ${String(row?.version)}; expected 1. Existing databases are not upgraded.`,
+        `Unsupported OpenHarness database format ${String(row?.version)}; expected 2. Move or delete the old database and restart.`,
       );
     }
   }
@@ -3207,6 +3207,23 @@ export class SessionStore {
           ? { output: JSON.parse(row.output_json as string) }
           : {}),
         ...(row.is_error !== null ? { isError: Boolean(row.is_error) } : {}),
+        ...(row.asset_id ? { assetId: row.asset_id as string } : {}),
+        ...(row.attachment_intent
+          ? { intent: row.attachment_intent as SessionMessagePartRecord["intent"] }
+          : {}),
+        ...(row.display_name ? { displayName: row.display_name as string } : {}),
+        ...(row.media_type ? { mediaType: row.media_type as string } : {}),
+        ...(row.size_bytes !== null ? { sizeBytes: row.size_bytes as number } : {}),
+        ...(row.transformation_kind
+          ? { kind: row.transformation_kind as SessionMessagePartRecord["kind"] }
+          : {}),
+        ...(row.representation_id
+          ? { representationId: row.representation_id as string }
+          : {}),
+        ...(row.processor ? { processor: row.processor as string } : {}),
+        ...(row.transformation_error
+          ? { transformationError: row.transformation_error as string }
+          : {}),
         metadata: decode(row.metadata_json as string),
         createdAt: row.created_at as number,
         updatedAt: row.updated_at as number,
@@ -3474,11 +3491,21 @@ export class SessionStore {
     }
 
     const upsertPart = this.database.prepare(`
-      INSERT INTO session_message_part VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO session_message_part (
+        id, session_id, message_id, seq, type, status, text, tool_use_id, tool_name,
+        input_json, output_json, is_error, asset_id, attachment_intent, display_name,
+        media_type, size_bytes, transformation_kind, representation_id, processor,
+        transformation_error, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, message_id=excluded.message_id,
         seq=excluded.seq, type=excluded.type, status=excluded.status, text=excluded.text,
         tool_use_id=excluded.tool_use_id, tool_name=excluded.tool_name, input_json=excluded.input_json,
-        output_json=excluded.output_json, is_error=excluded.is_error, metadata_json=excluded.metadata_json,
+        output_json=excluded.output_json, is_error=excluded.is_error, asset_id=excluded.asset_id,
+        attachment_intent=excluded.attachment_intent, display_name=excluded.display_name,
+        media_type=excluded.media_type, size_bytes=excluded.size_bytes,
+        transformation_kind=excluded.transformation_kind, representation_id=excluded.representation_id,
+        processor=excluded.processor, transformation_error=excluded.transformation_error,
+        metadata_json=excluded.metadata_json,
         created_at=excluded.created_at, updated_at=excluded.updated_at
     `);
     for (const id of this.mutations.parts) {
@@ -3497,6 +3524,15 @@ export class SessionStore {
           value.input === undefined ? null : encode(value.input),
           value.output === undefined ? null : JSON.stringify(value.output),
           value.isError === undefined ? null : Number(value.isError),
+          value.assetId ?? null,
+          value.intent ?? null,
+          value.displayName ?? null,
+          value.mediaType ?? null,
+          value.sizeBytes ?? null,
+          value.kind ?? null,
+          value.representationId ?? null,
+          value.processor ?? null,
+          value.transformationError ?? null,
           encode(value.metadata),
           value.createdAt,
           value.updatedAt,
