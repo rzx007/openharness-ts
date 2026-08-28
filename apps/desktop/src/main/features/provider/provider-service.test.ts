@@ -82,7 +82,11 @@ describe("buildDesktopProviderSnapshot", () => {
             displayName: "Office Gateway",
             baseUrl: "https://gateway.example/v1",
             apiFormat: "openai",
-            models: [{ id: "team-model", displayName: "Team Model" }],
+            models: [{
+              id: "team-model",
+              displayName: "Team Model",
+              imageInputSupport: "native",
+            }],
             headers: { "X-Tenant": "desktop" },
           },
         ],
@@ -97,6 +101,7 @@ describe("buildDesktopProviderSnapshot", () => {
               label: "Team Model",
               provider: "Office Gateway",
               providerName: "office-gateway",
+              inputCapabilities: { image: "native" },
             },
           ],
         },
@@ -109,7 +114,11 @@ describe("buildDesktopProviderSnapshot", () => {
       credentialSource: "configured",
       baseUrl: "https://gateway.example/v1",
       headers: { "X-Tenant": "desktop" },
-      models: [{ id: "team-model", label: "Team Model" }],
+      models: [{
+        id: "team-model",
+        label: "Team Model",
+        imageInputSupport: "native",
+      }],
     })
   })
 

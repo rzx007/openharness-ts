@@ -13,6 +13,10 @@ import type {
 } from "../settings-api.js";
 import { readCurrentSettings, type DaemonSettingsRef } from "./shared.js";
 import { readCatalogProvider } from "./catalog-provider-mapping.js";
+import {
+  modelInputCapabilities,
+  normalizeInputSupport,
+} from "../attachment-routing/attachment-capabilities.js";
 
 export function createDefaultModelService(
   ref?: DaemonSettingsRef,
@@ -57,6 +61,9 @@ export function createDefaultModelService(
             provider: provider.displayName,
             providerName: provider.id,
             status: "active",
+            inputCapabilities: {
+              image: normalizeInputSupport(model.imageInputSupport),
+            },
           })),
         });
       }
@@ -110,6 +117,7 @@ function toModelInfo(
     ...(inputModalities && inputModalities.length > 0
       ? { inputModalities }
       : {}),
+    inputCapabilities: modelInputCapabilities(model),
     ...(typeof model.tool_call === "boolean"
       ? { toolCalling: model.tool_call }
       : {}),

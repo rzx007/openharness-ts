@@ -156,7 +156,12 @@ export function CustomProviderDialog({
                       ...current,
                       models: [
                         ...current.models,
-                        { key: rowKey("model"), id: "", displayName: "" },
+                        {
+                          key: rowKey("model"),
+                          id: "",
+                          displayName: "",
+                          imageInputSupport: "unknown",
+                        },
                       ],
                     }))
                   }
@@ -167,7 +172,7 @@ export function CustomProviderDialog({
               </div>
               <div className="flex flex-col gap-3">
                 {form.models.map((model, index) => (
-                  <div key={model.key} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                  <div key={model.key} className="grid grid-cols-[1fr_1fr_10rem_auto] gap-2">
                     <Input
                       value={model.id}
                       aria-label={`模型 ${index + 1} ID`}
@@ -197,6 +202,31 @@ export function CustomProviderDialog({
                       }
                       placeholder="显示名称（可选）"
                     />
+                    <select
+                      value={model.imageInputSupport}
+                      aria-label={`模型 ${index + 1} 图片输入能力`}
+                      className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          models: current.models.map((item) =>
+                            item.key === model.key
+                              ? {
+                                  ...item,
+                                  imageInputSupport: event.target.value as
+                                    | "native"
+                                    | "unsupported"
+                                    | "unknown",
+                                }
+                              : item
+                          ),
+                        }))
+                      }
+                    >
+                      <option value="unknown">图片能力未知</option>
+                      <option value="native">支持图片</option>
+                      <option value="unsupported">不支持图片</option>
+                    </select>
                     <Button
                       type="button"
                       variant="ghost"
@@ -333,8 +363,14 @@ function initialForm(provider?: DesktopProviderInfo): CustomProviderFormState {
           key: `model-${index}`,
           id: model.id,
           displayName: model.label,
+          imageInputSupport: model.imageInputSupport ?? "unknown",
         }))
-      : [{ key: "model-0", id: "", displayName: "" }],
+      : [{
+          key: "model-0",
+          id: "",
+          displayName: "",
+          imageInputSupport: "unknown",
+        }],
     headers: Object.entries(provider?.headers ?? {}).map(([name, value], index) => ({
       key: `header-${index}`,
       name,

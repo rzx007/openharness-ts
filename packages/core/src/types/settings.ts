@@ -119,9 +119,18 @@ export interface DaemonConfig {
   autoStart: boolean;
 }
 
+/** Whether one input kind is natively accepted, rejected, or not declared. */
+export type InputSupport = "native" | "unsupported" | "unknown";
+
+export interface ModelInputCapabilities {
+  image: InputSupport;
+}
+
 export interface CustomProviderModelSettings {
   id: string;
   displayName: string;
+  /** Missing persisted values are read conservatively as unknown. */
+  imageInputSupport?: InputSupport;
 }
 
 export interface CustomProviderSettings {

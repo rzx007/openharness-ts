@@ -110,7 +110,9 @@ function formatInput(model: DesktopModel): string {
   if (inputs && inputs.length > 0) {
     return inputs.map((item) => INPUT_MODALITY_LABELS[item] ?? item).join("、")
   }
-  return model.vision ? "文本、图像" : "文本"
+  if (model.inputCapabilities?.image === "native") return "文本、图像"
+  if (model.inputCapabilities?.image === "unsupported") return "文本（不支持图像）"
+  return "文本（图像能力未知）"
 }
 
 function formatReasoning(value: boolean | undefined): string {

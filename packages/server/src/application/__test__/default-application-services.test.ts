@@ -298,7 +298,11 @@ describe("default daemon application services", () => {
       baseUrl: "https://gateway.example/v1",
       apiFormat: "openai",
       apiKey: "secret",
-      models: [{ id: "team-model", displayName: "Team Model" }],
+      models: [{
+        id: "team-model",
+        displayName: "Team Model",
+        imageInputSupport: "native",
+      }],
       headers: { " X-Tenant ": " desktop " },
     });
 
@@ -308,7 +312,11 @@ describe("default daemon application services", () => {
         displayName: "Office Gateway",
         baseUrl: "https://gateway.example/v1",
         apiFormat: "openai",
-        models: [{ id: "team-model", displayName: "Team Model" }],
+        models: [{
+          id: "team-model",
+          displayName: "Team Model",
+          imageInputSupport: "native",
+        }],
         headers: { "X-Tenant": "desktop" },
       },
     ]);
@@ -330,6 +338,7 @@ describe("default daemon application services", () => {
           id: "team-model",
           label: "Team Model",
           providerName: "office-gateway",
+          inputCapabilities: { image: "native" },
         }),
       ],
     });

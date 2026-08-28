@@ -1,4 +1,25 @@
+import type { InputSupport } from "@openharness/core";
+
 export type BackendType = "anthropic" | "openai_compat" | "codex";
+
+export interface ProviderInputCapabilities {
+  image: InputSupport;
+  imageMediaTypes: readonly string[];
+}
+
+const NATIVE_IMAGE_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+] as const;
+
+/** Capabilities of the request adapter, independent from any concrete model. */
+export function providerInputCapabilities(
+  _backendType: BackendType,
+): ProviderInputCapabilities {
+  return { image: "native", imageMediaTypes: [...NATIVE_IMAGE_MEDIA_TYPES] };
+}
 
 export interface ProviderConfig {
   apiKey: string;

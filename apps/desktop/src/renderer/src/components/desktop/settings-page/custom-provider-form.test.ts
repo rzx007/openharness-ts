@@ -7,7 +7,12 @@ const validForm = {
   displayName: " Office Gateway ",
   baseUrl: "https://gateway.example/v1",
   apiKey: " secret ",
-  models: [{ key: "model-1", id: "team-model", displayName: " Team Model " }],
+  models: [{
+    key: "model-1",
+    id: "team-model",
+    displayName: " Team Model ",
+    imageInputSupport: "native" as const,
+  }],
   headers: [{ key: "header-1", name: " X-Tenant ", value: " desktop " }],
 }
 
@@ -21,7 +26,11 @@ describe("validateCustomProviderForm", () => {
         baseUrl: "https://gateway.example/v1",
         apiFormat: "openai",
         apiKey: "secret",
-        models: [{ id: "team-model", displayName: "Team Model" }],
+        models: [{
+          id: "team-model",
+          displayName: "Team Model",
+          imageInputSupport: "native",
+        }],
         headers: { "X-Tenant": "desktop" },
       },
     })
@@ -43,7 +52,12 @@ describe("validateCustomProviderForm", () => {
     })
     expect(validateCustomProviderForm({
       ...validForm,
-      models: [{ key: "model-1", id: "", displayName: "Empty" }],
+      models: [{
+        key: "model-1",
+        id: "",
+        displayName: "Empty",
+        imageInputSupport: "unknown",
+      }],
     })).toMatchObject({ ok: false, field: "models" })
   })
 
@@ -51,13 +65,31 @@ describe("validateCustomProviderForm", () => {
     expect(validateCustomProviderForm({
       ...validForm,
       models: [
-        { key: "model-1", id: "same", displayName: "One" },
-        { key: "model-2", id: "same", displayName: "Two" },
+        { key: "model-1", id: "same", displayName: "One", imageInputSupport: "unknown" },
+        { key: "model-2", id: "same", displayName: "Two", imageInputSupport: "unsupported" },
       ],
     })).toMatchObject({ ok: false, field: "models" })
     expect(validateCustomProviderForm({
       ...validForm,
       headers: [{ key: "header-1", name: "X-Tenant", value: "" }],
     })).toMatchObject({ ok: false, field: "headers" })
+  })
+
+  it("keeps unsupported and unknown image declarations instead of guessing from IDs", () => {
+    expect(validateCustomProviderForm({
+      ...validForm,
+      models: [
+        { key: "model-1", id: "gpt-4o", displayName: "Vision off", imageInputSupport: "unsupported" },
+        { key: "model-2", id: "custom-vl", displayName: "Unknown", imageInputSupport: "unknown" },
+      ],
+    })).toMatchObject({
+      ok: true,
+      value: {
+        models: [
+          { id: "gpt-4o", displayName: "Vision off", imageInputSupport: "unsupported" },
+          { id: "custom-vl", displayName: "Unknown", imageInputSupport: "unknown" },
+        ],
+      },
+    })
   })
 })

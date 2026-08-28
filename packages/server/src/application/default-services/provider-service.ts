@@ -349,6 +349,9 @@ function normalizeCustomProvider(
   const models = input.models.map((model) => ({
     id: model.id?.trim(),
     displayName: model.displayName?.trim() || model.id?.trim(),
+    ...(model.imageInputSupport
+      ? { imageInputSupport: model.imageInputSupport }
+      : {}),
   }));
   if (models.some((model) => !model.id)) {
     throw new ProviderMutationError(400, "模型 ID 不能为空。");

@@ -1,9 +1,10 @@
-import type { DesktopCustomProviderInput } from "@shared/provider-types"
+import type { DesktopCustomProviderInput, DesktopInputSupport } from "@shared/provider-types"
 
 export interface CustomProviderModelRow {
   key: string
   id: string
   displayName: string
+  imageInputSupport: DesktopInputSupport
 }
 
 export interface CustomProviderHeaderRow {
@@ -55,6 +56,7 @@ export function validateCustomProviderForm(
   const models = form.models.map((model) => ({
     id: model.id.trim(),
     displayName: model.displayName.trim() || model.id.trim(),
+    imageInputSupport: model.imageInputSupport,
   }))
   if (models.some((model) => !model.id)) {
     return { ok: false, field: "models", message: "模型 ID 不能为空。" }
