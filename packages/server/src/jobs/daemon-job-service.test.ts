@@ -118,6 +118,73 @@ describe("DaemonJobService", () => {
     },
   );
 
+  it.each(["completed", "failed"] as const)(
+    "reopens a %s Agent durable task to running before writeInput so JobWait does not early-return",
+    async (status) => {
+      const projected = {
+        ...task,
+        status,
+        output: "prior result",
+        error: status === "failed" ? "boom" : undefined,
+        finishedAt: 99,
+      };
+      const { service, store, manager } = createService(projected);
+      manager.writeInput.mockImplementation(async () => {
+        expect(store.getSessionTask(projected.id)?.status).toBe("running");
+        expect(store.getSessionTask(projected.id)?.output).toBeUndefined();
+        expect(store.getSessionTask(projected.id)?.finishedAt).toBeUndefined();
+      });
+
+      await service.send({
+        sessionId: "session-1",
+        jobId: projected.id,
+        data: "continue",
+      });
+
+      expect(store.updateSessionTask).toHaveBeenCalledWith(projected.id, { status: "running" });
+      expect(manager.writeInput).toHaveBeenCalledWith("manager-1", "continue");
+      expect(store.getSessionTask(projected.id)?.status).toBe("running");
+
+      const waited = await service.wait({
+        sessionId: "session-1",
+        jobId: projected.id,
+        timeoutMs: 50,
+      });
+      expect(waited.timedOut).toBe(true);
+      expect(waited.snapshot.status).toBe("running");
+    },
+  );
+
+  it("restores a completed Agent durable task when writeInput fails after reopen", async () => {
+    const projected = {
+      ...task,
+      status: "completed" as const,
+      output: "prior result",
+      finishedAt: 99,
+    };
+    const { service, store, manager } = createService(projected);
+    manager.writeInput.mockImplementation(async () => {
+      expect(store.getSessionTask(projected.id)?.status).toBe("running");
+      throw new Error("Live child not found: child-1");
+    });
+
+    await expect(service.send({
+      sessionId: "session-1",
+      jobId: projected.id,
+      data: "continue",
+    })).rejects.toThrow("Live child not found");
+
+    expect(store.updateSessionTask).toHaveBeenCalledWith(projected.id, { status: "running" });
+    expect(store.updateSessionTask).toHaveBeenCalledWith(projected.id, {
+      status: "completed",
+      output: "prior result",
+    });
+    expect(store.getSessionTask(projected.id)).toMatchObject({
+      status: "completed",
+      output: "prior result",
+    });
+  });
+
   it("cancels a reserved shell before a runtime process exists", async () => {
     const pending = {
       ...task,
@@ -257,14 +324,30 @@ function createService(
     workflows?: Record<string, unknown>;
   } = {},
 ) {
+  let currentTask: SessionExecutionRecord = { ...projectedTask };
   const store = {
     getSession: vi.fn((id: string) => id === "session-1" ? { id, cwd: "/repo" } : undefined),
-    listSessionTasks: vi.fn(() => [projectedTask]),
-    getSessionTask: vi.fn((id: string) => id === projectedTask.id ? projectedTask : undefined),
-    updateSessionTask: vi.fn((_id: string, input: Record<string, unknown>) => ({
-      ...projectedTask,
-      ...input,
-    })),
+    listSessionTasks: vi.fn(() => [currentTask]),
+    getSessionTask: vi.fn((id: string) => id === currentTask.id ? { ...currentTask } : undefined),
+    updateSessionTask: vi.fn((_id: string, input: Record<string, unknown>) => {
+      const previousStatus = currentTask.status;
+      currentTask = { ...currentTask, ...input } as SessionExecutionRecord;
+      if (input.status === "running" && previousStatus !== "running") {
+        currentTask.startedAt = Date.now();
+        delete currentTask.finishedAt;
+        delete currentTask.output;
+        delete currentTask.error;
+      }
+      if (
+        typeof input.status === "string" &&
+        ["completed", "failed", "stopped", "interrupted"].includes(input.status)
+      ) {
+        currentTask.finishedAt = Date.now();
+      }
+      if (input.output !== undefined) currentTask.output = input.output as string;
+      if (input.error !== undefined) currentTask.error = input.error as string;
+      return { ...currentTask };
+    }),
   };
   const terminals = {
     list: vi.fn(async () => [terminal]),
