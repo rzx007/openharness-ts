@@ -189,8 +189,10 @@ describe("desktop session store integration races", () => {
 
     await expect(request).resolves.toBeUndefined()
     expect(
-      useDesktopSessionStore.getState().sessionRuntimes["session-1"]?.pendingPromptSubmissions
-    ).toEqual({})
+      useDesktopSessionStore.getState().sessionRuntimes["session-1"]?.pendingPromptSubmissions[
+        inputId
+      ]
+    ).toMatchObject({ phase: "accepted" })
   })
 
   it("keeps a background session failure out of the active session error scope", async () => {

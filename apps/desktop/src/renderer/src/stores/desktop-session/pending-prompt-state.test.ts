@@ -121,6 +121,21 @@ describe("desktop pending prompt state", () => {
     expect(updated["input-1"]?.phase).toBe("accepted")
     expect(removePendingPromptSubmission(updated, "input-1")).not.toHaveProperty("input-1")
     expect(reconcilePendingPromptSubmissions(updated, view)).toEqual({
+      "input-1": updated["input-1"],
+      "input-2": submissions["input-2"],
+    })
+
+    view.messages.push({
+      id: "message-1",
+      sessionId: "s1",
+      seq: 1,
+      role: "user",
+      inputId: "input-1",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(reconcilePendingPromptSubmissions(updated, view)).toEqual({
       "input-2": submissions["input-2"],
     })
   })

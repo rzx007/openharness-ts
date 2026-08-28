@@ -117,9 +117,27 @@ describe("desktop session view state", () => {
     })
 
     expect(reconcileRuntimeWithView(runtime, view)).toMatchObject({
-      pendingPromptSubmissions: { "input-2": runtime.pendingPromptSubmissions["input-2"] },
+      pendingPromptSubmissions: {
+        "input-1": runtime.pendingPromptSubmissions["input-1"],
+        "input-2": runtime.pendingPromptSubmissions["input-2"],
+      },
       queuedPromptActions: { "s2:run-1": runtime.queuedPromptActions["s2:run-1"] },
       operations: { "input-2": runtime.operations["input-2"] },
+    })
+
+    view.messages.push({
+      id: "message-1",
+      sessionId: "s1",
+      seq: 1,
+      role: "user",
+      inputId: "input-1",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    expect(reconcileRuntimeWithView(runtime, view).pendingPromptSubmissions).toEqual({
+      "input-2": runtime.pendingPromptSubmissions["input-2"],
     })
   })
 })

@@ -318,7 +318,7 @@ describe("prompt actions session runtime", () => {
 
     await expect(request).resolves.toBeUndefined()
     const runtime = useDesktopSessionStore.getState().sessionRuntimes["session-1"]!
-    expect(runtime.pendingPromptSubmissions).toEqual({})
+    expect(runtime.pendingPromptSubmissions[inputId]).toMatchObject({ phase: "accepted" })
     expect(runtime.operations).toEqual({})
   })
 
@@ -715,6 +715,25 @@ describe("desktop session store prompt intent boundaries", () => {
           createdAt: 1,
         },
       ],
+    })
+
+    expect(Object.keys(sessionRuntime("session-1").pendingPromptSubmissions)).toEqual([
+      firstCall[0].id,
+      secondCall[0].id,
+    ])
+
+    useDesktopSessionStore.getState().applySessionUpdate({
+      ...emptySessionView("session-1", 2),
+      messages: [{
+        id: "message-first",
+        sessionId: "session-1",
+        seq: 1,
+        role: "user",
+        inputId: firstCall[0].id,
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      }],
     })
 
     expect(Object.keys(sessionRuntime("session-1").pendingPromptSubmissions)).toEqual([

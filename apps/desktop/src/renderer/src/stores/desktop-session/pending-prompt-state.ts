@@ -39,11 +39,19 @@ export function reconcilePendingPromptSubmissions(
   view: DesktopSessionView
 ): Record<string, PendingPromptSubmission> {
   const confirmedInputIds = new Set(view.inputs.map((input) => input.id))
-  return Object.fromEntries(
-    Object.entries(submissions).filter(
-      ([id, submission]) => submission.sessionId !== view.session.id || !confirmedInputIds.has(id)
+  const projectedInputIds = new Set(
+    view.messages.flatMap((message) =>
+      message.role === "user" && message.inputId ? [message.inputId] : []
     )
   )
+  return Object.fromEntries(Object.entries(submissions).flatMap(([id, submission]) => {
+    if (submission.sessionId !== view.session.id) return [[id, submission]]
+    if (projectedInputIds.has(id)) return []
+    if (confirmedInputIds.has(id)) {
+      return [[id, { ...submission, phase: "accepted" as const, error: undefined }]]
+    }
+    return [[id, submission]]
+  }))
 }
 
 export function reconcileQueuedPromptActions(

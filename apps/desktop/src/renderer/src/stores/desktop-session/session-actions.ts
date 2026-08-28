@@ -1,4 +1,5 @@
 import type { CreateDesktopSessionInput, DesktopSessionView } from "@shared/session-types"
+import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 
 import { applyBootstrapData } from "./bootstrap-actions"
 import { errorMessage } from "./error-state"
@@ -552,6 +553,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       }
       let commandOperationId: string | null = null
       let startedSessionId: string | null = null
+      let clearedFirstPromptDraft = false
       set((state) => {
         const newConversationRuntime = beginOperation(state.newConversationRuntime, createOperation)
         return {
@@ -626,6 +628,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                 sessionComposerScope(session.id)
               )
             : { composerDraftsByScope: state.composerDraftsByScope }
+          clearedFirstPromptDraft = Boolean(firstSubmission && ownsNewConversationRuntime)
           return {
             sessions: upsertSession(state.sessions, session),
             newConversationRuntime: bound.source,
@@ -641,6 +644,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               : {}),
           }
         })
+        if (clearedFirstPromptDraft) {
+          clearFirstPromptDraft(session.id, prompt, attachmentDrafts)
+        }
         const openResult = ownsCurrentPage ? await openPrimarySession(session.id) : "cancelled"
         if (openResult === "failed") {
           const openError = Object.values(get().sessionRuntimes[session.id]?.operations ?? {}).find(
@@ -795,6 +801,8 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         })
         if (confirmed && startedSessionId) {
           clearFirstPromptDraft(startedSessionId, prompt, attachmentDrafts)
+        } else if (startedSessionId && clearedFirstPromptDraft) {
+          restoreFirstPromptDraft(startedSessionId, prompt, attachmentDrafts)
         }
         if (confirmed) return startedSessionId
         throw error
@@ -808,7 +816,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   function clearFirstPromptDraft(
     sessionId: string,
     submittedText: string,
-    submittedAttachments: readonly { draftId: string; assetId?: string }[]
+    submittedAttachments: readonly DesktopAttachmentDraft[]
   ): void {
     const scope = sessionComposerScope(sessionId)
     set((state) => {
@@ -827,6 +835,32 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                 submittedByDraftId.get(attachment.draftId) !== attachment.assetId ||
                 attachment.status !== "ready"
             ),
+          },
+        },
+      }
+    })
+  }
+
+  function restoreFirstPromptDraft(
+    sessionId: string,
+    submittedText: string,
+    submittedAttachments: readonly DesktopAttachmentDraft[]
+  ): void {
+    const scope = sessionComposerScope(sessionId)
+    set((state) => {
+      const current = state.composerDraftsByScope[scope] ?? { text: "", attachments: [] }
+      const currentDraftIds = new Set(current.attachments.map((attachment) => attachment.draftId))
+      return {
+        composerDraftsByScope: {
+          ...state.composerDraftsByScope,
+          [scope]: {
+            text: current.text.trim().length === 0 ? submittedText : current.text,
+            attachments: [
+              ...submittedAttachments.filter(
+                (attachment) => !currentDraftIds.has(attachment.draftId)
+              ),
+              ...current.attachments,
+            ],
           },
         },
       }

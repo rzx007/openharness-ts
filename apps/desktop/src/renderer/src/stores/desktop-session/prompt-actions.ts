@@ -128,9 +128,29 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       } catch (error) {
         const message = errorMessage(error)
         const confirmed = promptSubmissionConfirmed(get(), sessionId, submission.id)
+        const keepLocalAcknowledgement = get().activeSessionId === sessionId
         if (confirmed) clearSubmittedAttachments(sessionId, attachmentDrafts)
         replaceRuntime(sessionId, (currentRuntime) => {
-          if (confirmed) return removeOperation(currentRuntime, submission.id)
+          if (confirmed) {
+            const acceptedSubmissions = updatePendingPromptSubmission(
+              currentRuntime.pendingPromptSubmissions,
+              submission.id,
+              (pendingSubmission) => ({
+                ...pendingSubmission,
+                phase: "accepted",
+                error: undefined,
+              })
+            )
+            return removeOperation(
+              {
+                ...currentRuntime,
+                pendingPromptSubmissions: keepLocalAcknowledgement
+                  ? acceptedSubmissions
+                  : removePendingPromptSubmission(acceptedSubmissions, submission.id),
+              },
+              submission.id
+            )
+          }
           return failOperation(
             {
               ...currentRuntime,
@@ -368,8 +388,10 @@ function promptSubmissionConfirmed(
   sessionId: string,
   inputId: string
 ): boolean {
+  const submission = getSessionRuntime(state, sessionId).pendingPromptSubmissions[inputId]
   return (
-    !getSessionRuntime(state, sessionId).pendingPromptSubmissions[inputId] ||
+    !submission ||
+    submission.phase === "accepted" ||
     Boolean(
       state.sessionView?.session.id === sessionId &&
       state.sessionView.inputs.some((input) => input.id === inputId)

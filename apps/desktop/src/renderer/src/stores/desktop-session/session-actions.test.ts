@@ -125,6 +125,41 @@ describe("desktop session actions", () => {
     )
   })
 
+  it("clears the migrated first-prompt draft while sending is still pending", async () => {
+    const session = emptySessionView("session-created").session
+    let resolveSend!: () => void
+    const sendPrompt = vi.fn(
+      () => new Promise<void>((resolve) => (resolveSend = resolve))
+    )
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => emptySessionView(session.id, 1)),
+          sendPrompt,
+        },
+      },
+    })
+    resetNewConversationState()
+    const attachment = readyAttachment("draft-first", "asset-first")
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "new-conversation": { text: "说明", attachments: [attachment] },
+      },
+    })
+
+    const starting = useDesktopSessionStore
+      .getState()
+      .startSession("说明", { attachments: [attachment] })
+    await vi.waitFor(() => expect(sendPrompt).toHaveBeenCalledOnce())
+    const draftWhileSending =
+      useDesktopSessionStore.getState().composerDraftsByScope[`session:${session.id}`]
+    resolveSend()
+    await starting
+
+    expect(draftWhileSending).toEqual({ text: "", attachments: [] })
+  })
+
   it("keeps the new-conversation attachment draft when create fails", async () => {
     vi.stubGlobal("window", {
       desktop: {
@@ -245,7 +280,7 @@ describe("desktop session actions", () => {
     expect(open).toHaveBeenCalledWith("session-b")
   })
 
-  it("keeps the first prompt composer-locked until its IPC settles or SSE confirms it", async () => {
+  it("keeps the first optimistic prompt until the transcript projects its user message", async () => {
     const session = emptySessionView("session-created").session
     let resolvePrompt!: () => void
     const sendPrompt = vi.fn<
@@ -290,6 +325,22 @@ describe("desktop session actions", () => {
 
     const confirmed = emptySessionView(session.id, 3)
     confirmed.inputs = [{ id: inputId }] as DesktopSessionView["inputs"]
+    useDesktopSessionStore.getState().applySessionUpdate(confirmed)
+
+    expect(
+      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.pendingPromptSubmissions
+    ).toHaveProperty(inputId)
+
+    confirmed.messages = [{
+      id: "message-confirmed",
+      sessionId: session.id,
+      seq: 1,
+      role: "user",
+      inputId,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }]
     useDesktopSessionStore.getState().applySessionUpdate(confirmed)
 
     expect(
@@ -1479,6 +1530,16 @@ describe("desktop session store outside-project mode", () => {
         createdAt: 1,
       },
     ]
+    view.messages = [{
+      id: "message-confirmed",
+      sessionId: "session-reopen",
+      seq: 1,
+      role: "user",
+      inputId: "input-confirmed",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }]
     view.runs = [
       {
         id: "run-finished",
