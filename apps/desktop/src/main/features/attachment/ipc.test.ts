@@ -92,7 +92,7 @@ function fakeService(): AttachmentIpcService {
     retryUpload: vi.fn(async (_ownerId, input) => ({ taskId: input.taskId })),
     discardDraft: vi.fn(async () => undefined),
     deleteUnreferenced: vi.fn(async () => ({ deleted: true, inUse: false })),
-    readPreview: vi.fn(async () => ({ bytes: new Uint8Array(), mediaType: "image/png" })),
+    readPreview: vi.fn(async () => ({ bytes: new ArrayBuffer(0), mediaType: "image/png" })),
     openAttachment: vi.fn(async () => undefined),
     saveAs: vi.fn(async () => ({ saved: true })),
     disposeOwner: vi.fn(async () => undefined),

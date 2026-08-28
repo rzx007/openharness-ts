@@ -59,6 +59,8 @@ function ComposerAttachmentCard({
   onRemove: (draftId: string) => void
 }): React.JSX.Element {
   const previewUrl = useAttachmentPreviewUrl(attachment)
+  const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null)
+  const visiblePreviewUrl = previewUrl && previewUrl !== failedPreviewUrl ? previewUrl : null
   const state =
     attachment.status === "uploading"
       ? "uploading"
@@ -72,8 +74,16 @@ function ComposerAttachmentCard({
 
   return (
     <Attachment state={state} size="sm" className="max-w-64 flex-nowrap">
-      <AttachmentMedia variant={previewUrl ? "image" : "icon"}>
-        {previewUrl ? <img src={previewUrl} alt="" /> : fileIcon}
+      <AttachmentMedia variant={visiblePreviewUrl ? "image" : "icon"}>
+        {visiblePreviewUrl ? (
+          <img
+            src={visiblePreviewUrl}
+            alt=""
+            onError={() => setFailedPreviewUrl(visiblePreviewUrl)}
+          />
+        ) : (
+          fileIcon
+        )}
       </AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle title={attachment.displayName}>{attachment.displayName}</AttachmentTitle>
@@ -139,9 +149,7 @@ function useAttachmentPreviewUrl(attachment: DesktopAttachmentDraft): string | n
       .readPreview({ assetId: attachment.assetId })
       .then((preview) => {
         if (disposed) return
-        objectUrl = URL.createObjectURL(
-          new Blob([Uint8Array.from(preview.bytes).buffer], { type: preview.mediaType })
-        )
+        objectUrl = URL.createObjectURL(new Blob([preview.bytes], { type: preview.mediaType }))
         setPreview({ assetId: attachment.assetId!, url: objectUrl })
       })
       .catch(() => {

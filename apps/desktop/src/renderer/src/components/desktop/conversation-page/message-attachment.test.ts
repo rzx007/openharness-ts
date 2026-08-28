@@ -25,7 +25,7 @@ describe("MessageAttachment", () => {
     document.body.append(container)
     root = createRoot(container)
     readPreview = vi.fn(async ({ assetId }: { assetId: string }) => ({
-      bytes: new Uint8Array([1, 2, 3]),
+      bytes: new Uint8Array([1, 2, 3]).buffer,
       mediaType: "image/png",
       assetId,
     }))
@@ -77,7 +77,7 @@ describe("MessageAttachment", () => {
 
   it("rejects active content returned by the preview API even when the stored type looks safe", async () => {
     readPreview.mockResolvedValueOnce({
-      bytes: new Uint8Array([1, 2, 3]),
+      bytes: new Uint8Array([1, 2, 3]).buffer,
       mediaType: "image/svg+xml",
       assetId: "asset-a",
     })
@@ -102,6 +102,17 @@ describe("MessageAttachment", () => {
     )
     expect(open).toHaveBeenCalledWith({ assetId: "asset-a" })
     expect(saveAs).toHaveBeenCalledWith({ assetId: "asset-a" })
+  })
+
+  it("falls back to an icon when the browser cannot decode the preview", async () => {
+    await act(async () => root.render(createElement(MessageAttachment, { part: imagePart("a") })))
+
+    const image = container.querySelector("img")
+    expect(image).not.toBeNull()
+    await act(async () => image?.dispatchEvent(new Event("error")))
+
+    expect(container.querySelector("img")).toBeNull()
+    expect(container.querySelector("svg")).not.toBeNull()
   })
 
   it("keeps original cards read-only while editing a pure-attachment message", async () => {

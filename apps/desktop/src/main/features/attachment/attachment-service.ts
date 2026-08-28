@@ -233,7 +233,7 @@ export class DesktopAttachmentService {
     await Promise.all(ownerTasks.map((task) => this.cancelUpload(ownerId, task.taskId)))
   }
 
-  async readPreview(assetId: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
+  async readPreview(assetId: string): Promise<{ bytes: ArrayBuffer; mediaType: string }> {
     const client = await this.dependencies.getClient()
     const asset = await client.getAttachment(assetId)
     const mediaType = asset.mediaType ?? asset.declaredMediaType ?? "application/octet-stream"
@@ -247,7 +247,7 @@ export class DesktopAttachmentService {
     if (!hasExpectedBitmapSignature(bytes, mediaType)) {
       throw serviceError("attachment_preview_unsupported")
     }
-    return { bytes, mediaType }
+    return { bytes: exactArrayBuffer(bytes), mediaType }
   }
 
   async deleteUnreferenced(assetId: string): Promise<{ deleted: boolean; inUse: boolean }> {
@@ -608,6 +608,12 @@ function hasExpectedBitmapSignature(bytes: Uint8Array, mediaType: string): boole
     return asciiAt(bytes, 4, "ftyp") && (asciiAt(bytes, 8, "avif") || asciiAt(bytes, 8, "avis"))
   }
   return false
+}
+
+function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
 }
 
 function startsWithBytes(bytes: Uint8Array, expected: readonly number[]): boolean {

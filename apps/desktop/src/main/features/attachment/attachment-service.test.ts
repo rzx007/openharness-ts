@@ -119,7 +119,7 @@ describe("DesktopAttachmentService asset actions", () => {
     const service = createService({ getAttachment, downloadAttachment })
 
     await expect(service.readPreview("safe")).resolves.toEqual({
-      bytes: pngBytes(),
+      bytes: toArrayBuffer(pngBytes()),
       mediaType: "image/png",
     })
     await expect(service.readPreview("unsafe")).rejects.toMatchObject({
@@ -171,7 +171,7 @@ describe("DesktopAttachmentService asset actions", () => {
     await rm(sourcePath, { force: true })
 
     await expect(service.readPreview("asset-durable")).resolves.toEqual({
-      bytes: pngBytes(),
+      bytes: toArrayBuffer(pngBytes()),
       mediaType: "image/png",
     })
   })

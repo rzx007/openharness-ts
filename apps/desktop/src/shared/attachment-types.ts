@@ -92,7 +92,7 @@ export interface DesktopAttachmentAssetInput {
 }
 
 export interface DesktopAttachmentPreview {
-  bytes: Uint8Array
+  bytes: ArrayBuffer
   mediaType: string
 }
 

@@ -31,11 +31,17 @@ export function MessageAttachment({
   readOnly?: boolean
 }): React.JSX.Element {
   const previewUrl = useMessageAttachmentPreview(part)
+  const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null)
+  const visiblePreviewUrl = previewUrl && previewUrl !== failedPreviewUrl ? previewUrl : null
   return (
     <Attachment state="done" size="sm" className="max-w-72 flex-nowrap">
-      <AttachmentMedia variant={previewUrl ? "image" : "icon"}>
-        {previewUrl ? (
-          <img src={previewUrl} alt="" />
+      <AttachmentMedia variant={visiblePreviewUrl ? "image" : "icon"}>
+        {visiblePreviewUrl ? (
+          <img
+            src={visiblePreviewUrl}
+            alt=""
+            onError={() => setFailedPreviewUrl(visiblePreviewUrl)}
+          />
         ) : part.mediaType.startsWith("image/") ? (
           <FileImage />
         ) : (
@@ -110,9 +116,7 @@ function useMessageAttachmentPreview(part: DesktopAttachmentSessionPart): string
           setPreview(null)
           return
         }
-        objectUrl = URL.createObjectURL(
-          new Blob([Uint8Array.from(result.bytes).buffer], { type: result.mediaType })
-        )
+        objectUrl = URL.createObjectURL(new Blob([result.bytes], { type: result.mediaType }))
         setPreview({ assetId: part.assetId, url: objectUrl })
       })
       .catch(() => {
