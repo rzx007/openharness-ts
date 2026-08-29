@@ -67,7 +67,9 @@ export function buildConversationEntries(
       continue
     }
 
-    let turn = inputId ? turnsByInputId.get(inputId) : undefined
+    let turn = message.inputId ? turnsByInputId.get(message.inputId) : undefined
+    if (!turn && !message.inputId && message.runId) turn = turnsByRunId.get(message.runId)
+    if (!turn && inputId) turn = turnsByInputId.get(inputId)
     if (!turn && !inputId) turn = latestTurn
     if (!turn) {
       turn = createTurn(undefined, [], inputId, message.id)

@@ -46,6 +46,26 @@ describe("conversation turn model", () => {
     expect(turns[1]?.assistantMessages).toHaveLength(1)
   })
 
+  it("keeps assistant output after a steer under the steered user message", () => {
+    const messages = [
+      message("user", 1, { inputId: "input-1", runId: "run-1" }),
+      message("assistant", 2, { runId: "run-1" }),
+      message("user", 3, { inputId: "input-steer", runId: "run-1" }),
+      message("assistant", 4, { runId: "run-1" }),
+    ]
+    const parts = messages.map((item) => part(item.id, item.seq, `${item.role}-${item.seq}`))
+
+    const turns = buildConversationEntries(messages, parts, [run("run-1", "input-1")]).flatMap(
+      (entry) => (entry.type === "turn" ? [entry.turn] : [])
+    )
+
+    expect(turns).toHaveLength(2)
+    expect(turns[0]?.userMessage?.inputId).toBe("input-1")
+    expect(turns[0]?.assistantParts.map((item) => item.text)).toEqual(["assistant-2"])
+    expect(turns[1]?.userMessage?.inputId).toBe("input-steer")
+    expect(turns[1]?.assistantParts.map((item) => item.text)).toEqual(["assistant-4"])
+  })
+
   it("keeps system messages independent", () => {
     const entries = buildConversationEntries(
       [message("system", 1), message("user", 2), message("assistant", 3)],
