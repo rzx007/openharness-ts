@@ -121,6 +121,23 @@ export const attachmentRepresentations = sqliteTable(
   ],
 );
 
+export const attachmentLeases = sqliteTable(
+  "attachment_lease",
+  {
+    id: text("id").primaryKey(),
+    assetId: text("asset_id").notNull().references(() => attachmentAssets.id, { onDelete: "cascade" }),
+    ownerKind: text("owner_kind").notNull(),
+    ownerId: text("owner_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    renewedAt: integer("renewed_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("attachment_lease_asset_owner_unique").on(table.assetId, table.ownerKind, table.ownerId),
+    index("attachment_lease_expiry_idx").on(table.expiresAt, table.assetId),
+  ],
+);
+
 export const sessionInputAttachments = sqliteTable(
   "session_input_attachment",
   {

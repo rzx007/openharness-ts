@@ -17,6 +17,9 @@ import type {
 } from "../attachment-routing/attachment-routing-types.js";
 import type { SessionAttachmentResources } from "../attachment-resource/session-attachment-resources.js";
 
+const ATTACHMENT_LEASE_TTL_MS = 2 * 60 * 1_000;
+const ATTACHMENT_LEASE_RENEW_INTERVAL_MS = 30 * 1_000;
+
 export interface SessionRunExecutorContext {
   store: SessionStore;
   agentPool: AgentPool;
@@ -63,11 +66,48 @@ export class SessionRunExecutor {
     const { sessionId, inputId, runId } = input;
     let agentTouched = false;
     let cleanupAttachmentResources: (() => Promise<void>) | undefined;
+    let cleanupAttachmentLease: (() => void) | undefined;
     try {
       const session = this.context.store.getSession(sessionId);
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+
+      if (admitted.attachments.length > 0) {
+        const acquiredAt = Date.now();
+        this.context.store.acquireAttachmentLeases({
+          assetIds: admitted.attachments.map((reference) => reference.assetId),
+          ownerKind: "session_run",
+          ownerId: runId,
+          timestamp: acquiredAt,
+          expiresAt: acquiredAt + ATTACHMENT_LEASE_TTL_MS,
+        });
+        const renewTimer = setInterval(() => {
+          const timestamp = Date.now();
+          try {
+            this.context.store.renewAttachmentLeases({
+              ownerKind: "session_run",
+              ownerId: runId,
+              timestamp,
+              expiresAt: timestamp + ATTACHMENT_LEASE_TTL_MS,
+            });
+          } catch (error) {
+            this.context.log({
+              level: "error",
+              event: "attachment.lease.renew_failed",
+              traceId: this.context.traceIdForRun(runId),
+              sessionId,
+              runId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }, ATTACHMENT_LEASE_RENEW_INTERVAL_MS);
+        renewTimer.unref?.();
+        cleanupAttachmentLease = () => {
+          clearInterval(renewTimer);
+          this.context.store.releaseAttachmentLeases("session_run", runId);
+        };
+      }
 
       // 先拿到实际 Agent，路由才能看见 allow/deny 过滤后的工具和真实宿主能力。
       agentTouched = true;
@@ -241,6 +281,20 @@ export class SessionRunExecutor {
           this.context.log({
             level: "error",
             event: "attachment.resources.cleanup_failed",
+            traceId: this.context.traceIdForRun(runId),
+            sessionId,
+            runId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      if (cleanupAttachmentLease) {
+        try {
+          cleanupAttachmentLease();
+        } catch (error) {
+          this.context.log({
+            level: "error",
+            event: "attachment.lease.release_failed",
             traceId: this.context.traceIdForRun(runId),
             sessionId,
             runId,

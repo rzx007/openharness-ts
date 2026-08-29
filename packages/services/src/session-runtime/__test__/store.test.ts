@@ -2551,4 +2551,69 @@ describe("SessionStore", () => {
       }
     });
   });
+
+  it("acquires, renews, expires, and idempotently releases attachment leases", () => {
+    withStore((store) => {
+      createReadyAttachment(store, "att-lease-a");
+      createReadyAttachment(store, "att-lease-b");
+
+      const acquired = store.acquireAttachmentLeases({
+        assetIds: ["att-lease-a", "att-lease-b"],
+        ownerKind: "session_run",
+        ownerId: "run-1",
+        timestamp: 100,
+        expiresAt: 200,
+      });
+      expect(acquired).toHaveLength(2);
+      expect(acquired.map((lease) => lease.assetId)).toEqual([
+        "att-lease-a",
+        "att-lease-b",
+      ]);
+      expect(store.listActiveAttachmentLeases(150)).toEqual(acquired);
+
+      const reacquired = store.acquireAttachmentLeases({
+        assetIds: ["att-lease-a"],
+        ownerKind: "session_run",
+        ownerId: "run-1",
+        timestamp: 160,
+        expiresAt: 260,
+      });
+      expect(reacquired).toEqual([
+        expect.objectContaining({
+          id: acquired[0]!.id,
+          assetId: "att-lease-a",
+          createdAt: 100,
+          renewedAt: 160,
+          expiresAt: 260,
+        }),
+      ]);
+
+      expect(store.renewAttachmentLeases({
+        ownerKind: "session_run",
+        ownerId: "run-1",
+        timestamp: 180,
+        expiresAt: 300,
+      })).toBe(2);
+      expect(store.listActiveAttachmentLeases(250)).toHaveLength(2);
+      expect(store.listActiveAttachmentLeases(300)).toEqual([]);
+      expect(store.deleteExpiredAttachmentLeases(300)).toBe(2);
+      expect(store.deleteExpiredAttachmentLeases(300)).toBe(0);
+      expect(store.releaseAttachmentLeases("session_run", "run-1")).toBe(0);
+    });
+  });
+
+  it("rolls back a lease batch when any attachment is unavailable", () => {
+    withStore((store) => {
+      createReadyAttachment(store, "att-lease-ready");
+
+      expect(() => store.acquireAttachmentLeases({
+        assetIds: ["att-lease-ready", "att-missing"],
+        ownerKind: "session_run",
+        ownerId: "run-atomic",
+        timestamp: 100,
+        expiresAt: 200,
+      })).toThrow("Attachment is not ready: att-missing");
+      expect(store.listActiveAttachmentLeases(150)).toEqual([]);
+    });
+  });
 });

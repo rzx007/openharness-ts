@@ -84,6 +84,24 @@ export interface CreateAttachmentRepresentationInput {
   createdAt?: number;
 }
 
+export interface AttachmentLeaseRecord {
+  id: string;
+  assetId: string;
+  ownerKind: "session_run" | "backup";
+  ownerId: string;
+  createdAt: number;
+  renewedAt: number;
+  expiresAt: number;
+}
+
+export interface AcquireAttachmentLeasesInput {
+  assetIds: string[];
+  ownerKind: AttachmentLeaseRecord["ownerKind"];
+  ownerId: string;
+  timestamp: number;
+  expiresAt: number;
+}
+
 import {
   DEFAULT_DELTA_FLUSH_BYTES,
   DEFAULT_DELTA_FLUSH_INTERVAL_MS,
@@ -419,6 +437,97 @@ export class SessionStore {
        ORDER BY created_at, id`,
     ).all(assetId) as Array<Record<string, unknown>>;
     return rows.map(attachmentRepresentationFromRow);
+  }
+
+  acquireAttachmentLeases(
+    input: AcquireAttachmentLeasesInput,
+  ): AttachmentLeaseRecord[] {
+    validateLeaseWindow(input.timestamp, input.expiresAt);
+    const assetIds = [...new Set(input.assetIds)];
+    if (assetIds.length === 0) return [];
+    return this.database.transaction(() => {
+      for (const assetId of assetIds) {
+        const asset = this.getAttachment(assetId);
+        if (asset?.status !== "ready") {
+          throw new AttachmentError(
+            "attachment_not_ready",
+            `Attachment is not ready: ${assetId}`,
+          );
+        }
+      }
+      const upsert = this.database.prepare(
+        `INSERT INTO attachment_lease (
+          id, asset_id, owner_kind, owner_id, created_at, renewed_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(asset_id, owner_kind, owner_id) DO UPDATE SET
+          renewed_at = excluded.renewed_at,
+          expires_at = excluded.expires_at`,
+      );
+      const find = this.database.prepare(
+        `SELECT * FROM attachment_lease
+         WHERE asset_id = ? AND owner_kind = ? AND owner_id = ?`,
+      );
+      return assetIds.map((assetId) => {
+        upsert.run(
+          randomUUID(),
+          assetId,
+          input.ownerKind,
+          input.ownerId,
+          input.timestamp,
+          input.timestamp,
+          input.expiresAt,
+        );
+        return attachmentLeaseFromRow(find.get(
+          assetId,
+          input.ownerKind,
+          input.ownerId,
+        ) as Record<string, unknown>);
+      });
+    }).immediate();
+  }
+
+  renewAttachmentLeases(input: {
+    ownerKind: AttachmentLeaseRecord["ownerKind"];
+    ownerId: string;
+    timestamp: number;
+    expiresAt: number;
+  }): number {
+    validateLeaseWindow(input.timestamp, input.expiresAt);
+    return this.database.prepare(
+      `UPDATE attachment_lease
+       SET renewed_at = ?, expires_at = ?
+       WHERE owner_kind = ? AND owner_id = ? AND expires_at > ?`,
+    ).run(
+      input.timestamp,
+      input.expiresAt,
+      input.ownerKind,
+      input.ownerId,
+      input.timestamp,
+    ).changes;
+  }
+
+  releaseAttachmentLeases(
+    ownerKind: AttachmentLeaseRecord["ownerKind"],
+    ownerId: string,
+  ): number {
+    return this.database.prepare(
+      "DELETE FROM attachment_lease WHERE owner_kind = ? AND owner_id = ?",
+    ).run(ownerKind, ownerId).changes;
+  }
+
+  listActiveAttachmentLeases(timestamp = now()): AttachmentLeaseRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_lease
+       WHERE expires_at > ?
+       ORDER BY asset_id, owner_kind, owner_id`,
+    ).all(timestamp) as Array<Record<string, unknown>>;
+    return rows.map(attachmentLeaseFromRow);
+  }
+
+  deleteExpiredAttachmentLeases(timestamp = now()): number {
+    return this.database.prepare(
+      "DELETE FROM attachment_lease WHERE expires_at <= ?",
+    ).run(timestamp).changes;
   }
 
   findCompletedAttachmentRepresentation(
@@ -4425,6 +4534,29 @@ function attachmentRepresentationFromRow(row: Record<string, unknown>): Attachme
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+function attachmentLeaseFromRow(row: Record<string, unknown>): AttachmentLeaseRecord {
+  return {
+    id: String(row.id),
+    assetId: String(row.asset_id),
+    ownerKind: String(row.owner_kind) as AttachmentLeaseRecord["ownerKind"],
+    ownerId: String(row.owner_id),
+    createdAt: Number(row.created_at),
+    renewedAt: Number(row.renewed_at),
+    expiresAt: Number(row.expires_at),
+  };
+}
+
+function validateLeaseWindow(timestamp: number, expiresAt: number): void {
+  if (
+    !Number.isSafeInteger(timestamp) ||
+    timestamp < 0 ||
+    !Number.isSafeInteger(expiresAt) ||
+    expiresAt <= timestamp
+  ) {
+    throw new Error("Attachment lease expiry must be after its timestamp");
+  }
 }
 
 function externalConversationFromRow(
