@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 
 import type {
@@ -44,7 +44,10 @@ export class AgentImageToTextHostAdapter implements AgentImageToTextHost {
       assetId = input.attachmentId;
     } else {
       const source = "imagePath" in input
-        ? await this.readLocalFile(resolve(context.cwd, input.imagePath), signal)
+        ? await this.readLocalFile(
+          await resolveContainedImagePath(context.cwd, input.imagePath),
+          signal,
+        )
         : await this.readRemote(input.imageUrl, signal);
       const asset = await this.options.importAttachment({
         displayName: source.displayName,
@@ -84,6 +87,19 @@ export function createAgentImageToTextHost(options: {
   });
 }
 
+/** Keep OCR local reads inside the session cwd (blocks ../, absolute escapes, and symlink escapes). */
+export async function resolveContainedImagePath(cwd: string, imagePath: string): Promise<string> {
+  const trimmed = imagePath.trim();
+  if (!trimmed) throw new Error("ImageToText image_path 不能为空");
+  const root = await canonicalizeExistingPath(resolve(cwd));
+  const resolved = resolve(root, trimmed);
+  const canonical = await canonicalizePossiblyMissingPath(resolved);
+  if (!isPathInside(canonical, root)) {
+    throw new Error("ImageToText image_path 必须位于会话工作目录内");
+  }
+  return canonical;
+}
+
 async function readLocalImage(path: string, signal?: AbortSignal): Promise<ImportedImageSource> {
   signal?.throwIfAborted();
   const info = await stat(path);
@@ -93,4 +109,43 @@ async function readLocalImage(path: string, signal?: AbortSignal): Promise<Impor
     displayName: basename(path) || "image",
     content: Readable.toWeb(stream) as ReadableStream<Uint8Array>,
   };
+}
+
+async function canonicalizeExistingPath(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+async function canonicalizePossiblyMissingPath(path: string): Promise<string> {
+  const absolute = resolve(path);
+  try {
+    return await realpath(absolute);
+  } catch {
+    const parent = await nearestExistingParent(absolute);
+    const parentReal = await canonicalizeExistingPath(parent);
+    const tail = relative(parent, absolute);
+    return tail ? resolve(parentReal, tail) : parentReal;
+  }
+}
+
+async function nearestExistingParent(path: string): Promise<string> {
+  let current = path;
+  while (true) {
+    try {
+      await stat(current);
+      return current;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return current;
+      current = parent;
+    }
+  }
+}
+
+function isPathInside(candidate: string, root: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
