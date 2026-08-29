@@ -2538,6 +2538,9 @@ describe("SessionStore", () => {
       expect(completed).toMatchObject({ status: "completed", text: "hello" });
       expect(store.findCompletedAttachmentRepresentation("att-ocr", "ocr_text", "cache-a"))
         .toEqual(completed);
+      expect(store.listAttachmentRepresentations("att-ocr")).toEqual([
+        completed,
+      ]);
 
       store.close();
       const reloaded = new SessionStore({ path });

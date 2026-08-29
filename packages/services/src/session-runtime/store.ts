@@ -410,6 +410,17 @@ export class SessionStore {
     return row ? attachmentRepresentationFromRow(row) : undefined;
   }
 
+  listAttachmentRepresentations(
+    assetId: string,
+  ): AttachmentRepresentationRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_representation
+       WHERE asset_id = ?
+       ORDER BY created_at, id`,
+    ).all(assetId) as Array<Record<string, unknown>>;
+    return rows.map(attachmentRepresentationFromRow);
+  }
+
   findCompletedAttachmentRepresentation(
     assetId: string,
     kind: AttachmentRepresentationKind,
