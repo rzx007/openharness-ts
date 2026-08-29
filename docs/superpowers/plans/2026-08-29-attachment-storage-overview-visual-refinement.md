@@ -17,7 +17,7 @@
 - 修改：`apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-format.test.ts`
 - 修改：`apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-format.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
   新增 `storageComposition` 的表驱动测试，使用字面量期望值覆盖：
 
@@ -27,7 +27,7 @@
   expect(storageComposition(0, 10)).toEqual({ retainedBytes: 0, retainedPercent: 0, reclaimableBytes: 0, reclaimablePercent: 0 })
   ```
 
-- [ ] **步骤 2：运行测试确认 RED**
+- [x] **步骤 2：运行测试确认 RED**
 
   运行：
 
@@ -37,7 +37,7 @@
 
   预期：测试因 `storageComposition` 尚未导出而失败。
 
-- [ ] **步骤 3：实现最小纯函数并确认 GREEN**
+- [x] **步骤 3：实现最小纯函数并确认 GREEN**
 
   对非法、负数和超出实际占用的可清理量做归零或夹取，返回字节数和百分比。重新运行同一测试，预期全部通过。
 
@@ -49,15 +49,15 @@
 - 修改：`apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-settings.test.ts`
 - 修改：`docs/superpowers/specs/2026-08-29-conversation-attachments-release-closeout-design.md`
 
-- [ ] **步骤 1：编写失败的组件行为测试**
+- [x] **步骤 1：编写失败的组件行为测试**
 
   使用现有完整报告夹具渲染真实组件，断言用户可见结果包含“当前保留”“去重节省”“可清理”和五个次级统计；给比例条增加 `aria-label`，断言其中包含手工推导的 `75%`/`25%` 分段说明。测试要因当前八宫格没有比例条而失败。
 
-- [ ] **步骤 2：实现融合布局**
+- [x] **步骤 2：实现融合布局**
 
   在 `StorageOverview` 中调用 `storageComposition`：右上显示实际占用，中部渲染两段比例条和三项带文本说明的图例，下部只保留附件总数、唯一文件、正在使用、正在导入、处理失败。使用现有语义 token 和响应式网格，不新增依赖或硬编码色值。
 
-- [ ] **步骤 3：格式化并完成验证**
+- [x] **步骤 3：格式化并完成验证**
 
   运行：
 
@@ -71,7 +71,7 @@
 
   同时对本轮修改的 TypeScript/TSX 文件运行 ESLint，要求零警告。用户在真实设置页完成最终视觉反馈，自动化验证不替代实际观感判断。
 
-- [ ] **步骤 4：提交**
+- [x] **步骤 4：提交**
 
   ```powershell
   git add apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-format.ts apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-format.test.ts apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-settings.tsx apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-settings.test.ts docs/superpowers/specs/2026-08-29-conversation-attachments-release-closeout-design.md docs/superpowers/plans/2026-08-29-attachment-storage-overview-visual-refinement.md

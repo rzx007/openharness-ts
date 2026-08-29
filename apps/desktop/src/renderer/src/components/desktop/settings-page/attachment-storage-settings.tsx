@@ -47,6 +47,7 @@ import {
   canRepairStorage,
   formatBytes,
   groupStorageIssues,
+  storageComposition,
   totalAssets,
   type GroupedStorageIssue,
 } from "./attachment-storage-format"
@@ -372,6 +373,14 @@ function StorageOverview({
   onRefresh: () => void
 }): React.JSX.Element {
   const assets = report.summary.assets
+  const composition = storageComposition(
+    report.summary.physicalBytes,
+    report.summary.reclaimableBytes
+  )
+  const retainedPercent = Math.round(composition.retainedPercent)
+  const reclaimablePercent = Math.round(composition.reclaimablePercent)
+  const compositionLabel = `实际占用由当前保留 ${retainedPercent}% 和可清理 ${reclaimablePercent}% 组成；去重节省不计入实际占用`
+
   return (
     <section className="flex flex-col gap-4" aria-labelledby="attachment-storage-overview">
       <div className="flex items-center justify-between gap-4">
@@ -381,10 +390,10 @@ function StorageOverview({
         <StorageStatus issues={report.issues} />
       </div>
       <Card>
-        <CardHeader className="border-b">
+        <CardHeader>
           <CardTitle>本地附件</CardTitle>
           <CardDescription>统计当前设备上的对话附件，不包含云端账号空间。</CardDescription>
-          <CardAction>
+          <CardAction className="flex flex-col items-end gap-3">
             <Button
               type="button"
               variant="ghost"
@@ -395,26 +404,72 @@ function StorageOverview({
               <RefreshCw className={operation === "scanning" ? "animate-spin" : undefined} />
               {operation === "scanning" ? "正在扫描" : "重新扫描"}
             </Button>
+            <div className="text-right">
+              <p className="font-heading text-2xl font-semibold tracking-tight tabular-nums">
+                {formatBytes(report.summary.physicalBytes)}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">实际占用</p>
+            </div>
           </CardAction>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-border/60 p-px sm:grid-cols-3 lg:grid-cols-4">
-          <StorageStat
-            label="实际占用"
-            value={formatBytes(report.summary.physicalBytes)}
-            icon={<HardDrive />}
-          />
-          <StorageStat
-            label="附件总数"
-            value={String(totalAssets(assets))}
-            detail={`${assets.ready} 个可用`}
-            icon={<Database />}
-          />
-          <StorageStat label="唯一文件" value={String(report.summary.uniqueBlobs)} />
-          <StorageStat label="去重节省" value={formatBytes(report.summary.deduplicatedBytes)} />
-          <StorageStat label="可清理空间" value={formatBytes(report.summary.reclaimableBytes)} />
-          <StorageStat label="正在使用" value={String(report.summary.activeLeases)} />
-          <StorageStat label="正在导入" value={String(assets.importing)} />
-          <StorageStat label="处理失败" value={String(assets.failed)} />
+        <CardContent className="flex flex-col gap-5 px-0">
+          <div className="flex flex-col gap-4 px-5">
+            <svg
+              viewBox="0 0 100 4"
+              preserveAspectRatio="none"
+              className="h-2.5 w-full overflow-hidden rounded-full"
+              role="img"
+              aria-label={compositionLabel}
+              focusable="false"
+            >
+              <rect width="100" height="4" className="fill-muted" />
+              {composition.retainedPercent > 0 ? (
+                <rect width={composition.retainedPercent} height="4" className="fill-chart-2" />
+              ) : null}
+              {composition.reclaimablePercent > 0 ? (
+                <rect
+                  x={composition.retainedPercent}
+                  width={composition.reclaimablePercent}
+                  height="4"
+                  className="fill-chart-4"
+                />
+              ) : null}
+            </svg>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StorageCompositionStat
+                markerClassName="bg-chart-2"
+                label="当前保留"
+                value={formatBytes(composition.retainedBytes)}
+                detail="实际保存在本机"
+              />
+              <StorageCompositionStat
+                markerClassName="bg-muted-foreground/45"
+                label="去重节省"
+                value={formatBytes(report.summary.deduplicatedBytes)}
+                detail="重复文件只保存一份"
+              />
+              <StorageCompositionStat
+                markerClassName="bg-chart-4"
+                label="可清理"
+                value={formatBytes(composition.reclaimableBytes)}
+                detail="满足当前清理条件"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-px border-y bg-border/60 sm:grid-cols-3 lg:grid-cols-5">
+            <StorageStat
+              label="附件总数"
+              value={String(totalAssets(assets))}
+              detail={`${assets.ready} 个可用`}
+              icon={<Database />}
+            />
+            <StorageStat label="唯一文件" value={String(report.summary.uniqueBlobs)} />
+            <StorageStat label="正在使用" value={String(report.summary.activeLeases)} />
+            <StorageStat label="正在导入" value={String(assets.importing)} />
+            <StorageStat label="处理失败" value={String(assets.failed)} />
+          </div>
         </CardContent>
         <CardFooter className="justify-between gap-4 text-xs text-muted-foreground">
           <span>附件逻辑大小 {formatBytes(report.summary.logicalBytes)}</span>
@@ -422,6 +477,33 @@ function StorageOverview({
         </CardFooter>
       </Card>
     </section>
+  )
+}
+
+function StorageCompositionStat({
+  markerClassName,
+  label,
+  value,
+  detail,
+}: {
+  markerClassName: string
+  label: string
+  value: string
+  detail: string
+}): React.JSX.Element {
+  return (
+    <div className="flex min-w-0 items-start gap-2.5">
+      <span
+        className={`mt-1.5 size-2 shrink-0 rounded-full ${markerClassName}`}
+        aria-hidden="true"
+      />
+      <div className="min-w-0">
+        <p className="text-sm font-medium">
+          {label} <span className="tabular-nums">{value}</span>
+        </p>
+        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{detail}</p>
+      </div>
+    </div>
   )
 }
 

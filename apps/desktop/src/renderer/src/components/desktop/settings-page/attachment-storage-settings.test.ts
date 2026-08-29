@@ -51,6 +51,24 @@ describe("AttachmentStorageSettings", () => {
     expect(container.textContent).toContain("存储正常")
   })
 
+  it("visualizes retained and reclaimable storage without treating dedup savings as occupied space", async () => {
+    await renderPage(storageReport({ physicalBytes: 100, reclaimableBytes: 25 }))
+
+    expect(container.textContent).toContain("当前保留")
+    expect(container.textContent).toContain("去重节省")
+    expect(container.textContent).toContain("可清理")
+    expect(
+      container.querySelector(
+        '[aria-label="实际占用由当前保留 75% 和可清理 25% 组成；去重节省不计入实际占用"]'
+      )
+    ).not.toBeNull()
+    expect(container.textContent).toContain("附件总数")
+    expect(container.textContent).toContain("唯一文件")
+    expect(container.textContent).toContain("正在使用")
+    expect(container.textContent).toContain("正在导入")
+    expect(container.textContent).toContain("处理失败")
+  })
+
   it("shows an initial scan error and retries without crashing the settings page", async () => {
     scanStorage
       .mockRejectedValueOnce(new Error("daemon unavailable"))
@@ -176,6 +194,7 @@ function issue(
 function storageReport(
   overrides: {
     issues?: AttachmentStorageIssue[]
+    physicalBytes?: number
     reclaimableBytes?: number
   } = {}
 ): AttachmentStorageReport {
@@ -183,7 +202,7 @@ function storageReport(
     summary: {
       assets: { importing: 1, ready: 10, failed: 2, deleted: 1 },
       uniqueBlobs: 9,
-      physicalBytes: 2 * 1024 * 1024 * 1024,
+      physicalBytes: overrides.physicalBytes ?? 2 * 1024 * 1024 * 1024,
       logicalBytes: 2.5 * 1024 * 1024 * 1024,
       deduplicatedBytes: 512 * 1024 * 1024,
       activeLeases: 3,
