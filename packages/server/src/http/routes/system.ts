@@ -17,6 +17,7 @@ import type {
   SettingsService,
 } from "../../application/index.js";
 import type { DaemonControlService } from "../../application/control/index.js";
+import type { ApplicationRetentionService } from "../../application/retention/application-retention-service.js";
 import {
   DEFAULT_ATTACHMENT_LIMITS,
   type AttachmentLimits,
@@ -39,6 +40,10 @@ export interface SystemRoutesContext {
   >;
   capabilities?: ServerCapabilities;
   attachmentLimits?: AttachmentLimits;
+  retention?: Pick<
+    ApplicationRetentionService,
+    "scanAttachments" | "repairAttachments" | "gcAttachments"
+  >;
 }
 
 export function createSystemRoutes(context: SystemRoutesContext): Hono {
@@ -98,6 +103,39 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
         }),
       ),
     )
+    .get("/attachments/storage", async () => {
+      if (!context.retention) {
+        return errorResponse(501, "Attachment storage diagnostics are not configured");
+      }
+      try {
+        return jsonResponse(await context.retention.scanAttachments());
+      } catch (error) {
+        return errorResponse(500, error instanceof Error ? error.message : String(error));
+      }
+    })
+    .post("/attachments/storage/actions", async (c) => {
+      if (!context.retention) {
+        return errorResponse(501, "Attachment storage diagnostics are not configured");
+      }
+      const body = await readJson(c) as { action?: unknown };
+      if (!['repair-safe', 'gc'].includes(String(body.action))) {
+        return errorResponse(400, "action must be repair-safe or gc");
+      }
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease) return errorResponse(409, "Cannot clean attachment storage while runs are active");
+      try {
+        return jsonResponse(
+          body.action === "repair-safe"
+            ? await context.retention.repairAttachments()
+            : await context.retention.gcAttachments(),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return errorResponse(message.includes("attachment_gc_busy") ? 409 : 500, message);
+      } finally {
+        lease.release();
+      }
+    })
     .get("/commands", async (c) => {
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");
