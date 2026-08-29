@@ -84,6 +84,24 @@ export interface CreateAttachmentRepresentationInput {
   createdAt?: number;
 }
 
+export interface AttachmentLeaseRecord {
+  id: string;
+  assetId: string;
+  ownerKind: "session_run" | "backup";
+  ownerId: string;
+  createdAt: number;
+  renewedAt: number;
+  expiresAt: number;
+}
+
+export interface AcquireAttachmentLeasesInput {
+  assetIds: string[];
+  ownerKind: AttachmentLeaseRecord["ownerKind"];
+  ownerId: string;
+  timestamp: number;
+  expiresAt: number;
+}
+
 import {
   DEFAULT_DELTA_FLUSH_BYTES,
   DEFAULT_DELTA_FLUSH_INTERVAL_MS,
@@ -183,6 +201,7 @@ export interface RetentionPolicy {
   projectionSettlementMaxAgeMs: number;
   completedJobVisibleForMs: number;
   terminalOutputMaxBytes: number;
+  attachmentGracePeriodMs: number;
 }
 
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
@@ -193,6 +212,7 @@ export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
   projectionSettlementMaxAgeMs: 30 * 24 * 60 * 60 * 1_000,
   completedJobVisibleForMs: 7 * 24 * 60 * 60 * 1_000,
   terminalOutputMaxBytes: 10 * 1024 * 1024,
+  attachmentGracePeriodMs: 7 * 24 * 60 * 60 * 1_000,
 };
 
 export class SessionStore {
@@ -376,6 +396,17 @@ export class SessionStore {
     return row ? attachmentAssetFromRow(row) : undefined;
   }
 
+  listAttachments(
+    options: { includeDeleted?: boolean } = {},
+  ): AttachmentAssetRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_asset${
+        options.includeDeleted ? "" : " WHERE status != 'deleted'"
+      } ORDER BY created_at, id`,
+    ).all() as Array<Record<string, unknown>>;
+    return rows.map(attachmentAssetFromRow);
+  }
+
   listImportingAttachments(): ImportingAttachmentRecord[] {
     const rows = this.database
       .prepare(
@@ -408,6 +439,137 @@ export class SessionStore {
     const row = this.database.prepare("SELECT * FROM attachment_representation WHERE id = ?")
       .get(id) as Record<string, unknown> | undefined;
     return row ? attachmentRepresentationFromRow(row) : undefined;
+  }
+
+  listAttachmentRepresentations(
+    assetId: string,
+  ): AttachmentRepresentationRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_representation
+       WHERE asset_id = ?
+       ORDER BY created_at, id`,
+    ).all(assetId) as Array<Record<string, unknown>>;
+    return rows.map(attachmentRepresentationFromRow);
+  }
+
+  acquireAttachmentLeases(
+    input: AcquireAttachmentLeasesInput,
+  ): AttachmentLeaseRecord[] {
+    validateLeaseWindow(input.timestamp, input.expiresAt);
+    const assetIds = [...new Set(input.assetIds)];
+    if (assetIds.length === 0) return [];
+    return this.database.transaction(() => {
+      for (const assetId of assetIds) {
+        const asset = this.getAttachment(assetId);
+        if (asset?.status !== "ready") {
+          throw new AttachmentError(
+            "attachment_not_ready",
+            `Attachment is not ready: ${assetId}`,
+          );
+        }
+      }
+      const upsert = this.database.prepare(
+        `INSERT INTO attachment_lease (
+          id, asset_id, owner_kind, owner_id, created_at, renewed_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(asset_id, owner_kind, owner_id) DO UPDATE SET
+          renewed_at = excluded.renewed_at,
+          expires_at = excluded.expires_at`,
+      );
+      const find = this.database.prepare(
+        `SELECT * FROM attachment_lease
+         WHERE asset_id = ? AND owner_kind = ? AND owner_id = ?`,
+      );
+      return assetIds.map((assetId) => {
+        upsert.run(
+          randomUUID(),
+          assetId,
+          input.ownerKind,
+          input.ownerId,
+          input.timestamp,
+          input.timestamp,
+          input.expiresAt,
+        );
+        return attachmentLeaseFromRow(find.get(
+          assetId,
+          input.ownerKind,
+          input.ownerId,
+        ) as Record<string, unknown>);
+      });
+    }).immediate();
+  }
+
+  renewAttachmentLeases(input: {
+    ownerKind: AttachmentLeaseRecord["ownerKind"];
+    ownerId: string;
+    timestamp: number;
+    expiresAt: number;
+  }): number {
+    validateLeaseWindow(input.timestamp, input.expiresAt);
+    return this.database.prepare(
+      `UPDATE attachment_lease
+       SET renewed_at = ?, expires_at = ?
+       WHERE owner_kind = ? AND owner_id = ? AND expires_at > ?`,
+    ).run(
+      input.timestamp,
+      input.expiresAt,
+      input.ownerKind,
+      input.ownerId,
+      input.timestamp,
+    ).changes;
+  }
+
+  releaseAttachmentLeases(
+    ownerKind: AttachmentLeaseRecord["ownerKind"],
+    ownerId: string,
+  ): number {
+    return this.database.prepare(
+      "DELETE FROM attachment_lease WHERE owner_kind = ? AND owner_id = ?",
+    ).run(ownerKind, ownerId).changes;
+  }
+
+  listActiveAttachmentLeases(timestamp = now()): AttachmentLeaseRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_lease
+       WHERE expires_at > ?
+       ORDER BY asset_id, owner_kind, owner_id`,
+    ).all(timestamp) as Array<Record<string, unknown>>;
+    return rows.map(attachmentLeaseFromRow);
+  }
+
+  listAttachmentLeases(): AttachmentLeaseRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_lease
+       ORDER BY asset_id, owner_kind, owner_id`,
+    ).all() as Array<Record<string, unknown>>;
+    return rows.map(attachmentLeaseFromRow);
+  }
+
+  deleteExpiredAttachmentLeases(timestamp = now()): number {
+    return this.database.prepare(
+      "DELETE FROM attachment_lease WHERE expires_at <= ?",
+    ).run(timestamp).changes;
+  }
+
+  purgeDeletedAttachment(
+    assetId: string,
+    timestamp = now(),
+  ): AttachmentAssetRecord | undefined {
+    return this.database.transaction(() => {
+      const asset = this.getAttachment(assetId, { includeDeleted: true });
+      if (asset?.status !== "deleted") return undefined;
+      const references = this.countInputAttachmentReferences(assetId);
+      if (references > 0) return undefined;
+      const activeLease = this.database.prepare(
+        `SELECT 1 FROM attachment_lease
+         WHERE asset_id = ? AND expires_at > ? LIMIT 1`,
+      ).get(assetId, timestamp);
+      if (activeLease) return undefined;
+      const result = this.database.prepare(
+        "DELETE FROM attachment_asset WHERE id = ? AND status = 'deleted'",
+      ).run(assetId);
+      return result.changes === 1 ? asset : undefined;
+    }).immediate();
   }
 
   findCompletedAttachmentRepresentation(
@@ -1714,6 +1876,48 @@ export class SessionStore {
     return this.database
       .prepare("SELECT * FROM retention_audit ORDER BY created_at DESC")
       .all() as Array<Record<string, unknown>>;
+  }
+
+  recordRetentionAudit(input: {
+    policy: string;
+    result: unknown;
+    timestamp?: number;
+  }): void {
+    this.database.prepare(
+      `INSERT INTO retention_audit (id, policy, result_json, created_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run(
+      randomUUID(),
+      input.policy,
+      JSON.stringify(input.result),
+      input.timestamp ?? now(),
+    );
+  }
+
+  latestRetentionAudit(policy: string): {
+    id: string;
+    policy: string;
+    result: unknown;
+    createdAt: number;
+  } | undefined {
+    const row = this.database.prepare(
+      `SELECT id, policy, result_json, created_at
+       FROM retention_audit
+       WHERE policy = ?
+       ORDER BY created_at DESC, rowid DESC
+       LIMIT 1`,
+    ).get(policy) as {
+      id: string;
+      policy: string;
+      result_json: string;
+      created_at: number;
+    } | undefined;
+    return row ? {
+      id: row.id,
+      policy: row.policy,
+      result: JSON.parse(row.result_json) as unknown,
+      createdAt: row.created_at,
+    } : undefined;
   }
 
   claimWorkflowRun(
@@ -4414,6 +4618,29 @@ function attachmentRepresentationFromRow(row: Record<string, unknown>): Attachme
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+function attachmentLeaseFromRow(row: Record<string, unknown>): AttachmentLeaseRecord {
+  return {
+    id: String(row.id),
+    assetId: String(row.asset_id),
+    ownerKind: String(row.owner_kind) as AttachmentLeaseRecord["ownerKind"],
+    ownerId: String(row.owner_id),
+    createdAt: Number(row.created_at),
+    renewedAt: Number(row.renewed_at),
+    expiresAt: Number(row.expires_at),
+  };
+}
+
+function validateLeaseWindow(timestamp: number, expiresAt: number): void {
+  if (
+    !Number.isSafeInteger(timestamp) ||
+    timestamp < 0 ||
+    !Number.isSafeInteger(expiresAt) ||
+    expiresAt <= timestamp
+  ) {
+    throw new Error("Attachment lease expiry must be after its timestamp");
+  }
 }
 
 function externalConversationFromRow(

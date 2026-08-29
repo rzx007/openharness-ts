@@ -1,4 +1,5 @@
 import {
+  type AttachmentIntegrityService,
   DEFAULT_RETENTION_POLICY,
   type RetentionPolicy,
   type SessionStore,
@@ -6,7 +7,10 @@ import {
 
 /** 手动或定时运行的数据清理入口；每次结果都会写入 retention_audit。 */
 export class ApplicationRetentionService {
-  constructor(private readonly store: SessionStore) {}
+  constructor(
+    private readonly store: SessionStore,
+    private readonly attachmentIntegrity?: AttachmentIntegrityService,
+  ) {}
 
   get policy(): RetentionPolicy {
     return { ...DEFAULT_RETENTION_POLICY };
@@ -18,5 +22,30 @@ export class ApplicationRetentionService {
 
   audits(): Array<Record<string, unknown>> {
     return this.store.listRetentionAudits();
+  }
+
+  scanAttachments() {
+    return this.requireAttachmentIntegrity().scan({
+      gracePeriodMs: DEFAULT_RETENTION_POLICY.attachmentGracePeriodMs,
+    });
+  }
+
+  repairAttachments() {
+    return this.requireAttachmentIntegrity().repairSafe({
+      gracePeriodMs: DEFAULT_RETENTION_POLICY.attachmentGracePeriodMs,
+    });
+  }
+
+  gcAttachments() {
+    return this.requireAttachmentIntegrity().gc({
+      gracePeriodMs: DEFAULT_RETENTION_POLICY.attachmentGracePeriodMs,
+    });
+  }
+
+  private requireAttachmentIntegrity(): AttachmentIntegrityService {
+    if (!this.attachmentIntegrity) {
+      throw new Error("Attachment integrity service is not configured");
+    }
+    return this.attachmentIntegrity;
   }
 }

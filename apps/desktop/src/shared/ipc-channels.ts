@@ -85,6 +85,11 @@ import type {
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
 } from "./attachment-types"
+import type {
+  AttachmentStorageGcResult,
+  AttachmentStorageRepairResult,
+  AttachmentStorageReport,
+} from "@openharness/client"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -156,6 +161,9 @@ export const IpcChannels = {
   attachmentReadPreview: "attachment:read-preview",
   attachmentOpen: "attachment:open",
   attachmentSaveAs: "attachment:save-as",
+  attachmentStorageScan: "attachment:storage-scan",
+  attachmentStorageRepair: "attachment:storage-repair",
+  attachmentStorageGc: "attachment:storage-gc",
 
   workspaceListFiles: "workspace:list-files",
   workspaceReadFile: "workspace:read-file",
@@ -426,6 +434,9 @@ export interface IpcInvokeMap {
     args: [input: DesktopAttachmentAssetInput]
     result: { saved: boolean }
   }
+  [IpcChannels.attachmentStorageScan]: { args: []; result: AttachmentStorageReport }
+  [IpcChannels.attachmentStorageRepair]: { args: []; result: AttachmentStorageRepairResult }
+  [IpcChannels.attachmentStorageGc]: { args: []; result: AttachmentStorageGcResult }
 
   [IpcChannels.workspaceListFiles]: {
     args: [input: WorkspaceListFilesInput]

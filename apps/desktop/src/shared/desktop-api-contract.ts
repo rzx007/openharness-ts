@@ -94,6 +94,11 @@ import type {
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
 } from "./attachment-types"
+import type {
+  AttachmentStorageGcResult,
+  AttachmentStorageRepairResult,
+  AttachmentStorageReport,
+} from "@openharness/client"
 
 export type DesktopAPI = {
   app: {
@@ -156,6 +161,9 @@ export type DesktopAPI = {
     readPreview: (input: DesktopAttachmentAssetInput) => Promise<DesktopAttachmentPreview>
     open: (input: DesktopAttachmentAssetInput) => Promise<void>
     saveAs: (input: DesktopAttachmentAssetInput) => Promise<{ saved: boolean }>
+    scanStorage: () => Promise<AttachmentStorageReport>
+    repairStorage: () => Promise<AttachmentStorageRepairResult>
+    gcStorage: () => Promise<AttachmentStorageGcResult>
     onUploadEvent: (listener: (event: DesktopAttachmentUploadEvent) => void) => () => void
   }
   terminal: {

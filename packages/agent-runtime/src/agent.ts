@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  CompactAttachmentsProvider,
   AgentChildDirectory,
   AgentChildBudgetSnapshot,
   AgentEffects,
@@ -108,6 +109,9 @@ export interface OpenHarnessAgent {
   loadHistory(messages: Message[]): void;
   clear(): void;
   setModel(model: string): void;
+  setCompactAttachmentsProvider(
+    provider: CompactAttachmentsProvider | undefined,
+  ): void;
   compact(): Promise<AgentCompactResult>;
   remember(): Promise<AgentRememberResult>;
   getUsage(): UsageSnapshot;
@@ -209,6 +213,13 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     this.assertIdle("set the model");
     this.model = model;
     this.runtime.queryEngine.setModel(model);
+  }
+
+  setCompactAttachmentsProvider(
+    provider: CompactAttachmentsProvider | undefined,
+  ): void {
+    this.assertIdle("set compact attachments provider");
+    this.runtime.queryEngine.setAttachmentsProvider(provider);
   }
 
   compact(): Promise<AgentCompactResult> {

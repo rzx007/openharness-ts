@@ -5,6 +5,7 @@ import {
   mkdir,
   open,
   readdir,
+  rmdir,
   unlink,
   type FileHandle,
 } from "node:fs/promises";
@@ -41,6 +42,12 @@ export interface ImportedAttachmentBlob {
 export interface AttachmentBlobRange {
   start?: number;
   end?: number;
+}
+
+export interface StoredAttachmentBlob {
+  sha256: string;
+  sizeBytes: number;
+  modifiedAt: number;
 }
 
 export interface RecoverStagingOptions {
@@ -224,6 +231,76 @@ export class AttachmentBlobStore {
     }
   }
 
+  async listBlobs(): Promise<StoredAttachmentBlob[]> {
+    await this.initialize();
+    const blobs: StoredAttachmentBlob[] = [];
+    const buckets = await readdir(this.blobsRoot, { withFileTypes: true });
+    for (const bucket of buckets) {
+      if (!bucket.isDirectory() || !/^[a-f0-9]{2}$/.test(bucket.name)) continue;
+      const bucketRoot = join(this.blobsRoot, bucket.name);
+      const entries = await readdir(bucketRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (
+          !entry.isFile() ||
+          !SHA256_PATTERN.test(entry.name) ||
+          !entry.name.startsWith(bucket.name)
+        ) {
+          continue;
+        }
+        const stats = await lstat(join(bucketRoot, entry.name));
+        if (!stats.isFile() || stats.isSymbolicLink()) continue;
+        blobs.push({
+          sha256: entry.name,
+          sizeBytes: stats.size,
+          modifiedAt: stats.mtimeMs,
+        });
+      }
+    }
+    return blobs.sort((left, right) => left.sha256.localeCompare(right.sha256));
+  }
+
+  async inspectBlob(sha256: string): Promise<StoredAttachmentBlob | undefined> {
+    validateSha256(sha256);
+    try {
+      const stats = await lstat(this.blobPath(sha256));
+      if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw attachmentBytesUnavailable();
+      }
+      return { sha256, sizeBytes: stats.size, modifiedAt: stats.mtimeMs };
+    } catch (error) {
+      if (nodeErrorCode(error) === "ENOENT") return undefined;
+      if (isAttachmentError(error)) throw error;
+      throw attachmentBytesUnavailable();
+    }
+  }
+
+  async deleteBlob(
+    sha256: string,
+  ): Promise<{ deleted: boolean; sizeBytes: number }> {
+    validateSha256(sha256);
+    const blob = await this.inspectBlob(sha256);
+    if (!blob) return { deleted: false, sizeBytes: 0 };
+    try {
+      await unlink(this.blobPath(sha256));
+      await rmdir(join(this.blobsRoot, sha256.slice(0, 2))).catch((error) => {
+        if (!["ENOTEMPTY", "ENOENT"].includes(nodeErrorCode(error) ?? "")) {
+          throw error;
+        }
+      });
+      return { deleted: true, sizeBytes: blob.sizeBytes };
+    } catch (error) {
+      if (nodeErrorCode(error) === "ENOENT") {
+        return { deleted: false, sizeBytes: 0 };
+      }
+      if (isAttachmentError(error)) throw error;
+      throw new AttachmentError(
+        "attachment_storage_failed",
+        "failed to delete attachment bytes",
+        true,
+      );
+    }
+  }
+
   async recoverStaging(
     options: RecoverStagingOptions,
   ): Promise<RecoverStagingResult> {
@@ -264,6 +341,10 @@ export class AttachmentBlobStore {
       );
     }
     return this.now() - maxAgeMs;
+  }
+
+  private blobPath(sha256: string): string {
+    return join(this.blobsRoot, sha256.slice(0, 2), sha256);
   }
 }
 

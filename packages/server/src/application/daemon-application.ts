@@ -18,6 +18,7 @@ import {
 import {
   AttachmentApplicationService,
   AttachmentBlobStore,
+  AttachmentIntegrityService,
   LightOcrEngine,
   LocalOcrService,
   closeExecutionRuntimes,
@@ -71,6 +72,7 @@ import { ProjectApplicationService } from "./project-application-service.js";
 import { ChannelApplicationService } from "./channel/channel-application-service.js";
 import { SessionWorkflowRunRepository } from "./workflow/session-workflow-run-repository.js";
 import { ApplicationRetentionService } from "./retention/application-retention-service.js";
+import { buildCompactAttachmentCatalog } from "./attachment-resource/compact-attachment-catalog.js";
 import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capability-router.js";
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
@@ -194,13 +196,14 @@ export class DaemonApplication implements DurableAgentApplication {
     }, options.ownerHeartbeatMs ?? 5_000);
     this.ownerHeartbeat.unref?.();
     try {
+      const attachmentBlobs = new AttachmentBlobStore({
+        root: options.attachmentRoot ?? join(dirname(store.path), "attachments"),
+      });
       this.attachments =
         options.attachments ??
         new AttachmentApplicationService({
           store,
-          blobs: new AttachmentBlobStore({
-            root: options.attachmentRoot ?? join(dirname(store.path), "attachments"),
-          }),
+          blobs: attachmentBlobs,
           limits: options.attachmentLimits,
         });
       this.attachmentResources = new SessionAttachmentResources({
@@ -246,7 +249,14 @@ export class DaemonApplication implements DurableAgentApplication {
         (previousEventSeq) =>
           this.eventPublisher.publishSince(previousEventSeq),
       );
-      this.retention = new ApplicationRetentionService(store);
+      this.retention = new ApplicationRetentionService(
+        store,
+        new AttachmentIntegrityService({
+          store,
+          blobs: attachmentBlobs,
+          operationGate: this.attachments.operationGate,
+        }),
+      );
       this.terminals = new DaemonTerminalService(store);
       this.projects = new ProjectApplicationService(store);
       this.permissions = new StorePermissionBroker({
@@ -366,6 +376,9 @@ export class DaemonApplication implements DurableAgentApplication {
       this.agentPool = new AgentPool({
         store,
         loadAgent,
+        compactAttachments: (sessionId) => ({
+          attachmentCatalog: buildCompactAttachmentCatalog(store, sessionId),
+        }),
         isSessionExternallyOwned: (sessionId) =>
           this.liveChildren.has(sessionId),
       });

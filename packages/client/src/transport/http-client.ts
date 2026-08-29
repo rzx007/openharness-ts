@@ -68,6 +68,9 @@ import type {
   UploadAttachmentInput,
   DownloadAttachmentOptions,
   AttachmentAssetRecord,
+  AttachmentStorageGcResult,
+  AttachmentStorageRepairResult,
+  AttachmentStorageReport,
 } from "../types/index.js";
 import type {
   JobKind,
@@ -282,6 +285,34 @@ export class OpenHarnessClient {
       { method: "DELETE", signal: options.signal },
     );
     return parseAttachmentAssetRecord(value);
+  }
+
+  async scanAttachmentStorage(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AttachmentStorageReport> {
+    return await this.request<AttachmentStorageReport>("/attachments/storage", {
+      signal: options.signal,
+    });
+  }
+
+  async repairAttachmentStorage(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AttachmentStorageRepairResult> {
+    return await this.request<AttachmentStorageRepairResult>("/attachments/storage/actions", {
+      method: "POST",
+      body: { action: "repair-safe" },
+      signal: options.signal,
+    });
+  }
+
+  async gcAttachmentStorage(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AttachmentStorageGcResult> {
+    return await this.request<AttachmentStorageGcResult>("/attachments/storage/actions", {
+      method: "POST",
+      body: { action: "gc" },
+      signal: options.signal,
+    });
   }
 
   async handleChannelMessage(

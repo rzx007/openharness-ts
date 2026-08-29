@@ -1364,42 +1364,40 @@ daemon 启动时：
 
 PDF/Office 的原生输入、转换、扫描页 OCR、文档索引和预览另立后续阶段，不再算作阶段 6 未完成项。
 
-### 阶段 7：Compaction、资源生命周期与 Provider 文件缓存
+### 阶段 7：Compaction 与本地资源生命周期（已完成，2026-08-29）
 
 #### 目标
 
-让附件在长会话、上下文压缩、Provider 复用、删除和备份恢复中保持正确且成本可控。
+让附件在长会话、上下文压缩、删除和备份恢复中保持正确且成本可控。本阶段按已确认调整只完成本地附件生命周期；Provider 文件缓存等待真正接入原生远端文件输入后再设计。
 
 #### 交付内容
 
 - attachment-aware compact；
 - representation 摘要和索引保留；
-- Provider Files API cache；
-- credential/workspace scope；
-- Provider 文件过期、删除和重传；
 - 引用计数、lease、grace period 和 GC；
 - backup manifest 与 restore consistency check；
 - orphan scanner 与修复命令；
 - 会话删除/fork/重放的压力测试；
-- 存储配额和用户可见清理界面。
+- HTTP、Client 和 Desktop 最小诊断调用链。
+
+明确延期：Provider Files API cache、credential/workspace scope、远端文件过期/删除/重传、完整存储配额设置和图形化清理界面。
 
 #### 主要代码区域
 
 - `packages/core/src/engine/compact-service.ts`；
 - `packages/services/src/attachment/`；
 - `packages/server/src/application/attachment/`；
-- `packages/api/src/providers/`；
 - control/diagnostic routes；
-- Desktop storage settings page。
+- Client/Desktop shared contract 与 IPC。
 
 #### 验收门槛
 
 - compaction 后仍能回答“继续分析刚才的附件”；
-- Provider remote file 只在相同 credential scope 复用；
-- 过期 remote ID 自动重传一次并更新 cache；
 - 删除会话不会误删 fork/活跃 run 的附件；
 - GC 可重复执行且不删除有引用 blob；
 - backup/restore 能检测并报告缺失原始 blob。
+
+阶段验收已通过：全仓测试、全仓类型检查、文档检查和差异检查均成功。Provider 远端文件相关门槛随延期能力移动到后续独立设计，不作为本阶段未完成项。
 
 ### 阶段 8：分片上传、远程可靠性与文件夹
 
@@ -1487,7 +1485,7 @@ PDF/Office 的原生输入、转换、扫描页 OCR、文档索引和预览另�
    ↓
 阶段 6：文档与通用文件
    ↓
-阶段 7：Compaction、缓存与生命周期
+阶段 7：Compaction 与本地生命周期
    ↓
 阶段 8：远程大文件与文件夹
    ↓

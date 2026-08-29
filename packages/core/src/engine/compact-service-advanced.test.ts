@@ -323,6 +323,61 @@ describe("compact attachments", () => {
     expect(client.lastPrompt).toContain("## Current Task");
     expect(client.lastPrompt).toContain("finish compact docs");
   });
+
+  it("includes a bounded attachment catalog without inventing image contents", async () => {
+    const client = makeSummaryClient("<summary>ok</summary>");
+    const svc = new CompactService(SMALL_MAX, 2, {
+      client,
+      attachmentsProvider: () => ({
+        attachmentCatalog: {
+          entries: [
+            {
+              assetId: "att-image",
+              inputId: "input-1",
+              displayName: "收据.png",
+              mediaType: "image/png",
+              sizeBytes: 2048,
+              intent: "ocr",
+              status: "available",
+              resourceUri: "attachment://att-image/%E6%94%B6%E6%8D%AE.png",
+              access: "image_to_text",
+            },
+            {
+              assetId: "att-text",
+              inputId: "input-2",
+              displayName: "notes.txt",
+              mediaType: "text/plain",
+              sizeBytes: 42,
+              intent: "tool_resource",
+              status: "available",
+              resourceUri: "attachment://att-text/notes.txt",
+              access: "read_text",
+              representation: {
+                kind: "plain_text",
+                processor: "safe-text",
+                processorVersion: "1",
+                textPreview: "hello from the attachment",
+                truncated: false,
+              },
+            },
+          ],
+          omittedCount: 3,
+        },
+      }),
+    });
+
+    await svc.autoCompact(bigConversation(15));
+
+    expect(client.lastPrompt).toContain("## Conversation Attachments");
+    expect(client.lastPrompt).toContain("att-image");
+    expect(client.lastPrompt).toContain("收据.png");
+    expect(client.lastPrompt).toContain("Use ImageToText to inspect this image");
+    expect(client.lastPrompt).toContain("att-text");
+    expect(client.lastPrompt).toContain("hello from the attachment");
+    expect(client.lastPrompt).toContain("processor=safe-text@1");
+    expect(client.lastPrompt).toContain("3 additional attachment references omitted");
+    expect(client.lastPrompt).not.toContain("recognized total");
+  });
 });
 
 // ---------------------------------------------------------------------------

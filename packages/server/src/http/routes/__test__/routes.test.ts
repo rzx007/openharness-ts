@@ -121,6 +121,39 @@ describe("Scheduled task routes", () => {
 });
 
 describe("system routes", () => {
+  it("exposes attachment storage scan and explicit safe maintenance actions", async () => {
+    const scanAttachments = vi.fn(async () => ({ summary: { physicalBytes: 10 }, issues: [] }));
+    const repairAttachments = vi.fn(async () => ({ expiredLeases: 1 }));
+    const gcAttachments = vi.fn(async () => ({ deletedAssets: 2 }));
+    const app = createSystemRoutes({
+      control: daemonControl(),
+      retention: { scanAttachments, repairAttachments, gcAttachments },
+    });
+
+    const scan = await app.request("/attachments/storage");
+    expect(scan.status).toBe(200);
+    await expect(scan.json()).resolves.toMatchObject({ summary: { physicalBytes: 10 } });
+
+    const repaired = await app.request("/attachments/storage/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "repair-safe" }),
+    });
+    expect(repaired.status).toBe(200);
+    await expect(repaired.json()).resolves.toEqual({ expiredLeases: 1 });
+
+    const collected = await app.request("/attachments/storage/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "gc" }),
+    });
+    expect(collected.status).toBe(200);
+    await expect(collected.json()).resolves.toEqual({ deletedAssets: 2 });
+    expect(scanAttachments).toHaveBeenCalledOnce();
+    expect(repairAttachments).toHaveBeenCalledOnce();
+    expect(gcAttachments).toHaveBeenCalledOnce();
+  });
+
   it("serves health from the runtime snapshot", async () => {
     const app = createSystemRoutes({
       version: "1.2.3",

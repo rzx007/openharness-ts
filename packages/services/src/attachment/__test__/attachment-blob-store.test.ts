@@ -237,6 +237,44 @@ describe("AttachmentBlobStore", () => {
     });
   });
 
+  it("lists, inspects, and idempotently deletes only hash-addressed blobs", async () => {
+    const { store } = createStore();
+    const first = await store.import({
+      uploadId: "att-list-a",
+      content: streamOf([bytes("alpha")]),
+      maxBytes: 32,
+    });
+    const second = await store.import({
+      uploadId: "att-list-b",
+      content: streamOf([bytes("beta")]),
+      maxBytes: 32,
+    });
+
+    expect((await store.listBlobs()).map(({ sha256, sizeBytes }) => ({
+      sha256,
+      sizeBytes,
+    }))).toEqual([
+      { sha256: first.sha256, sizeBytes: 5 },
+      { sha256: second.sha256, sizeBytes: 4 },
+    ].sort((left, right) => left.sha256.localeCompare(right.sha256)));
+    await expect(store.inspectBlob(first.sha256)).resolves.toEqual(
+      expect.objectContaining({ sha256: first.sha256, sizeBytes: 5 }),
+    );
+    await expect(store.inspectBlob("../unsafe")).rejects.toMatchObject({
+      code: "attachment_invalid_request",
+    });
+
+    await expect(store.deleteBlob(first.sha256)).resolves.toEqual({
+      deleted: true,
+      sizeBytes: 5,
+    });
+    await expect(store.deleteBlob(first.sha256)).resolves.toEqual({
+      deleted: false,
+      sizeBytes: 0,
+    });
+    await expect(store.inspectBlob(first.sha256)).resolves.toBeUndefined();
+  });
+
   it("removes only expired unowned staging files", async () => {
     const now = 10_000;
     const { root, store } = createStore(() => now);

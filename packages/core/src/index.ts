@@ -135,7 +135,13 @@ export {
 export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
 export { ToolRegistry } from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
-export { CompactService } from "./engine/compact-service";
+export {
+  CompactService,
+  type CompactAttachmentCatalog,
+  type CompactAttachmentCatalogEntry,
+  type CompactAttachments,
+  type CompactAttachmentsProvider,
+} from "./engine/compact-service";
 export { CostTracker } from "./engine/cost-tracker";
 
 export {

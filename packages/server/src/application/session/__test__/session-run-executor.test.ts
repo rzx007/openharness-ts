@@ -163,6 +163,20 @@ describe("SessionRunExecutor", () => {
       runId: "run-1",
     }));
     expect(cleanupResources).toHaveBeenCalledOnce();
+    expect(store.acquireAttachmentLeases).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["asset-1"],
+        ownerKind: "session_run",
+        ownerId: "run-1",
+      }),
+    );
+    expect(store.releaseAttachmentLeases).toHaveBeenCalledWith(
+      "session_run",
+      "run-1",
+    );
+    expect(store.acquireAttachmentLeases.mock.invocationCallOrder[0]).toBeLessThan(
+      submitMessage.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("settles a blocked attachment run after inspecting and then closes the agent", async () => {
@@ -242,6 +256,9 @@ function createStore(options: { attachments?: ReturnType<typeof attachment>[] } 
     getRun: vi.fn(() => run),
     appendEvent: vi.fn(),
     updateRun: vi.fn((id, update) => Object.assign(run, update, { id })),
+    acquireAttachmentLeases: vi.fn(() => []),
+    renewAttachmentLeases: vi.fn(() => 1),
+    releaseAttachmentLeases: vi.fn(() => 1),
   };
 }
 

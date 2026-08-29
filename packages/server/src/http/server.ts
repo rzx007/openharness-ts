@@ -320,6 +320,7 @@ export class OpenHarnessHttpServer {
         providerService: this.services.provider,
         modelService: this.services.model,
         control: this.application.control,
+        retention: this.application.retention,
         attachmentLimits: this.application.attachments.limits,
       }),
     );

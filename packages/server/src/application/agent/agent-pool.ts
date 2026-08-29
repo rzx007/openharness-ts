@@ -1,4 +1,5 @@
 import type { OpenHarnessAgent } from "@openharness/agent-runtime";
+import type { CompactAttachments } from "@openharness/core";
 import type { SessionStore } from "@openharness/services";
 import type {
   SessionMessagePartRecord,
@@ -11,6 +12,9 @@ import type { LoadDaemonAgent } from "../../daemon/daemon-agent.js";
 export interface AgentPoolContext {
   store: Pick<SessionStore, "getSession" | "listMessageParts" | "listMessages" | "listSessions">;
   loadAgent?: LoadDaemonAgent;
+  compactAttachments?(
+    sessionId: string,
+  ): CompactAttachments | Promise<CompactAttachments>;
   isSessionExternallyOwned?(sessionId: string): boolean;
 }
 
@@ -139,6 +143,14 @@ export class AgentPool {
     const loadAgent = this.context.loadAgent;
     if (!loadAgent) throw new Error("Agent runtime is not configured");
     const agent = await loadAgent({ session, history, parts });
+    if (
+      this.context.compactAttachments
+      && typeof agent.setCompactAttachmentsProvider === "function"
+    ) {
+      agent.setCompactAttachmentsProvider(() =>
+        this.context.compactAttachments!(session.id)
+      );
+    }
     entry.agent = agent;
     return agent;
   }
