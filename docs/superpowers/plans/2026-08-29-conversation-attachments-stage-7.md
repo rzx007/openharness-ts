@@ -1,5 +1,7 @@
 # 对话附件阶段 7 实施计划
 
+> 完成状态：已实施并通过验收（2026-08-29）。实际提交为 `c8ab5f4`、`a15c5ca`、`b7edaf5`、`966303b`、`e405985` 和审查补强提交 `5dac4e3`。
+
 > **执行要求：** 使用 `executing-plans` 按本计划推进；每个大步骤内部使用 `test-driven-development`，先写失败测试，再写最小实现。完成前使用 `requesting-code-review` 和 `verification-before-completion`。
 
 **目标：** 让附件在对话压缩、活跃运行、物理回收和备份恢复中保持可继续访问、不会误删、能够检查并一致恢复。
@@ -328,3 +330,12 @@ docs: complete attachment lifecycle stage
 ```
 
 完成后使用 `finishing-a-development-branch` 给出本地合并选项；若用户继续要求本地合并，则在 main 重新运行关键验证后 fast-forward 合并，并安全移除 worktree 和功能分支。
+
+## 实际执行结果
+
+- 大步骤 1—5 已完成；阶段边界按批准后的本地生命周期方案执行，没有引入 Provider Files API 或二进制文档支持。
+- 审查阶段补上了上传与 GC 的共享/独占 gate，避免内容去重上传与物理删除竞态。
+- GC 结果写入现有 `retention_audit`，诊断报告返回最近一次审计；文件删除失败保留墓碑并允许后续重试。
+- 恢复流程先在与目标同目录的临时路径恢复并复检，再 rename 为正式目标；失败只清理本次临时结果，并拒绝重复、嵌套或位于备份源内的目标。
+- Client 与 Desktop 已接通 scan、repair-safe、gc 的最小类型化调用链，没有新增完整存储管理页面。
+- 最终全仓测试 58/58 个 Turbo 任务成功，类型检查 57/57 个 Turbo 任务成功，112 份 Markdown 文档检查通过，`git diff --check` 通过。
