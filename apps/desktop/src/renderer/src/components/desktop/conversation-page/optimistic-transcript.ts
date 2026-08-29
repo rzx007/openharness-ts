@@ -1,5 +1,47 @@
 import type { PendingPromptSubmission } from "@renderer/stores/desktop-session/types"
-import type { DesktopSessionMessage, DesktopSessionPart } from "@shared/session-types"
+import type {
+  DesktopSessionInput,
+  DesktopSessionMessage,
+  DesktopSessionPart,
+  DesktopSessionRun,
+} from "@shared/session-types"
+
+export function derivePendingHandoffSubmission(
+  messages: DesktopSessionMessage[],
+  inputs: DesktopSessionInput[],
+  runs: DesktopSessionRun[],
+  excludedRunIds: ReadonlySet<string> = new Set()
+): PendingPromptSubmission | undefined {
+  if (runs.some((run) => run.status === "running")) return undefined
+
+  const nextRun = runs
+    .filter((run) => run.status === "pending" && run.inputId && !excludedRunIds.has(run.id))
+    .sort((left, right) => left.createdAt - right.createdAt)[0]
+  if (!nextRun?.inputId) return undefined
+  if (messages.some((message) => message.role === "user" && message.inputId === nextRun.inputId)) {
+    return undefined
+  }
+
+  const input = inputs.find((candidate) => candidate.id === nextRun.inputId)
+  if (!input) return undefined
+  return {
+    id: input.id,
+    sessionId: input.sessionId,
+    content: input.content,
+    attachments: [...input.attachments]
+      .sort((left, right) => left.seq - right.seq)
+      .map(({ assetId, intent, displayName, mediaType, sizeBytes }) => ({
+        assetId,
+        intent,
+        displayName,
+        mediaType,
+        sizeBytes,
+      })),
+    createdAt: input.createdAt,
+    phase: "accepted",
+    placement: "transcript",
+  }
+}
 
 export function mergeOptimisticTranscript(
   messages: DesktopSessionMessage[],

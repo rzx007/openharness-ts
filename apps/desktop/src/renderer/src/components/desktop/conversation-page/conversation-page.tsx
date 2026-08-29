@@ -34,7 +34,7 @@ import {
 } from "@renderer/stores/desktop-session/selectors"
 import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
-import { mergeOptimisticTranscript } from "./optimistic-transcript"
+import { derivePendingHandoffSubmission, mergeOptimisticTranscript } from "./optimistic-transcript"
 import {
   skillCommandInvocationLine,
   toComposerSkillCommands,
@@ -184,10 +184,28 @@ function ConversationPane({
   const localPromptSubmissions = Object.values(pendingPromptSubmissions)
     .filter((submission) => submission.sessionId === activeSessionId)
     .sort((left, right) => left.createdAt - right.createdAt)
+  const pendingHandoffSubmission = derivePendingHandoffSubmission(
+    sessionView?.messages ?? [],
+    sessionView?.inputs ?? [],
+    sessionView?.runs ?? [],
+    new Set(
+      Object.values(queuedPromptActions)
+        .filter((action) => action.phase !== "failed")
+        .map((action) => action.runId)
+    )
+  )
+  const transcriptSubmissions =
+    pendingHandoffSubmission &&
+    !localPromptSubmissions.some(
+      (submission) =>
+        submission.id === pendingHandoffSubmission.id && submission.placement === "transcript"
+    )
+      ? [...localPromptSubmissions, pendingHandoffSubmission]
+      : localPromptSubmissions
   const transcript = mergeOptimisticTranscript(
     sessionView?.messages ?? [],
     sessionView?.parts ?? [],
-    localPromptSubmissions
+    transcriptSubmissions
   )
   const hasAgentTasks = Boolean(
     sessionView?.tasks.some((task) => task.type === "agent" && task.childSessionId)
@@ -196,8 +214,7 @@ function ConversationPane({
   const skillCommands =
     commandCwd && skillCommandSnapshot?.cwd === commandCwd ? skillCommandSnapshot.commands : []
   const canSubmit =
-    areDesktopAttachmentsSendable(attachments) &&
-    Boolean(draft.trim() || attachments.length > 0)
+    areDesktopAttachmentsSendable(attachments) && Boolean(draft.trim() || attachments.length > 0)
 
   const pasteAttachments = async (files: readonly File[]): Promise<void> => {
     const payloads = await Promise.all(
