@@ -18,6 +18,7 @@ import {
 import {
   AttachmentApplicationService,
   AttachmentBlobStore,
+  AttachmentIntegrityService,
   LightOcrEngine,
   LocalOcrService,
   closeExecutionRuntimes,
@@ -195,13 +196,14 @@ export class DaemonApplication implements DurableAgentApplication {
     }, options.ownerHeartbeatMs ?? 5_000);
     this.ownerHeartbeat.unref?.();
     try {
+      const attachmentBlobs = new AttachmentBlobStore({
+        root: options.attachmentRoot ?? join(dirname(store.path), "attachments"),
+      });
       this.attachments =
         options.attachments ??
         new AttachmentApplicationService({
           store,
-          blobs: new AttachmentBlobStore({
-            root: options.attachmentRoot ?? join(dirname(store.path), "attachments"),
-          }),
+          blobs: attachmentBlobs,
           limits: options.attachmentLimits,
         });
       this.attachmentResources = new SessionAttachmentResources({
@@ -247,7 +249,10 @@ export class DaemonApplication implements DurableAgentApplication {
         (previousEventSeq) =>
           this.eventPublisher.publishSince(previousEventSeq),
       );
-      this.retention = new ApplicationRetentionService(store);
+      this.retention = new ApplicationRetentionService(
+        store,
+        new AttachmentIntegrityService({ store, blobs: attachmentBlobs }),
+      );
       this.terminals = new DaemonTerminalService(store);
       this.projects = new ProjectApplicationService(store);
       this.permissions = new StorePermissionBroker({

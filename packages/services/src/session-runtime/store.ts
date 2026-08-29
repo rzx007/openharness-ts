@@ -201,6 +201,7 @@ export interface RetentionPolicy {
   projectionSettlementMaxAgeMs: number;
   completedJobVisibleForMs: number;
   terminalOutputMaxBytes: number;
+  attachmentGracePeriodMs: number;
 }
 
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
@@ -211,6 +212,7 @@ export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
   projectionSettlementMaxAgeMs: 30 * 24 * 60 * 60 * 1_000,
   completedJobVisibleForMs: 7 * 24 * 60 * 60 * 1_000,
   terminalOutputMaxBytes: 10 * 1024 * 1024,
+  attachmentGracePeriodMs: 7 * 24 * 60 * 60 * 1_000,
 };
 
 export class SessionStore {
@@ -394,6 +396,17 @@ export class SessionStore {
     return row ? attachmentAssetFromRow(row) : undefined;
   }
 
+  listAttachments(
+    options: { includeDeleted?: boolean } = {},
+  ): AttachmentAssetRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_asset${
+        options.includeDeleted ? "" : " WHERE status != 'deleted'"
+      } ORDER BY created_at, id`,
+    ).all() as Array<Record<string, unknown>>;
+    return rows.map(attachmentAssetFromRow);
+  }
+
   listImportingAttachments(): ImportingAttachmentRecord[] {
     const rows = this.database
       .prepare(
@@ -524,10 +537,39 @@ export class SessionStore {
     return rows.map(attachmentLeaseFromRow);
   }
 
+  listAttachmentLeases(): AttachmentLeaseRecord[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM attachment_lease
+       ORDER BY asset_id, owner_kind, owner_id`,
+    ).all() as Array<Record<string, unknown>>;
+    return rows.map(attachmentLeaseFromRow);
+  }
+
   deleteExpiredAttachmentLeases(timestamp = now()): number {
     return this.database.prepare(
       "DELETE FROM attachment_lease WHERE expires_at <= ?",
     ).run(timestamp).changes;
+  }
+
+  purgeDeletedAttachment(
+    assetId: string,
+    timestamp = now(),
+  ): AttachmentAssetRecord | undefined {
+    return this.database.transaction(() => {
+      const asset = this.getAttachment(assetId, { includeDeleted: true });
+      if (asset?.status !== "deleted") return undefined;
+      const references = this.countInputAttachmentReferences(assetId);
+      if (references > 0) return undefined;
+      const activeLease = this.database.prepare(
+        `SELECT 1 FROM attachment_lease
+         WHERE asset_id = ? AND expires_at > ? LIMIT 1`,
+      ).get(assetId, timestamp);
+      if (activeLease) return undefined;
+      const result = this.database.prepare(
+        "DELETE FROM attachment_asset WHERE id = ? AND status = 'deleted'",
+      ).run(assetId);
+      return result.changes === 1 ? asset : undefined;
+    }).immediate();
   }
 
   findCompletedAttachmentRepresentation(
