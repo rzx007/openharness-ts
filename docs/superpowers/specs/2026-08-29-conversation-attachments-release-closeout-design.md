@@ -1,7 +1,7 @@
 # 对话附件小型发布收口设计
 
 日期：2026-08-29  
-状态：待用户书面确认  
+状态：已实现，等待用户实际页面反馈
 分支：`codex/attachment-release-closeout`
 
 ## 1. 目标
@@ -75,9 +75,9 @@
 页面只调用已经存在的 Desktop API：
 
 ```ts
-window.desktop.attachments.scanStorage()
-window.desktop.attachments.repairStorage()
-window.desktop.attachments.gcStorage()
+window.desktop.attachments.scanStorage();
+window.desktop.attachments.repairStorage();
+window.desktop.attachments.gcStorage();
 ```
 
 主进程继续通过现有 IPC 和 Client 调用 daemon。渲染层不直接访问数据库或附件目录，也不新增另一套统计逻辑。
@@ -132,13 +132,13 @@ window.desktop.attachments.gcStorage()
 
 底层问题代码映射为固定用户文案：
 
-| 问题代码 | 用户说明 | 可执行动作 |
-| --- | --- | --- |
-| `missing_blob` | 附件记录存在，但本地文件缺失 | 提示重新扫描后仍存在则保留错误，不承诺自动恢复 |
-| `size_mismatch` | 附件文件大小与记录不一致 | 提示数据异常，不由安全修复删除 |
-| `orphan_blob` | 本地存在没有附件记录引用的文件 | 可安全修复 |
-| `stale_lease` | 发现已经过期的占用标记 | 可安全修复 |
-| `deleted_asset_retained` | 已删除附件仍在保留期或等待回收 | 可进入垃圾清理，但仍由服务端规则决定是否删除 |
+| 问题代码                 | 用户说明                       | 可执行动作                                     |
+| ------------------------ | ------------------------------ | ---------------------------------------------- |
+| `missing_blob`           | 附件记录存在，但本地文件缺失   | 提示重新扫描后仍存在则保留错误，不承诺自动恢复 |
+| `size_mismatch`          | 附件文件大小与记录不一致       | 提示数据异常，不由安全修复删除                 |
+| `orphan_blob`            | 本地存在没有附件记录引用的文件 | 可安全修复                                     |
+| `stale_lease`            | 发现已经过期的占用标记         | 可安全修复                                     |
+| `deleted_asset_retained` | 已删除附件仍在保留期或等待回收 | 可进入垃圾清理，但仍由服务端规则决定是否删除   |
 
 页面按代码聚合问题数量，不默认暴露 `assetId`、哈希或文件系统路径。这样既避免信息噪声，也避免把内部标识当作用户可操作对象。
 
@@ -242,3 +242,20 @@ apps/desktop/src/renderer/src/components/desktop/settings-page/
 - 页面严格沿用现有设计系统；
 - 自动化测试和人工视觉检查通过；
 - 不把本阶段扩成附件文件管理器或通用诊断中心。
+
+## 15. 实施记录
+
+2026-08-29 已在 `codex/attachment-release-closeout` 分支完成工程实现：
+
+- Desktop 设置侧栏新增“存储”入口；
+- 页面接入已有扫描、安全修复和垃圾清理接口；
+- 垃圾清理必须经过二次确认；
+- 操作完成后重新扫描，不在渲染层推测结果；
+- 补齐 Client 公共类型导出和 Desktop 附件服务测试桩；
+- 新增导航、格式化、问题聚合、加载、错误、修复、清理确认和环境降级测试；
+- 区分“维护操作失败”和“维护已完成但后续刷新失败”，避免向用户误报执行结果；
+- 页面严格复用现有设计 token、UI 组件和 Lucide 图标。
+
+最终提交前已通过桌面端 54 个测试文件、352 项测试、桌面端主进程与界面类型检查、本次改动文件的 ESLint 检查、仓库级测试、仓库级类型检查、116 个 Markdown 文件检查及 `git diff --check`。仓库已有的全量 Desktop lint 存在与本阶段无关的历史问题，因此本阶段以改动文件零警告作为代码规范门禁，没有批量改写旧文件。
+
+Windows 自动视觉驱动在本轮授权超时，因此不把自动截图检查伪装成已经完成；用户将在实际页面中给出最终视觉反馈，后续只根据具体反馈调整视觉或文案，不扩大功能范围。

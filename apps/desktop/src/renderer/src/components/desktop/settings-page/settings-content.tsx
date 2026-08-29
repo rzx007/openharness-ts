@@ -14,6 +14,7 @@ import {
 import { Separator } from "@renderer/components/ui/separator"
 import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
+import { AttachmentStorageSettings } from "./attachment-storage-settings"
 import { isDesktopWorkStyle } from "@shared/settings-types"
 import type { DesktopWorkStyle } from "@shared/settings-types"
 
@@ -32,7 +33,9 @@ export function SettingsContent({ selectedSection }: SettingsContentProps): Reac
               ? "调整 OpenHarness 的默认工作方式。工作风格会保存到全局配置，并用于后续任务。"
               : selectedSection === "供应商"
                 ? "连接模型服务和开发工具订阅，选择 OpenHarness 默认使用的供应商。"
-                : `${selectedSection}页面将在后续迭代中接入。`}
+                : selectedSection === "存储"
+                  ? "查看并维护当前设备上的对话附件存储。"
+                  : `${selectedSection}页面将在后续迭代中接入。`}
           </p>
         </header>
 
@@ -40,6 +43,8 @@ export function SettingsContent({ selectedSection }: SettingsContentProps): Reac
           <GeneralSettings />
         ) : selectedSection === "供应商" ? (
           <ProviderSettings />
+        ) : selectedSection === "存储" ? (
+          <AttachmentStorageSettings />
         ) : (
           <Card>
             <CardHeader>

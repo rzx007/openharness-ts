@@ -60,6 +60,10 @@ export type {
 export type {
   AdmitClientPromptInput,
   AgentPersonaInfo,
+  AttachmentStorageGcResult,
+  AttachmentStorageIssue,
+  AttachmentStorageRepairResult,
+  AttachmentStorageReport,
   AuthStatus,
   CommandCatalogEntry,
   CommandKind,

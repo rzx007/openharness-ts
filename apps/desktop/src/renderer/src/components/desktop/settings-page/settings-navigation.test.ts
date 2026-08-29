@@ -13,6 +13,9 @@ describe("settings navigation", () => {
     expect(settingsSectionSlug("外观")).toBe("appearance")
     expect(settingsSectionLabel("providers")).toBe("供应商")
     expect(settingsSectionSlug("供应商")).toBe("providers")
+    expect(settingsSectionLabel("storage")).toBe("存储")
+    expect(settingsSectionSlug("存储")).toBe("storage")
+    expect(isSettingsSection("storage")).toBe(true)
     expect(isSettingsSection("plugins")).toBe(false)
   })
 

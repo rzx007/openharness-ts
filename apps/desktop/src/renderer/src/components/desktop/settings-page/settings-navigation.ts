@@ -5,6 +5,7 @@ import {
   CreditCard,
   Database,
   GitBranch,
+  HardDrive,
   Keyboard,
   Link2,
   Palette,
@@ -40,6 +41,7 @@ export const codingSettingsNavigation: SettingsNavigationItem[] = [
   { label: "终端", slug: "terminal", icon: TerminalSquare },
   { label: "Git", slug: "git", icon: GitBranch },
   { label: "运行环境", slug: "runtime", icon: Code2 },
+  { label: "存储", slug: "storage", icon: HardDrive },
 ]
 
 const settingsNavigation = [
