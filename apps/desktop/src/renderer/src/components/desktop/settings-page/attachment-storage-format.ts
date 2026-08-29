@@ -4,6 +4,13 @@ export type GroupedStorageIssue = Pick<AttachmentStorageIssue, "code" | "severit
   count: number
 }
 
+export type StorageComposition = {
+  retainedBytes: number
+  retainedPercent: number
+  reclaimableBytes: number
+  reclaimablePercent: number
+}
+
 const ISSUE_ORDER: AttachmentStorageIssue["code"][] = [
   "missing_blob",
   "size_mismatch",
@@ -27,6 +34,34 @@ export function formatBytes(value: number): string {
 
 export function totalAssets(assets: AttachmentStorageReport["summary"]["assets"]): number {
   return assets.importing + assets.ready + assets.failed + assets.deleted
+}
+
+export function storageComposition(
+  physicalBytes: number,
+  reclaimableBytes: number
+): StorageComposition {
+  const physical = Number.isFinite(physicalBytes) && physicalBytes > 0 ? physicalBytes : 0
+  if (physical === 0) {
+    return {
+      retainedBytes: 0,
+      retainedPercent: 0,
+      reclaimableBytes: 0,
+      reclaimablePercent: 0,
+    }
+  }
+
+  const reclaimable =
+    Number.isFinite(reclaimableBytes) && reclaimableBytes > 0
+      ? Math.min(reclaimableBytes, physical)
+      : 0
+  const reclaimablePercent = (reclaimable / physical) * 100
+
+  return {
+    retainedBytes: physical - reclaimable,
+    retainedPercent: 100 - reclaimablePercent,
+    reclaimableBytes: reclaimable,
+    reclaimablePercent,
+  }
 }
 
 export function groupStorageIssues(

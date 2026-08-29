@@ -6,6 +6,7 @@ import {
   canRepairStorage,
   formatBytes,
   groupStorageIssues,
+  storageComposition,
   totalAssets,
 } from "./attachment-storage-format"
 
@@ -21,6 +22,33 @@ describe("attachment storage display helpers", () => {
 
   it("adds all asset states instead of hiding failed or deleted records", () => {
     expect(totalAssets(report().summary.assets)).toBe(14)
+  })
+
+  it("builds a truthful storage composition and clamps inconsistent reports", () => {
+    expect(storageComposition(100, 25)).toEqual({
+      retainedBytes: 75,
+      retainedPercent: 75,
+      reclaimableBytes: 25,
+      reclaimablePercent: 25,
+    })
+    expect(storageComposition(100, 150)).toEqual({
+      retainedBytes: 0,
+      retainedPercent: 0,
+      reclaimableBytes: 100,
+      reclaimablePercent: 100,
+    })
+    expect(storageComposition(0, 10)).toEqual({
+      retainedBytes: 0,
+      retainedPercent: 0,
+      reclaimableBytes: 0,
+      reclaimablePercent: 0,
+    })
+    expect(storageComposition(Number.NaN, -10)).toEqual({
+      retainedBytes: 0,
+      retainedPercent: 0,
+      reclaimableBytes: 0,
+      reclaimablePercent: 0,
+    })
   })
 
   it("groups repeated issues while preserving the strongest severity", () => {
