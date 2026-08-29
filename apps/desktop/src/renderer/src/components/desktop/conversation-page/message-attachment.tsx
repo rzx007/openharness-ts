@@ -14,6 +14,8 @@ import type {
   DesktopAttachmentSessionPart,
   DesktopTransformationSessionPart,
 } from "@shared/session-types"
+import { AttachmentImagePreview, attachmentImageActionClassName } from "./attachment-image-preview"
+import { attachmentRoutingMessage } from "./attachment-routing-message"
 
 const safePreviewMediaTypes = new Set([
   "image/png",
@@ -26,15 +28,57 @@ const safePreviewMediaTypes = new Set([
 export function MessageAttachment({
   part,
   readOnly = false,
+  alignMixedAttachmentHeights = false,
 }: {
   part: DesktopAttachmentSessionPart
   readOnly?: boolean
+  alignMixedAttachmentHeights?: boolean
 }): React.JSX.Element {
   const previewUrl = useMessageAttachmentPreview(part)
   const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null)
   const visiblePreviewUrl = previewUrl && previewUrl !== failedPreviewUrl ? previewUrl : null
+
+  if (visiblePreviewUrl) {
+    return (
+      <AttachmentImagePreview
+        src={visiblePreviewUrl}
+        displayName={part.displayName}
+        alignMixedAttachmentHeights={alignMixedAttachmentHeights}
+        actionsClassName="pointer-events-none opacity-0 transition-opacity duration-150 group-hover/attachment:pointer-events-auto group-hover/attachment:opacity-100 group-focus-within/attachment:pointer-events-auto group-focus-within/attachment:opacity-100"
+        onError={() => setFailedPreviewUrl(visiblePreviewUrl)}
+        actions={
+          !readOnly ? (
+            <>
+              <AttachmentAction
+                aria-label={`打开 ${part.displayName}`}
+                title="打开"
+                className={attachmentImageActionClassName}
+                onClick={() => void window.desktop.attachments.open({ assetId: part.assetId })}
+              >
+                <ExternalLink />
+              </AttachmentAction>
+              <AttachmentAction
+                aria-label={`另存为 ${part.displayName}`}
+                title="另存为"
+                className={attachmentImageActionClassName}
+                onClick={() => void window.desktop.attachments.saveAs({ assetId: part.assetId })}
+              >
+                <Download />
+              </AttachmentAction>
+            </>
+          ) : null
+        }
+      />
+    )
+  }
+
   return (
-    <Attachment state="done" size="sm" className="max-w-72 flex-nowrap">
+    <Attachment
+      data-display="file-card"
+      state="done"
+      size="sm"
+      className={`max-w-72 flex-nowrap ${alignMixedAttachmentHeights ? "h-20" : ""}`}
+    >
       <AttachmentMedia variant={visiblePreviewUrl ? "image" : "icon"}>
         {visiblePreviewUrl ? (
           <img
@@ -150,33 +194,4 @@ function transformationLabel(kind: DesktopTransformationSessionPart["kind"]): st
   if (kind === "document_extract") return "文档内容"
   if (kind === "tool_mount") return "工具资源"
   return "已作为原生图片输入"
-}
-
-export function attachmentRoutingMessage(code: string): string {
-  switch (code) {
-    case "attachment_model_capability_unknown":
-      return "当前模型没有声明图片能力，请切换支持图片的模型后重试。"
-    case "attachment_model_unsupported":
-      return "当前模型不支持图片，请切换支持图片的模型后重试。"
-    case "attachment_provider_capability_unknown":
-      return "当前提供商没有声明图片能力，请检查模型配置后重试。"
-    case "attachment_provider_unsupported":
-      return "当前提供商不支持图片输入，请切换提供商后重试。"
-    case "attachment_intent_unavailable":
-      return "当前阶段还不能执行 OCR 或文档处理，请移除附件处理方式后重试。"
-    case "attachment_kind_unsupported":
-      return "当前阶段只支持把图片直接发送给模型。"
-    case "attachment_media_type_unsupported":
-      return "当前图片格式不受支持，请改用 PNG、JPEG、GIF 或 WebP。"
-    case "attachment_ocr_tool_unavailable":
-      return "本地 OCR 工具被当前 Agent 配置禁用，请允许 ImageToText 后重试。"
-    case "attachment_ocr_host_unavailable":
-      return "本地 OCR 服务暂不可用，请重启应用后重试。"
-    case "attachment_materialization_failed":
-      return "附件内容不可用，请重新上传后重试。"
-    case "attachment_routing_aborted":
-      return "附件处理已取消。"
-    default:
-      return "附件处理失败，请检查附件和模型设置后重试。"
-  }
 }

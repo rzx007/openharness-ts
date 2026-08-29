@@ -16,6 +16,7 @@ import {
   resolveDesktopAttachmentCompatibility,
   type DesktopAttachmentDraft,
 } from "@shared/attachment-types"
+import { AttachmentImagePreview, attachmentImageActionClassName } from "./attachment-image-preview"
 
 export function ComposerAttachments({
   attachments,
@@ -32,6 +33,10 @@ export function ComposerAttachments({
 }): React.JSX.Element | null {
   if (attachments.length === 0) return null
 
+  const containsImage = attachments.some(isImageAttachment)
+  const containsFile = attachments.some((attachment) => !isImageAttachment(attachment))
+  const alignMixedAttachmentHeights = containsImage && containsFile
+
   return (
     <AttachmentGroup aria-label="待发送附件" className="px-3 pt-2">
       {attachments.map((attachment) => (
@@ -42,6 +47,7 @@ export function ComposerAttachments({
           onCancel={onCancel}
           onRetry={onRetry}
           onRemove={onRemove}
+          alignMixedAttachmentHeights={alignMixedAttachmentHeights}
         />
       ))}
     </AttachmentGroup>
@@ -54,12 +60,14 @@ function ComposerAttachmentCard({
   onCancel,
   onRetry,
   onRemove,
+  alignMixedAttachmentHeights,
 }: {
   attachment: DesktopAttachmentDraft
   readOnly: boolean
   onCancel: (draftId: string) => void
   onRetry: (draftId: string) => void
   onRemove: (draftId: string) => void
+  alignMixedAttachmentHeights: boolean
 }): React.JSX.Element {
   const previewUrl = useAttachmentPreviewUrl(attachment)
   const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null)
@@ -76,10 +84,40 @@ function ComposerAttachmentCard({
   const errorMessage =
     attachment.error?.message ??
     (attachment.status === "cancelled" ? "上传已取消" : null) ??
-    (attachment.status === "ready" && !compatibility.supported ? compatibility.reason ?? null : null)
+    (attachment.status === "ready" && !compatibility.supported
+      ? (compatibility.reason ?? null)
+      : null)
+
+  if (visiblePreviewUrl) {
+    return (
+      <AttachmentImagePreview
+        src={visiblePreviewUrl}
+        displayName={attachment.displayName}
+        alignMixedAttachmentHeights={alignMixedAttachmentHeights}
+        onError={() => setFailedPreviewUrl(visiblePreviewUrl)}
+        actions={
+          !readOnly ? (
+            <AttachmentAction
+              aria-label={`移除附件 ${attachment.displayName}`}
+              title="移除附件"
+              className={attachmentImageActionClassName}
+              onClick={() => onRemove(attachment.draftId)}
+            >
+              <X />
+            </AttachmentAction>
+          ) : null
+        }
+      />
+    )
+  }
 
   return (
-    <Attachment state={attachment.status === "ready" && !compatibility.supported ? "error" : state} size="sm" className="max-w-64 flex-nowrap">
+    <Attachment
+      data-display="file-card"
+      state={attachment.status === "ready" && !compatibility.supported ? "error" : state}
+      size="sm"
+      className={`max-w-64 flex-nowrap ${alignMixedAttachmentHeights ? "h-20" : ""}`}
+    >
       <AttachmentMedia variant={visiblePreviewUrl ? "image" : "icon"}>
         {visiblePreviewUrl ? (
           <img
@@ -136,6 +174,10 @@ function ComposerAttachmentCard({
       ) : null}
     </Attachment>
   )
+}
+
+function isImageAttachment(attachment: DesktopAttachmentDraft): boolean {
+  return (attachment.mediaType ?? attachment.declaredMediaType).startsWith("image/")
 }
 
 function useAttachmentPreviewUrl(attachment: DesktopAttachmentDraft): string | null {

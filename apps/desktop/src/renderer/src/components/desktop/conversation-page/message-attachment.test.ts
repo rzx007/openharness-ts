@@ -5,8 +5,9 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopAttachmentSessionPart, DesktopSessionMessage } from "@shared/session-types"
+import { attachmentRoutingMessage } from "./attachment-routing-message"
 import { MessageBlock } from "./message-block"
-import { attachmentRoutingMessage, MessageAttachment } from "./message-attachment"
+import { MessageAttachment } from "./message-attachment"
 
 describe("MessageAttachment", () => {
   let container: HTMLDivElement
@@ -56,6 +57,16 @@ describe("MessageAttachment", () => {
 
     expect(readPreview).toHaveBeenCalledWith({ assetId: "asset-a" })
     expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:3:1")
+    const imageAttachment = container.querySelector('[data-display="image-preview"]')
+    expect(imageAttachment?.className).toContain("size-24")
+    expect(imageAttachment?.className).toContain("border-border/50")
+    expect(imageAttachment?.textContent).not.toContain("a.png")
+    const actions = imageAttachment?.querySelector('[data-slot="attachment-actions"]')
+    expect(actions?.className).toContain("opacity-0")
+    expect(actions?.className).toContain("pointer-events-none")
+    expect(actions?.className).toContain("group-hover/attachment:opacity-100")
+    expect(actions?.className).toContain("group-hover/attachment:pointer-events-auto")
+    expect(actions?.className).toContain("group-focus-within/attachment:opacity-100")
 
     await act(async () => root.render(createElement(MessageAttachment, { part: imagePart("b") })))
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:3:1")
@@ -64,6 +75,35 @@ describe("MessageAttachment", () => {
     act(() => root.unmount())
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:3:2")
     root = createRoot(container)
+  })
+
+  it("aligns message image thumbnails and document cards in a mixed batch", async () => {
+    const message: DesktopSessionMessage = {
+      id: "message-mixed",
+      sessionId: "session-1",
+      seq: 1,
+      role: "user",
+      inputId: "input-mixed",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    await act(async () =>
+      root.render(
+        createElement(MessageBlock, {
+          message,
+          parts: [imagePart("mixed"), imagePart("notes", "text/plain", "notes.txt")],
+          streaming: false,
+          onOpenFile: () => undefined,
+          canOpenReview: false,
+          onOpenReview: () => undefined,
+          onOpenTerminal: () => undefined,
+        })
+      )
+    )
+
+    expect(container.querySelector('[data-display="image-preview"]')?.className).toContain("h-20")
+    expect(container.querySelector('[data-display="file-card"]')?.className).toContain("h-20")
   })
 
   it("never previews active content and renders the file name as text", async () => {

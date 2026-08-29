@@ -66,6 +66,46 @@ describe("ComposerAttachments preview", () => {
     expect(container.querySelector("img")).toBeNull()
     expect(container.querySelector("svg")).not.toBeNull()
   })
+
+  it("shows a ready image as a standalone thumbnail", async () => {
+    await act(async () =>
+      root.render(
+        createElement(ComposerAttachments, {
+          attachments: [readyImage],
+          onCancel: vi.fn(),
+          onRetry: vi.fn(),
+          onRemove: vi.fn(),
+        })
+      )
+    )
+
+    const imageAttachment = container.querySelector('[data-display="image-preview"]')
+    expect(imageAttachment).not.toBeNull()
+    expect(imageAttachment?.className).toContain("size-24")
+    expect(imageAttachment?.className).toContain("border-border/50")
+    expect(imageAttachment?.textContent).not.toContain(readyImage.displayName)
+    expect(
+      imageAttachment?.querySelector('[aria-label="移除附件 runtime-map.jpeg"]')
+    ).not.toBeNull()
+  })
+
+  it("aligns image thumbnails and document cards in a mixed batch", async () => {
+    await act(async () =>
+      root.render(
+        createElement(ComposerAttachments, {
+          attachments: [readyImage, readyDocument],
+          onCancel: vi.fn(),
+          onRetry: vi.fn(),
+          onRemove: vi.fn(),
+        })
+      )
+    )
+
+    const imageAttachment = container.querySelector('[data-display="image-preview"]')
+    const documentAttachment = container.querySelector('[data-display="file-card"]')
+    expect(imageAttachment?.className).toContain("h-20")
+    expect(documentAttachment?.className).toContain("h-20")
+  })
 })
 
 const readyImage: DesktopAttachmentDraft = {
@@ -79,4 +119,17 @@ const readyImage: DesktopAttachmentDraft = {
   progress: 1,
   assetId: "asset-image",
   mediaType: "image/jpeg",
+}
+
+const readyDocument: DesktopAttachmentDraft = {
+  draftId: "draft-document",
+  taskId: "task-document",
+  displayName: "release-notes.txt",
+  declaredMediaType: "text/plain",
+  sizeBytes: 12_000,
+  status: "ready",
+  bytesUploaded: 12_000,
+  progress: 1,
+  assetId: "asset-document",
+  mediaType: "text/plain",
 }

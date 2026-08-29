@@ -129,6 +129,9 @@ function UserMessageBlock({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(content)
   const canEdit = Boolean(userActions?.canEdit && (content.trim() || attachmentParts.length > 0))
+  const containsImage = attachmentParts.some((part) => part.mediaType.startsWith("image/"))
+  const containsFile = attachmentParts.some((part) => !part.mediaType.startsWith("image/"))
+  const alignMixedAttachmentHeights = containsImage && containsFile
 
   useEffect(() => {
     if (editing) return
@@ -157,7 +160,12 @@ function UserMessageBlock({
             {attachmentParts.length > 0 ? (
               <AttachmentGroup aria-label="原消息附件" className="max-w-full justify-end">
                 {attachmentParts.map((part) => (
-                  <MessageAttachment key={part.id} part={part} readOnly />
+                  <MessageAttachment
+                    key={part.id}
+                    part={part}
+                    readOnly
+                    alignMixedAttachmentHeights={alignMixedAttachmentHeights}
+                  />
                 ))}
               </AttachmentGroup>
             ) : null}
@@ -204,7 +212,11 @@ function UserMessageBlock({
         {attachmentParts.length > 0 ? (
           <AttachmentGroup aria-label="消息附件" className="max-w-[78%] justify-end">
             {attachmentParts.map((part) => (
-              <MessageAttachment key={part.id} part={part} />
+              <MessageAttachment
+                key={part.id}
+                part={part}
+                alignMixedAttachmentHeights={alignMixedAttachmentHeights}
+              />
             ))}
           </AttachmentGroup>
         ) : null}
