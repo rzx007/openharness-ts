@@ -2,6 +2,16 @@ import type { ModelsDevCatalog } from "./catalog";
 
 export const CODEX_DEFAULT_MODEL = "gpt-5.6-sol";
 
+const CODEX_MULTIMODAL_INPUT = {
+  input: ["text", "image", "pdf"],
+  output: ["text"],
+};
+
+const CODEX_TEXT_INPUT = {
+  input: ["text"],
+  output: ["text"],
+};
+
 export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
   codex: {
     id: "codex",
@@ -12,6 +22,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.6 Sol",
         reasoning: true,
         tool_call: true,
+        modalities: CODEX_MULTIMODAL_INPUT,
         limit: { context: 1_050_000, output: 128_000 },
       },
       "gpt-5.6-terra": {
@@ -19,6 +30,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.6 Terra",
         reasoning: true,
         tool_call: true,
+        modalities: CODEX_MULTIMODAL_INPUT,
         limit: { context: 1_050_000, output: 128_000 },
       },
       "gpt-5.6-luna": {
@@ -26,6 +38,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.6 Luna",
         reasoning: true,
         tool_call: true,
+        modalities: CODEX_MULTIMODAL_INPUT,
         limit: { context: 1_050_000, output: 128_000 },
       },
       "gpt-5.5": {
@@ -33,6 +46,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.5",
         reasoning: true,
         tool_call: true,
+        modalities: CODEX_MULTIMODAL_INPUT,
         limit: { context: 1_050_000, output: 128_000 },
       },
       "gpt-5.4": {
@@ -40,6 +54,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.4",
         reasoning: true,
         tool_call: true,
+        modalities: CODEX_MULTIMODAL_INPUT,
         limit: { context: 1_050_000, output: 128_000 },
       },
       "gpt-5.4-mini": {
@@ -47,6 +62,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.4 Mini",
         reasoning: true,
         tool_call: true,
+        modalities: CODEX_MULTIMODAL_INPUT,
         limit: { context: 400_000, output: 128_000 },
       },
       "gpt-5.3-codex-spark": {
@@ -54,6 +70,7 @@ export const SPECIAL_PROVIDER_CATALOG: ModelsDevCatalog = {
         name: "GPT-5.3 Codex Spark",
         reasoning: false,
         tool_call: true,
+        modalities: CODEX_TEXT_INPUT,
         limit: { context: 128_000, output: 128_000 },
       },
     },

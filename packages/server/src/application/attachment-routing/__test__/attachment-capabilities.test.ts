@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { createModelCatalogService } from "@openharness/api";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   modelInputCapabilities,
   resolveEffectiveImageSupport,
   resolveRuntimeAttachmentCapabilities,
 } from "../attachment-capabilities.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("attachment input capabilities", () => {
   it("maps explicit model input modalities without guessing from the model name", () => {
@@ -13,6 +18,27 @@ describe("attachment input capabilities", () => {
     expect(modelInputCapabilities({ modalities: { input: ["text"] } }))
       .toEqual({ image: "unsupported" });
     expect(modelInputCapabilities({ id: "gpt-4o" })).toEqual({ image: "unknown" });
+  });
+
+  it("publishes explicit image support for every Codex subscription model", async () => {
+    vi.stubEnv("OPENHARNESS_DISABLE_MODELS_FETCH", "1");
+    const catalog = await createModelCatalogService().load();
+    const models = catalog.codex?.models ?? {};
+
+    expect(Object.fromEntries(
+      Object.entries(models).map(([id, model]) => [
+        id,
+        modelInputCapabilities(model).image,
+      ]),
+    )).toEqual({
+      "gpt-5.6-sol": "native",
+      "gpt-5.6-terra": "native",
+      "gpt-5.6-luna": "native",
+      "gpt-5.5": "native",
+      "gpt-5.4": "native",
+      "gpt-5.4-mini": "native",
+      "gpt-5.3-codex-spark": "unsupported",
+    });
   });
 
   it("requires both the model and adapter to declare native image input", () => {
