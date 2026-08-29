@@ -313,7 +313,7 @@ HTTP/control 路由暴露 `scan`、`repair-safe` 和 `gc`，继续使用 daemon 
 - Services 完整测试：24 个测试文件、222 个测试通过；
 - Client 完整测试：3 个测试文件、64 个测试通过；
 - Server HTTP 与系统路由定向回归：83 个测试通过；
-- 文档检查：112 个 Markdown 文件通过；
+- 合并到 main 后的文档检查：114 个 Markdown 文件通过；
 - `git diff --check` 通过。
 
 本阶段没有实现 Provider 远端文件缓存、PDF/Office/压缩包处理、分片上传、文件夹快照或完整存储管理页面。Desktop 只提供扫描、安全修复和 GC 的类型化 IPC 调用链，图形页面留到后续阶段。

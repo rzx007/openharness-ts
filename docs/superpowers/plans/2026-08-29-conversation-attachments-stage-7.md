@@ -338,4 +338,4 @@ docs: complete attachment lifecycle stage
 - GC 结果写入现有 `retention_audit`，诊断报告返回最近一次审计；文件删除失败保留墓碑并允许后续重试。
 - 恢复流程先在与目标同目录的临时路径恢复并复检，再 rename 为正式目标；失败只清理本次临时结果，并拒绝重复、嵌套或位于备份源内的目标。
 - Client 与 Desktop 已接通 scan、repair-safe、gc 的最小类型化调用链，没有新增完整存储管理页面。
-- 最终全仓测试 58/58 个 Turbo 任务成功，类型检查 57/57 个 Turbo 任务成功，112 份 Markdown 文档检查通过，`git diff --check` 通过。
+- 最终全仓测试 58/58 个 Turbo 任务成功，类型检查 57/57 个 Turbo 任务成功；合并到 main 后，114 份 Markdown 文档检查通过，`git diff --check` 通过。
