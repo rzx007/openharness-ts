@@ -19,6 +19,11 @@ import type {
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
 } from "../../../shared/attachment-types"
+import type {
+  AttachmentStorageGcResult,
+  AttachmentStorageRepairResult,
+  AttachmentStorageReport,
+} from "@openharness/client"
 import { IpcChannels, IpcEvents } from "../../../shared/ipc-channels"
 import type { IpcContribution } from "../../core/ipc/types"
 import { desktopSessionService } from "../session/session-service"
@@ -50,6 +55,9 @@ export interface AttachmentIpcService {
   readPreview(assetId: string): Promise<DesktopAttachmentPreview>
   openAttachment(assetId: string): Promise<void>
   saveAs(assetId: string): Promise<{ saved: boolean }>
+  scanStorage(): Promise<AttachmentStorageReport>
+  repairStorage(): Promise<AttachmentStorageRepairResult>
+  gcStorage(): Promise<AttachmentStorageGcResult>
   disposeOwner(ownerId: number): Promise<void>
 }
 
@@ -197,6 +205,18 @@ export function createAttachmentIpcContribution(
             const service = await serviceFor(event.sender)
             return await service.saveAs((value as DesktopAttachmentAssetInput).assetId)
           },
+        },
+        {
+          channel: IpcChannels.attachmentStorageScan,
+          handler: async (event) => await (await serviceFor(event.sender)).scanStorage(),
+        },
+        {
+          channel: IpcChannels.attachmentStorageRepair,
+          handler: async (event) => await (await serviceFor(event.sender)).repairStorage(),
+        },
+        {
+          channel: IpcChannels.attachmentStorageGc,
+          handler: async (event) => await (await serviceFor(event.sender)).gcStorage(),
         },
       ]
     },

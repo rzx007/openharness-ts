@@ -5,6 +5,9 @@ import { Readable } from "node:stream"
 
 import type {
   AttachmentAssetRecord,
+  AttachmentStorageGcResult,
+  AttachmentStorageRepairResult,
+  AttachmentStorageReport,
   DownloadAttachmentOptions,
   UploadAttachmentInput,
 } from "@openharness/client"
@@ -20,6 +23,9 @@ interface AttachmentClient {
   getAttachment(id: string, options?: { signal?: AbortSignal }): Promise<AttachmentAssetRecord>
   downloadAttachment(id: string, options?: DownloadAttachmentOptions): Promise<Response>
   deleteAttachment(id: string, options?: { signal?: AbortSignal }): Promise<AttachmentAssetRecord>
+  scanAttachmentStorage(options?: { signal?: AbortSignal }): Promise<AttachmentStorageReport>
+  repairAttachmentStorage(options?: { signal?: AbortSignal }): Promise<AttachmentStorageRepairResult>
+  gcAttachmentStorage(options?: { signal?: AbortSignal }): Promise<AttachmentStorageGcResult>
 }
 
 export interface AttachmentFileSystem {
@@ -265,6 +271,18 @@ export class DesktopAttachmentService {
         true
       )
     }
+  }
+
+  async scanStorage(): Promise<AttachmentStorageReport> {
+    return await (await this.dependencies.getClient()).scanAttachmentStorage()
+  }
+
+  async repairStorage(): Promise<AttachmentStorageRepairResult> {
+    return await (await this.dependencies.getClient()).repairAttachmentStorage()
+  }
+
+  async gcStorage(): Promise<AttachmentStorageGcResult> {
+    return await (await this.dependencies.getClient()).gcAttachmentStorage()
   }
 
   async openAttachment(assetId: string): Promise<void> {

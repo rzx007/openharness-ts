@@ -251,7 +251,11 @@ export class DaemonApplication implements DurableAgentApplication {
       );
       this.retention = new ApplicationRetentionService(
         store,
-        new AttachmentIntegrityService({ store, blobs: attachmentBlobs }),
+        new AttachmentIntegrityService({
+          store,
+          blobs: attachmentBlobs,
+          operationGate: this.attachments.operationGate,
+        }),
       );
       this.terminals = new DaemonTerminalService(store);
       this.projects = new ProjectApplicationService(store);

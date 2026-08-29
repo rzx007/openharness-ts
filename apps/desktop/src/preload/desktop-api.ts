@@ -114,6 +114,9 @@ export const desktopAPI = {
       invoke(IpcChannels.attachmentOpen, input),
     saveAs: (input: IpcInvokeMap[typeof IpcChannels.attachmentSaveAs]["args"][0]) =>
       invoke(IpcChannels.attachmentSaveAs, input),
+    scanStorage: () => invoke(IpcChannels.attachmentStorageScan),
+    repairStorage: () => invoke(IpcChannels.attachmentStorageRepair),
+    gcStorage: () => invoke(IpcChannels.attachmentStorageGc),
     onUploadEvent: (listener: (event: DesktopAttachmentUploadEvent) => void): (() => void) => {
       const wrapped = (
         _event: Electron.IpcRendererEvent,

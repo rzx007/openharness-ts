@@ -17,6 +17,7 @@ import {
   decodeAttachmentText,
   type AttachmentTextEncoding,
 } from "./attachment-text.js";
+import { AttachmentStorageOperationGate } from "./attachment-storage-operation-gate.js";
 
 export interface AttachmentApplicationServiceOptions {
   store: SessionStore;
@@ -24,6 +25,7 @@ export interface AttachmentApplicationServiceOptions {
   limits?: Partial<AttachmentLimits>;
   now?: () => number;
   id?: () => string;
+  operationGate?: AttachmentStorageOperationGate;
 }
 
 export interface ImportAttachmentInput {
@@ -64,6 +66,7 @@ export interface AttachmentRecoveryResult {
 
 export class AttachmentApplicationService {
   readonly limits: AttachmentLimits;
+  readonly operationGate: AttachmentStorageOperationGate;
   private readonly store: SessionStore;
   private readonly blobs: AttachmentBlobStore;
   private readonly now: () => number;
@@ -74,6 +77,7 @@ export class AttachmentApplicationService {
     this.blobs = options.blobs;
     this.now = options.now ?? Date.now;
     this.id = options.id ?? (() => `att_${randomUUID()}`);
+    this.operationGate = options.operationGate ?? new AttachmentStorageOperationGate();
     this.limits = parseAttachmentLimits({
       ...DEFAULT_ATTACHMENT_LIMITS,
       ...options.limits,
@@ -81,6 +85,10 @@ export class AttachmentApplicationService {
   }
 
   async import(input: ImportAttachmentInput): Promise<AttachmentAssetRecord> {
+    return await this.operationGate.runShared(() => this.importUnlocked(input));
+  }
+
+  private async importUnlocked(input: ImportAttachmentInput): Promise<AttachmentAssetRecord> {
     const id = this.id();
     this.store.createImportingAttachment({
       id,

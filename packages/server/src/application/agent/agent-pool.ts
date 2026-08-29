@@ -143,7 +143,10 @@ export class AgentPool {
     const loadAgent = this.context.loadAgent;
     if (!loadAgent) throw new Error("Agent runtime is not configured");
     const agent = await loadAgent({ session, history, parts });
-    if (this.context.compactAttachments) {
+    if (
+      this.context.compactAttachments
+      && typeof agent.setCompactAttachmentsProvider === "function"
+    ) {
       agent.setCompactAttachmentsProvider(() =>
         this.context.compactAttachments!(session.id)
       );

@@ -95,6 +95,17 @@ function fakeService(): AttachmentIpcService {
     readPreview: vi.fn(async () => ({ bytes: new ArrayBuffer(0), mediaType: "image/png" })),
     openAttachment: vi.fn(async () => undefined),
     saveAs: vi.fn(async () => ({ saved: true })),
+    scanStorage: vi.fn(async () => ({ summary: {} as never, issues: [] })),
+    repairStorage: vi.fn(async () => ({ expiredLeases: 0, deletedOrphanBlobs: 0, releasedBytes: 0 })),
+    gcStorage: vi.fn(async () => ({
+      scannedAssets: 0,
+      expiredLeases: 0,
+      deletedAssets: 0,
+      deletedBlobs: 0,
+      releasedBytes: 0,
+      skipped: {} as never,
+      errors: [],
+    })),
     disposeOwner: vi.fn(async () => undefined),
   }
 }

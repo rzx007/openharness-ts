@@ -1878,6 +1878,48 @@ export class SessionStore {
       .all() as Array<Record<string, unknown>>;
   }
 
+  recordRetentionAudit(input: {
+    policy: string;
+    result: unknown;
+    timestamp?: number;
+  }): void {
+    this.database.prepare(
+      `INSERT INTO retention_audit (id, policy, result_json, created_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run(
+      randomUUID(),
+      input.policy,
+      JSON.stringify(input.result),
+      input.timestamp ?? now(),
+    );
+  }
+
+  latestRetentionAudit(policy: string): {
+    id: string;
+    policy: string;
+    result: unknown;
+    createdAt: number;
+  } | undefined {
+    const row = this.database.prepare(
+      `SELECT id, policy, result_json, created_at
+       FROM retention_audit
+       WHERE policy = ?
+       ORDER BY created_at DESC, rowid DESC
+       LIMIT 1`,
+    ).get(policy) as {
+      id: string;
+      policy: string;
+      result_json: string;
+      created_at: number;
+    } | undefined;
+    return row ? {
+      id: row.id,
+      policy: row.policy,
+      result: JSON.parse(row.result_json) as unknown,
+      createdAt: row.created_at,
+    } : undefined;
+  }
+
   claimWorkflowRun(
     runId: string,
     ownerId: string,

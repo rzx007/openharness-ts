@@ -56,6 +56,19 @@ describe("AgentPool", () => {
     expect(compactAttachments).toHaveBeenCalledWith("s1");
   });
 
+  it("keeps legacy injected agents usable when compact attachment binding is unavailable", async () => {
+    const agent = createAgent();
+    delete agent.setCompactAttachmentsProvider;
+    const pool = new AgentPool({
+      ...createContext(vi.fn(async () => agent)),
+      compactAttachments: vi.fn(async () => ({
+        attachmentCatalog: { entries: [], omittedCount: 0 },
+      })),
+    } as any);
+
+    await expect(pool.acquireSession("s1")).resolves.toBe(agent);
+  });
+
   it("does not create a second agent for a framework-owned live child session", async () => {
     const context = createContext();
     const pool = new AgentPool({

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionStore } from "../../session-runtime/store.js";
 import { AttachmentApplicationService } from "../attachment-application-service.js";
@@ -110,6 +110,21 @@ describe("AttachmentIntegrityService", () => {
       store.softDeleteAttachment(second.id, 200);
       const secondGc = await service.gc({ gracePeriodMs: 100 });
       expect(secondGc).toMatchObject({ deletedAssets: 1, deletedBlobs: 1, releasedBytes: 4 });
+      expect(secondGc).toMatchObject({
+        scannedAssets: 1,
+        expiredLeases: 0,
+        errors: [],
+      });
+      expect(store.latestRetentionAudit("attachment_gc")).toMatchObject({
+        policy: "attachment_gc",
+        result: { deletedAssets: 1, deletedBlobs: 1, releasedBytes: 4 },
+      });
+      await expect(service.scan({ gracePeriodMs: 100 })).resolves.toMatchObject({
+        latestGcAudit: {
+          policy: "attachment_gc",
+          result: { deletedAssets: 1, deletedBlobs: 1 },
+        },
+      });
       expect(await blobs.inspectBlob(first.sha256!)).toBeUndefined();
       await expect(service.gc({ gracePeriodMs: 100 })).resolves.toMatchObject({
         deletedAssets: 0,
@@ -140,6 +155,35 @@ describe("AttachmentIntegrityService", () => {
         deletedBlobs: 0,
       });
       expect(await blobs.inspectBlob(asset.sha256!)).toBeDefined();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("audits a blob deletion failure, keeps the tombstone, and retries later", async () => {
+    const { store, blobs, attachments } = fixture(["att-retry"]);
+    try {
+      const asset = await attachments.import({ displayName: "retry.txt", content: content("retry") });
+      store.softDeleteAttachment(asset.id, 100);
+      const service = new AttachmentIntegrityService({ store, blobs, now: () => 1_000 });
+      const originalDelete = blobs.deleteBlob.bind(blobs);
+      vi.spyOn(blobs, "deleteBlob").mockRejectedValueOnce(new Error("locked"));
+
+      await expect(service.gc({ gracePeriodMs: 100 })).resolves.toMatchObject({
+        deletedAssets: 0,
+        errors: [{ assetId: asset.id, code: "blob_delete_failed" }],
+      });
+      expect(store.getAttachment(asset.id, { includeDeleted: true })).toBeDefined();
+      expect(store.latestRetentionAudit("attachment_gc")).toMatchObject({
+        result: { errors: [{ assetId: asset.id, code: "blob_delete_failed" }] },
+      });
+
+      vi.mocked(blobs.deleteBlob).mockImplementation(originalDelete);
+      await expect(service.gc({ gracePeriodMs: 100 })).resolves.toMatchObject({
+        deletedAssets: 1,
+        deletedBlobs: 1,
+        errors: [],
+      });
     } finally {
       store.close();
     }

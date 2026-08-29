@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -164,7 +165,12 @@ describe("durable application long-running boundaries", () => {
     expect(createdManifest).toMatchObject({
       version: 2,
       directories: { attachments: true },
-      attachments: { assets: 1, uniqueBlobs: 1, physicalBytes: 16 },
+      attachments: {
+        assets: 1,
+        uniqueBlobs: 1,
+        physicalBytes: 16,
+        consistency: { errors: 0, warnings: 0, issueCounts: {} },
+      },
     });
 
     const checksumsPath = join(backup, "checksums.json");
@@ -189,6 +195,21 @@ describe("durable application long-running boundaries", () => {
     ).toThrow("not empty");
     expect(existsSync(blockedStorePath)).toBe(false);
 
+    expect(() =>
+      restoreApplicationBackup({
+        source: backup,
+        storePath: join(dir, "duplicate", "sessions.db"),
+        destinations: { memory: join(dir, "same-target"), attachments: join(dir, "same-target") },
+      }),
+    ).toThrow("distinct");
+    expect(() =>
+      restoreApplicationBackup({
+        source: backup,
+        storePath: join(backup, "nested-sessions.db"),
+        destinations: { attachments: join(dir, "unused-attachments") },
+      }),
+    ).toThrow("inside the backup source");
+
     const restoredPath = join(dir, "restored", "sessions.db");
     const restoredMemory = join(dir, "restored-memory");
     const restoredAttachments = join(dir, "restored-attachments");
@@ -198,6 +219,9 @@ describe("durable application long-running boundaries", () => {
       destinations: { memory: restoredMemory, attachments: restoredAttachments },
     });
     expect(manifest.recovery.reviveLiveProcesses).toBe(false);
+    expect(
+      readdirSync(dir).some((name) => name.includes(".restore-")),
+    ).toBe(false);
     const restored = new SessionStore({ path: restoredPath });
     expect(restored.getSession("session-1")).toBeDefined();
     expect(existsSync(join(
