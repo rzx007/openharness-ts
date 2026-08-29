@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -136,11 +137,34 @@ describe("durable application long-running boundaries", () => {
     const memory = join(dir, "memory");
     mkdirSync(memory, { recursive: true });
     writeFileSync(join(memory, "fact.md"), "durable fact", "utf-8");
+    const attachmentBytes = "attachment bytes";
+    const attachmentHash = createHash("sha256").update(attachmentBytes).digest("hex");
+    store.createImportingAttachment({
+      id: "att-backup",
+      displayName: "附件.txt",
+      stagingName: "att-backup.part",
+      createdAt: 1,
+    });
+    store.markAttachmentReady("att-backup", {
+      sha256: attachmentHash,
+      sizeBytes: Buffer.byteLength(attachmentBytes),
+      mediaType: "text/plain",
+      updatedAt: 2,
+    });
+    const attachments = join(dir, "attachments");
+    const attachmentBucket = join(attachments, "blobs", attachmentHash.slice(0, 2));
+    mkdirSync(attachmentBucket, { recursive: true });
+    writeFileSync(join(attachmentBucket, attachmentHash), attachmentBytes);
     const backup = join(dir, "backup");
-    await createApplicationBackup({
+    const createdManifest = await createApplicationBackup({
       store,
       destination: backup,
-      sources: { memory },
+      sources: { memory, attachments },
+    });
+    expect(createdManifest).toMatchObject({
+      version: 2,
+      directories: { attachments: true },
+      attachments: { assets: 1, uniqueBlobs: 1, physicalBytes: 16 },
     });
 
     const checksumsPath = join(backup, "checksums.json");
@@ -167,14 +191,21 @@ describe("durable application long-running boundaries", () => {
 
     const restoredPath = join(dir, "restored", "sessions.db");
     const restoredMemory = join(dir, "restored-memory");
+    const restoredAttachments = join(dir, "restored-attachments");
     const manifest = restoreApplicationBackup({
       source: backup,
       storePath: restoredPath,
-      destinations: { memory: restoredMemory },
+      destinations: { memory: restoredMemory, attachments: restoredAttachments },
     });
     expect(manifest.recovery.reviveLiveProcesses).toBe(false);
     const restored = new SessionStore({ path: restoredPath });
     expect(restored.getSession("session-1")).toBeDefined();
+    expect(existsSync(join(
+      restoredAttachments,
+      "blobs",
+      attachmentHash.slice(0, 2),
+      attachmentHash,
+    ))).toBe(true);
     expect(
       restored.acquireApplicationOwner({
         ownerId: "restored",
@@ -184,6 +215,33 @@ describe("durable application long-running boundaries", () => {
     ).toMatchObject({ generation: 1 });
     restored.close();
     store.close();
+  });
+
+  it("refuses to create an attachment backup when a ready blob is missing", async () => {
+    const dir = temporaryDirectory();
+    const store = new SessionStore({ path: join(dir, "sessions.db") });
+    try {
+      store.createImportingAttachment({
+        id: "att-missing",
+        displayName: "missing.txt",
+        stagingName: "att-missing.part",
+        createdAt: 1,
+      });
+      store.markAttachmentReady("att-missing", {
+        sha256: "f".repeat(64),
+        sizeBytes: 7,
+        mediaType: "text/plain",
+        updatedAt: 2,
+      });
+
+      await expect(createApplicationBackup({
+        store,
+        destination: join(dir, "backup"),
+        sources: { attachments: join(dir, "attachments") },
+      })).rejects.toThrow("att-missing");
+    } finally {
+      store.close();
+    }
   });
 
   it("retention keeps active Workflow facts and records an audit", () => {
