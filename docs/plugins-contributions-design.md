@@ -8,7 +8,7 @@
 手写 Native Plugin
 或 Claude Code Source -> Converter -> Native Plugin
   -> validateNativePlugin
-  -> 版本 cache
+  -> 当前 cache
   -> installed.json
   -> Runtime 按 cwd/scope 发现
   -> 加载 Skills / Agents / Hooks / MCP / Node Tool
@@ -32,13 +32,13 @@ Skills、Agents、Hooks、MCP 和 Node Tool 已进入加载闭环。Tool 不会�
 
 ```text
 ~/.openharness-ts/plugins/
-├─ cache/<plugin-id>/<version>-<digest>/
+├─ cache/<plugin-id>/current/
 ├─ data/<plugin-id>/
 ├─ sources/
 └─ installed.json
 ```
 
-安装流程先校验源目录，再复制到临时 cache、校验副本，最后原子切换 `installed.json`。权限批准记录保存在 installed record，不会写回 manifest。普通卸载保留 `data/`。
+安装流程先校验源目录，再复制到 `cache/<plugin-id>/` 下的临时候选目录并校验副本，校验成功后替换 `current/`，最后原子更新 `installed.json`。`installed.json` 仍记录 manifest version，但第三方插件缓存目录不按版本保留历史副本；使用新 Installer 成功重装时，会顺带清理旧的 `<version>-<digest>` 目录。权限批准记录保存在 installed record，不会写回 manifest。普通卸载保留 `data/`。
 
 Runtime 按当前 cwd 解析 user、managed、project 和 local scope。启停使用稳定插件 ID，不再修改 Settings。
 
@@ -51,6 +51,8 @@ detect -> inspect -> plan -> approve -> convert -> Native validate
 ```
 
 转换产物保存 `provenance.json`、`plan.json` 和 `report.json`，并逐项标记 exact、adapted、unsupported 或 blocked。转换过程只读源文件，不 import JavaScript、不启动 Hook/MCP、不联网或安装依赖。
+
+转换完成后，目录本身就是普通 Native Plugin：组件直接位于 `skills/`、`agents/`、`hooks.json` 和 `mcp.json`，不会再套 `payload/` 或 `generated/`。`plugin.json.metadata` 只保留 converted/sourceFormat/Converter 信息；Installer、Runtime、UI 和 CLI 均按 Native Plugin 管理，`.openharness-conversion/` 仅供审计，删除它不影响安装和运行。
 
 ## 诊断与安全边界
 

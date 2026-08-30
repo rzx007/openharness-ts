@@ -6,7 +6,7 @@
 
 **目标：** 用版本化 OpenHarness Native Plugin v1 替换当前临时插件格式，让 Runtime 只加载原生插件；随后实现独立 Converter core 和 Claude Code Converter，把 Claude Skills、Commands、Agents、Hooks、MCP 转换、校验并安装为原生插件。
 
-**架构：** `@openharness/plugins` 拥有 Native schema、组件加载、安装状态、版本 cache 和 Runtime 激活；新的 `@openharness/plugin-converters` 只负责外部 source 的 detect、inspect、plan、convert，并生成 provenance/report。CLI 的转换命令可以本地只读运行，所有 installed state 变更经 daemon PluginService 和 mutation barrier 完成。Runtime、Server、Client 和 CLI 不直接解析 Claude manifest。
+**架构：** `@openharness/plugins` 拥有 Native schema、组件加载、安装状态、当前 cache 和 Runtime 激活；新的 `@openharness/plugin-converters` 只负责外部 source 的 detect、inspect、plan、convert，并生成可直接安装的 Native Plugin 与 provenance/report。CLI 的转换命令可以本地只读运行，所有 installed state 变更经 daemon PluginService 和 mutation barrier 完成。Runtime、Server、Client 和 CLI 不直接解析 Claude manifest。
 
 **技术栈：** TypeScript 5.7、Zod、Node.js fs/path/crypto、Hono、Commander、Vitest、pnpm/Turbo。
 
@@ -307,7 +307,7 @@ pnpm --filter @openharness/plugins check-types
 
 ---
 
-## Task 3：实现 installed store、版本 cache、plugin data 和本地安装
+## Task 3：实现 installed store、当前 cache、plugin data 和本地安装
 
 **文件：**
 
@@ -372,7 +372,7 @@ validate source native plugin
 -> copy to unique temp cache
 -> validate copied artifact
 -> compute behavior digest
--> rename to final version/digest directory
+-> replace cache/<plugin-id>/current
 -> update installed store
 ```
 
@@ -750,9 +750,9 @@ pnpm --filter @openharness/plugin-converters check-types
 
 断言 namespace、frontmatter、资源复制、`sourceKind`、`$ARGUMENTS`、位置参数和用户不可调用字段。普通静态 Skill 应是 exact；需要变量 shim 时是 adapted。
 
-- [ ] **Step 2：实现 payload 保留策略**
+- [ ] **Step 2：实现 Native 组件资源保留策略**
 
-源文件复制到 `payload/`，Native Skill manifest/definition 引用最终路径；不要重写引用资源的相对关系。
+将已支持的组件直接写入 `skills/`、`agents/` 等 Native 目录；Skill 同目录资源随组件复制并保持相对关系。此步骤由 [2026-08-30 收口计划](./2026-08-30-native-plugin-conversion-simplification.md) 修订，不再复制完整 Claude `payload/`。
 
 - [ ] **Step 3：写 Agent mapping 测试**
 
@@ -803,21 +803,13 @@ url + ws -> ws
 
 Converter 只生成配置，不连接 Server。
 
-- [ ] **Step 3：写环境 alias 测试**
+- [ ] **Step 3：写 Native 环境测试（由 2026-08-30 收口计划修订）**
 
-Claude 脚本内容保持不变，激活生成的 Native Plugin 时，派生 Hook/MCP 环境包含：
-
-```text
-CLAUDE_PLUGIN_ROOT
-CLAUDE_PLUGIN_DATA
-CLAUDE_PROJECT_DIR
-```
-
-并正确指向 payload、plugin data 和 cwd。alias 不能读取 Validator 未允许的任意宿主变量。
+转换后的插件只使用 OpenHarness Native 环境。`origin/sourceFormat` 不能触发 `CLAUDE_PLUGIN_ROOT`、`CLAUDE_PLUGIN_DATA` 或 `CLAUDE_PROJECT_DIR` 注入；无法转换的源脚本必须在 report 中标为 adapted/unsupported。
 
 - [ ] **Step 4：实现 Hook/MCP/environment converter**
 
-不使用全局字符串 replace 改写脚本；路径出现在声明字段时生成 Native 配置，脚本读取变量时使用 compatibility alias。
+不使用全局字符串 replace 改写脚本；路径出现在声明字段时生成 Native 配置，无法转换的源格式变量进入诊断，不由 Runtime 提供 compatibility alias。
 
 - [ ] **Step 5：运行 Converter 和 activation 测试**
 
@@ -852,8 +844,10 @@ pnpm --filter @openharness/plugins exec vitest run src/activation
 .openharness-conversion/provenance.json
 .openharness-conversion/plan.json
 .openharness-conversion/report.json
-payload/
-generated/
+skills/
+agents/
+hooks.json
+mcp.json
 ```
 
 然后调用 `validateNativePlugin()`，必须 valid。

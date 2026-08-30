@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,9 +33,32 @@ describe("Native Plugin acceptance", () => {
     expect(validation.status).toBe("valid");
     const installed = await installLocalNativePlugin({ sourcePath: output, scope: "project", cwd: root, approvedPermissions: [] });
     expect(installed.status).toBe("installed");
-    if (installed.status === "installed") expect(installed.record.origin).toBe("converted");
+    if (installed.status !== "installed") return;
+    expect(installed.record.origin).toBe("converted");
+    expect(installed.record.sourceFormat).toBe("claude-code");
+    expect(installed.record.cachePath).toBe(join(
+      root,
+      "config",
+      "plugins",
+      "cache",
+      "converted.claude.mixed-plugin",
+      "current",
+    ));
+    expect((await readdir(installed.record.cachePath)).sort()).toEqual([
+      ".openharness-conversion",
+      ".openharness-plugin",
+      "agents",
+      "hooks.json",
+      "mcp.json",
+      "skills",
+    ]);
+    await expect(access(join(installed.record.cachePath, "payload"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(installed.record.cachePath, "generated"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(installed.record.cachePath, ".claude-plugin"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(await discoverInstalledNativePlugins({ cwd: root })).toHaveLength(1);
-    const loaded = await loadNativePlugin(validation.plugin!);
+    const installedValidation = await validateNativePlugin(installed.record.cachePath);
+    expect(installedValidation.status).toBe("valid");
+    const loaded = await loadNativePlugin(installedValidation.plugin!);
     expect(loaded.status).toBe("loaded");
     expect(loaded.components.skills?.value?.length).toBeGreaterThan(0);
     expect(loaded.components.agents?.value?.length).toBeGreaterThan(0);

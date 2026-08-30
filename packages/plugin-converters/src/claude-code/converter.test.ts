@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +31,39 @@ describe("ClaudeCodePluginConverter", () => {
     });
     expect(report.status).toBe("success");
     expect((await validateNativePlugin(output)).status).toBe("valid");
+
+    expect((await readdir(output)).sort()).toEqual([
+      ".openharness-conversion",
+      ".openharness-plugin",
+      "agents",
+      "hooks.json",
+      "mcp.json",
+      "skills",
+    ]);
+    await expect(access(join(output, "payload"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(output, "generated"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(output, ".claude-plugin"))).rejects.toMatchObject({ code: "ENOENT" });
+
+    const manifest = JSON.parse(
+      await readFile(join(output, ".openharness-plugin", "plugin.json"), "utf8"),
+    ) as {
+      metadata?: Record<string, unknown>;
+      components?: Record<string, unknown>;
+    };
+    expect(manifest.metadata).toEqual({
+      origin: "converted",
+      sourceFormat: "claude-code",
+      converterId: "claude-code",
+      converterVersion: "1.0.0",
+    });
+    expect(manifest.components).toEqual({
+      skills: ["./skills"],
+      agents: ["./agents"],
+      hooks: ["./hooks.json"],
+      mcpServers: ["./mcp.json"],
+    });
+    expect((await readdir(join(output, "skills"))).sort()).toEqual(["fix", "review"]);
+    expect(await readdir(join(output, "agents"))).toEqual(["reviewer.md"]);
   });
 
   it("does not mark unsupported-only hook files as adapted", async () => {

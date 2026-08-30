@@ -13,6 +13,13 @@ async function filesUnder(root: string, current = root): Promise<string[]> {
   return files;
 }
 
+async function pruneLegacyVersionCacheDirectories(parent: string): Promise<void> {
+  const legacyVersionDirectory = /^.+-[a-f0-9]{64}$/i;
+  await Promise.all((await readdir(parent, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && legacyVersionDirectory.test(entry.name))
+    .map((entry) => rm(join(parent, entry.name), { recursive: true, force: true }).catch(() => undefined)));
+}
+
 export async function computePluginBehaviorDigest(root: string): Promise<string> {
   const hash = createHash("sha256");
   for (const file of await filesUnder(root)) {
@@ -28,21 +35,35 @@ export async function materializePluginCache(
   source: string,
   cacheRoot: string,
   pluginId: string,
-  version: string,
   digest: string,
+  validateCandidate?: (candidatePath: string) => Promise<void>,
 ): Promise<string> {
   const parent = join(cacheRoot, pluginId);
-  const target = join(parent, `${version}-${digest}`);
-  try { if ((await stat(target)).isDirectory()) return target; } catch {}
+  const target = join(parent, "current");
   await mkdir(parent, { recursive: true });
-  const temporary = join(parent, `.tmp-${randomUUID()}`);
+  const temporary = join(parent, `.tmp-${digest}-${randomUUID()}`);
+  const previous = join(parent, `.previous-${digest}-${randomUUID()}`);
+  let previousExists = false;
   try {
     await cp(source, temporary, { recursive: true, errorOnExist: true, force: false });
+    await validateCandidate?.(temporary);
+    try {
+      if ((await stat(target)).isDirectory()) {
+        await rename(target, previous);
+        previousExists = true;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     await rename(temporary, target);
+    if (previousExists) await rm(previous, { recursive: true, force: true });
+    await pruneLegacyVersionCacheDirectories(parent);
     return target;
   } catch (error) {
     await rm(temporary, { recursive: true, force: true });
-    try { if ((await stat(target)).isDirectory()) return target; } catch {}
+    if (previousExists) {
+      try { await rename(previous, target); } catch {}
+    }
     throw error;
   }
 }

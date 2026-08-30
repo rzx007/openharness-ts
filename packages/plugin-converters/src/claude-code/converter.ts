@@ -10,6 +10,38 @@ import { inspectClaudeCodePlugin } from "./parser.js";
 import { convertClaudeAgentMarkdown } from "./convert-agents.js";
 
 const rel = (inspection: SourceInspection, path: string) => relative(inspection.root, path).replaceAll("\\", "/");
+
+function componentPath(inspection: SourceInspection, sourcePath: string, directory: string): string {
+  const parts = rel(inspection, sourcePath).split("/");
+  const directoryIndex = parts.indexOf(directory);
+  return (directoryIndex >= 0 ? parts.slice(directoryIndex + 1) : parts).join("/");
+}
+
+async function copySkillBundle(
+  inspection: SourceInspection,
+  skillFile: string,
+  targetRoot: string,
+): Promise<void> {
+  const sourceDirectory = dirname(skillFile);
+  const relativeDirectory = relative(inspection.root, sourceDirectory);
+  const targetRelative = relativeDirectory === ""
+    ? inspection.identity.name
+    : dirname(componentPath(inspection, skillFile, "skills"));
+  const targetDirectory = join(targetRoot, targetRelative === "." ? inspection.identity.name : targetRelative);
+  if (sourceDirectory !== inspection.root) {
+    await cp(sourceDirectory, targetDirectory, { recursive: true, errorOnExist: true, force: false });
+    return;
+  }
+  await mkdir(targetDirectory, { recursive: true });
+  await cp(skillFile, join(targetDirectory, "SKILL.md"), { errorOnExist: true, force: false });
+  for (const resourceDirectory of ["assets", "references", "scripts"]) {
+    const sourceResource = join(sourceDirectory, resourceDirectory);
+    if (await access(sourceResource).then(() => true, () => false)) {
+      await cp(sourceResource, join(targetDirectory, resourceDirectory), { recursive: true, errorOnExist: true, force: false });
+    }
+  }
+}
+
 async function convertHooks(source: string, target: string): Promise<boolean> {
   const raw = JSON.parse(await readFile(source, "utf8")) as Record<string, unknown>;
   const rows = (raw.hooks && typeof raw.hooks === "object" ? raw.hooks : raw) as Record<string, unknown>;
@@ -78,30 +110,33 @@ export class ClaudeCodePluginConverter implements PluginConverter {
     await rm(temporary, { recursive: true, force: true });
     try {
       await mkdir(temporary, { recursive: true });
-      await cp(input.inspection.root, join(temporary, "payload"), { recursive: true });
       const components: Record<string, string[]> = {};
       const skills = input.inspection.inventory.skills ?? [];
-      if (skills.length) components.skills = skills.map((path) => `./payload/${rel(input.inspection, path)}`);
+      for (const skill of skills) {
+        await copySkillBundle(input.inspection, skill, join(temporary, "skills"));
+      }
       const commands = input.inspection.inventory.commands ?? [];
       for (const command of commands) {
-        const name = basename(command, ".md"); const target = join(temporary, "generated", "skills", name, "SKILL.md");
+        const name = basename(command, ".md"); const target = join(temporary, "skills", name, "SKILL.md");
         await mkdir(dirname(target), { recursive: true }); await writeFile(target, await readFile(command, "utf8"));
       }
-      if (commands.length) components.skills = [...(components.skills ?? []), "./generated/skills"];
+      if (skills.length || commands.length) components.skills = ["./skills"];
       const agents = input.inspection.inventory.agents ?? [];
       for (const agent of agents) {
-        const target = join(temporary, "generated", "agents", rel(input.inspection, agent));
+        const target = join(temporary, "agents", componentPath(input.inspection, agent, "agents"));
         await mkdir(dirname(target), { recursive: true });
         await writeFile(target, convertClaudeAgentMarkdown(await readFile(agent, "utf8")));
       }
-      if (agents.length) components.agents = ["./generated/agents"];
+      if (agents.length) components.agents = ["./agents"];
       const hooks = input.inspection.inventory.hooks?.[0];
-      if (hooks && await convertHooks(hooks, join(temporary, "generated", "hooks.json"))) components.hooks = ["./generated/hooks.json"];
+      if (hooks && await convertHooks(hooks, join(temporary, "hooks.json"))) components.hooks = ["./hooks.json"];
       const mcp = input.inspection.inventory.mcpServers?.[0];
-      if (mcp) { await convertMcp(mcp, join(temporary, "generated", "mcp.json")); components.mcpServers = ["./generated/mcp.json"]; }
+      if (mcp) { await convertMcp(mcp, join(temporary, "mcp.json")); components.mcpServers = ["./mcp.json"]; }
       if (!Object.keys(components).length) throw new Error("Claude source contains no convertible components");
       const manifest = { schemaVersion: 1, id: input.inspection.identity.id, name: input.inspection.identity.name,
-        version: input.inspection.identity.version, components, compatibility: { environmentAliases: ["CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA", "CLAUDE_PROJECT_DIR"] } };
+        version: input.inspection.identity.version,
+        metadata: { origin: "converted", sourceFormat: this.sourceFormat, converterId: this.id, converterVersion: this.version },
+        components };
       await mkdir(join(temporary, ".openharness-plugin"));
       await writeFile(join(temporary, ".openharness-plugin", "plugin.json"), JSON.stringify(manifest, null, 2));
       const report: ConversionReport = { schemaVersion: 1, status: input.plan.items.some((x) => x.fidelity === "unsupported") ? "partial" : "success", items: input.plan.items, diagnostics: input.plan.diagnostics };

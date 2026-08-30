@@ -65,7 +65,7 @@ OpenHarness 需要的不只是“能读取某个外部 manifest”，而是一�
 - 不在 Converter 中执行 Hook、import JS、启动 MCP/LSP 或运行安装脚本。
 - 不要求手写的 OpenHarness Native Plugin 保留任何 Claude/Codex 字段。
 - 不要求 OpenHarness 内部 Tool、模型和 Hook 名称与某个外部产品一致。
-- 不把 provenance、conversion report 或 installer state 塞入 Runtime 的业务 manifest。
+- 不把完整 provenance、conversion report 或 installer state 塞入 Runtime 的业务 manifest；manifest metadata 只保留 `origin`、`sourceFormat` 和 Converter identity 这类轻量来源字段。
 
 ## 5. 术语与所有权
 
@@ -77,7 +77,7 @@ OpenHarness 需要的不只是“能读取某个外部 manifest”，而是一�
 | Conversion Report | 转换完成后的逐组件结果和诊断 | Converter core |
 | Provenance | 来源位置、版本、内容哈希和转换器信息 | Installer / converted artifact |
 | Native Plugin | 符合 OpenHarness schema、可被 Runtime 加载的插件包 | `packages/plugins` |
-| Installed Plugin | 已复制到版本 cache 并进入安装状态的 Native Plugin | Plugin installer/store |
+| Installed Plugin | 已复制到当前 cache 并进入安装状态的 Native Plugin | Plugin installer/store |
 | Activated Plugin | 已把组件注册或连接到某个 Runtime 的插件版本 | `agent-runtime` composition root |
 
 `packages/plugins` 不依赖具体外部 Converter；`packages/plugin-converters` 依赖 Native Plugin schema 来生成目标产物；Runtime 只依赖 `packages/plugins`。
@@ -523,7 +523,7 @@ plan 必须稳定排序和可序列化。相同 source digest、Converter 版本
 
 ## 14. 转换产物
 
-转换结果不是一份孤立 manifest，而是完整 Native Plugin 包：
+转换结果不是包着 Claude 源目录的中间产物，而是可以直接安装、校验和运行的完整 Native Plugin：
 
 ```text
 converted-plugin/
@@ -533,22 +533,21 @@ converted-plugin/
 │  ├─ provenance.json
 │  ├─ plan.json
 │  └─ report.json
-├─ payload/
-│  ├─ skills/
-│  ├─ agents/
-│  ├─ scripts/
-│  └─ assets/
-└─ generated/
-   ├─ hooks.json
-   ├─ mcp.json
-   └─ agents/
+├─ skills/
+│  └─ <skill>/
+│     ├─ SKILL.md
+│     └─ scripts-or-assets/
+├─ agents/
+│  └─ <agent>.md
+├─ hooks.json
+└─ mcp.json
 ```
 
-- `payload/` 保存从 source 复制的原始资源，尽量不改内容；
-- `generated/` 保存事件、模型、Tool、MCP 等经过转换的原生定义；
-- `plugin.json` 只引用最终参与 Native Plugin 的 component；
-- `.openharness-conversion/` 是安装和审计元数据，不作为 Runtime prompt 或 component 加载；
-- converter 不把 source 中的未知可执行文件自动加入 manifest。
+- Converter 把已支持的组件直接写入 Native 目录；Skill 同目录的 scripts、assets 和 references 随 Skill 复制，保持相对引用可用；
+- `plugin.json` 只引用 `./skills`、`./agents`、`./hooks.json`、`./mcp.json` 等 Native component 路径；
+- `plugin.json.metadata` 记录 `origin: "converted"`、`sourceFormat`、`converterId` 和 `converterVersion`，Installer 只依赖这组通用字段区分来源；
+- `.openharness-conversion/` 只用于本地审计和查看转换损失，不作为 Runtime component，Installer 和 Runtime 都不依赖它；
+- Converter 不复制 `.claude-plugin/`，也不把 source 中未知或 unsupported 的文件自动加入目标插件。
 
 手写 Native Plugin 不需要 `.openharness-conversion/`。
 
@@ -581,7 +580,7 @@ interface PluginProvenanceV1 {
 
 来源路径可以包含本机敏感信息，公共导出和 UI 展示必须经过路径脱敏；本地 installation store 保留可重转换所需的真实位置。
 
-`output.digest` 只覆盖会影响 Runtime 行为的 Native Plugin manifest、payload 和 generated 文件，不包含 `convertedAt`、本机绝对 source path 等非确定性审计字段。完整 artifact 可以另有 archive digest；相同输入和 options 的行为内容 digest 必须稳定。
+`output.digest` 只覆盖会影响 Runtime 行为的 Native Plugin manifest、Native component 和它们携带的资源，不包含 `convertedAt`、本机绝对 source path 等非确定性审计字段。完整 artifact 可以另有 archive digest；相同输入和 options 的行为内容 digest 必须稳定。
 
 ## 16. Conversion Report 和诊断
 
@@ -677,24 +676,9 @@ Output Styles、`bin/`、settings、monitors、themes、workflows 和 channels �
 
 ## 18. 环境兼容和资源保留
 
-Converter 应优先复制源资源并通过环境别名运行，不批量改写 `.sh`、`.py`、`.js` 脚本内容。
+Converter 应优先复制组件实际需要的资源，不批量改写 `.sh`、`.py`、`.js` 脚本内容。转换后的插件只依赖 Native 路径变量；Runtime 不因为 `sourceFormat: "claude-code"` 增加 Claude 专用解析或执行分支。
 
-由 Claude Code 转换的插件可以在 Native manifest 中声明：
-
-```json
-{
-  "compatibility": {
-    "sourceFormat": "claude-code",
-    "environmentAliases": {
-      "CLAUDE_PLUGIN_ROOT": "${OPENHARNESS_PLUGIN_ROOT}/payload",
-      "CLAUDE_PLUGIN_DATA": "${OPENHARNESS_PLUGIN_DATA}",
-      "CLAUDE_PROJECT_DIR": "${OPENHARNESS_PROJECT_DIR}"
-    }
-  }
-}
-```
-
-激活层只实现通用 environment alias，不需要知道 Claude 组件 schema。别名值必须来自 Validator 允许的变量，禁止插件借 alias 注入任意宿主环境值。
+若源脚本只能通过 `CLAUDE_PLUGIN_ROOT` 等 Claude 专用变量工作，Converter 必须把可确定的声明路径改成 Native 路径，或者在 report 中把该组件标为 adapted/unsupported。来源字段用于展示、诊断和重新转换，不是 Runtime 兼容开关。
 
 Native 路径变量：
 
@@ -704,7 +688,7 @@ OPENHARNESS_PLUGIN_DATA
 OPENHARNESS_PROJECT_DIR
 ```
 
-转换插件可以额外暴露源格式变量，但手写原生插件只依赖 Native 变量。
+手写和转换生成的 Native Plugin 使用同一组 Native 变量。
 
 ## 19. 转换安全边界
 
@@ -731,12 +715,12 @@ detect、inspect、plan 和 convert 允许：
 
 依赖安装和 Runtime 激活是独立的后续授权阶段。
 
-## 20. 安装、scope 和版本 cache
+## 20. 安装、scope 和当前 cache
 
 ```text
 ~/.openharness-ts/plugins/
 ├─ cache/
-│  └─ <plugin-id>/<version-or-digest>/
+│  └─ <plugin-id>/current/
 ├─ data/
 │  └─ <plugin-id>/
 ├─ sources/
@@ -749,7 +733,9 @@ detect、inspect、plan 和 convert 允许：
 - sources 保存来源和刷新信息，不作为 Runtime component；
 - installed store 保存 scope、启停、当前版本和授权；
 - Runtime 只读取 installed store 指向的 cache path；
-- 更新生成新目录，旧 Runtime 保持旧版本，reload 后切换；
+- 非链接安装先复制到同插件目录下的临时候选目录并完成 Native 校验，再原子替换 `current`；不保留按版本命名的历史目录；
+- 成功安装后清理符合旧 `<version>-<64位 digest>` 命名的缓存目录；未知目录和其他文件不参与自动清理；
+- manifest version 和内容 digest 继续记录在 manifest/installed state 中，用于展示、判断变化和诊断，不承担本地版本归档；
 - 卸载包和删除 data 是两个明确动作。
 
 目标 scope：
@@ -784,12 +770,13 @@ managed
   -> 用户批准新增权限或新有损项
   -> 转换到临时目录
   -> Native validate
-  -> 写入新 cache 版本
+  -> 校验 cache 临时候选目录
+  -> 替换 cache/<plugin-id>/current
   -> 原子更新 installed state
   -> 标记 Runtime reload-required
 ```
 
-转换或校验失败时保留旧安装版本，不把半成品设为 current。
+转换、复制或校验失败时保留旧 `current`，不把半成品设为当前插件。
 
 ## 22. CLI 和用户流程
 
@@ -801,7 +788,7 @@ ohs plugin install ./some-plugin
 
 流程：detect → inspect → plan → 展示报告 → 用户确认 → convert → validate → install。
 
-本地 Native Plugin 默认复制进版本 cache；开发时使用显式 link 模式，不把普通 install 隐式变成原地执行：
+本地 Native Plugin 默认复制进当前 cache；开发时使用显式 link 模式，不把普通 install 隐式变成原地执行：
 
 ```text
 ohs plugin link ./native-plugin
@@ -947,7 +934,7 @@ mcp_file
 
 1. Native manifest schema、Validator 和统一路径边界。
 2. Skills、Agents、Hooks、MCP components。
-3. installation store、version cache 和 plugin data。
+3. installation store、current cache 和 plugin data。
 4. Runtime 只发现和激活 Native Plugin。
 5. 结构化诊断、PluginInfo、enable/disable/reload。
 6. 删除当前旧 schema、旧 installer、`tools_dir` 和重复 CLI 注册路径。

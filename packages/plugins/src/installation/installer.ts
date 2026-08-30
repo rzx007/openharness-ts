@@ -1,6 +1,6 @@
 import { getInstalledPluginStorePath, getPluginCacheDir } from "@openharness/core";
-import { readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { resolve } from "node:path";
 import { validateNativePlugin } from "../manifest/validate.js";
 import type { PluginDiagnostic, } from "../diagnostics.js";
 import type { OpenHarnessPluginManifestV1 } from "../types.js";
@@ -53,29 +53,37 @@ export async function installLocalNativePlugin(input: InstallLocalNativePluginIn
   }] };
 
   const digest = await computePluginBehaviorDigest(sourcePath);
-  const cachePath = input.link
-    ? sourcePath
-    : await materializePluginCache(
+  let cachePath = sourcePath;
+  if (!input.link) {
+    let candidateDiagnostics: PluginDiagnostic[] | undefined;
+    try {
+      cachePath = await materializePluginCache(
         sourcePath, input.cacheDir ?? getPluginCacheDir(), validation.plugin.manifest.id,
-        validation.plugin.manifest.version, digest,
+        digest,
+        async (candidatePath) => {
+          const candidateValidation = await validateNativePlugin(candidatePath);
+          if (candidateValidation.status === "invalid") {
+            candidateDiagnostics = candidateValidation.diagnostics;
+            throw new Error("Copied plugin cache failed Native validation");
+          }
+        },
       );
-  const copiedValidation = await validateNativePlugin(cachePath);
-  if (copiedValidation.status === "invalid") return { status: "invalid", diagnostics: copiedValidation.diagnostics };
+    } catch (error) {
+      if (candidateDiagnostics) return { status: "invalid", diagnostics: candidateDiagnostics };
+      throw error;
+    }
+  }
 
   const now = new Date().toISOString();
-  let provenance: { sourceFormat: string; converterId: string } | undefined;
-  try {
-    const raw = JSON.parse(await readFile(join(sourcePath, ".openharness-conversion", "provenance.json"), "utf8")) as Record<string, unknown>;
-    if (typeof raw.sourceFormat === "string" && typeof raw.converterId === "string") {
-      provenance = { sourceFormat: raw.sourceFormat, converterId: raw.converterId };
-    }
-  } catch {}
+  const metadata = validation.plugin.manifest.metadata;
+  const manifestOrigin = metadata?.origin === "converted" ? "converted" : "native";
+  const manifestSourceFormat = typeof metadata?.sourceFormat === "string" ? metadata.sourceFormat : undefined;
   const projectDir = input.scope === "user" ? undefined : resolve(input.cwd);
   const record: InstalledPluginRecord = {
     id: validation.plugin.manifest.id, scope: input.scope, ...(projectDir ? { projectDir } : {}),
     enabled: true, currentVersion: validation.plugin.manifest.version, cachePath,
-    ...(input.link ? { linkedSourcePath: sourcePath } : {}), origin: input.origin ?? (provenance ? "converted" : "native"),
-    ...((input.sourceFormat ?? provenance?.sourceFormat) ? { sourceFormat: input.sourceFormat ?? provenance!.sourceFormat } : {}),
+    ...(input.link ? { linkedSourcePath: sourcePath } : {}), origin: input.origin ?? manifestOrigin,
+    ...((input.sourceFormat ?? manifestSourceFormat) ? { sourceFormat: input.sourceFormat ?? manifestSourceFormat } : {}),
     requestedPermissions: requested, approvedPermissions: approved, installedAt: now, updatedAt: now,
   };
   await updateInstalledPluginStore(input.storePath ?? getInstalledPluginStorePath(), (store) => {
