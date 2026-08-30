@@ -137,9 +137,50 @@ describe("DaemonJobService", () => {
       metadata: { admissionPhase: "cancelled_before_start" },
     });
     expect(manager.stopExecution).not.toHaveBeenCalled();
-    expect(store.updateSessionTask).toHaveBeenCalledWith(pending.id, {
+    expect(store.transitionPendingSessionTask).toHaveBeenCalledWith(pending.id, {
       status: "stopped",
       metadata: { admissionPhase: "cancelled_before_start" },
+    });
+    expect(store.updateSessionTask).not.toHaveBeenCalled();
+  });
+
+  it("stops a live process when JobCancel loses the pending→running race", async () => {
+    const pending = {
+      ...task,
+      type: "shell" as const,
+      status: "pending" as const,
+      metadata: { admissionPhase: "dispatching", executionBackend: "detached_process" },
+    };
+    const confirmed = {
+      ...pending,
+      status: "running" as const,
+      metadata: {
+        admissionPhase: "confirmed",
+        executionBackend: "detached_process",
+        runtimeExecutionId: "manager-1",
+      },
+    };
+    const { service, store, manager } = createService(pending);
+    store.transitionPendingSessionTask.mockReturnValue({
+      task: confirmed,
+      transitioned: false,
+    });
+    manager.stopExecution.mockResolvedValue({ ...confirmed, status: "stopped" });
+    store.updateSessionTask.mockReturnValue({ ...confirmed, status: "stopped" });
+
+    await expect(service.cancel({
+      sessionId: "session-1",
+      jobId: pending.id,
+      reason: "no longer needed",
+    })).resolves.toMatchObject({
+      id: pending.id,
+      status: "killed",
+    });
+
+    expect(manager.stopExecution).toHaveBeenCalledWith("manager-1");
+    expect(store.updateSessionTask).toHaveBeenCalledWith(pending.id, {
+      status: "stopped",
+      output: "task output",
     });
   });
 
@@ -261,6 +302,13 @@ function createService(
     getSession: vi.fn((id: string) => id === "session-1" ? { id, cwd: "/repo" } : undefined),
     listSessionTasks: vi.fn(() => [projectedTask]),
     getSessionTask: vi.fn((id: string) => id === projectedTask.id ? projectedTask : undefined),
+    transitionPendingSessionTask: vi.fn((_id: string, input: Record<string, unknown>) => {
+      if (projectedTask.status !== "pending") {
+        return { task: projectedTask, transitioned: false };
+      }
+      const task = { ...projectedTask, ...input, metadata: { ...projectedTask.metadata, ...(input.metadata as object ?? {}) } };
+      return { task, transitioned: true };
+    }),
     updateSessionTask: vi.fn((_id: string, input: Record<string, unknown>) => ({
       ...projectedTask,
       ...input,

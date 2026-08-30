@@ -28,6 +28,12 @@ interface JobSessionStore {
   getSession(sessionId: string): SessionRecord | undefined;
   listSessionTasks(sessionId: string): SessionExecutionRecord[];
   getSessionTask(taskId: string): SessionExecutionRecord | undefined;
+  /** Atomically stop a still-pending admission; returns false if create already confirmed. */
+  transitionPendingSessionTask(taskId: string, input: {
+    status: "stopped";
+    output?: string;
+    metadata?: Record<string, unknown>;
+  }): { task: SessionExecutionRecord; transitioned: boolean };
   updateSessionTask(taskId: string, input: {
     status: "stopped";
     output?: string;
@@ -194,18 +200,22 @@ export class DaemonJobService {
       return terminalSnapshot(await this.terminals.get(source.value.id));
     }
     if (source.kind === "task") {
-      if (source.value.status === "pending") {
-        const stopped = this.store.updateSessionTask(source.value.id, {
+      let task = source.value;
+      if (task.status === "pending") {
+        // Prefer the pending-only transition so a concurrent create confirm cannot
+        // be force-overwritten to "stopped" while the OS process keeps running.
+        const cancelled = this.store.transitionPendingSessionTask(task.id, {
           status: "stopped",
           metadata: { admissionPhase: "cancelled_before_start" },
         });
-        return taskSnapshot(stopped);
+        if (cancelled.transitioned) return taskSnapshot(cancelled.task);
+        task = cancelled.task;
       }
-      const runtime = this.runtimeFor(source.value);
-      await runtime.stopExecution(runtimeExecutionId(source.value));
+      const runtime = this.runtimeFor(task);
+      await runtime.stopExecution(runtimeExecutionId(task));
       let output: string | undefined;
-      try { output = runtime.readOutput(runtimeExecutionId(source.value)); } catch { /* durable output is optional */ }
-      const stopped = this.store.updateSessionTask(source.value.id, {
+      try { output = runtime.readOutput(runtimeExecutionId(task)); } catch { /* durable output is optional */ }
+      const stopped = this.store.updateSessionTask(task.id, {
         status: "stopped",
         ...(output !== undefined ? { output } : {}),
       });
