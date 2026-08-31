@@ -477,6 +477,29 @@ function pendingUserProfileUpdatePath(id: string): string {
   return join(getUserProfilePendingDir(), `${id}.json`);
 }
 
+export async function appendUserProfileUpdate(rawContent: string): Promise<string> {
+  const content = rawContent.trim();
+  if (!content) throw new Error("Cannot append an empty USER.md update.");
+
+  const blocking = scanPersonalPromptFile(content).find((issue) => issue.severity === "block");
+  if (blocking) {
+    throw new Error(`Blocked USER.md update: ${blocking.code}`);
+  }
+
+  const userProfilePath = join(getConfigDir(), "USER.md");
+  let existing = "";
+  try {
+    existing = (await readFile(userProfilePath, "utf-8")).trim();
+  } catch {
+    existing = "";
+  }
+
+  await mkdir(getConfigDir(), { recursive: true });
+  const next = [existing, content].filter(Boolean).join("\n\n") + "\n";
+  await writeFile(userProfilePath, next, "utf-8");
+  return userProfilePath;
+}
+
 export async function queueUserProfileUpdate(
   input: {
     content: string;
@@ -548,22 +571,7 @@ export async function approvePendingUserProfileUpdate(id: string): Promise<strin
     return null;
   }
 
-  const blocking = scanPersonalPromptFile(update.content).find((issue) => issue.severity === "block");
-  if (blocking) {
-    throw new Error(`Blocked USER.md update: ${blocking.code}`);
-  }
-
-  const userProfilePath = join(getConfigDir(), "USER.md");
-  let existing = "";
-  try {
-    existing = (await readFile(userProfilePath, "utf-8")).trim();
-  } catch {
-    existing = "";
-  }
-
-  await mkdir(getConfigDir(), { recursive: true });
-  const next = [existing, update.content.trim()].filter(Boolean).join("\n\n") + "\n";
-  await writeFile(userProfilePath, next, "utf-8");
+  const userProfilePath = await appendUserProfileUpdate(update.content);
   await rm(path, { force: true });
   return userProfilePath;
 }
