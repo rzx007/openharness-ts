@@ -27,10 +27,6 @@ import {
   discoverOpenHarnessExtensions,
   type OpenHarnessAgentExtension,
 } from "./extensions.js";
-import {
-  createAgentMemoryRuntime,
-  type AgentMemoryRuntime,
-} from "./memory-runtime.js";
 import { createMcpAuthHost } from "./mcp-auth.js";
 
 interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
@@ -61,7 +57,6 @@ export interface AgentComposition {
   runtime: RuntimeBundle;
   session: AgentSession;
   mcpConnections: () => ReturnType<McpClientManager["getConnections"]>;
-  memory: AgentMemoryRuntime | undefined;
   childManager: AgentChildManager;
   hostCapabilities: string[];
   model: string;
@@ -135,14 +130,6 @@ export async function composeOpenHarnessAgent(
     );
     runtime.queryEngine.setTerminal(explicitCapabilities?.terminal);
 
-    const memory =
-      settings.memory?.enabled === false
-        ? undefined
-        : await createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10);
-    runtime.queryEngine.setMemoryRetriever(
-      memory ? (userInput) => memory.retrieve(userInput) : undefined,
-    );
-
     const session = createAgentSession({
       queryEngine: runtime.queryEngine,
       sessionId: options.sessionId,
@@ -197,7 +184,6 @@ export async function composeOpenHarnessAgent(
       runtime,
       session,
       mcpConnections: () => mcpManager.getConnections(),
-      memory,
       childManager,
       hostCapabilities,
       model: options.model ?? settings.model,

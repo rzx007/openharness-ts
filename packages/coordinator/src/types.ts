@@ -14,7 +14,6 @@ export interface AgentDefinition {
   color?: string;
   background?: boolean;
   initialPrompt?: string;
-  memory?: string;
   isolation?: string;
   omitClaudeMd?: boolean;
   criticalSystemReminder?: string;

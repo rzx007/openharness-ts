@@ -74,7 +74,8 @@ export { HOOK_EVENTS } from "./types/hooks";
 export type {
   Settings,
   McpServerConfig,
-  MemoryConfig,
+  ContextConfig,
+  SessionContinuityConfig,
   SandboxConfig,
   PermissionSettings,
   PathRuleConfig,
@@ -93,7 +94,7 @@ export type { UsageSnapshot, CostTracker as ICostTracker } from "./types/usage";
 export type {
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
-  MemoryRetriever,
+  ContextRetriever,
   AgentChildController,
   AgentChildBudget,
   AgentChildBudgetDimension,
@@ -171,8 +172,6 @@ export {
   getPluginSourcesDir,
   getInstalledPluginStorePath,
   getSkillsDir,
-  getMemoryDir,
-  getProjectMemoryDir,
   getFeedbackDir,
   getCredentialsFilePath,
 } from "./config/paths";

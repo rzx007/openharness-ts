@@ -178,7 +178,6 @@ const server = new OpenHarnessHttpServer({
       clear() {},
       setModel() {},
       async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
-      async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
       getUsage() { return { inputTokens: 0, outputTokens: 0 }; },
       inspect() { return { model: session.model, tools: [], hooks: [], mcpServers: [] }; },
       async close() {},
@@ -483,12 +482,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
             description: "Dream",
           },
           {
-            name: "/profile",
-            kind: "session",
-            source: "builtin",
-            description: "Profile",
-          },
-          {
             name: "/doctor",
             kind: "session",
             source: "builtin",
@@ -616,21 +609,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     if (pathname === "/dream" && init?.method === "POST") {
       return jsonResponse({ taskId: "dream_1" });
     }
-    if (pathname === "/profile/init" && init?.method === "POST") {
-      return jsonResponse({ report: "PROFILE INIT" });
-    }
-    if (pathname === "/profile") {
-      return jsonResponse({ report: "PROFILE STATUS" });
-    }
     if (pathname === "/sessions/s1/compact" && init?.method === "POST") {
       return jsonResponse({ messageCount: 2, messages: [], parts: [] });
-    }
-    if (pathname === "/sessions/s1/remember" && init?.method === "POST") {
-      return jsonResponse({
-        skipped: false,
-        writtenIds: ["mem2"],
-        titles: ["pnpm tip"],
-      });
     }
     if (pathname === "/providers") {
       return jsonResponse({
@@ -735,22 +715,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
             command: "demo",
           },
         ],
-      });
-    }
-    if (pathname === "/memory" && init?.method === "POST") {
-      return jsonResponse({
-        entry: {
-          id: "mem1",
-          content: "prefer pnpm",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      });
-    }
-    if (pathname === "/memory") {
-      return jsonResponse({
-        directory: "/tmp/memory",
-        entries: [{ id: "mem1", content: "prefer pnpm", createdAt: 1, updatedAt: 1 }],
       });
     }
     if (pathname === "/auth") {
@@ -1288,7 +1252,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/provider" });
     captured?.sendRequest({ type: "submit_line", line: "/mcp" });
     captured?.sendRequest({ type: "submit_line", line: "/jobs list" });
-    captured?.sendRequest({ type: "submit_line", line: "/memory" });
     captured?.sendRequest({ type: "submit_line", line: "/auth" });
     captured?.sendRequest({ type: "submit_line", line: "/context" });
     captured?.sendRequest({ type: "submit_line", line: "/stats" });
@@ -1296,7 +1259,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/compact" });
     captured?.sendRequest({ type: "submit_line", line: "/remember" });
     captured?.sendRequest({ type: "submit_line", line: "/dream" });
-    captured?.sendRequest({ type: "submit_line", line: "/profile" });
     captured?.sendRequest({ type: "submit_line", line: "/doctor" });
     captured?.sendRequest({ type: "submit_line", line: "/effort high" });
     captured?.sendRequest({ type: "submit_line", line: "/usage" });

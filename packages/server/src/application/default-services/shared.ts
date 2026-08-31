@@ -27,9 +27,13 @@ export function mergeSettingsPatch(current: Settings, patch: Record<string, unkn
       ...current.permission,
       ...(isRecord(patch.permission) ? patch.permission : {}),
     },
-    memory: {
-      ...current.memory,
-      ...(isRecord(patch.memory) ? patch.memory : {}),
+    context: {
+      ...current.context,
+      ...(isRecord(patch.context) ? patch.context : {}),
+    },
+    sessionContinuity: {
+      ...current.sessionContinuity,
+      ...(isRecord(patch.sessionContinuity) ? patch.sessionContinuity : {}),
     },
     sandbox: {
       ...current.sandbox,

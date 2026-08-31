@@ -9,9 +9,6 @@
       "@openharness/core": [
         "../core/src/index.ts"
       ],
-      "@openharness/memory": [
-        "../memory/src/index.ts"
-      ],
       "@openharness/services": [
         "../services/src/index.ts"
       ]

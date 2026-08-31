@@ -75,7 +75,6 @@ describe("loadAgentsDir", () => {
         "color: red",
         "background: true",
         "initialPrompt: start here",
-        "memory: project",
         "isolation: worktree",
         "omitClaudeMd: true",
         "criticalSystemReminder: stay safe",
@@ -98,7 +97,6 @@ describe("loadAgentsDir", () => {
     expect(agent!.color).toBe("red");
     expect(agent!.background).toBe(true);
     expect(agent!.initialPrompt).toBe("start here");
-    expect(agent!.memory).toBe("project");
     expect(agent!.isolation).toBe("worktree");
     expect(agent!.omitClaudeMd).toBe(true);
     expect(agent!.criticalSystemReminder).toBe("stay safe");
@@ -118,15 +116,14 @@ describe("loadAgentsDir", () => {
     expect(agent!.systemPrompt).toBe("Just a prompt.");
   });
 
-  it("silently drops invalid enum values (color/effort/memory/permissionMode)", () => {
+  it("silently drops invalid enum values (color/effort/permissionMode)", () => {
     writeAgent(
       "weird",
-      ["---", "name: weird", "color: rainbow", "effort: extreme", "memory: galaxy", "permissionMode: yolo", "maxTurns: -3", "---", "x"].join("\n"),
+      ["---", "name: weird", "color: rainbow", "effort: extreme", "permissionMode: yolo", "maxTurns: -3", "---", "x"].join("\n"),
     );
     const [agent] = loadAgentsDir(tmp);
     expect(agent!.color).toBeUndefined();
     expect(agent!.effort).toBeUndefined();
-    expect(agent!.memory).toBeUndefined();
     expect(agent!.permissionMode).toBeUndefined();
     expect(agent!.maxTurns).toBeUndefined();
   });

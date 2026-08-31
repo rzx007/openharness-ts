@@ -97,32 +97,6 @@ export interface HookInfo {
   origin: "settings" | "runtime";
 }
 
-export interface MemoryEntryRecord {
-  id: string;
-  content: string;
-  tags?: string[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface MemoryService {
-  list(input: {
-    cwd: string;
-  }):
-    | Promise<{ directory: string; entries: MemoryEntryRecord[] }>
-    | { directory: string; entries: MemoryEntryRecord[] };
-  get(input: {
-    cwd: string;
-    id: string;
-  }): Promise<MemoryEntryRecord | null> | MemoryEntryRecord | null;
-  add(input: {
-    cwd: string;
-    content: string;
-    tags?: string[];
-  }): Promise<MemoryEntryRecord> | MemoryEntryRecord;
-  remove(input: { cwd: string; id: string }): Promise<boolean> | boolean;
-}
-
 export interface AuthStatus {
   codex: {
     configured: boolean;
@@ -144,15 +118,6 @@ export interface AuthService {
   logout(input: {
     provider: string;
   }): Promise<{ message: string }> | { message: string };
-}
-
-export interface ContextService {
-  preview(input: {
-    cwd: string;
-  }): Promise<{ report: string }> | { report: string };
-  status(input: {
-    cwd: string;
-  }): Promise<{ report: string }> | { report: string };
 }
 
 export interface DreamStartResult {

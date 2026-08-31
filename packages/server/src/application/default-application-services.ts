@@ -3,11 +3,9 @@ import type {
 } from "./settings-api.js";
 import {
   createDefaultAuthService,
-  createDefaultContextService,
   createDefaultDreamService,
   createDefaultGitService,
   createDefaultHooksService,
-  createDefaultMemoryService,
   createDefaultModelService,
   createDefaultOutputStyleService,
   createDefaultPluginService,
@@ -24,8 +22,6 @@ export {
   createDefaultProviderService,
   createDefaultModelService,
   createDefaultAuthService,
-  createDefaultMemoryService,
-  createDefaultContextService,
   createDefaultDreamService,
   createDefaultAgentIdentityService,
   createDefaultOutputStyleService,
@@ -58,7 +54,6 @@ export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
     settings: createDefaultSettingsService(ref),
     provider: createDefaultProviderService(ref),
     model: createDefaultModelService(ref),
-    memory: createDefaultMemoryService(),
     auth: createDefaultAuthService(),
     agentIdentity: createDefaultAgentIdentityService(),
     outputStyle: createDefaultOutputStyleService(),

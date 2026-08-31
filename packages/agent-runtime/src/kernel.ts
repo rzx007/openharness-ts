@@ -195,7 +195,6 @@ async function createAgentKernelInternal(
       runtime,
       session,
       mcpConnections: () => [],
-      memory: undefined,
       eventBus: tree.eventBus,
       effects: tree.effects,
       identity: tree.identity,

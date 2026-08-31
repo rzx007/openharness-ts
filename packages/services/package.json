@@ -9,10 +9,6 @@
       "import": "./src/index.ts",
       "types": "./src/index.ts"
     },
-    "./memory-extract": {
-      "import": "./src/memory-extract.ts",
-      "types": "./src/memory-extract.ts"
-    },
     "./executions": {
       "import": "./src/executions/index.ts",
       "types": "./src/executions/index.ts"
@@ -34,7 +30,6 @@
     "@arcships/light-ocr": "0.5.7",
     "@openharness/context": "workspace:*",
     "@openharness/core": "workspace:*",
-    "@openharness/memory": "workspace:*",
     "@openharness/protocol": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "better-sqlite3": "^13.0.2",

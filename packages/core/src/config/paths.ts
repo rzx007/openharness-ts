@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 export interface ResolvedPaths {
@@ -9,7 +8,6 @@ export interface ResolvedPaths {
   sessionsDir: string;
   pluginsDir: string;
   skillsDir: string;
-  memoryDir: string;
   tasksDir: string;
   feedbackDir: string;
   configFilePath: string;
@@ -33,7 +31,6 @@ export function resolvePaths(projectRoot?: string): ResolvedPaths {
     sessionsDir: join(dataDir, "sessions"),
     pluginsDir: join(configDir, "plugins"),
     skillsDir: join(configDir, "skills"),
-    memoryDir: join(projectRootResolved, ".openharness", "memory"),
     tasksDir: join(dataDir, "tasks"),
     feedbackDir: join(dataDir, "feedback"),
     configFilePath: join(configDir, "settings.json"),
@@ -98,17 +95,6 @@ export function getInstalledPluginStorePath(): string {
 
 export function getSkillsDir(): string {
   return resolvePaths().skillsDir;
-}
-
-export function getMemoryDir(projectRoot?: string): string {
-  return resolvePaths(projectRoot).memoryDir;
-}
-
-export function getProjectMemoryDir(projectRoot?: string): string {
-  const root = resolve(projectRoot ?? process.cwd());
-  const key = process.platform === "win32" ? root.toLowerCase() : root;
-  const digest = createHash("sha1").update(key).digest("hex").slice(0, 12);
-  return join(getDataDir(), "memory", `${basename(root)}-${digest}`);
 }
 
 export function getFeedbackDir(): string {

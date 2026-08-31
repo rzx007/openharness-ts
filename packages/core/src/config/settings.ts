@@ -10,16 +10,16 @@ const DEFAULT_SETTINGS: Settings = {
   maxTurns: 50,
   permission: { mode: "default" },
   plugins: { enabled: true },
-  memory: {
+  context: {
     enabled: true,
-    maxFiles: 5,
-    maxEntrypointLines: 200,
-    sessionMemoryEnabled: true,
-    autoExtractEnabled: true,
-    autoDreamEnabled: false,
-    autoDreamMinHours: 24,
-    autoDreamMinSessions: 5,
+    explicitCommitThreshold: 0.85,
+    automaticEnvironmentCommitThreshold: 0.95,
+    automaticExtractionEnabled: true,
+    candidateRetentionDays: 30,
+    promptMaxChars: 12_000,
+    promptMaxEntries: 40,
   },
+  sessionContinuity: { enabled: true },
   sandbox: {
     enabled: false,
     backend: "srt",
@@ -61,10 +61,12 @@ const DEFAULT_SETTINGS: Settings = {
   workStyle: "practical",
 };
 
-type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon" | "plugins">> & {
+type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon" | "plugins" | "context" | "sessionContinuity">> & {
   sandbox?: Partial<NonNullable<Settings["sandbox"]>>;
   daemon?: Partial<NonNullable<Settings["daemon"]>>;
   plugins?: Partial<NonNullable<Settings["plugins"]>>;
+  context?: Partial<NonNullable<Settings["context"]>>;
+  sessionContinuity?: Partial<NonNullable<Settings["sessionContinuity"]>>;
 };
 
 /**
@@ -99,18 +101,19 @@ export async function loadSettings(
     ...envSettings,
     ...cliOverrides,
   } as Settings;
-  merged.memory = {
-    ...DEFAULT_SETTINGS.memory,
-    ...fileSettings?.memory,
-    ...projectSettings?.memory,
-    ...envSettings.memory,
-    ...cliOverrides?.memory,
-    enabled: cliOverrides?.memory?.enabled
-      ?? envSettings.memory?.enabled
-      ?? projectSettings?.memory?.enabled
-      ?? fileSettings?.memory?.enabled
-      ?? DEFAULT_SETTINGS.memory?.enabled
-      ?? true,
+  merged.context = {
+    ...DEFAULT_SETTINGS.context!,
+    ...fileSettings?.context,
+    ...projectSettings?.context,
+    ...envSettings.context,
+    ...cliOverrides?.context,
+  };
+  merged.sessionContinuity = {
+    ...DEFAULT_SETTINGS.sessionContinuity!,
+    ...fileSettings?.sessionContinuity,
+    ...projectSettings?.sessionContinuity,
+    ...envSettings.sessionContinuity,
+    ...cliOverrides?.sessionContinuity,
   };
   merged.sandbox = mergeSandboxConfig(
     DEFAULT_SETTINGS.sandbox,

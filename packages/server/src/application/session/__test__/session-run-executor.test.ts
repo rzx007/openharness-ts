@@ -37,7 +37,7 @@ describe("SessionRunExecutor", () => {
       ids: { inputId: "input-1", runId: "run-1", traceId: "trace-1" },
     });
     expect(registerHandle).toHaveBeenCalledWith(handle);
-    expect(postRunMaintenance.run).toHaveBeenCalledWith("s1", "run-1", agent);
+    expect(postRunMaintenance.run).toHaveBeenCalledWith("s1", "run-1");
   });
 
   it("submits an explicit Skill tool instruction for selected skill metadata", async () => {

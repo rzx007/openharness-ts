@@ -133,7 +133,6 @@ function testAgent(
       clear: () => {},
       setModel: () => {},
       async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
-      async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
       getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),
       inspect: () => ({ model: session.model, tools: [], hooks: [], mcpServers: [] }),
       async close() {},

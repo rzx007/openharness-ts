@@ -34,7 +34,7 @@ const SIMPLE_RESPONSE: StreamEvent[] = [
   { type: "complete", stopReason: "end_turn" },
 ];
 
-describe("QueryEngine per-turn memory retriever", () => {
+describe("QueryEngine per-turn context retriever", () => {
   it("calls retriever with the current user input on each submitMessage", async () => {
     const { client } = createRecordingClient(SIMPLE_RESPONSE);
     const retriever = vi.fn(async () => null);
@@ -44,7 +44,7 @@ describe("QueryEngine per-turn memory retriever", () => {
       new ToolRegistry(),
       createMockPermissionChecker(),
       createMockHookExecutor(),
-      { systemPrompt: "BASE", memoryRetriever: retriever },
+      { systemPrompt: "BASE", contextRetriever: retriever },
     );
 
     for await (const _ of engine.submitMessage("first input")) { /* drain */ }
@@ -55,7 +55,7 @@ describe("QueryEngine per-turn memory retriever", () => {
     expect(retriever).toHaveBeenNthCalledWith(2, "second input");
   });
 
-  it("injects retrieved memory into the system prompt sent to the API", async () => {
+  it("injects retrieved context into the system prompt sent to the API", async () => {
     const { client, requests } = createRecordingClient(SIMPLE_RESPONSE);
     const retriever = vi.fn(async () => "<memory>\n- user prefers pnpm\n</memory>");
 
@@ -64,7 +64,7 @@ describe("QueryEngine per-turn memory retriever", () => {
       new ToolRegistry(),
       createMockPermissionChecker(),
       createMockHookExecutor(),
-      { systemPrompt: "BASE PROMPT", memoryRetriever: retriever },
+      { systemPrompt: "BASE PROMPT", contextRetriever: retriever },
     );
 
     for await (const _ of engine.submitMessage("how do I install?")) { /* drain */ }
@@ -78,7 +78,7 @@ describe("QueryEngine per-turn memory retriever", () => {
     expect(system).toContain("<system-reminder>");
   });
 
-  it("does NOT write injected memory into the persistent message history", async () => {
+  it("does NOT write injected context into the persistent message history", async () => {
     const { client } = createRecordingClient(SIMPLE_RESPONSE);
     const retriever = vi.fn(async () => "TRANSIENT_MEMORY_MARKER");
 
@@ -87,7 +87,7 @@ describe("QueryEngine per-turn memory retriever", () => {
       new ToolRegistry(),
       createMockPermissionChecker(),
       createMockHookExecutor(),
-      { systemPrompt: "BASE", memoryRetriever: retriever },
+      { systemPrompt: "BASE", contextRetriever: retriever },
     );
 
     for await (const _ of engine.submitMessage("hi")) { /* drain */ }
@@ -115,7 +115,7 @@ describe("QueryEngine per-turn memory retriever", () => {
       new ToolRegistry(),
       createMockPermissionChecker(),
       createMockHookExecutor(),
-      { systemPrompt: "BASE", memoryRetriever: retriever },
+      { systemPrompt: "BASE", contextRetriever: retriever },
     );
 
     for await (const _ of engine.submitMessage("turn 1")) { /* drain */ }
@@ -126,7 +126,7 @@ describe("QueryEngine per-turn memory retriever", () => {
     expect(requests[1]!.system).toBe("BASE");
   });
 
-  it("keeps the injected memory for every agentic iteration within one turn", async () => {
+  it("refreshes injected context for every agentic iteration within one turn", async () => {
     const tool = {
       name: "Echo",
       description: "echo",
@@ -158,14 +158,13 @@ describe("QueryEngine per-turn memory retriever", () => {
       registry,
       createMockPermissionChecker(),
       createMockHookExecutor(),
-      { systemPrompt: "BASE", memoryRetriever: retriever },
+      { systemPrompt: "BASE", contextRetriever: retriever },
     );
 
     for await (const _ of engine.submitMessage("use echo")) { /* drain */ }
 
-    // Retriever runs once per user turn, not once per API iteration.
-    expect(retriever).toHaveBeenCalledTimes(1);
-    // Both the initial call and the post-tool continuation carry the memory.
+    // Mutable Context is refreshed before both the initial call and tool continuation.
+    expect(retriever).toHaveBeenCalledTimes(2);
     expect(requests).toHaveLength(2);
     for (const r of requests) {
       expect(r.system).toContain("TURN_MEMORY");
@@ -224,7 +223,7 @@ describe("QueryEngine per-turn memory retriever", () => {
     expect(requests[0]!.system).not.toContain("system-reminder");
   });
 
-  it("setMemoryRetriever can enable and disable injection at runtime", async () => {
+  it("setContextRetriever can enable and disable injection at runtime", async () => {
     const { client, requests } = createRecordingClient(SIMPLE_RESPONSE);
     const engine = new QueryEngine(
       client,
@@ -237,14 +236,14 @@ describe("QueryEngine per-turn memory retriever", () => {
     // No retriever -> bare system.
     for await (const _ of engine.submitMessage("a")) { /* drain */ }
 
-    engine.setMemoryRetriever(async () => "LATE_MEMORY");
+    engine.setContextRetriever(async () => "LATE_CONTEXT");
     for await (const _ of engine.submitMessage("b")) { /* drain */ }
 
-    engine.setMemoryRetriever(undefined);
+    engine.setContextRetriever(undefined);
     for await (const _ of engine.submitMessage("c")) { /* drain */ }
 
     expect(requests[0]!.system).toBe("BASE");
-    expect(requests[1]!.system).toContain("LATE_MEMORY");
+    expect(requests[1]!.system).toContain("LATE_CONTEXT");
     expect(requests[2]!.system).toBe("BASE");
   });
 });

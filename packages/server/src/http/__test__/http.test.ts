@@ -431,7 +431,6 @@ async function withServer(
       commandCatalog: options.commandCatalog,
       settings: options.settingsService,
       provider: options.providerService,
-      memory: options.memoryService,
       auth: options.authService,
       dream: options.dreamService,
       agentIdentity: options.agentIdentityService,
@@ -467,7 +466,6 @@ interface TestServerOptions extends Pick<
   commandCatalog?: OpenHarnessServerServices["commandCatalog"];
   settingsService?: OpenHarnessServerServices["settings"];
   providerService?: OpenHarnessServerServices["provider"];
-  memoryService?: OpenHarnessServerServices["memory"];
   authService?: OpenHarnessServerServices["auth"];
   dreamService?: OpenHarnessServerServices["dream"];
   agentIdentityService?: OpenHarnessServerServices["agentIdentity"];
@@ -2708,74 +2706,6 @@ describe("OpenHarnessHttpServer", () => {
     );
   });
 
-  it("manages memory entries via resource APIs", async () => {
-    const entries = new Map<
-      string,
-      {
-        id: string;
-        content: string;
-        tags?: string[];
-        createdAt: number;
-        updatedAt: number;
-      }
-    >();
-    await withServer(
-      async ({ baseUrl, token }) => {
-        const created = await fetch(`${baseUrl}/memory`, {
-          method: "POST",
-          headers: { ...auth(token), "content-type": "application/json" },
-          body: JSON.stringify({ cwd: process.cwd(), content: "prefer pnpm" }),
-        });
-        expect(created.status).toBe(201);
-        const createdBody = (await created.json()) as {
-          entry: { id: string; content: string };
-        };
-        expect(createdBody.entry.content).toBe("prefer pnpm");
-
-        const listed = (await (
-          await fetch(
-            `${baseUrl}/memory?cwd=${encodeURIComponent(process.cwd())}`,
-            { headers: auth(token) },
-          )
-        ).json()) as { directory: string; entries: Array<{ id: string }> };
-        expect(listed.directory).toBe("/tmp/memory");
-        expect(listed.entries.map((entry) => entry.id)).toContain(
-          createdBody.entry.id,
-        );
-
-        const removed = await fetch(
-          `${baseUrl}/memory/${createdBody.entry.id}?cwd=${encodeURIComponent(process.cwd())}`,
-          { method: "DELETE", headers: auth(token) },
-        );
-        expect(removed.status).toBe(200);
-      },
-      {
-        memoryService: {
-          async list() {
-            return { directory: "/tmp/memory", entries: [...entries.values()] };
-          },
-          async get({ id }) {
-            return entries.get(id) ?? null;
-          },
-          async add({ content, tags }) {
-            const entry = {
-              id: `m${entries.size + 1}`,
-              content,
-              ...(tags ? { tags } : {}),
-              createdAt: 1,
-              updatedAt: 1,
-            };
-            entries.set(entry.id, entry);
-            return entry;
-          },
-          async remove({ id }) {
-            return entries.delete(id);
-          },
-        },
-      },
-    );
-  });
-
   it("manages auth status/login/logout via resource APIs", async () => {
     const stored = new Set<string>();
     await withServer(
@@ -4077,11 +4007,27 @@ describe("OpenHarnessHttpServer", () => {
     );
   });
 
+  it("returns 404 for removed legacy memory and session remember routes", async () => {
+    await withServer(async ({ baseUrl, token }) => {
+      const headers = { ...auth(token), "content-type": "application/json" };
+      const memory = await fetch(`${baseUrl}/memory`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ cwd: process.cwd(), content: "legacy" }),
+      });
+      const remember = await fetch(`${baseUrl}/sessions/missing/remember`, {
+        method: "POST",
+        headers: auth(token),
+      });
+      expect(memory.status).toBe(404);
+      expect(remember.status).toBe(404);
+    });
+  });
+
   it("rejects runtime-restarting resource mutations before they write state", async () => {
     const started = deferred();
     const stopped = deferred();
     const closed: string[] = [];
-    let memoryWrites = 0;
     let authWrites = 0;
     let pluginWrites = 0;
     let profileWrites = 0;
@@ -4098,9 +4044,6 @@ describe("OpenHarnessHttpServer", () => {
           },
           async close() {
             closed.push(context.session.id);
-          },
-          async remember() {
-            return { skipped: false, writtenIds: [], titles: [] };
           },
         };
       },
@@ -4153,16 +4096,14 @@ describe("OpenHarnessHttpServer", () => {
         ]);
 
         expect(requests.map((response) => response.status)).toEqual([
-          409, 409, 409, 409, 409, 409,
+          404, 409, 409, 409, 409, 404,
         ]);
         expect({
-          memoryWrites,
           authWrites,
           pluginWrites,
           profileWrites,
           closed,
         }).toEqual({
-          memoryWrites: 0,
           authWrites: 0,
           pluginWrites: 0,
           profileWrites: 0,
@@ -4177,26 +4118,6 @@ describe("OpenHarnessHttpServer", () => {
       },
       {
         runtimeFactory,
-        memoryService: {
-          async list() {
-            return { directory: "/tmp/memory", entries: [] };
-          },
-          async get() {
-            return null;
-          },
-          async add() {
-            memoryWrites++;
-            return {
-              id: "m1",
-              content: "unexpected",
-              createdAt: 1,
-              updatedAt: 1,
-            };
-          },
-          async remove() {
-            return false;
-          },
-        },
         authService: {
           async status() {
             return {

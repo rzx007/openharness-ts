@@ -391,8 +391,7 @@ export interface QueryEngine {
   setMaxTurns(max: number): void;
   loadMessages(messages: Message[]): void;
   getTotalUsage(): import("./usage").UsageSnapshot;
-  setMemoryRetriever(retriever: MemoryRetriever | undefined): void;
-  setContextRetriever(retriever: MemoryRetriever | undefined): void;
+  setContextRetriever(retriever: ContextRetriever | undefined): void;
   setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void;
   setAllowedTools(tools: string[] | null): void;
   setSessionId(sessionId: string | undefined): void;
@@ -407,7 +406,7 @@ export interface QueryEngine {
   setManagedResources(managedResources: import("./tools").AgentManagedResourcePolicy | undefined): void;
 }
 
-export interface MemoryRetriever {
+export interface ContextRetriever {
   (userInput: string): Promise<string | null> | string | null;
 }
 
@@ -425,9 +424,8 @@ export interface QueryEngineOptions {
   settings?: Settings;
   compactKeepRecent?: number;
   skillRegistry?: unknown;
-  memoryRetriever?: MemoryRetriever;
   /** Mutable governed context, refreshed before every physical model request. */
-  contextRetriever?: MemoryRetriever;
+  contextRetriever?: ContextRetriever;
 }
 
 export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";

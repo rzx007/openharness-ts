@@ -15,7 +15,7 @@ function createQueryEngine(submit: QueryEngine["submitMessage"]): QueryEngine {
     setMaxTurns: vi.fn(),
     loadMessages: vi.fn(),
     getTotalUsage: vi.fn(() => ({ inputTokens: 0, outputTokens: 0 })),
-    setMemoryRetriever: vi.fn(),
+    setContextRetriever: vi.fn(),
     setAttachmentsProvider: vi.fn(),
     setAllowedTools: vi.fn(),
     setSessionId: vi.fn(),

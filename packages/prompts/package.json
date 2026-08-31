@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "@openharness/core": "workspace:*",
-    "@openharness/personalization": "workspace:*",
     "@openharness/sandbox": "workspace:*"
   },
   "devDependencies": {

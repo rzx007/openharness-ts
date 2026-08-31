@@ -12,9 +12,6 @@
       "@openharness/core": [
         "../../packages/core/src/index.ts"
       ],
-      "@openharness/memory": [
-        "../../packages/memory/src/index.ts"
-      ],
       "@openharness/server": [
         "../../packages/server/src/index.ts"
       ],

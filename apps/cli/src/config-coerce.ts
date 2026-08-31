@@ -22,19 +22,19 @@ export function coerceConfigValue(key: string, value: string): unknown {
     case "verbose":
     case "fastMode":
     case "plugins.enabled":
-    case "memory.enabled":
-    case "memory.sessionMemoryEnabled":
-    case "memory.autoExtractEnabled":
-    case "memory.autoDreamEnabled":
+    case "context.enabled":
+    case "context.automaticExtractionEnabled":
+    case "sessionContinuity.enabled":
     case "daemon.autoStart":
       if (value === "true" || value === "on") return true;
       if (value === "false" || value === "off") return false;
       return undefined;
 
-    case "memory.maxFiles":
-    case "memory.maxEntrypointLines":
-    case "memory.autoDreamMinHours":
-    case "memory.autoDreamMinSessions": {
+    case "context.explicitCommitThreshold":
+    case "context.automaticEnvironmentCommitThreshold":
+    case "context.candidateRetentionDays":
+    case "context.promptMaxChars":
+    case "context.promptMaxEntries": {
       const n = Number(value);
       return Number.isFinite(n) ? n : undefined;
     }

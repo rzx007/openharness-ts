@@ -20,7 +20,7 @@ export type RuntimeDiagnostics = {
 export type SessionCommandHost = {
   client: OpenHarnessClient;
   sessionId?: string;
-  /** Project cwd for memory/git/plugins/etc. */
+  /** Project cwd for context, git, plugins, and related resources. */
   cwd: string;
   /** Values used by /status */
   model?: string;
@@ -129,10 +129,6 @@ function shouldPresentSlashOutput(slash: SlashLine): boolean {
     case "/provider":
       return !slash.args.trim();
     case "/jobs": {
-      const sub = firstArg(slash.args);
-      return !sub || sub === "list" || sub === "show";
-    }
-    case "/memory": {
       const sub = firstArg(slash.args);
       return !sub || sub === "list" || sub === "show";
     }
@@ -420,61 +416,6 @@ export async function dispatchSessionCommand(
     return "handled";
   }
 
-  if (slash?.name === "/memory") {
-    const args = slash.args.trim();
-    const [sub, ...rest] = args.split(/\s+/).filter(Boolean);
-    if (!sub || sub === "list") {
-      await readPresentation(`memory:${cwd}:list`, "Memory", async () => {
-        const listed = await client.listMemory({ cwd });
-        if (listed.entries.length === 0) return `Memory directory: ${listed.directory}\nNo entries found.`;
-        return [
-          `Memory entries (${listed.entries.length}):`,
-          "",
-          ...listed.entries.map((entry) => {
-            const tags = entry.tags?.length ? ` [${entry.tags.join(", ")}]` : "";
-            const preview = entry.content.length > 80
-              ? `${entry.content.slice(0, 80)}...`
-              : entry.content;
-            return `  ${entry.id}${tags}: ${preview}`;
-          }),
-        ].join("\n");
-      });
-      return "handled";
-    }
-    if (sub === "show" && rest[0]) {
-      const memoryId = rest[0];
-      await readPresentation(`memory:${cwd}:show:${memoryId}`, "Memory", async () => {
-        const entry = await client.getMemory(memoryId, { cwd });
-        return [
-          `ID:       ${entry.id}`,
-          `Created:  ${new Date(entry.createdAt).toISOString()}`,
-          `Updated:  ${new Date(entry.updatedAt).toISOString()}`,
-          `Tags:     ${entry.tags?.join(", ") ?? "(none)"}`,
-          "",
-          entry.content,
-        ].join("\n");
-      });
-      return "handled";
-    }
-    if (sub === "add") {
-      const content = rest.join(" ").trim();
-      if (!content) {
-        emit("Usage: /memory add <content>");
-        return "handled";
-      }
-      const entry = await client.addMemory({ cwd, content });
-      emit(`Memory added: ${entry.id}`);
-      return "handled";
-    }
-    if (sub === "remove" && rest[0]) {
-      await client.removeMemory(rest[0], { cwd });
-      emit(`Memory removed: ${rest[0]}`);
-      return "handled";
-    }
-    emit("Usage: /memory [list | show ID | add CONTENT | remove ID]");
-    return "handled";
-  }
-
   if (slash?.name === "/auth") {
     const args = slash.args.trim();
     const [sub, provider, apiKey] = args.split(/\s+/).filter(Boolean);
@@ -597,8 +538,8 @@ export async function dispatchSessionCommand(
       .map((part) => part.text ?? "")
       .join(" ");
     const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
-    const [memory, jobsResult, settings] = await Promise.all([
-      client.listMemory({ cwd }).catch(() => ({ entries: [] as Array<{ id: string }> })),
+    const [contextStatus, jobsResult, settings] = await Promise.all([
+      client.getContextStatus({ cwd }).catch(() => ({ active: 0, candidates: 0 })),
       client.listJobs({ sessionId, includeFinished: true, limit: 100 })
         .then((jobs) => ({ jobs }))
         .catch((error: unknown) => ({
@@ -613,7 +554,8 @@ export async function dispatchSessionCommand(
       "Session stats:",
       `- messages: ${messageCount}`,
       `- estimated_tokens: ${estimatedTokens}`,
-      `- memory_entries: ${memory.entries.length}`,
+      `- context_entries: ${contextStatus.active}`,
+      `- context_candidates: ${contextStatus.candidates}`,
       `- jobs: ${jobsSummary}`,
       `- output_style: ${typeof settings.outputStyle === "string" ? settings.outputStyle : "default"}`,
     ].join("\n"));
@@ -695,10 +637,10 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/doctor") {
-    const [settings, auth, memory, mcp, jobsResult] = await Promise.all([
+    const [settings, auth, contextStatus, mcp, jobsResult] = await Promise.all([
       client.getSettings().catch(() => ({}) as Record<string, unknown>),
       client.getAuthStatus().catch(() => null),
-      client.listMemory({ cwd }).catch(() => ({ directory: "(unavailable)", entries: [] as Array<{ id: string }> })),
+      client.getContextStatus({ cwd }).catch(() => ({ active: 0, candidates: 0 })),
       sessionId ? client.getSessionMcp(sessionId).catch(() => []) : Promise.resolve([]),
       sessionId
         ? client.listJobs({ sessionId, includeFinished: true, limit: 100 })
@@ -739,8 +681,8 @@ export async function dispatchSessionCommand(
       `Messages:       ${bucket?.messages.length ?? 0}`,
       `Jobs:           ${jobsSummary}`,
       "",
-      `Memory dir:     ${memory.directory}`,
-      `Memory entries: ${memory.entries.length}`,
+      `Context entries: ${contextStatus.active}`,
+      `Candidates:      ${contextStatus.candidates}`,
     ];
     if (auth) {
       lines.push(

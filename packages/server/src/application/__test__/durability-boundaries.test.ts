@@ -135,9 +135,6 @@ describe("durable application long-running boundaries", () => {
       pid: 1,
       staleAfterMs: 10_000,
     });
-    const memory = join(dir, "memory");
-    mkdirSync(memory, { recursive: true });
-    writeFileSync(join(memory, "fact.md"), "durable fact", "utf-8");
     const attachmentBytes = "attachment bytes";
     const attachmentHash = createHash("sha256").update(attachmentBytes).digest("hex");
     store.createImportingAttachment({
@@ -160,10 +157,10 @@ describe("durable application long-running boundaries", () => {
     const createdManifest = await createApplicationBackup({
       store,
       destination: backup,
-      sources: { memory, attachments },
+      sources: { attachments },
     });
     expect(createdManifest).toMatchObject({
-      version: 2,
+      version: 3,
       directories: { attachments: true },
       attachments: {
         assets: 1,
@@ -182,24 +179,14 @@ describe("durable application long-running boundaries", () => {
       JSON.stringify(Object.fromEntries(Object.entries(checksums).reverse())),
     );
 
-    const occupiedMemory = join(dir, "occupied-memory");
-    mkdirSync(occupiedMemory);
-    writeFileSync(join(occupiedMemory, "keep.txt"), "keep");
-    const blockedStorePath = join(dir, "blocked", "sessions.db");
-    expect(() =>
-      restoreApplicationBackup({
-        source: backup,
-        storePath: blockedStorePath,
-        destinations: { memory: occupiedMemory },
-      }),
-    ).toThrow("not empty");
-    expect(existsSync(blockedStorePath)).toBe(false);
-
     expect(() =>
       restoreApplicationBackup({
         source: backup,
         storePath: join(dir, "duplicate", "sessions.db"),
-        destinations: { memory: join(dir, "same-target"), attachments: join(dir, "same-target") },
+        destinations: {
+          artifacts: join(dir, "same-target"),
+          attachments: join(dir, "same-target"),
+        },
       }),
     ).toThrow("distinct");
     expect(() =>
@@ -211,12 +198,11 @@ describe("durable application long-running boundaries", () => {
     ).toThrow("inside the backup source");
 
     const restoredPath = join(dir, "restored", "sessions.db");
-    const restoredMemory = join(dir, "restored-memory");
     const restoredAttachments = join(dir, "restored-attachments");
     const manifest = restoreApplicationBackup({
       source: backup,
       storePath: restoredPath,
-      destinations: { memory: restoredMemory, attachments: restoredAttachments },
+      destinations: { attachments: restoredAttachments },
     });
     expect(manifest.recovery.reviveLiveProcesses).toBe(false);
     expect(

@@ -12,7 +12,6 @@
       "@openharness/client": ["../../packages/client/src/index.ts"],
       "@openharness/services": ["../../packages/services/src/index.ts"],
       "@openharness/core": ["../../packages/core/src/index.ts"],
-      "@openharness/memory": ["../../packages/memory/src/index.ts"],
       "react": ["./node_modules/@types/react"],
       "react/*": ["./node_modules/@types/react/*"]
     }

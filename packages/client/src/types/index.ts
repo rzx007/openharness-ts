@@ -360,19 +360,6 @@ export interface McpServerStatus {
   error?: string;
 }
 
-export interface MemoryEntryRecord {
-  id: string;
-  content: string;
-  tags?: string[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface MemoryListResponse {
-  directory: string;
-  entries: MemoryEntryRecord[];
-}
-
 export type ContextScope = "user" | "machine" | "project";
 export type ContextKind = "user_preference" | "project_rule" | "project_knowledge" | "environment_fact";
 export type ContextTopic = "preferences" | "ui-design" | "development-workflow" | "rules" | "knowledge" | "environment" | "pending";
@@ -440,13 +427,6 @@ export interface ReloadPluginsResponse {
   plugins: PluginInfo[];
   warnings: string[];
   message: string;
-}
-
-export interface RememberSessionResponse {
-  skipped: boolean;
-  reason?: string;
-  writtenIds: string[];
-  titles: string[];
 }
 
 export interface StartDreamResponse {

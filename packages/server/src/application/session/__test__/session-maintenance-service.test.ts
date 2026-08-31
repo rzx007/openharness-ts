@@ -18,7 +18,7 @@ const session = {
   updatedAt: 1,
 };
 
-function createMaintenance(agent: Record<string, any>, options: { personalizationUpdater?: (messages: any[]) => number } = {}) {
+function createMaintenance(agent: Record<string, any>) {
   const replaced = { messages: [{ id: "persisted-message" }], parts: [{ id: "persisted-part" }] };
   const store = {
     getSession: vi.fn(() => session),
@@ -47,7 +47,6 @@ function createMaintenance(agent: Record<string, any>, options: { personalizatio
     liveChildren: { has: vi.fn(() => false) },
     operationGate,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
-    personalizationUpdater: options.personalizationUpdater,
   });
   return { maintenance, store, runEngine, agentPool, operationGate, broadcastSince, replaced };
 }
@@ -135,50 +134,6 @@ describe("SessionMaintenanceService", () => {
     expect(store.replaceTranscript).toHaveBeenCalledWith({ sessionId: "s1", messages: [] });
     expect(agentPool.close).toHaveBeenCalledWith("s1");
     expect(broadcastSince).toHaveBeenCalledWith(7);
-  });
-
-  it("extracts memories and closes every runtime for the cwd", async () => {
-    const remembered = { skipped: false, writtenIds: ["memory-1"], titles: ["Fact"] };
-    const remember = vi.fn(async () => remembered);
-    const personalizationUpdater = vi.fn(() => 1);
-    const { maintenance, agentPool, store } = createMaintenance({ remember }, { personalizationUpdater });
-    store.listMessages.mockReturnValue([{
-      id: "m1",
-      seq: 1,
-      sessionId: "s1",
-      role: "user",
-      metadata: {},
-      createdAt: 1,
-      updatedAt: 1,
-    }] as any);
-    store.listMessageParts.mockReturnValue([{
-      id: "p1",
-      seq: 1,
-      sessionId: "s1",
-      messageId: "m1",
-      type: "text",
-      status: "completed",
-      text: "ssh ops@10.0.0.9",
-      metadata: {},
-      createdAt: 1,
-      updatedAt: 1,
-    }] as any);
-
-    await expect(maintenance.remember("s1")).resolves.toBe(remembered);
-    expect(personalizationUpdater).toHaveBeenCalledWith([{ role: "user", content: "ssh ops@10.0.0.9" }]);
-    expect(agentPool.closeForCwd).toHaveBeenCalledWith("/repo");
-  });
-
-  it("does not fail remember when local personalization extraction fails", async () => {
-    const remembered = { skipped: false, writtenIds: ["memory-1"], titles: ["Fact"] };
-    const remember = vi.fn(async () => remembered);
-    const personalizationUpdater = vi.fn(() => {
-      throw new Error("disk full");
-    });
-    const { maintenance, agentPool } = createMaintenance({ remember }, { personalizationUpdater });
-
-    await expect(maintenance.remember("s1")).resolves.toBe(remembered);
-    expect(agentPool.closeForCwd).toHaveBeenCalledWith("/repo");
   });
 
   it("holds a session barrier for the complete asynchronous compact operation", async () => {

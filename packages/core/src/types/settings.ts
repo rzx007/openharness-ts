@@ -23,18 +23,18 @@ export interface McpRemoteServerConfig {
 
 export type McpServerConfig = McpStdioServerConfig | McpRemoteServerConfig;
 
-export interface MemoryConfig {
+export interface ContextConfig {
   enabled: boolean;
-  maxFiles?: number;
-  maxEntrypointLines?: number;
-  /** Keep a deterministic per-session checkpoint for compact continuity. */
-  sessionMemoryEnabled?: boolean;
-  /** Run a best-effort memory extraction pass after completed user turns. */
-  autoExtractEnabled?: boolean;
-  /** autodream（记忆梦境整合）开关与触发门槛（E.6）。 */
-  autoDreamEnabled?: boolean;
-  autoDreamMinHours?: number;
-  autoDreamMinSessions?: number;
+  explicitCommitThreshold: number;
+  automaticEnvironmentCommitThreshold: number;
+  automaticExtractionEnabled: boolean;
+  candidateRetentionDays: number;
+  promptMaxChars: number;
+  promptMaxEntries: number;
+}
+
+export interface SessionContinuityConfig {
+  enabled: boolean;
 }
 
 export interface SandboxConfig {
@@ -158,7 +158,8 @@ export interface Settings {
   systemPrompt?: string;
   permission: PermissionSettings;
   hooks?: HookDefinition[];
-  memory?: MemoryConfig;
+  context?: ContextConfig;
+  sessionContinuity?: SessionContinuityConfig;
   sandbox?: SandboxConfig;
   mcpServers?: Record<string, McpServerConfig>;
   plugins?: {

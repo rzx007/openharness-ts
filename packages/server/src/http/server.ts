@@ -18,7 +18,6 @@ import type {
   DreamService,
   GitService,
   HooksService,
-  MemoryService,
   ModelService,
   OutputStyleService,
   PluginService,
@@ -50,7 +49,6 @@ import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
 import { createContextRoutes } from "./routes/context.js";
 import { createJobRoutes } from "./routes/job.js";
-import { createMemoryRoutes } from "./routes/memory.js";
 import { createPermissionRoutes } from "./routes/permission.js";
 import { createProjectRoutes } from "./routes/project.js";
 import { createRunExecutionRoutes } from "./routes/run-execution.js";
@@ -71,7 +69,6 @@ export interface OpenHarnessServerServices {
   settings?: SettingsService;
   provider?: ProviderService;
   model?: ModelService;
-  memory?: MemoryService;
   auth?: AuthService;
   dream?: DreamService;
   agentIdentity?: AgentIdentityService;
@@ -326,13 +323,6 @@ export class OpenHarnessHttpServer {
     this.app.route(
       "/attachments",
       createAttachmentRoutes(this.application.attachments),
-    );
-    this.app.route(
-      "/memory",
-      createMemoryRoutes({
-        memoryService: this.services.memory,
-        control: this.application.control,
-      }),
     );
     this.app.route(
       "/context",

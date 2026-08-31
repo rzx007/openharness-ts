@@ -15,7 +15,6 @@ const NATIVE_AGENT_KEYS: Record<string, string> = {
   color: "color",
   background: "background",
   initialprompt: "initialPrompt",
-  memory: "memory",
   isolation: "isolation",
   maxturns: "maxTurns",
   skills: "skills",

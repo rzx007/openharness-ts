@@ -17,15 +17,9 @@ export function createDefaultProjectInitService(): ProjectInitService {
           content: "# OpenHarness Config\n\nThis directory contains OpenHarness project configuration.\n",
           label: ".openharness/README.md",
         },
-        {
-          path: join(cwd, ".openharness", "memory", "MEMORY.md"),
-          content: "# Memory\n\nThis file stores project memory for the AI assistant.\n",
-          label: ".openharness/memory/MEMORY.md",
-        },
       ];
       const dirs = [
         join(cwd, ".openharness"),
-        join(cwd, ".openharness", "memory"),
         join(cwd, ".openharness", "plugins"),
         join(cwd, ".openharness", "skills"),
       ];

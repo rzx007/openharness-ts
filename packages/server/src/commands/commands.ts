@@ -94,13 +94,6 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     source: "builtin",
   },
   {
-    name: "/memory",
-    description: "Manage project memory (list | show ID | add CONTENT | remove ID)",
-    kind: "session",
-    source: "builtin",
-    argumentHint: "[list|show ID|add CONTENT|remove ID]",
-  },
-  {
     name: "/auth",
     description: "Manage API credentials (status | login | logout)",
     kind: "session",
@@ -140,7 +133,7 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
   },
   {
     name: "/dream",
-    description: "Start memory consolidation (--preview for plan only)",
+    description: "Start context consolidation (--preview for plan only)",
     kind: "session",
     source: "builtin",
     argumentHint: "[--preview]",

@@ -257,7 +257,7 @@ describe("createDefaultNodeAgent", () => {
         maxTurns: 3,
         permission: { mode: "default" },
         sandbox: { enabled: false },
-        memory: { enabled: false },
+        context: { enabled: false },
       },
     });
     const childError = new Error("child cleanup failed");
@@ -281,7 +281,7 @@ describe("createDefaultNodeAgent", () => {
         maxTurns: 3,
         permission: { mode: "default" },
         sandbox: { enabled: false },
-        memory: { enabled: false },
+        context: { enabled: false },
       },
     });
     const childError = new Error("child cleanup failed");

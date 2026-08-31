@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthRoutes } from "../auth.js";
 import { HttpEventHub } from "../events.js";
 import { createGitRoutes } from "../git.js";
-import { createMemoryRoutes } from "../memory.js";
 import { createPermissionRoutes } from "../permission.js";
 import { createRunExecutionRoutes } from "../run-execution.js";
 import { createScheduleRoutes } from "../schedules.js";
@@ -235,34 +234,6 @@ describe("system routes", () => {
         ],
       },
     ]);
-  });
-});
-
-describe("memory routes", () => {
-  it("adds memory and closes runtimes for the cwd", async () => {
-    const closeRuntimesForCwd = vi.fn();
-    const app = createMemoryRoutes({
-      memoryService: {
-        add: async (input) => ({ id: "m1", ...input }),
-        list: async () => ({ entries: [] }),
-        get: async () => undefined,
-        remove: async () => false,
-      },
-      control: daemonControl({ closeRuntimesForCwd }),
-    });
-
-    const response = await app.request("/", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        cwd: "/repo",
-        content: "Remember this",
-        tags: ["a"],
-      }),
-    });
-
-    expect(response.status).toBe(201);
-    expect(closeRuntimesForCwd).toHaveBeenCalledWith("/repo");
   });
 });
 

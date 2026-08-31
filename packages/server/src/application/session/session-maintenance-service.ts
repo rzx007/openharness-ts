@@ -1,7 +1,4 @@
-import type { SessionMessagePartRecord, SessionMessageRecord } from "@openharness/protocol";
 import type { SessionStore } from "@openharness/services";
-import type { AgentRememberResult } from "@openharness/agent-runtime";
-import { updateRulesFromSession, type SessionMessageLike } from "@openharness/personalization";
 
 import { writeSessionExport, type SessionExportFormat } from "../../session/export-session.js";
 import { rewindTranscript } from "../../session/rewind.js";
@@ -35,7 +32,6 @@ export interface SessionMaintenanceServiceContext {
   liveChildren: Pick<LiveChildAgentDirectory, "has">;
   operationGate: Pick<DaemonOperationGate, "enter" | "tryEnterBarrier">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
-  personalizationUpdater?: (messages: SessionMessageLike[]) => number;
 }
 
 /**
@@ -166,27 +162,6 @@ export class SessionMaintenanceService {
     }
   }
 
-  async remember(sessionId: string): Promise<AgentRememberResult> {
-    const session = this.requireSession(sessionId);
-    this.rejectLiveChild(sessionId);
-    this.requireRuntime();
-    const lease = this.context.operationGate.tryEnterBarrier({ kind: "cwd", cwd: session.cwd }, () =>
-      !this.context.runEngine.hasActiveRunsForCwd(session.cwd) &&
-      !this.context.agentPool.hasActiveWorkForCwd(session.cwd));
-    if (!lease) {
-      throw new SessionMaintenanceError(409, "Cannot remember while session runs are active for this cwd");
-    }
-    try {
-      const agent = await this.context.agentPool.acquireSession(sessionId);
-      const result = await agent.remember();
-      this.updateLocalEnvironmentRules(sessionId);
-      await this.context.agentPool.closeForCwd(session.cwd);
-      return result;
-    } finally {
-      lease.release();
-    }
-  }
-
   private requireSession(sessionId: string): NonNullable<ReturnType<SessionStore["getSession"]>> {
     const session = this.context.store.getSession(sessionId);
     if (!session) throw new SessionMaintenanceError(404, "Session not found");
@@ -226,40 +201,4 @@ export class SessionMaintenanceService {
     }
   }
 
-  private updateLocalEnvironmentRules(sessionId: string): void {
-    try {
-      const messages = transcriptToPersonalizationMessages(
-        this.context.store.listMessages(sessionId),
-        this.context.store.listMessageParts(sessionId),
-      );
-      const updater = this.context.personalizationUpdater ?? updateRulesFromSession;
-      updater(messages);
-    } catch {
-      // Local personalization is best-effort and must not block the remember flow.
-    }
-  }
-}
-
-function transcriptToPersonalizationMessages(
-  messages: SessionMessageRecord[],
-  parts: SessionMessagePartRecord[],
-): SessionMessageLike[] {
-  const partsByMessage = new Map<string, SessionMessagePartRecord[]>();
-  for (const part of parts) {
-    const list = partsByMessage.get(part.messageId) ?? [];
-    list.push(part);
-    partsByMessage.set(part.messageId, list);
-  }
-
-  return [...messages]
-    .sort((a, b) => a.seq - b.seq)
-    .map((message) => {
-      const content = (partsByMessage.get(message.id) ?? [])
-        .sort((a, b) => a.seq - b.seq)
-        .map((part) => part.text)
-        .filter((text): text is string => typeof text === "string" && text.trim().length > 0)
-        .join("\n");
-      return { role: message.role, content };
-    })
-    .filter((message) => message.content.length > 0);
 }

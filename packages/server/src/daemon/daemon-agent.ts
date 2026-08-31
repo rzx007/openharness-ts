@@ -20,7 +20,7 @@ import type {
   AgentEffects,
   AgentEventListener,
   Settings,
-  MemoryRetriever,
+  ContextRetriever,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
@@ -77,7 +77,7 @@ export interface DaemonAgentLoaderOptions {
   attachments?: AgentAttachmentResourceHost;
   contextMemory?: AgentContextMemoryHost;
   managedResources?: AgentManagedResourcePolicy;
-  createContextRetriever?(session: SessionRecord): MemoryRetriever;
+  createContextRetriever?(session: SessionRecord): ContextRetriever;
   attachmentResourceRoot?(session: SessionRecord): string;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。

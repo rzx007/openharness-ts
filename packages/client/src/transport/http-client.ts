@@ -34,8 +34,6 @@ import type {
   ReloadPluginsResponse,
   RewindSessionResponse,
   McpServerStatus,
-  MemoryEntryRecord,
-  MemoryListResponse,
   ContextEntryRecord,
   ContextKind,
   ContextMutationResult,
@@ -54,7 +52,6 @@ import type {
   ResumeInterruptedRunResponse,
   ProviderInfo,
   OutputStyleInfo,
-  RememberSessionResponse,
   ScheduledRunRecord,
   ScheduledTaskRecord,
   ScheduledTaskStatusSummary,
@@ -496,58 +493,6 @@ export class OpenHarnessClient {
     return response.servers;
   }
 
-  /** `GET /memory?cwd=` */
-  async listMemory(options: {
-    cwd: string;
-    signal?: AbortSignal;
-  }): Promise<MemoryListResponse> {
-    const { signal, ...query } = options;
-    return await this.request<MemoryListResponse>(this.path("/memory", query), {
-      signal,
-    });
-  }
-
-  /** `GET /memory/:id?cwd=` */
-  async getMemory(
-    entryId: string,
-    options: { cwd: string; signal?: AbortSignal },
-  ): Promise<MemoryEntryRecord> {
-    const { signal, cwd } = options;
-    const response = await this.request<{ entry: MemoryEntryRecord }>(
-      this.path(`/memory/${encodeURIComponent(entryId)}`, { cwd }),
-      { signal },
-    );
-    return response.entry;
-  }
-
-  /** `POST /memory` */
-  async addMemory(
-    input: { cwd: string; content: string; tags?: string[] },
-    options: { signal?: AbortSignal } = {},
-  ): Promise<MemoryEntryRecord> {
-    const response = await this.request<{ entry: MemoryEntryRecord }>(
-      "/memory",
-      {
-        method: "POST",
-        body: input,
-        signal: options.signal,
-      },
-    );
-    return response.entry;
-  }
-
-  /** `DELETE /memory/:id?cwd=` */
-  async removeMemory(
-    entryId: string,
-    options: { cwd: string; signal?: AbortSignal },
-  ): Promise<void> {
-    const { signal, cwd } = options;
-    await this.request<{ deleted: boolean }>(
-      this.path(`/memory/${encodeURIComponent(entryId)}`, { cwd }),
-      { method: "DELETE", signal },
-    );
-  }
-
   /** `GET /auth` */
   async getAuthStatus(
     options: { signal?: AbortSignal } = {},
@@ -671,17 +616,6 @@ export class OpenHarnessClient {
     return await this.request<RewindSessionResponse>(
       `/sessions/${encodeURIComponent(sessionId)}/rewind`,
       { method: "POST", body: input, signal: options.signal },
-    );
-  }
-
-  /** `POST /sessions/:id/remember` */
-  async rememberSession(
-    sessionId: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<RememberSessionResponse> {
-    return await this.request<RememberSessionResponse>(
-      `/sessions/${encodeURIComponent(sessionId)}/remember`,
-      { method: "POST", signal: options.signal },
     );
   }
 

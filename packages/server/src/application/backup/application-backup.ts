@@ -21,17 +21,16 @@ import {
 
 export interface BackupSourceDirectories {
   artifacts?: string;
-  memory?: string;
   executionOutput?: string;
   attachments?: string;
 }
 
 export interface ApplicationBackupManifest {
-  version: 1 | 2;
+  version: 3;
   backupId: string;
   createdAt: number;
   database: "database.sqlite";
-  directories: Record<"artifacts" | "memory" | "execution-output" | "attachments", boolean>;
+  directories: Record<"artifacts" | "execution-output" | "attachments", boolean>;
   attachments?: {
     assets: number;
     uniqueBlobs: number;
@@ -57,7 +56,7 @@ export async function createApplicationBackup(input: {
   if (existsSync(destination) && readdirSync(destination).length > 0) {
     throw new Error(`Backup destination is not empty: ${destination}`);
   }
-  for (const source of [input.sources?.artifacts, input.sources?.memory, input.sources?.executionOutput]) {
+  for (const source of [input.sources?.artifacts, input.sources?.executionOutput]) {
     if (source) assertDestinationOutsideSource(destination, source);
   }
   if (input.sources?.attachments) assertDestinationOutsideSource(destination, input.sources.attachments);
@@ -75,7 +74,6 @@ export async function createApplicationBackup(input: {
   await input.store.backupDatabase(join(destination, "database.sqlite"));
   const directories = {
     artifacts: copyOptionalDirectory(input.sources?.artifacts, join(destination, "artifacts")),
-    memory: copyOptionalDirectory(input.sources?.memory, join(destination, "memory")),
     "execution-output": copyOptionalDirectory(
       input.sources?.executionOutput,
       join(destination, "execution-output"),
@@ -86,7 +84,7 @@ export async function createApplicationBackup(input: {
     ),
   };
   const manifest: ApplicationBackupManifest = {
-    version: 2,
+    version: 3,
     backupId: randomUUID(),
     createdAt: Date.now(),
     database: "database.sqlite",
@@ -114,7 +112,7 @@ export function restoreApplicationBackup(input: {
 }): ApplicationBackupManifest {
   const source = resolve(input.source);
   const manifest = JSON.parse(readFileSync(join(source, "manifest.json"), "utf-8")) as ApplicationBackupManifest;
-  if (![1, 2].includes(manifest.version) || manifest.database !== "database.sqlite") {
+  if (manifest.version !== 3 || manifest.database !== "database.sqlite") {
     throw new Error("Unsupported backup manifest");
   }
   if (!isDirectoryManifest(manifest.directories)) {
@@ -137,7 +135,6 @@ export function restoreApplicationBackup(input: {
   try {
     stageRestoreTarget(targets[0]!, join(source, manifest.database));
     stageOptionalRestoreTarget(targets, input.destinations?.artifacts, join(source, "artifacts"));
-    stageOptionalRestoreTarget(targets, input.destinations?.memory, join(source, "memory"));
     stageOptionalRestoreTarget(
       targets,
       input.destinations?.executionOutput,
@@ -202,7 +199,6 @@ function optionalRestoreTargets(
 ): RestoreTarget[] {
   const entries: Array<[string | undefined, boolean | undefined]> = [
     [destinations?.artifacts, manifest.directories.artifacts],
-    [destinations?.memory, manifest.directories.memory],
     [destinations?.executionOutput, manifest.directories["execution-output"]],
     [destinations?.attachments, manifest.directories.attachments],
   ];
@@ -276,7 +272,7 @@ function validateStagedRestore(
   const database = new SessionStore({ path: databaseTarget.stagePath });
   try {
     const stats = validateAttachmentFiles(database, attachmentTarget?.stagePath);
-    if (manifest.version === 2 && manifest.attachments && (
+    if (manifest.attachments && (
       manifest.attachments.assets !== stats.assets ||
       manifest.attachments.uniqueBlobs !== stats.uniqueBlobs ||
       manifest.attachments.physicalBytes !== stats.physicalBytes
@@ -378,7 +374,6 @@ function isDirectoryManifest(value: unknown): value is ApplicationBackupManifest
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
   return typeof candidate.artifacts === "boolean" &&
-    typeof candidate.memory === "boolean" &&
     typeof candidate["execution-output"] === "boolean" &&
     (typeof candidate.attachments === "boolean" || candidate.attachments === undefined);
 }
@@ -421,10 +416,7 @@ function validateBackupAttachmentFiles(
       database,
       manifest.directories.attachments ? join(source, "attachments") : undefined,
     );
-    if (manifest.version === 1 && stats.assets > 0) {
-      throw new Error("Attachment backup is incomplete: version 1 backup contains attachment records without blobs");
-    }
-    if (manifest.version === 2 && manifest.attachments && (
+    if (manifest.attachments && (
       manifest.attachments.assets !== stats.assets ||
       manifest.attachments.uniqueBlobs !== stats.uniqueBlobs ||
       manifest.attachments.physicalBytes !== stats.physicalBytes

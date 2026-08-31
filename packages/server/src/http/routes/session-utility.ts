@@ -12,7 +12,7 @@ import {
 export interface SessionUtilityRoutesContext {
   maintenance: Pick<
     SessionMaintenanceService,
-    "compact" | "exportSession" | "getUsage" | "listMcpServers" | "remember" | "rewind"
+    "compact" | "exportSession" | "getUsage" | "listMcpServers" | "rewind"
   >;
 }
 
@@ -74,15 +74,6 @@ export function createSessionUtilityRoutes(context: SessionUtilityRoutesContext)
       }
       try {
         return jsonResponse(await context.maintenance.rewind(sessionId, count));
-      } catch (error) {
-        return maintenanceErrorResponse(error, 500);
-      }
-    })
-    .post("/:sessionId/remember", async (c) => {
-      const sessionId = c.req.param("sessionId");
-      if (!sessionId) return errorResponse(400, "sessionId is required");
-      try {
-        return jsonResponse(await context.maintenance.remember(sessionId));
       } catch (error) {
         return maintenanceErrorResponse(error, 500);
       }

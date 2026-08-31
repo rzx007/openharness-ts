@@ -24,12 +24,10 @@ import {
   LightOcrEngine,
   LocalOcrService,
   closeExecutionRuntimes,
-  executeAutoDream,
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,
   getSessionMemoryContent,
   getSessionMemoryPath,
-  readLastConsolidatedAt,
   sessionMemoryToCompactText,
   updateSessionMemoryFile,
   type SessionStore,
@@ -554,8 +552,6 @@ export class DaemonApplication implements DurableAgentApplication {
             sourceSessionId: sessionId,
           });
         },
-        lastConsolidatedAt: readLastConsolidatedAt,
-        autoDream: executeAutoDream,
       });
       // 车道轮到这条 run 时，真正 submitMessage 的地方。
       const attachmentRouter = new AttachmentCapabilityRouter({

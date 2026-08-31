@@ -14,7 +14,7 @@ import type {
   IHookExecutor,
   QueryEngine as IQueryEngine,
   QueryEngineOptions,
-  MemoryRetriever,
+  ContextRetriever,
   AgentBackgroundShellHost,
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
@@ -192,8 +192,7 @@ export class QueryEngine implements IQueryEngine {
   private model: string;
   private maxTurns: number;
   private skillRegistry?: unknown;
-  private memoryRetriever?: MemoryRetriever;
-  private contextRetriever?: MemoryRetriever;
+  private contextRetriever?: ContextRetriever;
   private allowedTools: string[] | null = null;
   private mcpManager: unknown = undefined;
   private mcpAuth: McpAuthHost | undefined;
@@ -227,21 +226,12 @@ export class QueryEngine implements IQueryEngine {
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 50;
     this.skillRegistry = options.skillRegistry;
-    this.memoryRetriever = options.memoryRetriever;
     this.contextRetriever = options.contextRetriever;
     this.cwd = options.cwd ?? process.cwd();
     this.sessionId = options.sessionId;
   }
 
-  /**
-   * 设置/替换 per-turn 记忆检索回调。传入 undefined 可清除（恢复无记忆注入行为）。
-   * 详见 {@link MemoryRetriever}。
-   */
-  setMemoryRetriever(retriever: MemoryRetriever | undefined): void {
-    this.memoryRetriever = retriever;
-  }
-
-  setContextRetriever(retriever: MemoryRetriever | undefined): void {
+  setContextRetriever(retriever: ContextRetriever | undefined): void {
     this.contextRetriever = retriever;
   }
 
@@ -302,12 +292,12 @@ export class QueryEngine implements IQueryEngine {
    * 注入风格参考 Python 的「# Relevant Memories」段（追加在 system 末尾）。
    */
   private composeTurnSystemPrompt(
-    memoryContext: string | null,
+    context: string | null,
   ): string | undefined {
-    if (!memoryContext || !memoryContext.trim()) {
+    if (!context || !context.trim()) {
       return this.systemPrompt;
     }
-    const reminder = `<system-reminder>\n${memoryContext.trim()}\n</system-reminder>`;
+    const reminder = `<system-reminder>\n${context.trim()}\n</system-reminder>`;
     if (this.systemPrompt && this.systemPrompt.trim()) {
       return `${this.systemPrompt}\n\n${reminder}`;
     }
@@ -330,18 +320,6 @@ export class QueryEngine implements IQueryEngine {
 
     this.messages.push({ type: "user", content });
 
-    // per-turn 相关记忆检索：按本轮用户输入选相关记忆，作为瞬态上下文。
-    // 仅在本轮（这次 submitMessage）拼进发往 API 的 system，不污染持久历史，
-    // 也不改写常驻 systemPrompt。缺省未设 retriever 时该值为 undefined，
-    // turnSystemPrompt 退化为 this.systemPrompt，行为与之前完全一致。
-    let memoryContext: string | null = null;
-    if (this.memoryRetriever) {
-      try {
-        memoryContext = await this.memoryRetriever(userContentToText(content));
-      } catch {
-        // retriever failure is non-fatal; continue without memory context
-      }
-    }
     const currentUserInput = userContentToText(content);
 
     let turnCount = 0;
@@ -363,17 +341,15 @@ export class QueryEngine implements IQueryEngine {
       }
       this.messages = sanitizeMessageHistory(this.messages);
 
-      let contextMemory: string | null = null;
+      let turnContext: string | null = null;
       if (this.contextRetriever) {
         try {
-          contextMemory = await this.contextRetriever(currentUserInput);
+          turnContext = await this.contextRetriever(currentUserInput);
         } catch {
-          contextMemory = null;
+          turnContext = null;
         }
       }
-      const turnSystemPrompt = this.composeTurnSystemPrompt(
-        [memoryContext, contextMemory].filter((value): value is string => Boolean(value?.trim())).join("\n\n") || null,
-      );
+      const turnSystemPrompt = this.composeTurnSystemPrompt(turnContext);
 
       const tools = this.visibleToolRegistry().getAll();
       const stream = this.apiClient.streamMessage({

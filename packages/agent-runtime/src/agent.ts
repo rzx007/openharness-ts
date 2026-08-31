@@ -33,10 +33,6 @@ import {
 import { AgentEventBus } from "./event-source.js";
 import type { OpenHarnessAgentExtension } from "./extensions.js";
 import { FrameworkAgentRun } from "./framework-agent-run.js";
-import type {
-  AgentMemoryRuntime,
-  AgentRememberResult,
-} from "./memory-runtime.js";
 
 export {
   AgentOperationConflictError,
@@ -113,7 +109,6 @@ export interface OpenHarnessAgent {
     provider: CompactAttachmentsProvider | undefined,
   ): void;
   compact(): Promise<AgentCompactResult>;
-  remember(): Promise<AgentRememberResult>;
   getUsage(): UsageSnapshot;
   inspect(): AgentInspection;
   close(): Promise<void>;
@@ -132,7 +127,6 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     private readonly runtime: RuntimeBundle,
     private readonly session: AgentSession,
     private readonly mcpConnections: () => readonly McpConnection[],
-    private readonly memory: AgentMemoryRuntime | undefined,
     private readonly eventBus: AgentEventBus,
     private readonly effects: AgentEffects,
     private readonly identity: AgentIdentity | undefined,
@@ -231,24 +225,6 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     });
   }
 
-  remember(): Promise<AgentRememberResult> {
-    return this.runMaintenance("remember", async () => {
-      if (!this.memory) {
-        return {
-          skipped: true,
-          reason: "memory is disabled",
-          writtenIds: [],
-          titles: [],
-        };
-      }
-      return await this.memory.remember(
-        this.getHistory(),
-        this.runtime.apiClient,
-        this.model,
-      );
-    });
-  }
-
   getUsage(): UsageSnapshot {
     return this.runtime.queryEngine.getTotalUsage();
   }
@@ -316,7 +292,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   }
 
   private runMaintenance<T>(
-    kind: "compact" | "remember",
+    kind: "compact",
     work: () => Promise<T>,
   ): Promise<T> {
     this.assertIdle(kind);
@@ -343,7 +319,6 @@ export interface AssembledAgentOptions {
   runtime: RuntimeBundle;
   session: AgentSession;
   mcpConnections: () => readonly McpConnection[];
-  memory: AgentMemoryRuntime | undefined;
   eventBus: AgentEventBus;
   effects: AgentEffects;
   identity: AgentIdentity | undefined;
@@ -361,7 +336,6 @@ export function createAssembledAgent(
     options.runtime,
     options.session,
     options.mcpConnections,
-    options.memory,
     options.eventBus,
     options.effects,
     options.identity,

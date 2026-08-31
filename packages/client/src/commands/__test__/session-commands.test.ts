@@ -35,6 +35,13 @@ function job(overrides: Partial<JobSnapshot> = {}): JobSnapshot {
 function fakeClient(overrides: Partial<OpenHarnessClient> = {}): OpenHarnessClient {
   return {
     health: vi.fn(async () => ({ ok: true, version: "1.2.3" })),
+    getContextStatus: vi.fn(async () => ({
+      enabled: true,
+      active: 0,
+      candidates: 0,
+      byScope: {},
+      byKind: {},
+    })),
     ...overrides,
   } as unknown as OpenHarnessClient;
 }
@@ -286,7 +293,6 @@ describe("dispatchSessionCommand", () => {
     const listJobs = vi.fn(async () => [agentJob, job({ id: "shell-1", kind: "shell" })]);
     const client = fakeClient({
       listJobs,
-      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
       getSettings: vi.fn(async () => ({})),
     });
     const { host: h, emitted } = host({ client });
@@ -304,7 +310,6 @@ describe("dispatchSessionCommand", () => {
       listJobs: vi.fn(async () => {
         throw new Error("jobs unavailable");
       }),
-      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
       getSettings: vi.fn(async () => ({})),
     });
     const { host: h, emitted } = host({ client });
@@ -342,7 +347,6 @@ describe("dispatchSessionCommand", () => {
         storedProviders: [],
         envProviders: [],
       })),
-      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
       getSessionMcp: vi.fn(async () => {
         throw new Error("MCP unavailable");
       }),
@@ -370,7 +374,6 @@ describe("dispatchSessionCommand", () => {
       listJobs: vi.fn(async () => []),
       getSettings: vi.fn(async () => ({})),
       getAuthStatus: vi.fn(async () => null as never),
-      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
       getSessionMcp: vi.fn(async () => []),
     });
     const { host: h, emitted } = host({ client });
@@ -388,7 +391,6 @@ describe("dispatchSessionCommand", () => {
       }),
       getSettings: vi.fn(async () => ({})),
       getAuthStatus: vi.fn(async () => null as never),
-      listMemory: vi.fn(async () => ({ directory: "/memory", entries: [] })),
       getSessionMcp: vi.fn(async () => []),
     });
     const { host: h, emitted } = host({ client });
@@ -412,11 +414,9 @@ describe("dispatchSessionCommand", () => {
 
   it("routes explicit remember content through Context instead of session transcript extraction", async () => {
     const addContextEntry = vi.fn(async () => ({ status: "completed" as const, results: [{ status: "noop" as const, existingId: "ctx-1" }] }));
-    const rememberSession = vi.fn();
-    const { host: h, emitted } = host({ client: fakeClient({ addContextEntry, rememberSession }) });
+    const { host: h, emitted } = host({ client: fakeClient({ addContextEntry }) });
     await dispatchSessionCommand({ name: "/remember", args: "回答简洁" }, h);
     expect(addContextEntry).toHaveBeenCalledWith({ cwd: "/tmp/project", content: "回答简洁" });
-    expect(rememberSession).not.toHaveBeenCalled();
     expect(emitted.at(-1)).toBe("Context already exists: ctx-1");
   });
 

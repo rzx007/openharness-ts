@@ -1,9 +1,7 @@
 export { createDefaultAuthService } from "./auth-service.js";
-export { createDefaultContextService } from "./context-service.js";
 export { createDefaultDreamService } from "./dream-service.js";
 export { createDefaultGitService } from "./git-service.js";
 export { createDefaultHooksService } from "./hooks-service.js";
-export { createDefaultMemoryService } from "./memory-service.js";
 export { createDefaultModelService } from "./model-service.js";
 export { createDefaultOutputStyleService } from "./output-style-service.js";
 export { createDefaultPluginService } from "./plugin-service.js";

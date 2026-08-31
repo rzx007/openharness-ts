@@ -193,10 +193,9 @@ function coerceConfigValue(key: string, value: string): unknown {
       "verbose",
       "fastMode",
       "plugins.enabled",
-      "memory.enabled",
-      "memory.sessionMemoryEnabled",
-      "memory.autoExtractEnabled",
-      "memory.autoDreamEnabled",
+      "context.enabled",
+      "context.automaticExtractionEnabled",
+      "sessionContinuity.enabled",
       "daemon.autoStart",
     ].includes(key)
   ) {
@@ -206,10 +205,11 @@ function coerceConfigValue(key: string, value: string): unknown {
   }
   if (
     [
-      "memory.maxFiles",
-      "memory.maxEntrypointLines",
-      "memory.autoDreamMinHours",
-      "memory.autoDreamMinSessions",
+      "context.explicitCommitThreshold",
+      "context.automaticEnvironmentCommitThreshold",
+      "context.candidateRetentionDays",
+      "context.promptMaxChars",
+      "context.promptMaxEntries",
     ].includes(key)
   ) {
     const parsed = Number(value);

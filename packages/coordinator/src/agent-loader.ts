@@ -21,7 +21,6 @@ export const EFFORT_LEVELS: ReadonlySet<string> = new Set(["low", "medium", "hig
 export const PERMISSION_MODES: ReadonlySet<string> = new Set([
   "default", "acceptEdits", "bypassPermissions", "plan", "dontAsk",
 ]);
-export const MEMORY_SCOPES: ReadonlySet<string> = new Set(["user", "project", "local"]);
 export const ISOLATION_MODES: ReadonlySet<string> = new Set(["worktree", "remote"]);
 
 // ---------------------------------------------------------------------------
@@ -163,7 +162,6 @@ export function buildAgentDefinition(
     color: pickEnum(fm.color, AGENT_COLORS),
     background: bgRaw === true || bgRaw === "true",
     initialPrompt: typeof ipRaw === "string" && ipRaw.trim() ? ipRaw : undefined,
-    memory: pickEnum(fm.memory, MEMORY_SCOPES),
     isolation: pickEnum(fm.isolation, ISOLATION_MODES),
     omitClaudeMd: ocmRaw === true || ocmRaw === "true",
     criticalSystemReminder: typeof csrRaw === "string" && csrRaw.trim() ? csrRaw : undefined,

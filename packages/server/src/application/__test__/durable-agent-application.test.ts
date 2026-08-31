@@ -144,11 +144,8 @@ describe("DaemonApplication", () => {
         apiFormat: "openai",
         maxTurns: 10,
         permission: { mode: "default" },
-        memory: {
-          enabled: true,
-          sessionMemoryEnabled: true,
-          autoExtractEnabled: false,
-        },
+        context: { enabled: true, automaticExtractionEnabled: false },
+        sessionContinuity: { enabled: true },
       },
       createAgent: async (context) => ({
         ...(await createEchoAgent(context)),

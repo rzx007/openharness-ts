@@ -6,19 +6,7 @@ import {
   getPluginCacheDir,
   getPluginDataDir,
   getPluginSourcesDir,
-  getProjectMemoryDir,
 } from "./paths";
-
-describe("getProjectMemoryDir", () => {
-  it("stores project memory under data/memory with a project hash", () => {
-    const a = getProjectMemoryDir(join("C:", "work", "alpha"));
-    const b = getProjectMemoryDir(join("C:", "work", "beta"));
-
-    expect(a).toContain(join("data", "memory", "alpha-"));
-    expect(b).toContain(join("data", "memory", "beta-"));
-    expect(a).not.toBe(b);
-  });
-});
 
 describe("Native plugin paths", () => {
   it("keeps cache, data, sources and installed state under OPENHARNESS_CONFIG_DIR", () => {

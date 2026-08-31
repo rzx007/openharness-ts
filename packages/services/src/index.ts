@@ -82,18 +82,6 @@ export {
   type CheckpointMessageLike,
 } from "./session-memory.js";
 
-export {
-  EXTRACTION_SYSTEM_PROMPT,
-  hasMemoryWritesSince,
-  buildExtractionPrompt,
-  parseExtractionRecords,
-  applyExtractionRecords,
-  extractMemoriesFromTurn,
-  type ExtractionRecord,
-  type ExtractionResult,
-  type ExtractMemoriesOptions,
-} from "./memory-extract.js";
-export * from "./autodream/index.js";
 export * from "./attachment/index.js";
 export * from "./attachment-processing/index.js";
 export * from "./context/index.js";

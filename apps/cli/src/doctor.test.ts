@@ -12,7 +12,7 @@ function mkSettings(partial: Partial<Settings>): Settings {
     apiFormat: "openai",
     maxTurns: 50,
     permission: { mode: "default" },
-    memory: { enabled: true, maxFiles: 5, maxEntrypointLines: 200 },
+    context: { enabled: true },
     effort: "medium",
     passes: 1,
     ...partial,

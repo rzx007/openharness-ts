@@ -23,7 +23,6 @@ export {
   type AgentKernelRuntime,
   type AgentKernelRuntimeContext,
 } from "./kernel.js";
-export type { AgentRememberResult } from "./memory-runtime.js";
 export type {
   OpenHarnessAgentExtension,
   OpenHarnessExtensionContext,

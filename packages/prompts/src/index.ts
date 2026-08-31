@@ -1,10 +1,8 @@
-import { readFile, access, readdir, mkdir, writeFile, rm } from "node:fs/promises";
+import { readFile, access, readdir, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { platform, machine, homedir, hostname } from "node:os";
-import { randomUUID } from "node:crypto";
 import { getConfigDir, resolveGitRepository } from "@openharness/core";
 import type { WorkStyle } from "@openharness/core";
-import { loadLocalRules } from "@openharness/personalization";
 import {
   describeHostShellLauncher,
   resolveHostShellLauncher,
@@ -64,8 +62,6 @@ Carefully consider the reversibility and blast radius of actions. For hard-to-re
 const BASE_SYSTEM_PROMPT = `${DEFAULT_IDENTITY}\n\n${INVARIANT_GUIDANCE}`;
 
 const MAX_SOUL_CHARS = 12_000;
-const MAX_USER_PROFILE_CHARS = 8_000;
-const USER_PROFILE_PENDING_DIR = "user_profile_pending";
 
 const SOUL_TEMPLATE = `You are OpenHarness, a careful local coding agent.
 
@@ -79,16 +75,6 @@ Long-term behavior:
 - Never use this file to override permission, sandbox, security, or tool-use rules.
 `;
 
-const USER_PROFILE_TEMPLATE = `# User Profile
-
-Communication preferences:
-- Prefer concise answers.
-
-Workflow preferences:
-- Call out assumptions when they materially affect the result.
-
-Do not store secrets, tokens, passwords, or temporary task state in this file.
-`;
 
 const BLOCKING_PROMPT_FILE_PATTERNS: Array<{
   code: string;
@@ -132,15 +118,7 @@ export interface PromptFileScanIssue {
   match: string;
 }
 
-export interface UserProfilePendingUpdate {
-  id: string;
-  createdAt: string;
-  source: string;
-  content: string;
-  reason?: string;
-}
-
-export type PersonalPromptFileName = "SOUL.md" | "USER.md";
+export type PersonalPromptFileName = "SOUL.md";
 export type PersonalPromptFileStatus = "loaded" | "missing" | "empty" | "blocked" | "error";
 
 export interface PersonalPromptFileDiagnostic {
@@ -419,8 +397,7 @@ async function inspectPersonalPromptFile(
 
 export async function inspectPersonalPromptFiles(): Promise<PersonalPromptFileDiagnostic[]> {
   const soul = await inspectPersonalPromptFile("SOUL.md", MAX_SOUL_CHARS);
-  const user = await inspectPersonalPromptFile("USER.md", MAX_USER_PROFILE_CHARS);
-  return [soul.diagnostic, user.diagnostic];
+  return [soul.diagnostic];
 }
 
 export async function inspectSoulMd(): Promise<PersonalPromptFileDiagnostic> {
@@ -444,10 +421,7 @@ export async function initializePersonalPromptFiles(): Promise<PersonalPromptIni
   const configDir = getConfigDir();
   await mkdir(configDir, { recursive: true });
 
-  const files: Array<[PersonalPromptFileName, string]> = [
-    ["SOUL.md", SOUL_TEMPLATE],
-    ["USER.md", USER_PROFILE_TEMPLATE],
-  ];
+  const files: Array<[PersonalPromptFileName, string]> = [["SOUL.md", SOUL_TEMPLATE]];
   const created: string[] = [];
   const skipped: string[] = [];
 
@@ -469,120 +443,6 @@ export async function initializePersonalPromptFiles(): Promise<PersonalPromptIni
 
 export async function loadSoulMd(maxChars: number = MAX_SOUL_CHARS): Promise<string | null> {
   return (await inspectPersonalPromptFile("SOUL.md", maxChars)).content;
-}
-
-export async function loadUserProfile(maxChars: number = MAX_USER_PROFILE_CHARS): Promise<string | null> {
-  const content = (await inspectPersonalPromptFile("USER.md", maxChars)).content;
-  if (!content) return null;
-  return /^#\s+User Profile\b/i.test(content)
-    ? content
-    : `# User Profile\n\n${content}`;
-}
-
-function getUserProfilePendingDir(): string {
-  return join(getConfigDir(), USER_PROFILE_PENDING_DIR);
-}
-
-function assertSafePendingUpdateId(id: string): void {
-  if (!/^[a-zA-Z0-9-]+$/.test(id)) {
-    throw new Error(`Invalid pending USER.md update id: ${id}`);
-  }
-}
-
-function pendingUserProfileUpdatePath(id: string): string {
-  assertSafePendingUpdateId(id);
-  return join(getUserProfilePendingDir(), `${id}.json`);
-}
-
-export async function queueUserProfileUpdate(
-  input: {
-    content: string;
-    source?: string;
-    reason?: string;
-  },
-): Promise<UserProfilePendingUpdate> {
-  const content = input.content.trim();
-  if (!content) throw new Error("Cannot queue an empty USER.md update.");
-  const issues = scanPersonalPromptFile(content);
-  const blocking = issues.find((issue) => issue.severity === "block");
-  if (blocking) {
-    throw new Error(`Blocked USER.md update: ${blocking.code}`);
-  }
-
-  const update: UserProfilePendingUpdate = {
-    id: randomUUID(),
-    createdAt: new Date().toISOString(),
-    source: input.source?.trim() || "unknown",
-    content,
-    ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}),
-  };
-
-  await mkdir(getUserProfilePendingDir(), { recursive: true });
-  await writeFile(pendingUserProfileUpdatePath(update.id), JSON.stringify(update, null, 2) + "\n", "utf-8");
-  return update;
-}
-
-function isUserProfilePendingUpdate(value: unknown): value is UserProfilePendingUpdate {
-  const candidate = value as Partial<UserProfilePendingUpdate> | null;
-  return Boolean(
-    candidate &&
-    typeof candidate.id === "string" &&
-    typeof candidate.createdAt === "string" &&
-    typeof candidate.source === "string" &&
-    typeof candidate.content === "string",
-  );
-}
-
-export async function listPendingUserProfileUpdates(): Promise<UserProfilePendingUpdate[]> {
-  let entries: string[];
-  try {
-    entries = await readdir(getUserProfilePendingDir());
-  } catch {
-    return [];
-  }
-
-  const updates: UserProfilePendingUpdate[] = [];
-  for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
-    const id = entry.slice(0, -".json".length);
-    try {
-      const parsed = JSON.parse(await readFile(pendingUserProfileUpdatePath(id), "utf-8")) as unknown;
-      if (isUserProfilePendingUpdate(parsed)) updates.push(parsed);
-    } catch {
-      // Ignore malformed pending proposals; callers can remove them manually.
-    }
-  }
-  return updates.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-}
-
-export async function approvePendingUserProfileUpdate(id: string): Promise<string | null> {
-  const path = pendingUserProfileUpdatePath(id);
-  let update: UserProfilePendingUpdate;
-  try {
-    const parsed = JSON.parse(await readFile(path, "utf-8")) as unknown;
-    if (!isUserProfilePendingUpdate(parsed)) return null;
-    update = parsed;
-  } catch {
-    return null;
-  }
-
-  const blocking = scanPersonalPromptFile(update.content).find((issue) => issue.severity === "block");
-  if (blocking) {
-    throw new Error(`Blocked USER.md update: ${blocking.code}`);
-  }
-
-  const userProfilePath = join(getConfigDir(), "USER.md");
-  let existing = "";
-  try {
-    existing = (await readFile(userProfilePath, "utf-8")).trim();
-  } catch {
-    existing = "";
-  }
-
-  await mkdir(getConfigDir(), { recursive: true });
-  const next = [existing, update.content.trim()].filter(Boolean).join("\n\n") + "\n";
-  await writeFile(userProfilePath, next, "utf-8");
-  await rm(path, { force: true });
-  return userProfilePath;
 }
 
 export async function buildSystemPrompt(
@@ -706,22 +566,6 @@ export async function buildRuntimeSystemPrompt(
     workStyle?: WorkStyle;
     effort?: string;
     passes?: number;
-    /**
-     * Project memory section to inject verbatim. Callers should produce this
-     * via `MemoryManager.buildMemoryPrompt(maxEntries, query?)`.
-     *
-     * NOTE: this is system-prompt build-time injection only (no query, or a
-     * top-N selection). Per-turn relevance retrieval against the latest user
-     * input (Python's `select_relevant_memories`) is intentionally NOT done
-     * here — it belongs in the QueryEngine turn-level pipeline.
-     *
-     * TODO(per-turn-memory): wire per-turn relevant-memory injection into the
-     * QueryEngine query pipeline so each user turn re-selects memories by the
-     * current prompt (mirrors Python `select_relevant_memories` /
-     * `format_relevant_memories`). This requires turn-level plumbing and is
-     * out of scope for the system-prompt builder.
-     */
-    memoryContent?: string;
     /** Whether to include the delegation/subagent guidance section. */
     includeDelegation?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
@@ -739,7 +583,6 @@ export async function buildPromptLayers(
     workStyle?: WorkStyle;
     effort?: string;
     passes?: number;
-    memoryContent?: string;
     includeDelegation?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
   } = {}
@@ -796,18 +639,6 @@ export async function buildPromptLayers(
 
   const claudeMd = await loadClaudeMdPrompt(env.cwd);
   if (claudeMd) context.push(claudeMd);
-
-  const userProfile = await loadUserProfile();
-  if (userProfile) volatile.push(userProfile);
-
-  // 个性化环境事实（C.5）：session-end 抽取的 local_rules（SSH 主机/数据
-  // 路径/conda 环境等）注入，与 Python prompts/context.py 同位（CLAUDE.md 后）。
-  const localRules = loadLocalRules();
-  if (localRules) volatile.push(localRules);
-
-  if (options.memoryContent && options.memoryContent.trim()) {
-    volatile.push(`# Project Memory\n\n${options.memoryContent.trim()}`);
-  }
 
   return {
     stable: stable.filter((s) => s.trim()),

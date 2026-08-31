@@ -181,7 +181,7 @@ export class SessionRunExecutor {
       await run.result;
 
       // 只在成功走完之后做记忆/个性化/auto-dream。失败路径不跑，避免半截对话被写进长期记忆。
-      await this.context.postRunMaintenance?.run(sessionId, runId, agent);
+      await this.context.postRunMaintenance?.run(sessionId, runId);
     } catch (error) {
       // 这次 run 把 session agent 弄脏了（或根本没创建成功）：关掉，下次 acquire 会新建。
       // close 失败不能盖住原始错误；先记日志，再继续结算 run。
