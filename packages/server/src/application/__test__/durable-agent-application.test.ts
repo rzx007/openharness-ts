@@ -11,6 +11,7 @@ import type {
   AgentEventInput,
   AgentRunHandle,
   AgentRunResult,
+  CompactAttachmentsProvider,
   Message,
 } from "@openharness/core";
 import { SessionStore } from "@openharness/services";
@@ -113,6 +114,7 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
       history = [];
     },
     setModel: () => {},
+    setCompactAttachmentsProvider: () => {},
     compact: async () => ({
       history,
       beforeMessageCount: history.length,
@@ -129,6 +131,59 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
+  it("把成功 Run 写入的 session checkpoint 提供给 compact", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openharness-session-memory-"));
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = join(dir, "config");
+    const store = new SessionStore({ path: join(dir, "store.db") });
+    let compactAttachmentsProvider: CompactAttachmentsProvider | undefined;
+    const application = new DaemonApplication({
+      store,
+      settings: {
+        model: "test-model",
+        apiFormat: "openai",
+        maxTurns: 10,
+        permission: { mode: "default" },
+        memory: {
+          enabled: true,
+          sessionMemoryEnabled: true,
+          autoExtractEnabled: false,
+        },
+      },
+      createAgent: async (context) => ({
+        ...(await createEchoAgent(context)),
+        setCompactAttachmentsProvider: (provider) => {
+          compactAttachmentsProvider = provider;
+        },
+      }),
+      log: () => {},
+    });
+
+    try {
+      await application.ready();
+      const session = application.sessions.createSession({
+        cwd: dir,
+        model: "test-model",
+      });
+      const admission = await application.sessions.admitPrompt(session.id, {
+        content: "preserve this checkpoint detail",
+      });
+      await application.sessions.awaitRun(session.id, admission.run!.id);
+
+      expect(compactAttachmentsProvider).toBeDefined();
+      const compactAttachments = await compactAttachmentsProvider!();
+      expect(compactAttachments).toMatchObject({
+        sessionMemory: expect.stringContaining("preserve this checkpoint detail"),
+      });
+    } finally {
+      await application.close().catch(() => {});
+      store.close();
+      if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("让模型工具创建的后台 shell 立即进入统一 Jobs，并可被取消", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-background-shell-"));
     const store = new SessionStore({ path: join(dir, "store.db") });

@@ -35,7 +35,7 @@
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🟡 | ✅ SRT/Docker runtime、per-session 容器、统一进程入口、host file guard、Docker 整棵进程停止、daemon 托管 Cron、MCP stdio sandbox-aware transport、Docker active 文件操作、主 daemon 系统常驻与 E2E 用例；缺 Docker CI 实跑 |
-| services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 compact 读回接线、lsp 真 AST |
+| services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint+✅compact 读回(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 tool_outputs 接 microcompact、lsp 真 AST |
 | personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 自动抽取尚未接 standalone 或 daemon/TUI lifecycle(C.5) |
 | observability | 🟡 | ✅ trace/结构化日志/持久事实指标/Run Inspector/Projection diagnostics 已闭环；缺统一 span、外部 exporter、长期时序查询、面板与告警 |
 | evaluation | 🔴 | 有单元/集成/恢复/soak 测试，但尚无固定 Agent 任务集、评分器、基线结果、回归阈值和 CI eval 入口 |
@@ -317,7 +317,7 @@
 ### E.6 Services 杂项
 - ✅ 记忆四件套（第一刀）：`autodream`（/dream 命令+锁/备份/回滚）、`memory_extract`
   （/remember 命令）、`session_memory`（REPL 每轮 checkpoint）、`tool_outputs`
-  （预算函数）。留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact、
+  （预算函数）。daemon compact 侧已经 attachments provider 读回 session checkpoint。留待：tool_outputs 接 microcompact、
   executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
 - ✅ cron 调度升级（第一刀）：`CronScheduler.start()` 改为 `setTimeout` 自重调度，
   每次触发后用 `computeNextRunTime()` 精确计算下一次绝对时刻，替代近似 `setInterval`。
@@ -334,7 +334,7 @@
 - ✅ `/export` 命令：`/export [filename] [--json]`，文件名 `.json` 后缀或 `--json` 标志
   输出结构化 JSON（session_id/model/exported_at/messages），否则输出 Markdown；
   默认写入 `~/.openharness-ts/data/exports/`。
-- 留待：compact 侧读回 checkpoint、tool_outputs 接 microcompact。
+- 留待：tool_outputs 接 microcompact。
   详见 `docs/session-storage-design.md`。
 - lsp 用真实 AST 解析（当前为正则/rg 近似）。
 

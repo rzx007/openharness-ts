@@ -25,7 +25,10 @@ import {
   executeAutoDream,
   getChildAgentExecutionRegistry,
   getDetachedProcessSupervisor,
+  getSessionMemoryContent,
+  getSessionMemoryPath,
   readLastConsolidatedAt,
+  sessionMemoryToCompactText,
   updateSessionMemoryFile,
   type SessionStore,
   type ApplicationOwnerLease,
@@ -376,9 +379,20 @@ export class DaemonApplication implements DurableAgentApplication {
       this.agentPool = new AgentPool({
         store,
         loadAgent,
-        compactAttachments: (sessionId) => ({
-          attachmentCatalog: buildCompactAttachmentCatalog(store, sessionId),
-        }),
+        compactAttachments: (sessionId) => {
+          const session = store.getSession(sessionId);
+          const sessionMemory = session
+            ? sessionMemoryToCompactText(
+                getSessionMemoryContent(
+                  getSessionMemoryPath(session.cwd, sessionId),
+                ),
+              )
+            : "";
+          return {
+            ...(sessionMemory ? { sessionMemory } : {}),
+            attachmentCatalog: buildCompactAttachmentCatalog(store, sessionId),
+          };
+        },
         isSessionExternallyOwned: (sessionId) =>
           this.liveChildren.has(sessionId),
       });
