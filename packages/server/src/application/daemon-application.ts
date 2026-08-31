@@ -84,7 +84,7 @@ import { createDefaultModelService } from "./default-services/model-service.js";
 import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
 import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
-import { ContextIntentResolver, ContextPersistenceService, detectContextSensitivity } from "./context/index.js";
+import { ContextIntentResolver, ContextPersistenceService, ContextQueryService, detectContextSensitivity } from "./context/index.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -305,6 +305,7 @@ export class DaemonApplication implements DurableAgentApplication {
         store: contextStore,
         resolver: new ContextIntentResolver(),
       });
+      const contextQuery = new ContextQueryService({ store: contextStore });
       const contextMemory: AgentContextMemoryHost = {
         remember: async (input, context) => {
           const session = requireContextSession(store, context.sessionId, context.cwd);
@@ -430,6 +431,11 @@ export class DaemonApplication implements DurableAgentApplication {
           attachments: this.attachments,
         }),
         contextMemory,
+        createContextRetriever: (session) => async (userInput) => contextQuery.retrieve(userInput, {
+          userScopeKey: "local-user",
+          machineId: await contextStore.paths.getOrCreateMachineId(),
+          ...(session.projectId ? { projectId: session.projectId } : {}),
+        }),
         attachmentResourceRoot: (session) =>
           this.attachmentResources.prepareSessionSync(session.id),
         requestPermission: async (request, context) => {

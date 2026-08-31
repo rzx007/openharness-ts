@@ -192,6 +192,7 @@ export class QueryEngine implements IQueryEngine {
   private maxTurns: number;
   private skillRegistry?: unknown;
   private memoryRetriever?: MemoryRetriever;
+  private contextRetriever?: MemoryRetriever;
   private allowedTools: string[] | null = null;
   private mcpManager: unknown = undefined;
   private mcpAuth: McpAuthHost | undefined;
@@ -225,6 +226,7 @@ export class QueryEngine implements IQueryEngine {
     this.maxTurns = options.maxTurns ?? 50;
     this.skillRegistry = options.skillRegistry;
     this.memoryRetriever = options.memoryRetriever;
+    this.contextRetriever = options.contextRetriever;
     this.cwd = options.cwd ?? process.cwd();
     this.sessionId = options.sessionId;
   }
@@ -235,6 +237,10 @@ export class QueryEngine implements IQueryEngine {
    */
   setMemoryRetriever(retriever: MemoryRetriever | undefined): void {
     this.memoryRetriever = retriever;
+  }
+
+  setContextRetriever(retriever: MemoryRetriever | undefined): void {
+    this.contextRetriever = retriever;
   }
 
   /** 注册 compact 附件提供者（B.2）：compact 时注入 taskFocus/plan 等结构化上下文。 */
@@ -330,7 +336,7 @@ export class QueryEngine implements IQueryEngine {
         // retriever failure is non-fatal; continue without memory context
       }
     }
-    const turnSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
+    const currentUserInput = userContentToText(content);
 
     let turnCount = 0;
 
@@ -350,6 +356,18 @@ export class QueryEngine implements IQueryEngine {
         // compact failure is non-fatal; continue with current messages
       }
       this.messages = sanitizeMessageHistory(this.messages);
+
+      let contextMemory: string | null = null;
+      if (this.contextRetriever) {
+        try {
+          contextMemory = await this.contextRetriever(currentUserInput);
+        } catch {
+          contextMemory = null;
+        }
+      }
+      const turnSystemPrompt = this.composeTurnSystemPrompt(
+        [memoryContext, contextMemory].filter((value): value is string => Boolean(value?.trim())).join("\n\n") || null,
+      );
 
       const tools = this.visibleToolRegistry().getAll();
       const stream = this.apiClient.streamMessage({

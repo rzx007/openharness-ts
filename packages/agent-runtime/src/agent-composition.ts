@@ -173,6 +173,7 @@ export async function composeOpenHarnessAgent(
     runtime.queryEngine.setImageToText(explicitCapabilities?.imageToText);
     runtime.queryEngine.setAttachments(explicitCapabilities?.attachments);
     runtime.queryEngine.setContextMemory(explicitCapabilities?.contextMemory);
+    runtime.queryEngine.setContextRetriever(explicitCapabilities?.contextRetriever);
     const hostCapabilities = [
       "permissions",
       ...(jobs ? ["jobs"] : []),
@@ -188,6 +189,7 @@ export async function composeOpenHarnessAgent(
       ...(explicitCapabilities?.imageToText ? ["imageToText"] : []),
       ...(explicitCapabilities?.attachments ? ["attachments"] : []),
       ...(explicitCapabilities?.contextMemory ? ["contextMemory"] : []),
+      ...(explicitCapabilities?.contextRetriever ? ["contextRetriever"] : []),
     ];
     return {
       runtime,

@@ -8,6 +8,7 @@ import type {
   AgentScheduleEffects,
   PermissionMode,
   Settings,
+  MemoryRetriever,
   StreamingMessageClient,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
@@ -34,6 +35,7 @@ export interface AgentHostCapabilities {
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
   contextMemory?: AgentContextMemoryHost;
+  contextRetriever?: MemoryRetriever;
   /** Stable per-session directory exposed read-only inside Docker. */
   attachmentResourceRoot?: string;
 }

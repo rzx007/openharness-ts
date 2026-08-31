@@ -172,6 +172,41 @@ describe("QueryEngine per-turn memory retriever", () => {
     }
   });
 
+  it("refreshes mutable context before every physical model request", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "Remember",
+      description: "remember",
+      inputSchema: {},
+      execute: async () => ({ content: [{ type: "text" as const, text: "saved" }] }),
+    });
+    const requests: Array<{ system?: string }> = [];
+    let modelCall = 0;
+    const client = {
+      streamMessage: async function* (request: any) {
+        requests.push({ system: request.system });
+        modelCall += 1;
+        if (modelCall === 1) {
+          yield { type: "tool_use_start", toolUse: { type: "tool_use", id: "remember-1", name: "Remember", input: {} } } as StreamEvent;
+          yield { type: "complete", stopReason: "tool_use" } as StreamEvent;
+        } else {
+          yield { type: "complete", stopReason: "end_turn" } as StreamEvent;
+        }
+      },
+    };
+    let retrieval = 0;
+    const engine = new QueryEngine(client, registry, createMockPermissionChecker(), createMockHookExecutor(), {
+      systemPrompt: "BASE",
+      contextRetriever: async () => ++retrieval === 1 ? null : "NEW_CONTEXT",
+    });
+
+    for await (const _ of engine.submitMessage("remember then continue")) { /* drain */ }
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.system).not.toContain("NEW_CONTEXT");
+    expect(requests[1]!.system).toContain("NEW_CONTEXT");
+  });
+
   it("behaves identically when no retriever is set (system prompt unchanged)", async () => {
     const { client, requests } = createRecordingClient(SIMPLE_RESPONSE);
     const engine = new QueryEngine(

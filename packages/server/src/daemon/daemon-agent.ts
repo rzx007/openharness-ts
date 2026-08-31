@@ -19,6 +19,7 @@ import type {
   AgentEffects,
   AgentEventListener,
   Settings,
+  MemoryRetriever,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
@@ -74,6 +75,7 @@ export interface DaemonAgentLoaderOptions {
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
   contextMemory?: AgentContextMemoryHost;
+  createContextRetriever?(session: SessionRecord): MemoryRetriever;
   attachmentResourceRoot?(session: SessionRecord): string;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
@@ -130,6 +132,7 @@ export function createDaemonAgentLoader(
     const jobs = options.createJobHost?.(session);
     const backgroundShell = options.createBackgroundShellHost?.(session);
     const attachmentResourceRoot = options.attachmentResourceRoot?.(session);
+    const contextRetriever = options.createContextRetriever?.(session);
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
@@ -147,6 +150,7 @@ export function createDaemonAgentLoader(
         ...(options.imageToText ? { imageToText: options.imageToText } : {}),
         ...(options.attachments ? { attachments: options.attachments } : {}),
         ...(options.contextMemory ? { contextMemory: options.contextMemory } : {}),
+        ...(contextRetriever ? { contextRetriever } : {}),
         ...(attachmentResourceRoot ? { attachmentResourceRoot } : {}),
       },
       ...(options.createEventSink

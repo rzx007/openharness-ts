@@ -392,6 +392,7 @@ export interface QueryEngine {
   loadMessages(messages: Message[]): void;
   getTotalUsage(): import("./usage").UsageSnapshot;
   setMemoryRetriever(retriever: MemoryRetriever | undefined): void;
+  setContextRetriever(retriever: MemoryRetriever | undefined): void;
   setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void;
   setAllowedTools(tools: string[] | null): void;
   setSessionId(sessionId: string | undefined): void;
@@ -424,6 +425,8 @@ export interface QueryEngineOptions {
   compactKeepRecent?: number;
   skillRegistry?: unknown;
   memoryRetriever?: MemoryRetriever;
+  /** Mutable governed context, refreshed before every physical model request. */
+  contextRetriever?: MemoryRetriever;
 }
 
 export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";
