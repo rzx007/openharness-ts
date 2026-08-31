@@ -26,7 +26,7 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
-} from "./session-types"
+} from "./session-types";
 import type {
   WorkspaceListFilesInput,
   WorkspaceListFilesResult,
@@ -36,7 +36,7 @@ import type {
   WorkspaceRevealPathInput,
   WorkspaceOpenWithInput,
   WorkspaceOpener,
-} from "./workspace-types"
+} from "./workspace-types";
 import type {
   DesktopTerminalCreateInput,
   DesktopTerminalReadInput,
@@ -44,7 +44,7 @@ import type {
   DesktopTerminalRecord,
   DesktopTerminalResizeInput,
   DesktopTerminalWriteInput,
-} from "./terminal-types"
+} from "./terminal-types";
 import type {
   CreateDesktopScheduledTaskInput,
   DesktopScheduledRun,
@@ -52,7 +52,7 @@ import type {
   DesktopScheduledTask,
   ListDesktopScheduledRunsInput,
   UpdateDesktopScheduledTaskInput,
-} from "./schedule-types"
+} from "./schedule-types";
 import type {
   ActivateDesktopProviderInput,
   ConnectDesktopProviderInput,
@@ -61,23 +61,23 @@ import type {
   CreateDesktopCustomProviderInput,
   UpdateDesktopCustomProviderInput,
   RemoveDesktopCustomProviderInput,
-} from "./provider-types"
+} from "./provider-types";
 import type {
   DesktopGitChangesInput,
   DesktopGitChangesResult,
   DesktopGitFileDiffInput,
   DesktopGitFileDiffResult,
-} from "./git-types"
+} from "./git-types";
 import type {
   DesktopPluginActionInput,
   DesktopPluginContextInput,
   DesktopPluginSnapshot,
-} from "./plugin-types"
+} from "./plugin-types";
 import type {
   DesktopSettingsSnapshot,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
-} from "./settings-types"
+} from "./settings-types";
 import type {
   CancelDesktopAttachmentUploadInput,
   DesktopAttachmentAssetInput,
@@ -87,12 +87,22 @@ import type {
   RetryDesktopAttachmentUploadInput,
   StartDesktopAttachmentUploadInput,
   UploadDesktopAttachmentMemoryInput,
-} from "./attachment-types"
+} from "./attachment-types";
 import type {
   AttachmentStorageGcResult,
   AttachmentStorageRepairResult,
   AttachmentStorageReport,
-} from "@openharness/client"
+} from "@openharness/client";
+import type {
+  ContextEntryRecord,
+  ContextMutationResult,
+  ContextStatus,
+  DesktopContextCandidateAccept,
+  DesktopContextEntryInput,
+  DesktopContextEntryTarget,
+  DesktopContextEntryUpdate,
+  DesktopContextQuery,
+} from "./context-types";
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
@@ -151,6 +161,16 @@ export const IpcChannels = {
   sessionSetPinned: "session:set-pinned",
   sessionArchive: "session:archive",
   sessionDelete: "session:delete",
+
+  contextList: "context:list",
+  contextAdd: "context:add",
+  contextUpdate: "context:update",
+  contextRemove: "context:remove",
+  contextCandidates: "context:candidates",
+  contextAccept: "context:accept",
+  contextReject: "context:reject",
+  contextPreview: "context:preview",
+  contextStatus: "context:status",
 
   attachmentPickFiles: "attachment:pick-files",
   attachmentPickImages: "attachment:pick-images",
@@ -214,7 +234,7 @@ export const IpcChannels = {
   settingsSnapshot: "settings:snapshot",
   settingsUpdateWorkStyle: "settings:update-work-style",
   settingsUpdateNotificationMode: "settings:update-notification-mode",
-} as const
+} as const;
 
 export const IpcEvents = {
   windowMaximizedChanged: "window:maximized-changed",
@@ -227,355 +247,430 @@ export const IpcEvents = {
   terminalStatus: "terminal:status",
   terminalExit: "terminal:exit",
   terminalError: "terminal:error",
-} as const
+} as const;
 
-export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
+export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];
 
 export interface DesktopAppInfo {
-  name: string
-  version: string
-  isPackaged: boolean
+  name: string;
+  version: string;
+  isPackaged: boolean;
 }
 
 export interface PlatformInfo {
-  platform: string
-  isMac: boolean
-  isWindows: boolean
-  isLinux: boolean
+  platform: string;
+  isMac: boolean;
+  isWindows: boolean;
+  isLinux: boolean;
 }
 
 export interface TrayNotificationOptions {
-  title: string
-  body: string
-  silent?: boolean
-  showWhenFocused?: boolean
+  title: string;
+  body: string;
+  silent?: boolean;
+  showWhenFocused?: boolean;
 }
 
 export interface PetPosition {
-  x: number
-  y: number
+  x: number;
+  y: number;
 }
 
 export interface PetState {
-  visible: boolean
-  alwaysOnTop: boolean
-  ignoreMouseEvents: boolean
-  position: PetPosition | null
+  visible: boolean;
+  alwaysOnTop: boolean;
+  ignoreMouseEvents: boolean;
+  position: PetPosition | null;
 }
 
 export interface IpcInvokeMap {
-  [IpcChannels.appGetInfo]: { args: []; result: DesktopAppInfo }
-  [IpcChannels.appGetPlatform]: { args: []; result: PlatformInfo }
-  [IpcChannels.appQuit]: { args: []; result: void }
+  [IpcChannels.appGetInfo]: { args: []; result: DesktopAppInfo };
+  [IpcChannels.appGetPlatform]: { args: []; result: PlatformInfo };
+  [IpcChannels.appQuit]: { args: []; result: void };
 
-  [IpcChannels.windowShowMain]: { args: []; result: void }
-  [IpcChannels.windowMinimize]: { args: []; result: void }
-  [IpcChannels.windowClose]: { args: []; result: void }
-  [IpcChannels.windowToggleMaximize]: { args: []; result: void }
-  [IpcChannels.windowIsMaximized]: { args: []; result: boolean }
-  [IpcChannels.windowGetZoomLevel]: { args: []; result: number }
-  [IpcChannels.windowSetZoomLevel]: { args: [level: number]; result: number }
-  [IpcChannels.windowOpenExternal]: { args: [url: string]; result: void }
+  [IpcChannels.windowShowMain]: { args: []; result: void };
+  [IpcChannels.windowMinimize]: { args: []; result: void };
+  [IpcChannels.windowClose]: { args: []; result: void };
+  [IpcChannels.windowToggleMaximize]: { args: []; result: void };
+  [IpcChannels.windowIsMaximized]: { args: []; result: boolean };
+  [IpcChannels.windowGetZoomLevel]: { args: []; result: number };
+  [IpcChannels.windowSetZoomLevel]: { args: [level: number]; result: number };
+  [IpcChannels.windowOpenExternal]: { args: [url: string]; result: void };
 
-  [IpcChannels.trayFlash]: { args: []; result: void }
-  [IpcChannels.trayStopFlash]: { args: []; result: void }
-  [IpcChannels.trayNotify]: { args: [options: TrayNotificationOptions]; result: void }
+  [IpcChannels.trayFlash]: { args: []; result: void };
+  [IpcChannels.trayStopFlash]: { args: []; result: void };
+  [IpcChannels.trayNotify]: {
+    args: [options: TrayNotificationOptions];
+    result: void;
+  };
 
-  [IpcChannels.petShow]: { args: []; result: void }
-  [IpcChannels.petHide]: { args: []; result: void }
-  [IpcChannels.petToggle]: { args: []; result: PetState }
-  [IpcChannels.petGetState]: { args: []; result: PetState }
-  [IpcChannels.petSetAlwaysOnTop]: { args: [value: boolean]; result: PetState }
-  [IpcChannels.petSetIgnoreMouseEvents]: { args: [value: boolean]; result: PetState }
+  [IpcChannels.petShow]: { args: []; result: void };
+  [IpcChannels.petHide]: { args: []; result: void };
+  [IpcChannels.petToggle]: { args: []; result: PetState };
+  [IpcChannels.petGetState]: { args: []; result: PetState };
+  [IpcChannels.petSetAlwaysOnTop]: { args: [value: boolean]; result: PetState };
+  [IpcChannels.petSetIgnoreMouseEvents]: {
+    args: [value: boolean];
+    result: PetState;
+  };
 
-  [IpcChannels.settingsSnapshot]: { args: []; result: DesktopSettingsSnapshot }
+  [IpcChannels.settingsSnapshot]: { args: []; result: DesktopSettingsSnapshot };
   [IpcChannels.settingsUpdateWorkStyle]: {
-    args: [input: UpdateDesktopWorkStyleInput]
-    result: DesktopSettingsSnapshot
-  }
+    args: [input: UpdateDesktopWorkStyleInput];
+    result: DesktopSettingsSnapshot;
+  };
   [IpcChannels.settingsUpdateNotificationMode]: {
-    args: [input: UpdateDesktopNotificationModeInput]
-    result: DesktopSettingsSnapshot
-  }
+    args: [input: UpdateDesktopNotificationModeInput];
+    result: DesktopSettingsSnapshot;
+  };
 
-  [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData }
-  [IpcChannels.sessionDaemonStatus]: { args: []; result: DesktopDaemonStatus }
-  [IpcChannels.sessionChooseProject]: { args: []; result: DesktopProjectDetails | null }
+  [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData };
+  [IpcChannels.sessionDaemonStatus]: { args: []; result: DesktopDaemonStatus };
+  [IpcChannels.sessionChooseProject]: {
+    args: [];
+    result: DesktopProjectDetails | null;
+  };
   [IpcChannels.sessionInspectProject]: {
-    args: [path: string]
-    result: DesktopProjectDetails
-  }
+    args: [path: string];
+    result: DesktopProjectDetails;
+  };
   [IpcChannels.sessionListCommands]: {
-    args: [cwd: string]
-    result: DesktopCommandCatalogEntry[]
-  }
+    args: [cwd: string];
+    result: DesktopCommandCatalogEntry[];
+  };
   [IpcChannels.projectRename]: {
-    args: [input: RenameDesktopProjectInput]
-    result: DesktopProjectDetails["project"]
-  }
+    args: [input: RenameDesktopProjectInput];
+    result: DesktopProjectDetails["project"];
+  };
   [IpcChannels.projectSetPinned]: {
-    args: [input: PinDesktopProjectInput]
-    result: DesktopProjectDetails["project"]
-  }
+    args: [input: PinDesktopProjectInput];
+    result: DesktopProjectDetails["project"];
+  };
   [IpcChannels.projectSetDefaultShell]: {
-    args: [input: SetDefaultDesktopProjectShellInput]
-    result: DesktopProjectDetails["project"]
-  }
-  [IpcChannels.projectRemove]: { args: [path: string]; result: void }
+    args: [input: SetDefaultDesktopProjectShellInput];
+    result: DesktopProjectDetails["project"];
+  };
+  [IpcChannels.projectRemove]: { args: [path: string]; result: void };
   [IpcChannels.projectRebind]: {
-    args: [projectId: string]
-    result: DesktopProjectDetails["project"] | null
-  }
+    args: [projectId: string];
+    result: DesktopProjectDetails["project"] | null;
+  };
   [IpcChannels.projectCheckoutBranch]: {
-    args: [input: CheckoutDesktopProjectBranchInput]
-    result: DesktopProjectDetails
-  }
+    args: [input: CheckoutDesktopProjectBranchInput];
+    result: DesktopProjectDetails;
+  };
   [IpcChannels.projectCreateBranch]: {
-    args: [input: CreateDesktopProjectBranchInput]
-    result: DesktopProjectDetails
-  }
+    args: [input: CreateDesktopProjectBranchInput];
+    result: DesktopProjectDetails;
+  };
   [IpcChannels.sessionCreate]: {
-    args: [input: CreateDesktopSessionInput]
-    result: DesktopSessionRecord
-  }
-  [IpcChannels.sessionOpen]: { args: [sessionId: string]; result: DesktopSessionView }
+    args: [input: CreateDesktopSessionInput];
+    result: DesktopSessionRecord;
+  };
+  [IpcChannels.sessionOpen]: {
+    args: [sessionId: string];
+    result: DesktopSessionView;
+  };
   [IpcChannels.sessionAuxOpen]: {
-    args: [input: OpenDesktopAuxSessionInput]
-    result: DesktopSessionView
-  }
-  [IpcChannels.sessionAuxClose]: { args: [input: CloseDesktopAuxSessionInput]; result: void }
+    args: [input: OpenDesktopAuxSessionInput];
+    result: DesktopSessionView;
+  };
+  [IpcChannels.sessionAuxClose]: {
+    args: [input: CloseDesktopAuxSessionInput];
+    result: void;
+  };
   [IpcChannels.sessionFork]: {
-    args: [input: ForkDesktopSessionInput]
-    result: DesktopSessionRecord
-  }
-  [IpcChannels.sessionClose]: { args: []; result: void }
-  [IpcChannels.sessionSendPrompt]: { args: [input: SendDesktopPromptInput]; result: void }
+    args: [input: ForkDesktopSessionInput];
+    result: DesktopSessionRecord;
+  };
+  [IpcChannels.sessionClose]: { args: []; result: void };
+  [IpcChannels.sessionSendPrompt]: {
+    args: [input: SendDesktopPromptInput];
+    result: void;
+  };
   [IpcChannels.sessionEditLatestPrompt]: {
-    args: [input: EditLatestDesktopPromptInput]
-    result: void
-  }
+    args: [input: EditLatestDesktopPromptInput];
+    result: void;
+  };
   [IpcChannels.sessionPromoteQueuedPrompt]: {
-    args: [input: PromoteDesktopQueuedPromptInput]
-    result: void
-  }
+    args: [input: PromoteDesktopQueuedPromptInput];
+    result: void;
+  };
   [IpcChannels.sessionCancelQueuedPrompt]: {
-    args: [input: CancelDesktopQueuedPromptInput]
-    result: void
-  }
-  [IpcChannels.sessionInterrupt]: { args: [input: InterruptDesktopSessionInput]; result: void }
+    args: [input: CancelDesktopQueuedPromptInput];
+    result: void;
+  };
+  [IpcChannels.sessionInterrupt]: {
+    args: [input: InterruptDesktopSessionInput];
+    result: void;
+  };
   [IpcChannels.sessionReplyPermission]: {
-    args: [input: ReplyDesktopPermissionInput]
-    result: void
-  }
+    args: [input: ReplyDesktopPermissionInput];
+    result: void;
+  };
   [IpcChannels.sessionSetDefaultModel]: {
-    args: [input: SetDefaultDesktopModelInput]
-    result: DesktopBootstrapData
-  }
+    args: [input: SetDefaultDesktopModelInput];
+    result: DesktopBootstrapData;
+  };
   [IpcChannels.sessionSetDefaultPermissionMode]: {
-    args: [input: SetDefaultDesktopPermissionModeInput]
-    result: DesktopBootstrapData
-  }
+    args: [input: SetDefaultDesktopPermissionModeInput];
+    result: DesktopBootstrapData;
+  };
   [IpcChannels.sessionUpdateModel]: {
-    args: [input: UpdateDesktopSessionModelInput]
-    result: DesktopSessionRecord
-  }
+    args: [input: UpdateDesktopSessionModelInput];
+    result: DesktopSessionRecord;
+  };
   [IpcChannels.sessionUpdatePermissionMode]: {
-    args: [input: UpdateDesktopSessionPermissionModeInput]
-    result: DesktopSessionRecord
-  }
+    args: [input: UpdateDesktopSessionPermissionModeInput];
+    result: DesktopSessionRecord;
+  };
   [IpcChannels.sessionRename]: {
-    args: [input: RenameDesktopSessionInput]
-    result: DesktopSessionRecord
-  }
+    args: [input: RenameDesktopSessionInput];
+    result: DesktopSessionRecord;
+  };
   [IpcChannels.sessionSetPinned]: {
-    args: [input: PinDesktopSessionInput]
-    result: DesktopSessionRecord
-  }
+    args: [input: PinDesktopSessionInput];
+    result: DesktopSessionRecord;
+  };
   [IpcChannels.sessionArchive]: {
-    args: [sessionId: string]
-    result: DesktopSessionRecord
-  }
+    args: [sessionId: string];
+    result: DesktopSessionRecord;
+  };
   [IpcChannels.sessionDelete]: {
-    args: [sessionId: string]
-    result: string[]
-  }
+    args: [sessionId: string];
+    result: string[];
+  };
+  [IpcChannels.contextList]: {
+    args: [input: DesktopContextQuery];
+    result: ContextEntryRecord[];
+  };
+  [IpcChannels.contextAdd]: {
+    args: [input: DesktopContextEntryInput];
+    result: ContextMutationResult;
+  };
+  [IpcChannels.contextUpdate]: {
+    args: [input: DesktopContextEntryUpdate];
+    result: ContextEntryRecord;
+  };
+  [IpcChannels.contextRemove]: {
+    args: [input: DesktopContextEntryTarget];
+    result: void;
+  };
+  [IpcChannels.contextCandidates]: {
+    args: [input: { cwd: string }];
+    result: ContextEntryRecord[];
+  };
+  [IpcChannels.contextAccept]: {
+    args: [input: DesktopContextCandidateAccept];
+    result: ContextEntryRecord;
+  };
+  [IpcChannels.contextReject]: {
+    args: [input: DesktopContextEntryTarget];
+    result: void;
+  };
+  [IpcChannels.contextPreview]: {
+    args: [input: { cwd: string }];
+    result: string;
+  };
+  [IpcChannels.contextStatus]: {
+    args: [input: { cwd: string }];
+    result: ContextStatus;
+  };
 
-  [IpcChannels.attachmentPickFiles]: { args: []; result: DesktopAttachmentCandidate[] }
-  [IpcChannels.attachmentPickImages]: { args: []; result: DesktopAttachmentCandidate[] }
+  [IpcChannels.attachmentPickFiles]: {
+    args: [];
+    result: DesktopAttachmentCandidate[];
+  };
+  [IpcChannels.attachmentPickImages]: {
+    args: [];
+    result: DesktopAttachmentCandidate[];
+  };
   [IpcChannels.attachmentStageDropped]: {
-    args: [paths: string[]]
-    result: DesktopAttachmentCandidate[]
-  }
+    args: [paths: string[]];
+    result: DesktopAttachmentCandidate[];
+  };
   [IpcChannels.attachmentUploadMemory]: {
-    args: [input: UploadDesktopAttachmentMemoryInput]
-    result: { taskId: string }
-  }
+    args: [input: UploadDesktopAttachmentMemoryInput];
+    result: { taskId: string };
+  };
   [IpcChannels.attachmentStartUpload]: {
-    args: [input: StartDesktopAttachmentUploadInput]
-    result: { taskId: string }
-  }
+    args: [input: StartDesktopAttachmentUploadInput];
+    result: { taskId: string };
+  };
   [IpcChannels.attachmentCancelUpload]: {
-    args: [input: CancelDesktopAttachmentUploadInput]
-    result: void
-  }
+    args: [input: CancelDesktopAttachmentUploadInput];
+    result: void;
+  };
   [IpcChannels.attachmentRetryUpload]: {
-    args: [input: RetryDesktopAttachmentUploadInput]
-    result: { taskId: string }
-  }
+    args: [input: RetryDesktopAttachmentUploadInput];
+    result: { taskId: string };
+  };
   [IpcChannels.attachmentDiscardDraft]: {
-    args: [input: DiscardDesktopAttachmentDraftInput]
-    result: void
-  }
+    args: [input: DiscardDesktopAttachmentDraftInput];
+    result: void;
+  };
   [IpcChannels.attachmentDeleteUnreferenced]: {
-    args: [input: DesktopAttachmentAssetInput]
-    result: { deleted: boolean; inUse: boolean }
-  }
+    args: [input: DesktopAttachmentAssetInput];
+    result: { deleted: boolean; inUse: boolean };
+  };
   [IpcChannels.attachmentReadPreview]: {
-    args: [input: DesktopAttachmentAssetInput]
-    result: DesktopAttachmentPreview
-  }
+    args: [input: DesktopAttachmentAssetInput];
+    result: DesktopAttachmentPreview;
+  };
   [IpcChannels.attachmentOpen]: {
-    args: [input: DesktopAttachmentAssetInput]
-    result: void
-  }
+    args: [input: DesktopAttachmentAssetInput];
+    result: void;
+  };
   [IpcChannels.attachmentSaveAs]: {
-    args: [input: DesktopAttachmentAssetInput]
-    result: { saved: boolean }
-  }
-  [IpcChannels.attachmentStorageScan]: { args: []; result: AttachmentStorageReport }
-  [IpcChannels.attachmentStorageRepair]: { args: []; result: AttachmentStorageRepairResult }
-  [IpcChannels.attachmentStorageGc]: { args: []; result: AttachmentStorageGcResult }
+    args: [input: DesktopAttachmentAssetInput];
+    result: { saved: boolean };
+  };
+  [IpcChannels.attachmentStorageScan]: {
+    args: [];
+    result: AttachmentStorageReport;
+  };
+  [IpcChannels.attachmentStorageRepair]: {
+    args: [];
+    result: AttachmentStorageRepairResult;
+  };
+  [IpcChannels.attachmentStorageGc]: {
+    args: [];
+    result: AttachmentStorageGcResult;
+  };
 
   [IpcChannels.workspaceListFiles]: {
-    args: [input: WorkspaceListFilesInput]
-    result: WorkspaceListFilesResult
-  }
+    args: [input: WorkspaceListFilesInput];
+    result: WorkspaceListFilesResult;
+  };
   [IpcChannels.workspaceReadFile]: {
-    args: [input: WorkspaceReadFileInput]
-    result: WorkspaceReadFileResult
-  }
+    args: [input: WorkspaceReadFileInput];
+    result: WorkspaceReadFileResult;
+  };
   [IpcChannels.workspaceRevealPath]: {
-    args: [input: WorkspaceRevealPathInput]
-    result: void
-  }
+    args: [input: WorkspaceRevealPathInput];
+    result: void;
+  };
   [IpcChannels.workspaceCopyPath]: {
-    args: [input: WorkspaceCopyPathInput]
-    result: string
-  }
+    args: [input: WorkspaceCopyPathInput];
+    result: string;
+  };
   [IpcChannels.workspaceListOpeners]: {
-    args: []
-    result: WorkspaceOpener[]
-  }
+    args: [];
+    result: WorkspaceOpener[];
+  };
   [IpcChannels.workspaceOpenWith]: {
-    args: [input: WorkspaceOpenWithInput]
-    result: void
-  }
+    args: [input: WorkspaceOpenWithInput];
+    result: void;
+  };
 
   [IpcChannels.gitChanges]: {
-    args: [input: DesktopGitChangesInput]
-    result: DesktopGitChangesResult
-  }
+    args: [input: DesktopGitChangesInput];
+    result: DesktopGitChangesResult;
+  };
   [IpcChannels.gitFileDiff]: {
-    args: [input: DesktopGitFileDiffInput]
-    result: DesktopGitFileDiffResult
-  }
+    args: [input: DesktopGitFileDiffInput];
+    result: DesktopGitFileDiffResult;
+  };
 
   [IpcChannels.clipboardReadText]: {
-    args: []
-    result: string
-  }
+    args: [];
+    result: string;
+  };
   [IpcChannels.clipboardWriteText]: {
-    args: [text: string]
-    result: void
-  }
+    args: [text: string];
+    result: void;
+  };
 
   [IpcChannels.terminalCreate]: {
-    args: [input: DesktopTerminalCreateInput]
-    result: DesktopTerminalRecord
-  }
+    args: [input: DesktopTerminalCreateInput];
+    result: DesktopTerminalRecord;
+  };
   [IpcChannels.terminalWrite]: {
-    args: [input: DesktopTerminalWriteInput]
-    result: void
-  }
+    args: [input: DesktopTerminalWriteInput];
+    result: void;
+  };
   [IpcChannels.terminalResize]: {
-    args: [input: DesktopTerminalResizeInput]
-    result: void
-  }
+    args: [input: DesktopTerminalResizeInput];
+    result: void;
+  };
   [IpcChannels.terminalRead]: {
-    args: [input: DesktopTerminalReadInput]
-    result: DesktopTerminalReadResult
-  }
+    args: [input: DesktopTerminalReadInput];
+    result: DesktopTerminalReadResult;
+  };
   [IpcChannels.terminalKill]: {
-    args: [terminalId: string]
-    result: void
-  }
+    args: [terminalId: string];
+    result: void;
+  };
   [IpcChannels.terminalList]: {
-    args: []
-    result: DesktopTerminalRecord[]
-  }
-  [IpcChannels.scheduleStatus]: { args: []; result: DesktopScheduledStatus }
-  [IpcChannels.scheduleList]: { args: []; result: DesktopScheduledTask[] }
+    args: [];
+    result: DesktopTerminalRecord[];
+  };
+  [IpcChannels.scheduleStatus]: { args: []; result: DesktopScheduledStatus };
+  [IpcChannels.scheduleList]: { args: []; result: DesktopScheduledTask[] };
   [IpcChannels.scheduleCreate]: {
-    args: [input: CreateDesktopScheduledTaskInput]
-    result: DesktopScheduledTask
-  }
+    args: [input: CreateDesktopScheduledTaskInput];
+    result: DesktopScheduledTask;
+  };
   [IpcChannels.scheduleUpdate]: {
-    args: [id: string, input: UpdateDesktopScheduledTaskInput]
-    result: DesktopScheduledTask
-  }
-  [IpcChannels.scheduleRemove]: { args: [id: string]; result: void }
-  [IpcChannels.scheduleRunNow]: { args: [id: string]; result: DesktopScheduledRun }
+    args: [id: string, input: UpdateDesktopScheduledTaskInput];
+    result: DesktopScheduledTask;
+  };
+  [IpcChannels.scheduleRemove]: { args: [id: string]; result: void };
+  [IpcChannels.scheduleRunNow]: {
+    args: [id: string];
+    result: DesktopScheduledRun;
+  };
   [IpcChannels.scheduleListRuns]: {
-    args: [input: ListDesktopScheduledRunsInput]
-    result: DesktopScheduledRun[]
-  }
+    args: [input: ListDesktopScheduledRunsInput];
+    result: DesktopScheduledRun[];
+  };
   [IpcChannels.scheduleSetRunUnread]: {
-    args: [id: string, unread: boolean]
-    result: DesktopScheduledRun
-  }
-  [IpcChannels.providerSnapshot]: { args: []; result: DesktopProviderSnapshot }
+    args: [id: string, unread: boolean];
+    result: DesktopScheduledRun;
+  };
+  [IpcChannels.providerSnapshot]: { args: []; result: DesktopProviderSnapshot };
   [IpcChannels.providerConnect]: {
-    args: [input: ConnectDesktopProviderInput]
-    result: DesktopProviderSnapshot
-  }
+    args: [input: ConnectDesktopProviderInput];
+    result: DesktopProviderSnapshot;
+  };
   [IpcChannels.providerActivate]: {
-    args: [input: ActivateDesktopProviderInput]
-    result: DesktopProviderSnapshot
-  }
+    args: [input: ActivateDesktopProviderInput];
+    result: DesktopProviderSnapshot;
+  };
   [IpcChannels.providerDisconnect]: {
-    args: [input: DisconnectDesktopProviderInput]
-    result: DesktopProviderSnapshot
-  }
+    args: [input: DisconnectDesktopProviderInput];
+    result: DesktopProviderSnapshot;
+  };
   [IpcChannels.providerCustomCreate]: {
-    args: [input: CreateDesktopCustomProviderInput]
-    result: DesktopProviderSnapshot
-  }
+    args: [input: CreateDesktopCustomProviderInput];
+    result: DesktopProviderSnapshot;
+  };
   [IpcChannels.providerCustomUpdate]: {
-    args: [input: UpdateDesktopCustomProviderInput]
-    result: DesktopProviderSnapshot
-  }
+    args: [input: UpdateDesktopCustomProviderInput];
+    result: DesktopProviderSnapshot;
+  };
   [IpcChannels.providerCustomRemove]: {
-    args: [input: RemoveDesktopCustomProviderInput]
-    result: DesktopProviderSnapshot
-  }
+    args: [input: RemoveDesktopCustomProviderInput];
+    result: DesktopProviderSnapshot;
+  };
   [IpcChannels.pluginSnapshot]: {
-    args: [input: DesktopPluginContextInput]
-    result: DesktopPluginSnapshot
-  }
+    args: [input: DesktopPluginContextInput];
+    result: DesktopPluginSnapshot;
+  };
   [IpcChannels.pluginEnable]: {
-    args: [input: DesktopPluginActionInput]
-    result: DesktopPluginSnapshot
-  }
+    args: [input: DesktopPluginActionInput];
+    result: DesktopPluginSnapshot;
+  };
   [IpcChannels.pluginDisable]: {
-    args: [input: DesktopPluginActionInput]
-    result: DesktopPluginSnapshot
-  }
+    args: [input: DesktopPluginActionInput];
+    result: DesktopPluginSnapshot;
+  };
   [IpcChannels.pluginUninstall]: {
-    args: [input: DesktopPluginActionInput]
-    result: DesktopPluginSnapshot
-  }
+    args: [input: DesktopPluginActionInput];
+    result: DesktopPluginSnapshot;
+  };
   [IpcChannels.pluginReload]: {
-    args: [input: DesktopPluginContextInput]
-    result: DesktopPluginSnapshot
-  }
+    args: [input: DesktopPluginContextInput];
+    result: DesktopPluginSnapshot;
+  };
 }

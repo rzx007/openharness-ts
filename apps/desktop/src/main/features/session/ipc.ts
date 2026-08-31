@@ -1,4 +1,4 @@
-import { IpcChannels } from "../../../shared/ipc-channels"
+import { IpcChannels } from "../../../shared/ipc-channels";
 import type {
   CheckoutDesktopProjectBranchInput,
   CloseDesktopAuxSessionInput,
@@ -21,9 +21,16 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
-} from "../../../shared/session-types"
-import type { IpcContribution } from "../../core/ipc/types"
-import { desktopSessionService } from "./session-service"
+} from "../../../shared/session-types";
+import type {
+  DesktopContextCandidateAccept,
+  DesktopContextEntryInput,
+  DesktopContextEntryTarget,
+  DesktopContextEntryUpdate,
+  DesktopContextQuery,
+} from "../../../shared/context-types";
+import type { IpcContribution } from "../../core/ipc/types";
+import { desktopSessionService } from "./session-service";
 
 export const sessionIpcContribution: IpcContribution = {
   id: "session",
@@ -43,67 +50,91 @@ export const sessionIpcContribution: IpcContribution = {
       },
       {
         channel: IpcChannels.sessionInspectProject,
-        handler: (_event, path) => desktopSessionService.inspectProject(String(path ?? "")),
+        handler: (_event, path) =>
+          desktopSessionService.inspectProject(String(path ?? "")),
       },
       {
         channel: IpcChannels.sessionListCommands,
-        handler: (_event, cwd) => desktopSessionService.listCommands(String(cwd ?? "")),
+        handler: (_event, cwd) =>
+          desktopSessionService.listCommands(String(cwd ?? "")),
       },
       {
         channel: IpcChannels.projectRename,
         handler: (_event, input) =>
-          desktopSessionService.renameProject(input as RenameDesktopProjectInput),
+          desktopSessionService.renameProject(
+            input as RenameDesktopProjectInput,
+          ),
       },
       {
         channel: IpcChannels.projectSetPinned,
         handler: (_event, input) =>
-          desktopSessionService.setProjectPinned(input as PinDesktopProjectInput),
+          desktopSessionService.setProjectPinned(
+            input as PinDesktopProjectInput,
+          ),
       },
       {
         channel: IpcChannels.projectSetDefaultShell,
         handler: (_event, input) =>
-          desktopSessionService.setProjectDefaultShell(input as SetDefaultDesktopProjectShellInput),
+          desktopSessionService.setProjectDefaultShell(
+            input as SetDefaultDesktopProjectShellInput,
+          ),
       },
       {
         channel: IpcChannels.projectRemove,
-        handler: (_event, path) => desktopSessionService.removeProject(String(path ?? "")),
+        handler: (_event, path) =>
+          desktopSessionService.removeProject(String(path ?? "")),
       },
       {
         channel: IpcChannels.projectRebind,
         handler: (event, projectId) =>
-          desktopSessionService.rebindProject(event.sender, String(projectId ?? "")),
+          desktopSessionService.rebindProject(
+            event.sender,
+            String(projectId ?? ""),
+          ),
       },
       {
         channel: IpcChannels.projectCheckoutBranch,
         handler: (_event, input) =>
-          desktopSessionService.checkoutProjectBranch(input as CheckoutDesktopProjectBranchInput),
+          desktopSessionService.checkoutProjectBranch(
+            input as CheckoutDesktopProjectBranchInput,
+          ),
       },
       {
         channel: IpcChannels.projectCreateBranch,
         handler: (_event, input) =>
-          desktopSessionService.createProjectBranch(input as CreateDesktopProjectBranchInput),
+          desktopSessionService.createProjectBranch(
+            input as CreateDesktopProjectBranchInput,
+          ),
       },
       {
         channel: IpcChannels.sessionCreate,
         handler: (_event, input) =>
-          desktopSessionService.createSession(input as CreateDesktopSessionInput),
+          desktopSessionService.createSession(
+            input as CreateDesktopSessionInput,
+          ),
       },
       {
         channel: IpcChannels.sessionOpen,
         handler: (event, sessionId) =>
-          desktopSessionService.openSession(event.sender, String(sessionId ?? "")),
+          desktopSessionService.openSession(
+            event.sender,
+            String(sessionId ?? ""),
+          ),
       },
       {
         channel: IpcChannels.sessionAuxOpen,
         handler: (event, input) =>
-          desktopSessionService.openAuxSession(event.sender, input as OpenDesktopAuxSessionInput),
+          desktopSessionService.openAuxSession(
+            event.sender,
+            input as OpenDesktopAuxSessionInput,
+          ),
       },
       {
         channel: IpcChannels.sessionAuxClose,
         handler: (event, input) =>
           desktopSessionService.closeAuxSession(
             event.sender.id,
-            input as CloseDesktopAuxSessionInput
+            input as CloseDesktopAuxSessionInput,
           ),
       },
       {
@@ -123,72 +154,149 @@ export const sessionIpcContribution: IpcContribution = {
       {
         channel: IpcChannels.sessionEditLatestPrompt,
         handler: (_event, input) =>
-          desktopSessionService.editLatestPrompt(input as EditLatestDesktopPromptInput),
+          desktopSessionService.editLatestPrompt(
+            input as EditLatestDesktopPromptInput,
+          ),
       },
       {
         channel: IpcChannels.sessionPromoteQueuedPrompt,
         handler: (_event, input) =>
-          desktopSessionService.promoteQueuedPrompt(input as PromoteDesktopQueuedPromptInput),
+          desktopSessionService.promoteQueuedPrompt(
+            input as PromoteDesktopQueuedPromptInput,
+          ),
       },
       {
         channel: IpcChannels.sessionCancelQueuedPrompt,
         handler: (_event, input) =>
-          desktopSessionService.cancelQueuedPrompt(input as CancelDesktopQueuedPromptInput),
+          desktopSessionService.cancelQueuedPrompt(
+            input as CancelDesktopQueuedPromptInput,
+          ),
       },
       {
         channel: IpcChannels.sessionInterrupt,
         handler: (_event, input) =>
-          desktopSessionService.interruptSession(input as InterruptDesktopSessionInput),
+          desktopSessionService.interruptSession(
+            input as InterruptDesktopSessionInput,
+          ),
       },
       {
         channel: IpcChannels.sessionReplyPermission,
         handler: (_event, input) =>
-          desktopSessionService.replyPermission(input as ReplyDesktopPermissionInput),
+          desktopSessionService.replyPermission(
+            input as ReplyDesktopPermissionInput,
+          ),
       },
       {
         channel: IpcChannels.sessionSetDefaultModel,
         handler: (_event, input) =>
-          desktopSessionService.setDefaultModel(input as SetDefaultDesktopModelInput),
+          desktopSessionService.setDefaultModel(
+            input as SetDefaultDesktopModelInput,
+          ),
       },
       {
         channel: IpcChannels.sessionSetDefaultPermissionMode,
         handler: (_event, input) =>
           desktopSessionService.setDefaultPermissionMode(
-            input as SetDefaultDesktopPermissionModeInput
+            input as SetDefaultDesktopPermissionModeInput,
           ),
       },
       {
         channel: IpcChannels.sessionUpdateModel,
         handler: (_event, input) =>
-          desktopSessionService.updateSessionModel(input as UpdateDesktopSessionModelInput),
+          desktopSessionService.updateSessionModel(
+            input as UpdateDesktopSessionModelInput,
+          ),
       },
       {
         channel: IpcChannels.sessionUpdatePermissionMode,
         handler: (_event, input) =>
           desktopSessionService.updateSessionPermissionMode(
-            input as UpdateDesktopSessionPermissionModeInput
+            input as UpdateDesktopSessionPermissionModeInput,
           ),
       },
       {
         channel: IpcChannels.sessionRename,
         handler: (_event, input) =>
-          desktopSessionService.renameSession(input as RenameDesktopSessionInput),
+          desktopSessionService.renameSession(
+            input as RenameDesktopSessionInput,
+          ),
       },
       {
         channel: IpcChannels.sessionSetPinned,
         handler: (_event, input) =>
-          desktopSessionService.setSessionPinned(input as PinDesktopSessionInput),
+          desktopSessionService.setSessionPinned(
+            input as PinDesktopSessionInput,
+          ),
       },
       {
         channel: IpcChannels.sessionArchive,
         handler: (event, sessionId) =>
-          desktopSessionService.archiveSession(event.sender.id, String(sessionId ?? "")),
+          desktopSessionService.archiveSession(
+            event.sender.id,
+            String(sessionId ?? ""),
+          ),
       },
       {
         channel: IpcChannels.sessionDelete,
         handler: (event, sessionId) =>
-          desktopSessionService.deleteSession(event.sender.id, String(sessionId ?? "")),
+          desktopSessionService.deleteSession(
+            event.sender.id,
+            String(sessionId ?? ""),
+          ),
       },
-    ]
+      {
+        channel: IpcChannels.contextList,
+        handler: (_event, input) =>
+          desktopSessionService.listContext(input as DesktopContextQuery),
+      },
+      {
+        channel: IpcChannels.contextAdd,
+        handler: (_event, input) =>
+          desktopSessionService.addContext(input as DesktopContextEntryInput),
+      },
+      {
+        channel: IpcChannels.contextUpdate,
+        handler: (_event, input) =>
+          desktopSessionService.updateContext(
+            input as DesktopContextEntryUpdate,
+          ),
+      },
+      {
+        channel: IpcChannels.contextRemove,
+        handler: (_event, input) =>
+          desktopSessionService.removeContext(
+            input as DesktopContextEntryTarget,
+          ),
+      },
+      {
+        channel: IpcChannels.contextCandidates,
+        handler: (_event, input) =>
+          desktopSessionService.listContextCandidates(input as { cwd: string }),
+      },
+      {
+        channel: IpcChannels.contextAccept,
+        handler: (_event, input) =>
+          desktopSessionService.acceptContextCandidate(
+            input as DesktopContextCandidateAccept,
+          ),
+      },
+      {
+        channel: IpcChannels.contextReject,
+        handler: (_event, input) =>
+          desktopSessionService.rejectContextCandidate(
+            input as DesktopContextEntryTarget,
+          ),
+      },
+      {
+        channel: IpcChannels.contextPreview,
+        handler: (_event, input) =>
+          desktopSessionService.getContextPreview(input as { cwd: string }),
+      },
+      {
+        channel: IpcChannels.contextStatus,
+        handler: (_event, input) =>
+          desktopSessionService.getContextStatus(input as { cwd: string }),
+      },
+    ];
   },
-}
+};

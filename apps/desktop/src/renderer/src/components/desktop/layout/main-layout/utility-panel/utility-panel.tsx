@@ -1,57 +1,67 @@
-import { MessageCirclePlus } from "lucide-react"
-import type * as React from "react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { MessageCirclePlus } from "lucide-react";
+import type * as React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { BrowserTool, type BrowserToolTab } from "@renderer/components/desktop/tools/browser-tool"
-import { toLocalFileUrl } from "@renderer/components/desktop/tools/browser-navigation"
-import type { UtilityToolRequest } from "./utility-panel-tabs"
-import { FilesTool } from "@renderer/components/desktop/tools/files-tool"
-import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
+import {
+  BrowserTool,
+  type BrowserToolTab,
+} from "@renderer/components/desktop/tools/browser-tool";
+import { toLocalFileUrl } from "@renderer/components/desktop/tools/browser-navigation";
+import type { UtilityToolRequest } from "./utility-panel-tabs";
+import { FilesTool } from "@renderer/components/desktop/tools/files-tool";
+import { getFileIcon } from "@renderer/components/desktop/tools/file-icons";
 import {
   mergeFileViewerTabs,
   type FileViewerTab,
-} from "@renderer/components/desktop/tools/file-viewer"
-import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool"
-import { ReviewTool } from "@renderer/components/desktop/tools/review-tool"
-import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool"
-import { AgentsTool } from "@renderer/components/desktop/tools/agents/agents-tool"
+} from "@renderer/components/desktop/tools/file-viewer";
+import { PlaceholderTool } from "@renderer/components/desktop/tools/placeholder-tool";
+import { ReviewTool } from "@renderer/components/desktop/tools/review-tool";
+import { TerminalTool } from "@renderer/components/desktop/tools/terminal/terminal-tool";
+import { AgentsTool } from "@renderer/components/desktop/tools/agents/agents-tool";
 import type {
   TerminalPanelCommand,
   TerminalSessionTabInfo,
-} from "@renderer/components/desktop/tools/terminal/terminal-tool"
-import { cn } from "@renderer/lib/utils"
-import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+} from "@renderer/components/desktop/tools/terminal/terminal-tool";
+import { cn } from "@renderer/lib/utils";
+import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store";
 import {
   readPersistedUtilityFileTabs,
   writePersistedUtilityFileTabs,
-} from "./utility-panel-repository"
-import { createBrowserTab, type PersistedFileTabsByScope } from "./utility-panel-state"
-import { EmptyUtilityPanelState, UtilityPanelTabStrip } from "./utility-panel-tab-strip"
+} from "./utility-panel-repository";
+import {
+  createBrowserTab,
+  type PersistedFileTabsByScope,
+} from "./utility-panel-state";
+import {
+  EmptyUtilityPanelState,
+  UtilityPanelTabStrip,
+} from "./utility-panel-tab-strip";
 import {
   utilityToolMeta,
   utilityToolOrder,
   type UtilityTab,
   type UtilityTool,
-} from "./utility-panel-tabs"
-import { useUtilityPanelRuntime } from "./use-utility-panel-runtime"
+} from "./utility-panel-tabs";
+import { useUtilityPanelRuntime } from "./use-utility-panel-runtime";
+import { ContextPanel } from "./context-panel";
 
 type UtilityPanelProps = {
-  scopeId: string
-  open: boolean
-  maximized: boolean
-  onToggleMaximized: () => void
-  onClose: () => void
-  fileOpenRequest: { id: number; path: string; line?: number } | null
-  reviewOpenRequest: { id: number; path?: string } | null
-  terminalOpenRequest: { id: number; terminalId: string } | null
-  toolOpenRequest: { id: number; tool: UtilityToolRequest } | null
-  onOpenFile: (path: string, line?: number) => void
-  onOpenReview: (path?: string) => void
-  onOpenTerminal: (terminalId: string) => void
-}
+  scopeId: string;
+  open: boolean;
+  maximized: boolean;
+  onToggleMaximized: () => void;
+  onClose: () => void;
+  fileOpenRequest: { id: number; path: string; line?: number } | null;
+  reviewOpenRequest: { id: number; path?: string } | null;
+  terminalOpenRequest: { id: number; terminalId: string } | null;
+  toolOpenRequest: { id: number; tool: UtilityToolRequest } | null;
+  onOpenFile: (path: string, line?: number) => void;
+  onOpenReview: (path?: string) => void;
+  onOpenTerminal: (terminalId: string) => void;
+};
 
-const filesTabId = "files-tab"
-const unavailableTerminalTabId = "terminal-tab:unavailable"
+const filesTabId = "files-tab";
+const unavailableTerminalTabId = "terminal-tab:unavailable";
 
 export function UtilityPanel({
   scopeId,
@@ -91,61 +101,88 @@ export function UtilityPanel({
     setTerminalMounted,
     setHandledFileRequestId,
     setHandledToolRequestId,
-  } = useUtilityPanelRuntime(scopeId)
-  const [terminalCommands, setTerminalCommands] = useState<TerminalPanelCommand[]>([])
-  const terminalCommandSequenceRef = useRef(0)
-  const handledReviewRequestRef = useRef<number | null>(null)
-  const [persistedFileTabs, setPersistedFileTabs] = useState<PersistedFileTabsByScope>(
-    readPersistedUtilityFileTabs
-  )
-  const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
-  const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
-  const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
+  } = useUtilityPanelRuntime(scopeId);
+  const [terminalCommands, setTerminalCommands] = useState<
+    TerminalPanelCommand[]
+  >([]);
+  const terminalCommandSequenceRef = useRef(0);
+  const handledReviewRequestRef = useRef<number | null>(null);
+  const [persistedFileTabs, setPersistedFileTabs] =
+    useState<PersistedFileTabsByScope>(readPersistedUtilityFileTabs);
+  const selectedProjectPath = useDesktopSessionStore(
+    (state) => state.selectedProject?.path,
+  );
+  const activeSessionId = useDesktopSessionStore(
+    (state) => state.activeSessionId,
+  );
+  const sessionCwd = useDesktopSessionStore(
+    (state) => state.sessionView?.session.cwd ?? null,
+  );
+  const selectedProjectGit = useDesktopSessionStore(
+    (state) => state.selectedProjectGit,
+  );
   const selectedProjectAvailable = useDesktopSessionStore(
-    (state) => state.selectedProject?.available ?? false
-  )
+    (state) => state.selectedProject?.available ?? false,
+  );
   const availableTools = selectedProjectGit
     ? utilityToolOrder
-    : utilityToolOrder.filter((tool) => tool !== "review")
-  const persistedFileState = selectedProjectPath ? persistedFileTabs[scopeId] : undefined
-  const fileStateVisible = fileProjectPath === (selectedProjectPath ?? null)
+    : utilityToolOrder.filter((tool) => tool !== "review");
+  const persistedFileState = selectedProjectPath
+    ? persistedFileTabs[scopeId]
+    : undefined;
+  const fileStateVisible = fileProjectPath === (selectedProjectPath ?? null);
   const visibleFileTabs = fileTabs.filter(
-    (tab) => (tab.projectPath ?? null) === (selectedProjectPath ?? null)
-  )
+    (tab) => (tab.projectPath ?? null) === (selectedProjectPath ?? null),
+  );
   const visibleTabs = tabs.filter(
     (tab) =>
       (!tab.projectPath || tab.projectPath === selectedProjectPath) &&
-      (selectedProjectGit || tab.tool !== "review")
-  )
+      (selectedProjectGit || tab.tool !== "review"),
+  );
   const visibleActiveFilePath =
-    fileStateVisible || visibleTabs.some((tab) => tab.filePath === activeFilePath)
+    fileStateVisible ||
+    visibleTabs.some((tab) => tab.filePath === activeFilePath)
       ? activeFilePath
-      : null
+      : null;
   const visibleLoadingFilePath =
-    fileStateVisible || visibleTabs.some((tab) => tab.filePath === loadingFilePath)
+    fileStateVisible ||
+    visibleTabs.some((tab) => tab.filePath === loadingFilePath)
       ? loadingFilePath
-      : null
-  const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
-  const terminalCommand = terminalCommands[0] ?? null
+      : null;
+  const activeTab =
+    visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0];
+  const terminalCommand = terminalCommands[0] ?? null;
   const pendingTerminal =
     Boolean(terminalOpenRequest) ||
-    terminalCommands.some((command) => command.type === "ensure" || command.type === "create")
+    terminalCommands.some(
+      (command) => command.type === "ensure" || command.type === "create",
+    );
 
   useEffect(() => {
-    if (!fileOpenRequest || handledFileRequestId === fileOpenRequest.id) return
-    const relativePath = toRelativeWorkspacePath(fileOpenRequest.path, selectedProjectPath)
+    if (!fileOpenRequest || handledFileRequestId === fileOpenRequest.id) return;
+    const relativePath = toRelativeWorkspacePath(
+      fileOpenRequest.path,
+      selectedProjectPath,
+    );
     const timer = window.setTimeout(() => {
-      setHandledFileRequestId(fileOpenRequest.id)
+      setHandledFileRequestId(fileOpenRequest.id);
       if (!relativePath) {
         setTabs((current) =>
           current.some((tab) => tab.id === filesTabId || tab.tool === "files")
             ? current
-            : [...current, { id: filesTabId, tool: "files", title: utilityToolMeta.files.label }]
-        )
-        setActiveTabId(filesTabId)
-        return
+            : [
+                ...current,
+                {
+                  id: filesTabId,
+                  tool: "files",
+                  title: utilityToolMeta.files.label,
+                },
+              ],
+        );
+        setActiveTabId(filesTabId);
+        return;
       }
-      const id = fileTabId(relativePath, selectedProjectPath)
+      const id = fileTabId(relativePath, selectedProjectPath);
       setTabs((current) =>
         placeFileTab(current, {
           id,
@@ -154,13 +191,13 @@ export function UtilityPanel({
           filePath: relativePath,
           fileIcon: getFileIcon(relativePath),
           projectPath: selectedProjectPath,
-        })
-      )
-      setFileProjectPath(selectedProjectPath ?? null)
-      setActiveTabId(id)
-      setActiveFilePath(relativePath)
-    }, 0)
-    return () => window.clearTimeout(timer)
+        }),
+      );
+      setFileProjectPath(selectedProjectPath ?? null);
+      setActiveTabId(id);
+      setActiveFilePath(relativePath);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [
     fileOpenRequest,
     handledFileRequestId,
@@ -170,70 +207,84 @@ export function UtilityPanel({
     setFileProjectPath,
     setHandledFileRequestId,
     setTabs,
-  ])
+  ]);
 
   useEffect(() => {
-    if (!terminalOpenRequest) return
-    const timer = window.setTimeout(() => setTerminalMounted(true), 0)
-    return () => window.clearTimeout(timer)
-  }, [setTerminalMounted, terminalOpenRequest])
+    if (!terminalOpenRequest) return;
+    const timer = window.setTimeout(() => setTerminalMounted(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [setTerminalMounted, terminalOpenRequest]);
 
   useEffect(() => {
-    if (!selectedProjectGit) return
-    if (!reviewOpenRequest || handledReviewRequestRef.current === reviewOpenRequest.id) return
-    handledReviewRequestRef.current = reviewOpenRequest.id
+    if (!selectedProjectGit) return;
+    if (
+      !reviewOpenRequest ||
+      handledReviewRequestRef.current === reviewOpenRequest.id
+    )
+      return;
+    handledReviewRequestRef.current = reviewOpenRequest.id;
     const timer = window.setTimeout(() => {
-      const id = toolTabId("review")
+      const id = toolTabId("review");
       setTabs((current) => {
-        const existing = current.find((tab) => tab.id === id)
+        const existing = current.find((tab) => tab.id === id);
         if (existing) {
-          setActiveTabId(existing.id)
-          return current
+          setActiveTabId(existing.id);
+          return current;
         }
-        setActiveTabId(id)
-        return [...current, { id, tool: "review", title: utilityToolMeta.review.label }]
-      })
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [reviewOpenRequest, selectedProjectGit, setActiveTabId, setTabs])
+        setActiveTabId(id);
+        return [
+          ...current,
+          { id, tool: "review", title: utilityToolMeta.review.label },
+        ];
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [reviewOpenRequest, selectedProjectGit, setActiveTabId, setTabs]);
 
   useEffect(() => {
-    if (selectedProjectGit) return
+    if (selectedProjectGit) return;
     const timer = window.setTimeout(() => {
       setTabs((current) => {
-        if (!current.some((tab) => tab.tool === "review")) return current
-        const nextTabs = current.filter((tab) => tab.tool !== "review")
-        if (activeTabId === toolTabId("review")) setActiveTabId(nextTabs[0]?.id ?? "")
-        return nextTabs
-      })
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [activeTabId, selectedProjectGit, setActiveTabId, setTabs])
+        if (!current.some((tab) => tab.tool === "review")) return current;
+        const nextTabs = current.filter((tab) => tab.tool !== "review");
+        if (activeTabId === toolTabId("review"))
+          setActiveTabId(nextTabs[0]?.id ?? "");
+        return nextTabs;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, selectedProjectGit, setActiveTabId, setTabs]);
 
   const openBrowserTab = useCallback(
     (url: string | null = null, title = "新标签页"): void => {
-      const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
-      const tab = createBrowserTab(id, url, title)
-      setBrowserTabs((current) => [...current, tab])
-      setTabs((current) => [...current, { id, tool: "browser", title: tab.title }])
-      setActiveTabId(id)
+      const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const tab = createBrowserTab(id, url, title);
+      setBrowserTabs((current) => [...current, tab]);
+      setTabs((current) => [
+        ...current,
+        { id, tool: "browser", title: tab.title },
+      ]);
+      setActiveTabId(id);
     },
-    [setActiveTabId, setBrowserTabs, setTabs]
-  )
+    [setActiveTabId, setBrowserTabs, setTabs],
+  );
 
   const addTab = useCallback(
     (tool: UtilityTool): void => {
       if (tool === "terminal") {
-        setTerminalMounted(true)
+        setTerminalMounted(true);
         if (!selectedProjectPath || !selectedProjectAvailable) {
-          const id = unavailableTerminalTabId
+          const id = unavailableTerminalTabId;
           setTabs((current) =>
             current.some((tab) => tab.id === id)
               ? current
-              : [...current, { id, tool, title: utilityToolMeta.terminal.label }]
-          )
-          setActiveTabId(id)
-          return
+              : [
+                  ...current,
+                  { id, tool, title: utilityToolMeta.terminal.label },
+                ],
+          );
+          setActiveTabId(id);
+          return;
         }
         setTerminalCommands((commands) => [
           ...commands,
@@ -241,22 +292,22 @@ export function UtilityPanel({
             id: ++terminalCommandSequenceRef.current,
             type: "create",
           },
-        ])
-        return
+        ]);
+        return;
       }
 
       if (tool === "browser") {
-        openBrowserTab()
-        return
+        openBrowserTab();
+        return;
       }
 
       if (tool === "files") {
-        setFileProjectPath(selectedProjectPath ?? null)
+        setFileProjectPath(selectedProjectPath ?? null);
         setTabs((current) => {
-          const emptyFilesTab = current.find((tab) => tab.id === filesTabId)
+          const emptyFilesTab = current.find((tab) => tab.id === filesTabId);
           if (emptyFilesTab) {
-            setActiveTabId(emptyFilesTab.id)
-            return current
+            setActiveTabId(emptyFilesTab.id);
+            return current;
           }
           const existingFileTab =
             current.find(
@@ -264,32 +315,37 @@ export function UtilityPanel({
                 tab.tool === "files" &&
                 tab.filePath &&
                 tab.filePath === activeFilePath &&
-                tab.projectPath === selectedProjectPath
+                tab.projectPath === selectedProjectPath,
             ) ??
             current.find(
               (tab) =>
-                tab.tool === "files" && tab.filePath && tab.projectPath === selectedProjectPath
-            )
+                tab.tool === "files" &&
+                tab.filePath &&
+                tab.projectPath === selectedProjectPath,
+            );
           if (existingFileTab) {
-            setActiveTabId(existingFileTab.id)
-            return current
+            setActiveTabId(existingFileTab.id);
+            return current;
           }
-          setActiveTabId(filesTabId)
-          return [...current, { id: filesTabId, tool, title: utilityToolMeta.files.label }]
-        })
-        return
+          setActiveTabId(filesTabId);
+          return [
+            ...current,
+            { id: filesTabId, tool, title: utilityToolMeta.files.label },
+          ];
+        });
+        return;
       }
 
-      const id = toolTabId(tool)
+      const id = toolTabId(tool);
       setTabs((current) => {
-        const existing = current.find((tab) => tab.id === id)
+        const existing = current.find((tab) => tab.id === id);
         if (existing) {
-          setActiveTabId(existing.id)
-          return current
+          setActiveTabId(existing.id);
+          return current;
         }
-        setActiveTabId(id)
-        return [...current, { id, tool, title: utilityToolMeta[tool].label }]
-      })
+        setActiveTabId(id);
+        return [...current, { id, tool, title: utilityToolMeta[tool].label }];
+      });
     },
     [
       activeFilePath,
@@ -300,36 +356,42 @@ export function UtilityPanel({
       setFileProjectPath,
       setTabs,
       setTerminalMounted,
-    ]
-  )
+    ],
+  );
 
   useEffect(() => {
-    if (!toolOpenRequest || handledToolRequestId === toolOpenRequest.id) return
+    if (!toolOpenRequest || handledToolRequestId === toolOpenRequest.id) return;
     const timer = window.setTimeout(() => {
-      setHandledToolRequestId(toolOpenRequest.id)
-      addTab(toolOpenRequest.tool)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [addTab, handledToolRequestId, setHandledToolRequestId, toolOpenRequest])
+      setHandledToolRequestId(toolOpenRequest.id);
+      addTab(toolOpenRequest.tool);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [addTab, handledToolRequestId, setHandledToolRequestId, toolOpenRequest]);
 
   const closeTabs = (tabIds: string[], preferredActiveTabId?: string): void => {
-    const closingIds = new Set(tabIds)
-    if (closingIds.size === 0) return
+    const closingIds = new Set(tabIds);
+    if (closingIds.size === 0) return;
 
-    const closingTabs = tabs.filter((tab) => closingIds.has(tab.id))
+    const closingTabs = tabs.filter((tab) => closingIds.has(tab.id));
     const closingFilePaths = new Set(
-      closingTabs.map((tab) => tab.filePath).filter((path): path is string => Boolean(path))
-    )
+      closingTabs
+        .map((tab) => tab.filePath)
+        .filter((path): path is string => Boolean(path)),
+    );
     const closingTerminalIds = closingTabs
       .map((tab) => tab.terminalId)
-      .filter((terminalId): terminalId is string => Boolean(terminalId))
+      .filter((terminalId): terminalId is string => Boolean(terminalId));
 
-    setBrowserTabs((current) => current.filter((tab) => !closingIds.has(tab.id)))
+    setBrowserTabs((current) =>
+      current.filter((tab) => !closingIds.has(tab.id)),
+    );
 
     if (closingFilePaths.size > 0) {
-      const nextFileTabs = visibleFileTabs.filter((tab) => !closingFilePaths.has(tab.preview.path))
-      const preferredTab = tabs.find((tab) => tab.id === preferredActiveTabId)
-      const preferredFilePath = preferredTab?.filePath
+      const nextFileTabs = visibleFileTabs.filter(
+        (tab) => !closingFilePaths.has(tab.preview.path),
+      );
+      const preferredTab = tabs.find((tab) => tab.id === preferredActiveTabId);
+      const preferredFilePath = preferredTab?.filePath;
       const nextActivePath =
         preferredFilePath && !closingFilePaths.has(preferredFilePath)
           ? preferredFilePath
@@ -337,44 +399,44 @@ export function UtilityPanel({
             ? (nextFileTabs[0]?.preview.path ?? null)
             : activeFilePath && !closingFilePaths.has(activeFilePath)
               ? activeFilePath
-              : (nextFileTabs[0]?.preview.path ?? null)
+              : (nextFileTabs[0]?.preview.path ?? null);
 
       const nextStoredFileTabs = fileTabsRef.current.filter(
-        (tab) => !closingFilePaths.has(tab.preview.path)
-      )
-      fileTabsRef.current = nextStoredFileTabs
-      setFileTabs(nextStoredFileTabs)
-      setActiveFilePath(nextActivePath)
+        (tab) => !closingFilePaths.has(tab.preview.path),
+      );
+      fileTabsRef.current = nextStoredFileTabs;
+      setFileTabs(nextStoredFileTabs);
+      setActiveFilePath(nextActivePath);
       persistFileTabs(
         nextFileTabs.map((tab) => tab.preview.path),
-        nextActivePath
-      )
+        nextActivePath,
+      );
     }
 
     setTabs((current) => {
-      const nextTabs = current.filter((tab) => !closingIds.has(tab.id))
+      const nextTabs = current.filter((tab) => !closingIds.has(tab.id));
       if (nextTabs.length === 0) {
-        setActiveTabId("")
-        setActiveFilePath(null)
-        return []
+        setActiveTabId("");
+        setActiveFilePath(null);
+        return [];
       }
 
       const visibleNextTabs = nextTabs.filter(
-        (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath
-      )
+        (tab) => !tab.projectPath || tab.projectPath === selectedProjectPath,
+      );
       const preferredTab = preferredActiveTabId
         ? visibleNextTabs.find((tab) => tab.id === preferredActiveTabId)
-        : undefined
+        : undefined;
       const fallbackTab = closingIds.has(activeTabId)
         ? (visibleNextTabs[0] ?? nextTabs[0])
         : (visibleNextTabs.find((tab) => tab.id === activeTabId) ??
           visibleNextTabs[0] ??
-          nextTabs[0])
-      const nextActive = preferredTab ?? fallbackTab
-      setActiveTabId(nextActive.id)
-      if (nextActive.filePath) setActiveFilePath(nextActive.filePath)
-      return nextTabs
-    })
+          nextTabs[0]);
+      const nextActive = preferredTab ?? fallbackTab;
+      setActiveTabId(nextActive.id);
+      if (nextActive.filePath) setActiveFilePath(nextActive.filePath);
+      return nextTabs;
+    });
 
     if (closingTerminalIds.length > 0) {
       setTerminalCommands((current) => [
@@ -384,27 +446,27 @@ export function UtilityPanel({
           type: "close",
           terminalIds: closingTerminalIds,
         },
-      ])
+      ]);
     }
-  }
+  };
 
   const closeTab = (tabId: string): void => {
-    closeTabs([tabId])
-  }
+    closeTabs([tabId]);
+  };
 
   const selectTab = (tab: UtilityTab): void => {
-    setActiveTabId(tab.id)
+    setActiveTabId(tab.id);
     if (tab.filePath) {
-      setActiveFilePath(tab.filePath)
+      setActiveFilePath(tab.filePath);
       persistFileTabs(
         visibleFileTabs.map((item) => item.preview.path),
-        tab.filePath
-      )
+        tab.filePath,
+      );
     }
-  }
+  };
 
   const startFileTab = (path: string): void => {
-    const id = fileTabId(path, selectedProjectPath)
+    const id = fileTabId(path, selectedProjectPath);
     setTabs((current) =>
       placeFileTab(current, {
         id,
@@ -413,20 +475,24 @@ export function UtilityPanel({
         filePath: path,
         fileIcon: getFileIcon(path),
         projectPath: selectedProjectPath,
-      })
-    )
-    setFileProjectPath(selectedProjectPath ?? null)
-    setActiveTabId(id)
-    setActiveFilePath(path)
-  }
+      }),
+    );
+    setFileProjectPath(selectedProjectPath ?? null);
+    setActiveTabId(id);
+    setActiveFilePath(path);
+  };
 
   const upsertFileTab = (nextFileTab: FileViewerTab): void => {
-    const nextProject = selectedProjectPath ?? null
-    const id = fileTabId(nextFileTab.preview.path, selectedProjectPath)
-    const nextTabs = mergeFileViewerTabs(fileTabsRef.current, nextFileTab, nextProject)
-    fileTabsRef.current = nextTabs
-    setFileProjectPath(nextProject)
-    setFileTabs(nextTabs)
+    const nextProject = selectedProjectPath ?? null;
+    const id = fileTabId(nextFileTab.preview.path, selectedProjectPath);
+    const nextTabs = mergeFileViewerTabs(
+      fileTabsRef.current,
+      nextFileTab,
+      nextProject,
+    );
+    fileTabsRef.current = nextTabs;
+    setFileProjectPath(nextProject);
+    setFileTabs(nextTabs);
     setTabs((current) =>
       placeFileTab(current, {
         id,
@@ -436,51 +502,64 @@ export function UtilityPanel({
         fileIcon: getFileIcon(nextFileTab.preview.path),
         fileType: nextFileTab.type,
         projectPath: selectedProjectPath,
-      })
-    )
-    setActiveTabId(id)
-    setActiveFilePath(nextFileTab.preview.path)
+      }),
+    );
+    setActiveTabId(id);
+    setActiveFilePath(nextFileTab.preview.path);
     persistFileTabs(
       nextTabs
         .filter((tab) => (tab.projectPath ?? null) === nextProject)
         .map((tab) => tab.preview.path),
-      nextFileTab.preview.path
-    )
-  }
+      nextFileTab.preview.path,
+    );
+  };
 
-  const persistFileTabs = (paths: string[], activePath: string | null): void => {
-    if (!selectedProjectPath) return
+  const persistFileTabs = (
+    paths: string[],
+    activePath: string | null,
+  ): void => {
+    if (!selectedProjectPath) return;
     setPersistedFileTabs((current) => {
-      const nextState = { ...current }
+      const nextState = { ...current };
       if (paths.length === 0) {
-        delete nextState[scopeId]
+        delete nextState[scopeId];
       } else {
         nextState[scopeId] = {
           activePath,
           paths: paths.slice(0, 12),
-        }
+        };
       }
-      writePersistedUtilityFileTabs(nextState)
-      return nextState
-    })
-  }
+      writePersistedUtilityFileTabs(nextState);
+      return nextState;
+    });
+  };
 
-  const updateBrowserTab = (tabId: string, patch: Partial<BrowserToolTab>): void => {
+  const updateBrowserTab = (
+    tabId: string,
+    patch: Partial<BrowserToolTab>,
+  ): void => {
     setBrowserTabs((current) =>
-      current.map((tab) => (tab.id === tabId ? { ...tab, ...patch } : tab))
-    )
+      current.map((tab) => (tab.id === tabId ? { ...tab, ...patch } : tab)),
+    );
     if (patch.title) {
       setTabs((current) =>
-        current.map((tab) => (tab.id === tabId ? { ...tab, title: patch.title ?? tab.title } : tab))
-      )
+        current.map((tab) =>
+          tab.id === tabId ? { ...tab, title: patch.title ?? tab.title } : tab,
+        ),
+      );
     }
-  }
+  };
 
-  const upsertTerminalTab = (session: TerminalSessionTabInfo, activate: boolean): void => {
-    const id = terminalTabId(session.id)
+  const upsertTerminalTab = (
+    session: TerminalSessionTabInfo,
+    activate: boolean,
+  ): void => {
+    const id = terminalTabId(session.id);
     setTabs((current) => {
       if (current.some((tab) => tab.id === id)) {
-        return current.map((tab) => (tab.id === id ? { ...tab, title: session.title } : tab))
+        return current.map((tab) =>
+          tab.id === id ? { ...tab, title: session.title } : tab,
+        );
       }
       return [
         ...current.filter((tab) => tab.id !== unavailableTerminalTabId),
@@ -491,75 +570,80 @@ export function UtilityPanel({
           terminalId: session.id,
           projectPath: selectedProjectPath,
         },
-      ]
-    })
-    if (activate) setActiveTabId(id)
-  }
+      ];
+    });
+    if (activate) setActiveTabId(id);
+  };
 
   const removeTerminalTab = (terminalId: string): void => {
-    const id = terminalTabId(terminalId)
+    const id = terminalTabId(terminalId);
     setTabs((current) => {
-      if (!current.some((tab) => tab.id === id)) return current
-      const nextTabs = current.filter((tab) => tab.id !== id)
+      if (!current.some((tab) => tab.id === id)) return current;
+      const nextTabs = current.filter((tab) => tab.id !== id);
       if (nextTabs.length === 0) {
-        setActiveTabId("")
-        return []
+        setActiveTabId("");
+        return [];
       }
       if (activeTabId === id) {
-        const previousIndex = current.findIndex((tab) => tab.id === id)
-        const nextActive = nextTabs[Math.max(0, previousIndex - 1)] ?? nextTabs[0]
-        setActiveTabId(nextActive.id)
-        if (nextActive.filePath) setActiveFilePath(nextActive.filePath)
+        const previousIndex = current.findIndex((tab) => tab.id === id);
+        const nextActive =
+          nextTabs[Math.max(0, previousIndex - 1)] ?? nextTabs[0];
+        setActiveTabId(nextActive.id);
+        if (nextActive.filePath) setActiveFilePath(nextActive.filePath);
       }
-      return nextTabs
-    })
-  }
+      return nextTabs;
+    });
+  };
 
   const hydrateTerminalTabs = (sessions: TerminalSessionTabInfo[]): void => {
     setTabs((current) => {
       const others = current.filter(
         (tab) =>
-          tab.tool !== "terminal" || (tab.projectPath && tab.projectPath !== selectedProjectPath)
-      )
+          tab.tool !== "terminal" ||
+          (tab.projectPath && tab.projectPath !== selectedProjectPath),
+      );
       const terminalTabs = sessions.map((session) => ({
         id: terminalTabId(session.id),
         tool: "terminal" as const,
         title: session.title,
         terminalId: session.id,
         projectPath: selectedProjectPath,
-      }))
-      return [...others.filter((tab) => tab.id !== unavailableTerminalTabId), ...terminalTabs]
-    })
-  }
+      }));
+      return [
+        ...others.filter((tab) => tab.id !== unavailableTerminalTabId),
+        ...terminalTabs,
+      ];
+    });
+  };
 
   const handleActiveTerminalChange = (terminalId: string | null): void => {
-    if (terminalId) setActiveTabId(terminalTabId(terminalId))
-  }
+    if (terminalId) setActiveTabId(terminalTabId(terminalId));
+  };
 
   const closeOtherTabs = (tab: UtilityTab): void => {
-    selectTab(tab)
+    selectTab(tab);
     closeTabs(
       visibleTabs.filter((item) => item.id !== tab.id).map((item) => item.id),
-      tab.id
-    )
-  }
+      tab.id,
+    );
+  };
 
   const closeTabsToRight = (tab: UtilityTab): void => {
-    const index = visibleTabs.findIndex((item) => item.id === tab.id)
-    if (index < 0) return
-    selectTab(tab)
+    const index = visibleTabs.findIndex((item) => item.id === tab.id);
+    if (index < 0) return;
+    selectTab(tab);
     closeTabs(
       visibleTabs.slice(index + 1).map((item) => item.id),
-      tab.id
-    )
-  }
+      tab.id,
+    );
+  };
 
   return (
     <aside
       aria-hidden={!open}
       className={cn(
-        "h-full min-h-0 w-full overflow-hidden bg-conversation transition-opacity duration-150 ease-out",
-        open ? "border-l opacity-100" : "pointer-events-none opacity-0"
+        "bg-conversation h-full min-h-0 w-full overflow-hidden transition-opacity duration-150 ease-out",
+        open ? "border-l opacity-100" : "pointer-events-none opacity-0",
       )}
     >
       <div className="flex h-full min-w-[320px] flex-col">
@@ -578,9 +662,12 @@ export function UtilityPanel({
           onClosePanel={onClose}
         />
 
-        <div className="relative min-h-0 flex-1 bg-conversation">
+        <div className="bg-conversation relative min-h-0 flex-1">
           {!activeTab && !pendingTerminal && (
-            <EmptyUtilityPanelState availableTools={availableTools} onAdd={addTab} />
+            <EmptyUtilityPanelState
+              availableTools={availableTools}
+              onAdd={addTab}
+            />
           )}
           {browserTabs.map((tab) => (
             <BrowserTool
@@ -619,12 +706,17 @@ export function UtilityPanel({
               onActiveTerminalChange={handleActiveTerminalChange}
               onCommandSettled={(commandId) =>
                 setTerminalCommands((current) =>
-                  current.filter((command) => command.id !== commandId)
+                  current.filter((command) => command.id !== commandId),
                 )
               }
             />
           )}
-          {activeTab?.tool === "review" && <ReviewTool openRequest={reviewOpenRequest} />}
+          {activeTab?.tool === "review" && (
+            <ReviewTool openRequest={reviewOpenRequest} />
+          )}
+          {activeTab?.tool === "context" && (
+            <ContextPanel cwd={sessionCwd ?? selectedProjectPath ?? null} />
+          )}
           {activeTab?.tool === "side-chat" && (
             <PlaceholderTool
               icon={MessageCirclePlus}
@@ -645,15 +737,18 @@ export function UtilityPanel({
         </div>
       </div>
     </aside>
-  )
+  );
 }
 
 function fileTabId(path: string, projectPath?: string): string {
-  return `file-tab:${projectPath ?? "no-project"}:${path}`
+  return `file-tab:${projectPath ?? "no-project"}:${path}`;
 }
 
-function placeFileTab(current: UtilityTab[], fileTab: UtilityTab): UtilityTab[] {
-  const existingIndex = current.findIndex((tab) => tab.id === fileTab.id)
+function placeFileTab(
+  current: UtilityTab[],
+  fileTab: UtilityTab,
+): UtilityTab[] {
+  const existingIndex = current.findIndex((tab) => tab.id === fileTab.id);
   if (existingIndex >= 0) {
     return current.map((tab, index) =>
       index === existingIndex
@@ -665,39 +760,43 @@ function placeFileTab(current: UtilityTab[], fileTab: UtilityTab): UtilityTab[] 
             filePath: fileTab.filePath,
             projectPath: fileTab.projectPath,
           }
-        : tab
-    )
+        : tab,
+    );
   }
 
-  const emptyIndex = current.findIndex((tab) => tab.id === filesTabId)
+  const emptyIndex = current.findIndex((tab) => tab.id === filesTabId);
   if (emptyIndex >= 0) {
-    return current.map((tab, index) => (index === emptyIndex ? fileTab : tab))
+    return current.map((tab, index) => (index === emptyIndex ? fileTab : tab));
   }
 
-  return [...current, fileTab]
+  return [...current, fileTab];
 }
 
 function toolTabId(tool: UtilityTool): string {
-  return tool === "files" ? filesTabId : `${tool}-tab`
+  return tool === "files" ? filesTabId : `${tool}-tab`;
 }
 
 function terminalTabId(terminalId: string): string {
-  return `terminal-tab:${terminalId}`
+  return `terminal-tab:${terminalId}`;
 }
 
 function fileNameFromPath(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-function toRelativeWorkspacePath(path: string, projectPath: string | undefined): string | null {
-  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
-  const normalizedPath = withoutLocation.replace(/\\/g, "/")
-  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
+function toRelativeWorkspacePath(
+  path: string,
+  projectPath: string | undefined,
+): string | null {
+  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "");
+  const normalizedPath = withoutLocation.replace(/\\/g, "/");
+  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "");
   if (/^[a-z]:\//i.test(normalizedPath)) {
-    if (!normalizedProject) return null
-    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
-    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return null
-    return normalizedPath.slice(normalizedProject.length + 1)
+    if (!normalizedProject) return null;
+    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`;
+    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix))
+      return null;
+    return normalizedPath.slice(normalizedProject.length + 1);
   }
-  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
+  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "");
 }

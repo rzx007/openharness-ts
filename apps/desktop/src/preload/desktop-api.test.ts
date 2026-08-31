@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest";
 
 const electron = vi.hoisted(() => ({
   invoke: vi.fn(async () => []),
   on: vi.fn(),
   removeListener: vi.fn(),
   getPathForFile: vi.fn((file: { name: string }) =>
-    file.name === "missing.png" ? "" : `C:\\drop\\${file.name}`
+    file.name === "missing.png" ? "" : `C:\\drop\\${file.name}`,
   ),
-}))
+}));
 
 vi.mock("electron", () => ({
   ipcRenderer: {
@@ -16,42 +16,65 @@ vi.mock("electron", () => ({
     removeListener: electron.removeListener,
   },
   webUtils: { getPathForFile: electron.getPathForFile },
-}))
+}));
 
-import { IpcChannels, IpcEvents } from "../shared/ipc-channels"
-import { desktopAPI } from "./desktop-api"
+import { IpcChannels, IpcEvents } from "../shared/ipc-channels";
+import { desktopAPI } from "./desktop-api";
 
 describe("desktop attachment preload bridge", () => {
   it("turns dropped File objects into paths inside preload and does not expose those paths back", async () => {
-    const files = [{ name: "report.pdf" }, { name: "missing.png" }] as unknown as File[]
+    const files = [
+      { name: "report.pdf" },
+      { name: "missing.png" },
+    ] as unknown as File[];
 
-    await desktopAPI.attachments.stageDroppedFiles(files)
+    await desktopAPI.attachments.stageDroppedFiles(files);
 
-    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.attachmentStageDropped, [
-      "C:\\drop\\report.pdf",
-    ])
-  })
+    expect(electron.invoke).toHaveBeenCalledWith(
+      IpcChannels.attachmentStageDropped,
+      ["C:\\drop\\report.pdf"],
+    );
+  });
 
   it("subscribes and unsubscribes the narrow upload event", () => {
-    const listener = vi.fn()
-    const unsubscribe = desktopAPI.attachments.onUploadEvent(listener)
+    const listener = vi.fn();
+    const unsubscribe = desktopAPI.attachments.onUploadEvent(listener);
 
-    expect(electron.on).toHaveBeenCalledWith(IpcEvents.attachmentUploadEvent, expect.any(Function))
-    unsubscribe()
+    expect(electron.on).toHaveBeenCalledWith(
+      IpcEvents.attachmentUploadEvent,
+      expect.any(Function),
+    );
+    unsubscribe();
     expect(electron.removeListener).toHaveBeenCalledWith(
       IpcEvents.attachmentUploadEvent,
-      expect.any(Function)
-    )
-  })
-})
+      expect.any(Function),
+    );
+  });
+});
 
 describe("desktop window preload bridge", () => {
   it("opens an address in the system browser through the window IPC channel", async () => {
-    await desktopAPI.window.openExternal("file:///D:/demo/index.html")
+    await desktopAPI.window.openExternal("file:///D:/demo/index.html");
 
     expect(electron.invoke).toHaveBeenCalledWith(
       IpcChannels.windowOpenExternal,
-      "file:///D:/demo/index.html"
-    )
-  })
-})
+      "file:///D:/demo/index.html",
+    );
+  });
+});
+
+describe("desktop context preload bridge", () => {
+  it("forwards logical entry inputs without any storage path", async () => {
+    await desktopAPI.context.update({
+      cwd: "D:/project",
+      entryId: "answer-style",
+      content: "回答简洁",
+    });
+
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.contextUpdate, {
+      cwd: "D:/project",
+      entryId: "answer-style",
+      content: "回答简洁",
+    });
+  });
+});
