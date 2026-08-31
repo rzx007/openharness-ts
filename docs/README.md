@@ -79,7 +79,8 @@
 - [Agent Child Session Flow](./agent-child-session-flow.md)：child 创建、等待、follow-up、预算、关闭和 durable 投影。
 - [CompactService](./compact-service-design.md)：上下文压缩、checkpoint、Tool 配对和失败策略。
 - [Prompt Layering](./prompt-layering-design.md)：系统提示词怎样分层组装。
-- [Personalization](./personalization-design.md)：用户个性化设置的边界。
+- [Context Persistence 生命周期](./memory-system.md)：用户偏好、环境事实、项目规则与候选的统一治理边界。
+- [Personalization 旧设计](./personalization-design.md)：已移除方案的历史记录，不代表当前运行时。
 
 ### Durable Agent Application
 
@@ -100,12 +101,13 @@
 - [Workflow CLI](./workflow-cli.md)：项目文件 CLI 与 daemon SQLite Workflow 的边界。
 - 调度器真实测试入口统一列在 [契约与测试索引](./contract-test-index.md)；`workflow-scheduler-test.md` 只是冲突测试夹具，不是产品文档。
 
-### Context、Memory 与 Prompt
+### Context、Prompt 与会话连续性
 
-- [Context And Memory Map](./context-memory-map.md)：进入模型上下文的信息总图。
-- [Memory System](./memory-system.md)：Memory 的读取、写入和检索。
-- [Memory Quartet](./services-memory-quartet-design.md)：四类 memory service 的职责。
+- [Context、Prompt 与会话连续性总图](./context-memory-map.md)：长期 Context、身份、durable transcript 和 compact checkpoint 的边界。
+- [Context Persistence 生命周期](./memory-system.md)：记住、候选、冲突、回忆、整合、忘记和安全政策。
+- [Prompt 分层与动态 Context](./prompt-layering-design.md)：stable/context/volatile/compact-only 的实际组装方式。
 - [Prompt Runtime Audit](./prompt-runtime-audit.md)：prompt 运行时审计记录。
+- [Services Memory Quartet 旧设计](./services-memory-quartet-design.md)：已被 Context Persistence 替代的历史记录。
 
 ### 工具、扩展与执行环境
 

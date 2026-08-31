@@ -1,4 +1,6 @@
-# 设计：Personalization 环境事实抽取（C.5）
+# 设计：Personalization 环境事实抽取（已移除）
+
+> 历史文档：该实现已经从运行时删除。当前用户偏好、环境事实和项目规则统一由 [Context Persistence](./memory-system.md) 管理；旧 `USER.md` 和 local rules 不再读取。以下内容只用于理解旧方案，不代表当前行为。
 
 > 状态：当前实现。每个成功完成的 daemon root Run 都会从 durable transcript 抽取环境事实，持久化后由后续 runtime 的 prompt 读取。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 新建 `packages/personalization`，移植 Python

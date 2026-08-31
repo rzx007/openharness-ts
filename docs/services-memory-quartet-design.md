@@ -1,4 +1,6 @@
-# 设计：Services 记忆四件套（E.6 第一刀）
+# 设计：Services 记忆四件套（已被统一 Context 替代）
+
+> 历史文档：memory extraction 与 autodream 直接编辑文件的实现已经删除。当前长期 Context 与受控整合见 [Context Persistence](./memory-system.md)；Session Continuity checkpoint 仍保留，并且只服务 compact。以下内容不代表当前运行时。
 
 > 状态：当前实现。记忆体系全景见 [memory-system.md](./memory-system.md)。
 > 移植 Python services 的四个记忆/上下文内功模块（~1170 行），

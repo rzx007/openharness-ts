@@ -5,7 +5,7 @@
 > 状态图例：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现 · ⛔ 不在复刻范围
 
 > **进度（分支 `feat/align-phase-ab`）**：**Phase A、Phase B 已完成**（4 commit，`check-types` 26/26、`test` 25/25 全绿）。
-> 遗留 TODO：① bash 在无 Git Bash 的 Windows 上的优雅降级。B.2 compact attachments、B.5 per-turn 记忆检索均已完成；Phase C/D 大部分已完成，见下表。
+> 2026-08-31 更新：长期记忆已完成统一 Context Persistence 硬切。旧 Memory、Personalization、`USER.md`、local rules、旧 `/memory` 与旧 `memory.*` 配置均已移除，不做兼容读取。当前实现与验收以 `docs/memory-system.md` 和 `docs/superpowers/plans/2026-08-31-context-persistence-control-plane.md` 为准。
 
 ## 原则
 
@@ -25,8 +25,8 @@
 | mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers/env 静态鉴权 + `McpAuth` 保存配置并重连 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
 | engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint/attachments 全部完成(B.2) |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
-| memory | 🟡 | ✅frontmatter/加权搜索(distinct)/use_count/签名去重/MEMORY.md/中文分词(A.4+B.4)；仍缺团队隔离+密钥扫描(C) |
-| prompts | 🟡 | ✅CLAUDE.md 向上遍历/permission-mode/delegation 段+per-turn 记忆检索(B.5)；personalization 段待 C |
+| context | ✅ | 统一 Markdown 主题文档、逻辑 entry blocks、user/machine/project 作用域、secret/sensitive/conflict 治理、候选、热检索、受控整合、REST/Slash/Desktop 管理和 managed resource 保护已完成 |
+| prompts | ✅ | 项目 Instructions、permission/delegation 与每次模型请求前的 governed Context 注入已完成；`SOUL.md` 仅负责身份，旧用户档案和 local rules 不再加载 |
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | ✅ | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；✅agent 级字段运行时生效(tools/disallowedTools/maxTurns/effort/permissionMode) |
 | auth | 🟠 | 无 ProviderProfile 体系、无 keyring、明文凭证、无 copilot/codex OAuth |
@@ -35,8 +35,7 @@
 | swarm | ✅ | 派发/TaskWait/worktree/只读放行+文件邮箱/team.json/权限同步+task-worker 多轮 sendMessage+重启上下文恢复(D.1)；缺 TUI 人工裁决 |
 | channels | 🟠 | ~5%，仅 Feishu(未导出+bug)+Stdio+Http，缺 7+ 通道与附件/群组/桥接 |
 | sandbox | 🟡 | ✅ SRT/Docker runtime、per-session 容器、统一进程入口、host file guard、Docker 整棵进程停止、daemon 托管 Cron、MCP stdio sandbox-aware transport、Docker active 文件操作、主 daemon 系统常驻与 E2E 用例；缺 Docker CI 实跑 |
-| services(autodream/memory_extract/session_memory/tool_outputs) | 🟡 | ✅记忆四件套+/dream /remember+每轮 checkpoint+✅compact 读回(E.6 第一刀)；✅cron: command/timezone/daemon(E.6 第二刀)；缺 tool_outputs 接 microcompact、lsp 真 AST |
-| personalization | 🟡 | 10 类事实抽取+local_rules 持久化+prompt 注入；session-end 自动抽取尚未接 standalone 或 daemon/TUI lifecycle(C.5) |
+| services(Context/session continuity/tool_outputs) | 🟡 | ✅Context persistence、自动候选、受控 `/dream`、Session Continuity 写入及 compact 读回；仍缺 tool_outputs 接 microcompact、lsp 真 AST |
 | observability | 🟡 | ✅ trace/结构化日志/持久事实指标/Run Inspector/Projection diagnostics 已闭环；缺统一 span、外部 exporter、长期时序查询、面板与告警 |
 | evaluation | 🔴 | 有单元/集成/恢复/soak 测试，但尚无固定 Agent 任务集、评分器、基线结果、回归阈值和 CI eval 入口 |
 | ohmo | 🔴 | 整应用缺失（个人助理 + 多渠道网关） |
@@ -112,10 +111,9 @@
 - glob：尊重 `.gitignore`、跳过 `.venv`/重目录、支持 limit。
 - **文件**：`packages/tools/src/search/grep.ts`、`glob.ts`、`shell/bash.ts`
 
-### A.4 memory 中文检索
-- 搜索分词支持 CJK 逐字（`一-鿿`），当前 `split(/\s+/)` 对中文整句视作一个 term。
-- 搜索匹配 body 内容（不只 metadata）。
-- **文件**：`packages/memory/src/index.ts`
+### A.4 Context 中文检索 ✅ 已由统一 Context 替代
+- Context Query 按逻辑条目选择，用户偏好/规则按语义键合并，项目知识按当前输入相关性过滤。
+- 旧 memory 搜索包已删除。
 
 ### A.5 coordinator mode env 一致性 ✅ 已收口
 - `isCoordinatorMode()` 统一读取 `OPENHARNESS_COORDINATOR_MODE`；不再兼容 `CLAUDE_CODE_COORDINATOR_MODE` / `COORDINATOR_MODE` / `OPENHARNESS_COORDINATOR` / `CLAUDE_CODE_COORDINATOR`。
@@ -147,19 +145,18 @@
 - completion listener 注册/通知、agent 任务断管自动重启、优雅关停。
 - **文件**：`packages/services/src/tasks/index.ts`
 
-### B.4 Memory 模型升级
-- Markdown + YAML frontmatter 格式（type/scope/importance/ttl/disabled/supersedes/signature）。
-- 加权搜索（frontmatter×2 / body×1 + recency / importance / use_count）、使用次数索引、stale 候选挖掘。
-- `MEMORY.md` 索引维护、content signature 去重、按项目(cwd) 隔离。
-- **文件**：`packages/memory/src/index.ts`
+### B.4 长期 Context 模型 ✅ 已替代旧 Memory
+- schema 2 Markdown 主题文档容纳多个独立 entry blocks。
+- user/machine/project 作用域、语义键冲突、候选、状态和使用信息由 `@openharness/context` 与 `MarkdownContextStore` 管理。
+- Agent 与客户端只使用逻辑 ID，不接触文件路径。
 
 ### B.5 Prompts 上下文增强
 - CLAUDE.md 从 cwd **向上逐级遍历**累积（含 `.claude/CLAUDE.md`、`.claude/rules/*.md`）。
-- 相关记忆检索（select_relevant_memories + mark_memory_used）注入。
+- 每次物理模型请求前重新检索 governed Context，并以瞬态 reminder 注入。
 - permission-mode 段、delegation/subagent 段。
 - **文件**：`packages/prompts/src/index.ts`
 
-> B.5 per-turn 相关记忆检索已于后续完成：`QueryEngine.memoryRetriever` 回调 + `composeTurnSystemPrompt()` 瞬态注入。当前由 `createOpenHarnessAgent()` 统一创建 `AgentMemoryRuntime` 并接入所有 standalone/daemon agent。
+> 当前使用 `QueryEngine.contextRetriever`。旧 `memoryRetriever` 和 `AgentMemoryRuntime` 已删除。
 
 ---
 
@@ -203,16 +200,10 @@
 - ✅ agent 级字段运行时生效：`tools/disallowedTools/maxTurns/effort/permissionMode` 经 `TeammateSpawnConfig` → `ChildSessionBackend` 写入 child session metadata，由 daemon runtime 应用。留待：agent 级 `hooks/mcpServers` 的运行时生效。
 - **文件**：`packages/coordinator/src/{agent-loader,coordinator-mode}.ts`、`packages/plugins/src/agents.ts`、`packages/core/src/{types/runtime,engine/query-engine}.ts`、`packages/services/src/session/storage.ts`、`apps/cli/src/commands/main.ts`
 
-### C.5 Personalization（新模块）✅ 核心完成 / daemon 未接
-- ✅ `packages/personalization`：10 类环境事实正则抽取（SSH/IP/数据路径/conda/
-  Python/端点/env/git remote/Ray/cron），去重合并 + 置信度胜出。
-- ✅ `local_rules/` rules.md + facts.json 持久化（尊重 OPENHARNESS_CONFIG_DIR）。
-- ✅ `rules.md` 已注入 framework 默认 system prompt；`updateRulesFromSession()` 抽取能力已实现
-  system prompt（CLAUDE.md 后，含 daemon bootstrap）。
-- 留待：standalone host 与 daemon/TUI session archive 或进程退出时调用 `updateRulesFromSession`。
-  旧 BackendHost shutdown 路径已删除。详见 `docs/personalization-design.md`。
-- 顺带修了 Python git_remote 正则的失效模式（恒捕获 1 字符被过滤）。
-- **文件**：`packages/personalization/src/index.ts`、`packages/prompts/src/index.ts`、`apps/cli/src/commands/main.ts`
+### C.5 自动环境事实 ✅ 已并入 Context Persistence
+- 成功 root Run 从 durable transcript 提取环境事实，并走统一 policy。
+- 高置信度安全环境事实可直接提交；低置信度、知识类或敏感事实进入候选；secret 丢弃。
+- 旧 Personalization 包和 local rules 注入已删除。
 
 ---
 
@@ -274,7 +265,7 @@
 - **文件**：`apps/cli/src/commands/provider.ts`、`setup.ts`、`apps/cli/src/dry-run.ts`
 
 ### E.2 缺失斜杠命令
-- ✅ 高价值批次：`/stats`（messages/tokens/tools/memory/jobs/output_style）、`/jobs`
+- ✅ 高价值批次：`/stats`（messages/tokens/context/jobs/output_style）、`/jobs`
   （统一 list/show/cancel）、`/background`（创建后台 shell 并返回 Job ID）、
   `/reload-plugins`（先清后注册，disable 立即生效）、`/subagents`（三源人格列表；
   差异：Python 为任务视图，TS 由既有 `/agents` 覆盖）、`/plugin list|enable|disable`
@@ -315,10 +306,9 @@
 - **文件**：`packages/skills/src/index.ts`、`packages/agent-runtime/src/extensions.ts`、`apps/cli/src/commands/main.ts`
 
 ### E.6 Services 杂项
-- ✅ 记忆四件套（第一刀）：`autodream`（/dream 命令+锁/备份/回滚）、`memory_extract`
-  （/remember 命令）、`session_memory`（REPL 每轮 checkpoint）、`tool_outputs`
-  （预算函数）。daemon compact 侧已经 attachments provider 读回 session checkpoint。留待：tool_outputs 接 microcompact、
-  executeAutoDream 自动触发（归 cron）。详见 `docs/services-memory-quartet-design.md`。
+- ✅ Context Persistence 已接管 `/remember` 与 `/dream`：前者写逻辑条目，后者只执行经过校验的 merge/update/disable 并在执行前备份主题文档。
+- ✅ Session Continuity checkpoint 由 daemon 成功 Run 写入，compact 通过 attachments provider 读回。
+- 留待：tool_outputs 接 microcompact。
 - ✅ cron 调度升级（第一刀）：`CronScheduler.start()` 改为 `setTimeout` 自重调度，
   每次触发后用 `computeNextRunTime()` 精确计算下一次绝对时刻，替代近似 `setInterval`。
 - ✅ cron 升级（第二刀，旧实现，已由 daemon 托管方案替代）：
@@ -344,8 +334,8 @@
 
 ```
 Phase A (正确性)   → 最高优先，低成本，立即提升可用性
-Phase B (核心)     → 引擎/工具/记忆/prompt 能力，影响上层
-Phase C (扩展)     → 插件/auth/mcp/coordinator/personalization
+Phase B (核心)     → 引擎/工具/Context/prompt 能力，影响上层
+Phase C (扩展)     → 插件/auth/mcp/coordinator
 Phase D (大模块)   → swarm/channels/sandbox（工作量大，可挑选）
 Phase E (体验)     → CLI/TUI/订阅 provider，可与 C/D 并行
 ```

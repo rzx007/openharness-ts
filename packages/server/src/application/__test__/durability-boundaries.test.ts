@@ -153,15 +153,18 @@ describe("durable application long-running boundaries", () => {
     const attachmentBucket = join(attachments, "blobs", attachmentHash.slice(0, 2));
     mkdirSync(attachmentBucket, { recursive: true });
     writeFileSync(join(attachmentBucket, attachmentHash), attachmentBytes);
+    const artifacts = join(dir, "artifacts");
+    mkdirSync(artifacts, { recursive: true });
+    writeFileSync(join(artifacts, "report.txt"), "artifact", "utf8");
     const backup = join(dir, "backup");
     const createdManifest = await createApplicationBackup({
       store,
       destination: backup,
-      sources: { attachments },
+      sources: { artifacts, attachments },
     });
     expect(createdManifest).toMatchObject({
       version: 3,
-      directories: { attachments: true },
+      directories: { artifacts: true, attachments: true },
       attachments: {
         assets: 1,
         uniqueBlobs: 1,

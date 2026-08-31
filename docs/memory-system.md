@@ -1,295 +1,172 @@
-# 记忆系统总览
+# Context Persistence 与会话连续性
 
-> 状态：当前实现。持久记忆格式只接受 Markdown + frontmatter schema 1，不读取旧 JSON memory。
+> 状态：当前实现。文件名保留为 `memory-system.md` 以维持文档链接稳定；正文描述的是已经上线的统一 Context Persistence。旧 Memory/Personalization 运行时已删除，不做兼容读取。
 
-OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每层解决不同的问题：
+## 目标
 
-```
-问题                     解决方案             作用域
-────────────────────────────────────────────────────
-单轮工具输出太大？  →  tool_outputs 预算判定   本轮之内
-会话被压缩后忘事？  →  session_memory 检查点   本次会话
-有些事情要记很久？  →  持久记忆 + /remember   跨会话
-记忆积久变乱？      →  /dream 梦境整合         定期维护
-```
+当用户说“记住”时，Agent 不应该自行寻找 `USER.md`、`rules.md`、`MEMORY.md` 或任何记忆目录。正确流程是：
 
----
-
-## 一图看清四层
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  每轮对话                                                         │
-│  ┌─────────────────────────────┐                                  │
-│  │  工具调用产生输出            │                                  │
-│  │    ≤ 16k chars → 内联      │ ← tool_outputs 预算判定           │
-│  │    > 16k chars → 截断+预览  │   (纯内存计算，不写盘)            │
-│  └───────────────┬─────────────┘                                  │
-│                  ↓                                                │
-│  ┌─────────────────────────────┐                                  │
-│  │  session_memory 写 checkpoint│ ← 每轮自动，原子写               │
-│  │  goal / next_step / 摘要    │   ~/.openharness-ts/data/        │
-│  │  （最多 12k 字符 / 80 行）  │   session-memory/<项目>/<id>.md  │
-│  └─────────────────────────────┘                                  │
-└──────────────────────────────────────────────────────────────────┘
-         ↓ Run 成功收尾                   ↓ 用户手动或自动触发
-┌────────────────────┐         ┌──────────────────────────┐
-│  personalization   │         │  /remember               │
-│  正则抽环境事实     │         │  LLM 提取语义事实         │
-│  IP/路径/conda/…   │         │  决策/偏好/约束…          │
-│  → facts.json      │         │  → memory/ 目录           │
-│  → rules.md        │         │    (Markdown + frontmatter)│
-│  → 下次自动注入    │         │                          │
-│    system prompt   │         │                          │
-└────────────────────┘         └──────────────────────────┘
-                                         ↓ 积累一段时间后
-                               ┌──────────────────────────┐
-                               │  /dream                  │
-                               │  后台子进程整理 memory/   │
-                               │  合并重复 / 纠错矛盾 /   │
-                               │  相对日期→绝对 / 重建索引 │
-                               │  ⚠ 跑前整目录备份        │
-                               └──────────────────────────┘
+```text
+用户表达记忆意图
+  → Resolver 拆分语义条目并判断作用域
+  → Policy 检查置信度、敏感性和冲突
+  → ContextPersistenceService 执行逻辑操作
+  → MarkdownContextStore 原子写入受管主题文档
+  → 下一次模型请求重新检索最新 Context
 ```
 
----
+这套设计保留 Markdown 可读、可备份、可审查的优点，同时消除 Agent 猜路径、多个子系统抢写和一个规则一个文件的问题。
 
-## 各层详解
+## 明确记住
 
-### 层 1 · tool_outputs 预算判定（轮内，不写盘）
+用户明确要求记住且作用域清晰、置信度高、没有冲突时，系统立即保存。例如：
 
-工具输出太长会撑爆单轮上下文，靠三个阈值控制：
+| 输入 | 结果 |
+|---|---|
+| `记住以后回答尽量简洁。` | 保存 user preference |
+| `记住这个项目统一使用 pnpm。` | 保存 project rule |
+| `记住我喜欢 pnpm。` | 语境不足，询问作用域/含义 |
+| `记住 API key 是 sk-test-secret。` | 拒绝保存 |
+| `把这个项目的包管理器改成 pnpm。` | 明确替换已有语义条目 |
 
+一句话包含多件事时会先拆分再分别治理。某一条包含 secret 不会阻止其他安全条目保存：
 
-| 阈值             | 默认值       | 含义                       |
-| -------------- | --------- | ------------------------ |
-| `inline`       | 16 000 字符 | 低于此值 → 工具结果整段内联进上下文      |
-| `preview`      | 3 000 字符  | 超出 inline → 截断保留前 3k 作预览 |
-| `microcompact` | 4 000 字符  | 老工具结果超此值 → 可被微压缩清理       |
-
-
-可用环境变量覆盖：`OPENHARNESS_TOOL_OUTPUT_INLINE_CHARS` 等。
-
-> 状态：✅ 已实现。工具结果写入 messages 前经 `applyToolOutputBudget` 截断（`query-engine.ts`）；microCompact 已扩展支持 MCP 工具（`compact-service.ts`）。阈值均可环境变量覆盖。
-
----
-
-### 层 2 · session_memory 检查点（本次会话）
-
-**解决什么问题**：`/compact` 会把历史消息全部压缩成一段摘要，模型压缩后就不知道"当前在做什么任务、下一步是什么"了。session-memory 的作用是在压缩边界把任务状态**注回上下文**，让模型不失忆。
-
-**设计意图（完整流程）**：
-
-```
-压缩前：
-  [消息1][消息2]...[消息100]   ← 上下文快满了
-
-执行 /compact 之后（设计中）：
-  [摘要：整段对话做了什么]
-  [session-memory: 当前目标/下一步/关键状态]  ← 从文件读回来补上
-
-效果：即使原始对话被替换，模型仍然知道自己在做什么
+```text
+记住回答详细、注释中文、项目使用 pnpm。
+  → user: 回答详细程度
+  → user: 注释语言
+  → project: 包管理器规则
 ```
 
-**写什么**：每轮结束自动将以下内容写入一个 Markdown 文件：
+系统不会为高置信度的直接保存额外制造确认步骤；只有不确定、敏感或冲突时才问。
 
-- 当前目标（`task_focus_state.goal`）
-- 下一步（`task_focus_state.next_step`）
-- 最近 80 行消息的文本摘要
+## 主题式 Markdown
 
-**文件位置**：
+一个 Markdown 主题文档容纳多个 entry block。主题用于人类管理和批量备份，block 用于精确更新：
 
-```
-~/.openharness-ts/data/session-memory/
-  <项目名>-<sha1前12>/
-    <sessionId>.md
-```
+- 同一组 UI 设计规范只占一个 UI 主题文档。
+- 每条配色、圆角、间距和阴影规则都有独立 ID。
+- 更新一条规则不会覆盖相邻规则或文档中的人工说明。
+- 严格解析 schema 2；缺字段、重复 ID、非法作用域或损坏 block 会报错，不猜旧格式。
+- 写入使用临时文件、复读校验和原子 rename。
+- 同一作用域的 mutation 串行执行，避免并发覆盖。
 
-**示例文件内容**：
+主题文档是服务内部实现。Agent、REST 响应、Slash 输出和 Desktop 管理页都只显示逻辑条目，不显示实际路径。
 
-```markdown
-# Session Memory
+## 自动提取与候选
 
-## Current State
-正在修复 TUI 权限弹窗死锁问题
+成功 root Run 的维护顺序是：
 
-## Next Step
-验证 readline handler 中 permission_response 的处理是否正确
+1. durable Run 已经进入 `completed`。
+2. 写 Session Continuity checkpoint。
+3. 如果 `context.enabled` 和 `context.automaticExtractionEnabled` 均开启，从 durable transcript 提取环境事实。
+4. 同一个 policy 决定自动提交、进入候选或拒绝。
 
-## Recent Work
-...（最近消息的文字摘要）
-```
+默认规则：
 
-> **当前实现状态：✅ 已完整接线。**
->
-> - 写入：daemon root Run 成功收尾后，从 durable transcript 自动写（可用 `memory.sessionMemoryEnabled=false` 关闭）
-> - 读回：`/compact` 和 autocompact 触发时，通过 `setAttachmentsProvider` 读取 checkpoint，注入摘要 prompt 的 `## Session Memory Checkpoint` 段落
+- 高置信度且非敏感的环境事实可以自动提交。
+- 低一些置信度的环境事实进入候选。
+- 项目知识和其他自动推断内容进入候选。
+- 内部地址等敏感内容进入候选。
+- secret 直接拒绝，不产生候选。
+- failed/interrupted Run 不提取。
 
----
+多个候选会聚合进同一作用域的待确认主题文档。接受候选时，服务先幂等写入目标主题，再从待确认主题移除；拒绝只删除候选。
 
-### 层 3a · personalization 环境事实（跨会话，自动）
+## 冲突和更新
 
-**解决什么问题**：你提到的服务器 IP、conda 环境、数据路径这类机械事实，每次都要重新说。
+条目用 `semanticKey` 表示“它描述的是哪个槽位”。例如项目包管理器始终对应同一个语义键：
 
-**原理**：daemon root Run 成功写入 durable 终态后，用 10 个正则扫描当前 durable transcript，识别：
+- 内容等价：返回 `noop`，不重复写入。
+- 内容不同但用户没有表达替换：返回 conflict clarification。
+- 用户明确说“改成”“改为”“替换为”：写入新 active 条目，并保留可审计的取代关系。
+- API 编辑已知 ID：只更新目标 block。
 
-- SSH 主机 / 服务器 IP
-- 数据路径（`/data/`、`/mnt/` 等开头）
-- conda 环境名（`conda activate xxx`）
-- Python 版本、API 端点、环境变量
-- git 远端、Ray 集群地址、cron 表达式
+项目作用域优先于相同语义键的 user 默认值，因此用户可以全局偏好 npm，同时某个项目明确要求 pnpm。
 
-**写哪里**（全局，跨项目共享）：
+## 每轮查询
 
-```
-~/.openharness-ts/local_rules/
-  facts.json     ← 结构化事实（按 type:value 去重）
-  rules.md       ← 人类可读的摘要，下次启动注入 system prompt
-```
+QueryEngine 不缓存长期 Context。每次真正调用模型前都会执行 Context retriever：
 
-**效果**：下次启动时，`rules.md` 自动出现在 system prompt 里，不用你再说"测试服在 10.0.0.7"。
+1. 读取当前 user、machine、project 的 active 条目。
+2. 去除候选、禁用、已取代项。
+3. 按语义键合并作用域覆盖。
+4. 只选择和当前问题相关的项目知识。
+5. 在 `promptMaxChars` 和 `promptMaxEntries` 预算内渲染。
+6. 用临时 `system-reminder` 注入本次请求。
 
-这条触发不依赖 TUI、print、Web、Desktop 或 Bot 是否正常退出；不同产品入口只要使用同一个 daemon，就共用同一套收尾规则。失败只记告警，不会把已经完成的 Run 改成失败。
+因此 Desktop 或另一个客户端刚修改的条目，热 Agent 下一次请求即可看到；Context 内容不会泄漏进 durable 消息历史。
 
----
+## 受控整合 `/dream`
 
-### 层 3b · 持久记忆 `/remember`（跨会话，手动 / 可选自动）
+`/dream --preview` 只生成逻辑计划，不写盘。正式 `/dream`：
 
-**解决什么问题**：personalization 只抓正则能匹配的机械事实；"我们决定不做 X 因为 Y"、"这个项目偏好方案 Z"这类**语义事实**需要 LLM 来理解。
+1. 读取 active 逻辑条目，不把路径交给 planner。
+2. 只接受 `merge`、`update`、`disable` 操作和已知 entry ID。
+3. 拒绝未知 ID、未知字段、敏感内容，以及任何 path/directory/root/file 字段。
+4. 执行前备份受影响主题。
+5. 所有写入仍通过 Context store；planner 不能直接编辑 Markdown。
+6. 单项失败会生成明确 receipt，其他项可以继续并保留恢复备份。
 
-**触发方式**：你手动敲 `/remember`；默认也会在每轮结束后 best-effort 自动提取，可用 `/config set memory.autoExtractEnabled false` 关闭。
+## 忘记
 
-**原理**：
+忘记操作按稳定 entry ID 删除唯一 block。删除后：
 
-1. LLM 读取本次会话，找出「值得长期保存、无法从代码/git 推导」的事实（每次 ≤3 条）
-2. 写进 `memory/` 目录（Markdown + YAML frontmatter 格式，带签名去重）
-3. 下次会话启动，相关记忆按轮检索注入 prompt
+- 下一次 Context 查询不再返回它。
+- 相邻 block 和人工说明保持不变。
+- 热 Agent 无需重启。
+- 不会删除 Session transcript 或 Session Continuity checkpoint。
 
-每个持久记忆文件只接受当前格式：frontmatter 必须包含 `schema_version: 1`、id、name、description、type、scope、importance、signature、created_at、updated_at 和 use_count，文件名必须与 id 一致。缺字段、类型错误、版本不同或空内容都会直接失败；系统不会读取旧 JSON、补默认字段或猜测旧名字。
+## Session Continuity 不是长期 Context
 
-**内置护栏**：提取 prompt 里写死：不存密钥/令牌、只存稳定且不可推导的事实。
+Session Continuity checkpoint 只解决 compact 后的当前任务连续性：
 
-> 状态：`/remember` 手动触发和 Run 成功后的自动触发都已接入。自动触发默认开启，受 `memory.autoExtractEnabled` 控制；一次最多写 3 条，team scope 暂不写入。
+- Run 成功后自动写入当前目标、下一步、已验证工作、活跃产物和最近消息摘要。
+- compact/autocompact 通过 attachments provider 读回。
+- 只进入 compact summary prompt，不进入普通每轮 system prompt。
+- 由 `sessionContinuity.enabled` 独立控制。
 
-#### 按轮自动提取的精确流程
+长期 Context 被删除，不代表应删除当前会话 checkpoint；反过来，compact checkpoint 也不会变成跨会话偏好。
 
-当 `memory.enabled !== false` 且 `memory.autoExtractEnabled !== false` 时，每个成功完成的 root Run 会进入 `SessionPostRunMaintenance`：
+## 配置
 
-1. 从 daemon Store 读取已经完成投影的 transcript。
-2. 写 session_memory checkpoint。
-3. 更新 personalization 环境事实。
-4. 调用同一个 live Agent 的 `remember()` 尝试提取长期记忆。
-5. 开启 autoDream 时，根据同一 cwd 下最近更新的 durable Session 判断是否达到门槛。
-
-自动提取是 best-effort，不影响主对话。以下情况会跳过或不写入：
-
-- 本轮没有成功完成。
-- 历史消息少于 2 条。
-- 本轮已经手动写过 memory 目录，避免重复提取。
-- 模型没有提出值得保存的长期记忆。
-- 提出的记录全部被拒绝，例如 team scope 暂不写入。
-- 提取过程报错会写结构化告警，不阻断当前对话，也不回退 Run 终态。
-
-提取时只把最近 12 条消息摘要给模型，一次最多写入 3 条。写入后由 `MemoryManager` 做签名去重。下一轮会按当前用户输入检索相关记忆，并以临时 `system-reminder` 注入，不写进消息历史。
-
-注意：代码默认开启不等于本机一定开启；用户 `settings.json` 里的显式配置会覆盖默认值。例如已有配置写了 `memory.autoExtractEnabled=false` 时，需要用 `/config set memory.autoExtractEnabled true` 重新打开。
-
----
-
-### 层 4 · `/dream` 梦境整合（定期维护）
-
-**解决什么问题**：memory 目录积累久了会有重复条目、相互矛盾的内容、写着"明天"但已经是两年前的相对日期。
-
-**触发方式**：你手动敲 `/dream`（或 `/dream --preview` 只看方案不执行）；也可用 `/config set memory.autoDreamEnabled true` 开启阈值满足后的后台自动整合。
-
-**原理**：
-
-1. 整目录备份（`~/.openharness-ts/data/memory-backups/`）
-2. 抢整合锁（防止并发两次 dream）
-3. 拉起一个 `ohs --print <整合 prompt>` 后台子进程（type: "dream"）
-4. 模型读 memory 目录，输出整合指令：合并近重复、纠错矛盾、相对日期改绝对、过时条目标 `disabled: true`、重建 MEMORY.md 索引
-5. 失败/被杀 → 自动回滚锁 mtime
-
-**内置护栏**：整合 prompt 里焊死纪律——不从日志臆测用户、不保存密钥/令牌、敏感内容必须标 `Privacy` 标签、一次最多新建 2 个文件。
-
-> 状态：✅ 手动触发已实现；✅ 自动触发已实现，默认关闭，受 `memory.autoDreamEnabled` 与 hours/sessions 阈值控制。
-
----
-
-## 具体例子：一段对话产生了什么
-
-```
-你："测试服在 10.0.0.7，conda 用 prod-ml，我们决定把 /clear 命令移除了"
+```json
+{
+  "context": {
+    "enabled": true,
+    "explicitCommitThreshold": 0.85,
+    "automaticEnvironmentCommitThreshold": 0.95,
+    "automaticExtractionEnabled": true,
+    "candidateRetentionDays": 30,
+    "promptMaxChars": 12000,
+    "promptMaxEntries": 40
+  },
+  "sessionContinuity": {
+    "enabled": true
+  }
+}
 ```
 
+没有旧 `memory.*` key fallback。旧配置不会控制新系统。
 
-| 时机             | 产生什么                                    | 写哪里                                                           |
-| -------------- | --------------------------------------- | ------------------------------------------------------------- |
-| 本轮结束           | session_memory checkpoint（goal + 消息摘要）  | `~/.openharness-ts/data/session-memory/<project>-<hash>/<id>.md` |
-| root Run 成功收尾 | personalization 抽出 `10.0.0.7`、`prod-ml` | `~/.openharness-ts/local_rules/facts.json` + `rules.md`          |
-| 你敲 `/remember` | LLM 提取"移除 /clear 的决策"                   | `~/.openharness-ts/data/memory/<project>-<hash>/xxx.md`          |
-| 你敲 `/dream`    | 整理 memory 目录，合并重复                       | 原地修改 + 备份                                                     |
+## 管理与可观察性
 
+- `/remember <内容>`：显式写入。
+- `/context status`：active、candidate 和作用域/类型统计。
+- `/context list`、`show`、`preview`：读取逻辑状态。
+- `/context add`、`update`、`remove`：管理条目。
+- `/context candidates`、`accept`、`reject`：管理候选。
+- `/dream [--preview]`：整合。
+- Desktop Context 页：图形化完成同一组操作。
 
-**下次启动时**：
+所有结果都返回条目 ID、逻辑作用域、类型、主题和状态，不返回 Markdown 文件路径。
 
-- `rules.md` 里的 `10.0.0.7` / `prod-ml` 自动注入 system prompt ✅
-- memory 里的"移除 /clear"在相关对话时自动检索注入 ✅
+## 旧结构迁移边界
 
----
+系统不会读取、迁移或删除旧 `USER.md`、local rules、Project Memory 或旧 `/memory` 数据。这样可以避免静默导入错误规则或敏感信息。若用户需要保留旧内容，应在审核后通过 `/remember` 或 Context 管理页重新录入。
 
-## 两条"自动记忆"的区别
+相关文档：
 
-
-|          | personalization                   | /remember（memory_extract）                      |
-| -------- | --------------------------------- | ---------------------------------------------- |
-| **触发**   | root Run 成功后自动；`/remember` 也触发 | 手动 `/remember`，或开启后每轮自动                        |
-| **方法**   | 正则（10 个模式）                        | LLM 语义理解                                       |
-| **抓什么**  | 机械事实：IP、路径、环境名、端点                 | 语义事实：决策、偏好、约束                                  |
-| **成本**   | 零（无 LLM 调用）                       | 有成本（一次 LLM 调用）                                 |
-| **存放位置** | `~/.openharness-ts/local_rules/`（全局） | `~/.openharness-ts/data/memory/<项目>-<hash>/`（项目级） |
-
-
----
-
-## 容易混淆：两个"会话文件"
-
-
-|         | session_memory checkpoint                         | session 快照                                  |
-| ------- | ------------------------------------------------- | ------------------------------------------- |
-| **目录**  | `~/.openharness-ts/data/session-memory/<项目>-<hash>/` | daemon SQLite |
-| **内容**  | goal + 消息摘要（12k 上限）                               | 完整 durable Session、Input、Run、Message 和 Part |
-| **用途**  | 给 compact 提供连续性                                   | 多端恢复、审计和运行状态 |
-| **由谁读** | compact 边界（attachmentsProvider 注入）                | daemon Application 和共享 client |
-
-
-项目级旧 Session JSON 不参与 daemon 主线，也不再由 CLI 每轮额外写一份。多端恢复只使用 daemon SQLite、snapshot 和 SSE。历史设计见 [session-storage-design.md](./session-storage-design.md)。
-
----
-
-## 功能状态汇总
-
-
-| 功能                             | 状态                   | 备注                                                         |
-| ------------------------------ | -------------------- | ---------------------------------------------------------- |
-| tool_outputs inline/preview 截断 | ✅                    | applyToolOutputBudget 在 query-engine.ts，写入 messages 前截断    |
-| tool_outputs microCompact 接入   | ✅                    | MCP 工具已纳入 microcompactable，同内置工具一起按 keepRecent 清理          |
-| session_memory 每轮写入            | ✅ daemon 所有产品入口 | root Run 成功后执行，受 `memory.enabled` 与 `memory.sessionMemoryEnabled` 控制 |
-| session_memory compact 读回      | ✅                    | compact 时经 attachmentsProvider 注入摘要 prompt                 |
-| personalization 抽取             | ✅                    | 10 个正则，root Run 成功后自动；`/remember` 也触发 |
-| `/remember` 手动提取               | ✅                    | LLM 提取，签名去重                                                |
-| `/remember` 按轮自动               | ✅                    | 默认开启；每轮结束 best-effort 提取，可用 `memory.autoExtractEnabled=false` 关闭 |
-| `/dream` 手动整合                  | ✅                    | 备份 + 锁 + 回滚                                                |
-| `/dream` 自动定期触发                | ✅                    | 默认关闭；`memory.autoDreamEnabled=true` 后按 hours/sessions 阈值触发 |
-| memory 团队隔离 / 密钥扫描             | ⏳                    | Phase C                                                    |
-
-
----
-
-## 相关文档
-
-- [prompt-layering-design.md](./prompt-layering-design.md) — stable/context/volatile prompt 分层，以及 SOUL.md / USER.md 迁移设计
-- [compact-service-design.md](./compact-service-design.md) — 上下文压缩服务：触发阈值、microCompact、LLM 摘要、PTL 重试与附件注入
-- [services-memory-quartet-design.md](./services-memory-quartet-design.md) — tool_outputs / session_memory / memory_extract / autodream 详细设计
-- [personalization-design.md](./personalization-design.md) — 环境事实抽取
-- [session-storage-design.md](./session-storage-design.md) — 会话快照存储
+- [Context、Prompt 与会话连续性总图](./context-memory-map.md)
+- [Prompt 分层](./prompt-layering-design.md)
+- [人工验收提示词](./runtime-acceptance-prompts.md)

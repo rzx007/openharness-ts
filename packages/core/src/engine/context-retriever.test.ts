@@ -57,7 +57,7 @@ describe("QueryEngine per-turn context retriever", () => {
 
   it("injects retrieved context into the system prompt sent to the API", async () => {
     const { client, requests } = createRecordingClient(SIMPLE_RESPONSE);
-    const retriever = vi.fn(async () => "<memory>\n- user prefers pnpm\n</memory>");
+    const retriever = vi.fn(async () => "<context>\n- user prefers pnpm\n</context>");
 
     const engine = new QueryEngine(
       client,

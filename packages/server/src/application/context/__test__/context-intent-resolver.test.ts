@@ -32,6 +32,19 @@ describe("ContextIntentResolver", () => {
     expect(secret).toMatchObject({ sensitivity: "secret" });
   });
 
+  it("splits one global UI design group into independently managed UI entries", async () => {
+    const proposals = await resolver.resolve(
+      "请全局记住：UI 不使用紫色；UI 只使用设计系统规定的圆角；UI 避免重度阴影",
+      { userScopeKey: "local-user", projectId: "project-1" },
+    );
+
+    expect(proposals).toHaveLength(3);
+    expect(proposals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: "user", kind: "user_preference" }),
+    ]));
+    expect(proposals.every(({ semanticKey }) => semanticKey.startsWith("ui.design."))).toBe(true);
+  });
+
   it("uses the injected classifier only when deterministic rules cannot resolve the request", async () => {
     let calls = 0;
     const classified = new ContextIntentResolver({

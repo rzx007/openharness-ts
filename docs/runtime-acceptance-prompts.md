@@ -238,34 +238,56 @@ Coordinator / Workflow：再跑 A5、A6
 - 模型在后续 turn 中采用补充要求。
 - 两条输入的 delivery receipt 都结算，原 Run 最终进入终态。
 
-## A9：自动个性化与长期记忆
+## A9：统一 Context Persistence 生命周期
 
-验证：成功 Run 后的维护链、显式记忆提取，以及新 Session 是否能读回。使用虚构信息，不要写真实凭据。
+验证：显式记住、自动判断、冲突、敏感信息、候选、跨 Session 回忆和忘记。只使用虚构内容，不要输入真实凭据或内网信息。
 
-在 Session A 发送：
-
-```text
-请记住这个项目的测试约定：测试机固定写作 ssh qa@192.0.2.10，发布前检查命令固定写作 pnpm acceptance:check。192.0.2.10 是文档保留的虚构地址，不是真实机器。请复述一次，不要执行这些命令。
-```
-
-等 Run 完成后执行：
+依次发送：
 
 ```text
-/remember
+记住以后回答尽量简洁。
+记住这个项目统一使用 pnpm。
+记住我喜欢 pnpm。
+记住 API key 是 sk-test-secret。
+记住回答详细、注释中文、项目使用 pnpm。
+请全局记住：UI 不使用紫色；UI 只使用设计系统规定的圆角；UI 避免重度阴影。
 ```
 
-新建 Session B，再发送：
+预期：
+
+- 明确的 user preference 和 project rule 直接保存。
+- “我喜欢 pnpm”因作用域/含义不够清楚而询问，不擅自猜。
+- 虚构 API key 被拒绝，且 `/context list`、`/context preview` 中都找不到它。
+- 一句话中的多项要求被拆成独立逻辑条目；某项失败不回滚其他安全项。
+- 三条 UI 规则属于同一个 UI 主题，但有三个可单独管理的 entry ID。
+- 输出只显示逻辑作用域、主题和 ID，不显示受管 Markdown 路径。
+
+再执行：
 
 ```text
-不读取 Git 文件，也不要搜索仓库。根据你已经保存的项目信息，测试机写法和发布前检查命令分别是什么？如果没有记住，请直接说不知道，不要猜。
+/context status
+/context list
+/context preview 安装依赖并调整设置页面
 ```
 
-通过时应看到：
+新建同项目 Session B，发送：
 
-- Session A 的 root Run 先进入 `completed`，之后的维护失败也不能改变它的终态。
-- Personalization 或 Project Memory 中出现虚构测试约定，但不应保存任何密钥。
-- Session B 能通过注入的规则或检索到的记忆回答；如果模型明确说不知道，应检查维护告警和 Memory 配置，不能仅凭期待判通过。
-- 测试结束后删除这两条虚构记忆，避免污染日常使用。
+```text
+不读取 Git 文件，也不要搜索仓库。根据你已经保存的 Context，这个项目使用什么包管理器？UI 有哪些约束？不知道就明确说不知道。
+```
+
+预期 Session B 能读回 project rule 和 user UI preference。然后把包管理器规则改成 npm：
+
+```text
+记住这个项目统一使用 npm。
+把这个项目的包管理器改成 npm。
+```
+
+第一句应报告冲突并询问；第二句包含明确替换语言，应只更新包管理器语义条目，不影响 UI 规则。
+
+最后使用 `/context remove <包管理器条目 ID>` 删除它，再次询问包管理器。预期不再注入该规则，而 UI 条目仍在。测试完成后删除本节创建的所有虚构条目。
+
+自动候选可使用包含虚构公开 endpoint 的成功 Run 验证。低置信度或知识类内容应出现在 `/context candidates`；接受后进入 active，拒绝后消失。failed/interrupted Run 不应产生候选。
 
 ## A10：Compact 后保持当前任务
 
@@ -291,7 +313,7 @@ Coordinator / Workflow：再跑 A5、A6
 
 通过时应看到：
 
-- Compact 前的成功 Run 已生成 Session Memory checkpoint。
+- Compact 前的成功 Run 已生成 Session Continuity checkpoint。
 - Compact 操作有明确结果，历史消息没有形成损坏的 Tool 配对。
 - Compact 后模型仍能复述任务代号和三个约束，最后包含“蓝色雨伞”。
 - Session 与后续 Run 都能正常继续，不需要创建一个假恢复 Session。
@@ -438,7 +460,7 @@ ACCEPTANCE-日期-14：请只回复当前项目名称、当前 Session ID，以�
 - [Durable Execution Data Model](./durable-execution-data-model.md)：核对 ID、关系、版本和终态字段。
 - [Agent Child Session Flow](./agent-child-session-flow.md)：核对 Child 和预算。
 - [Jobs Protocol](./jobs-protocol.md)：核对后台进程和统一 Job 状态。
-- [Memory System](./memory-system.md)：核对 checkpoint、长期记忆和 Dream。
+- [Context Persistence 生命周期](./memory-system.md)：核对长期 Context、候选、checkpoint 和受控整合。
 - [Permission Flow](./permission-flow.md)：核对权限请求和拒绝。
 - [Coordinator 硬调度器调用链](./coordinator-hard-scheduler-flow.md)：核对 Workflow DAG。
 - [Channels Flow](./channels-flow.md)：核对 Bot/Channel 幂等和回复。

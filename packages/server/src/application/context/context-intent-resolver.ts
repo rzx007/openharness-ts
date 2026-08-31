@@ -84,6 +84,20 @@ function resolveStatement(statement: string, runtimeScope: ContextRuntimeScope):
       replace,
     })];
   }
+  if (isUiDesignStatement(statement)) {
+    return [proposal({
+      title: uiDesignTitle(statement),
+      content: `${statement}。`,
+      kind: "user_preference",
+      scope: "user",
+      scopeKey: runtimeScope.userScopeKey,
+      semanticKey: `ui.design.${createContentSignature(statement).slice(0, 12)}`,
+      confidence: 0.97,
+      sensitivity,
+      evidence,
+      replace,
+    })];
+  }
   if (packageManager && /(?:这个项目|当前项目|项目|包管理器|改成|改为)/u.test(statement)) {
     return [proposal({
       title: "项目包管理器",
@@ -156,6 +170,19 @@ function resolveStatement(statement: string, runtimeScope: ContextRuntimeScope):
     })];
   }
   return [];
+}
+
+function isUiDesignStatement(statement: string): boolean {
+  return /(?:\bUI\b|界面|设计系统|色板|配色|紫色|靛蓝|渐变|圆角|Hero|占位文本|padding|间距|卡片|阴影|视觉)/iu
+    .test(statement);
+}
+
+function uiDesignTitle(statement: string): string {
+  if (/(?:色板|配色|紫色|靛蓝)/u.test(statement)) return "UI 配色";
+  if (/(?:圆角)/u.test(statement)) return "UI 圆角";
+  if (/(?:阴影)/u.test(statement)) return "UI 阴影";
+  if (/(?:间距|padding)/iu.test(statement)) return "UI 间距";
+  return "UI 设计规则";
 }
 
 function fallbackProposal(content: string, runtimeScope: ContextRuntimeScope): ContextProposal {

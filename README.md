@@ -20,7 +20,7 @@ OpenHarness 是一套可长期保存运行状态的 Agent 应用。CLI、TUI、W
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。统一 Jobs Panel 展示和控制 Terminal、后台 shell、child Agent、dream 与 Workflow；Workflow Steps 在所选 Workflow Job 的详情中展示，不再保留独立的后台 Task/Swarm/Workflow Runs 执行面板
 - 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。`DaemonApplication` 集中组装 durable 应用，HTTP server 只负责 transport；`AgentPool` 按 session 缓存真实 `OpenHarnessAgent`。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
 - ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 连接同一个终端；支持多终端、输出快照恢复、右键菜单、每项目默认 shell、REST/SSE 传输、对话卡片挂接和沙箱终端 MVP。模型用 `TerminalOpen` 创建持久终端，后续统一通过 `JobList/Read/Wait/Send/Cancel` 观察和控制。完整功能、权限和生命周期见 [docs/desktop-terminal-pty-design.md](docs/desktop-terminal-pty-design.md)。
-- ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
+- ✅ **统一 Context Persistence** — Agent 通过语义工具记住、回忆、修改和忘记；服务按 user/machine/project 作用域治理 Markdown 主题条目，支持自动候选、冲突确认、secret 拒绝、每次模型请求热检索、受控 `/dream` 整合，以及独立的 compact 会话连续性 checkpoint。详见 [docs/memory-system.md](docs/memory-system.md)
 - 🟡 **可用但仍在收口** — `sandbox`（Bash / MCP stdio / hooks / LSP 等进程入口走 SRT/Docker；Docker active 时 Read/Write/Edit/Glob/Grep 进入容器文件操作；Docker 整棵进程停止和真实 E2E 已补，CI 中 Docker 实跑仍待接入）
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
@@ -280,6 +280,7 @@ OpenHarness-ts/
 │   ├── core/                 # 核心引擎（QueryEngine、类型、配置）
 │   ├── api/                  # API Provider 抽象层
 │   ├── client/               # daemon HTTP/SSE typed client + event reducer（TUI/Web/Desktop 共用）
+│   ├── context/              # Context 领域策略、主题、schema 2 Markdown 与 prompt 渲染
 │   ├── protocol/             # 浏览器安全的 Session/Run/Event 请求、响应与公共类型
 │   ├── tools/                # 工具 registry（基础 33；daemon 全 capability 为 44）
 │   ├── server/               # daemon HTTP server、run engine、permission broker
@@ -292,12 +293,10 @@ OpenHarness-ts/
 │   ├── permissions/          # 权限检查器
 │   ├── bridge/               # 多进程会话桥接
 │   ├── swarm/                # 多 Agent 团队管理
-│   ├── memory/               # 持久化记忆存储
 │   ├── commands/             # CommandRegistry 库；TUI 不跑 CLI 旧 builtin 表
 │   ├── auth/                 # 认证流程（API Key、OAuth Device Code）
 │   ├── skills/               # Skill 加载与管理
 │   ├── plugins/              # 插件系统
-│   ├── personalization/      # 环境事实抽取（local_rules 注入 prompt）
 │   ├── utils/                # 共享工具函数
 │   ├── themes/               # 终端主题（5 内置主题）
 │   ├── output-styles/        # 输出格式化
@@ -411,8 +410,8 @@ OpenHarness-ts/
 │  │ (LLM摘要)   │ │ (daemon)     │ │ (RRULE计算)  │ │ (进程句柄)│ │
 │  └──────────────┘ └──────────────┘ └──────────────┘ └───────────┘ │
 │  ┌──────────────┐ ┌──────────────┐                                │
-│  │ Memory       │ │ LSP Client   │                                │
-│  │ (加权搜索)   │ │              │                                │
+│  │ Context      │ │ LSP Client   │                                │
+│  │ Persistence  │ │              │                                │
 │  └──────────────┘ └──────────────┘                                │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -478,7 +477,7 @@ OpenHarness-ts/
 | `SessionStore`             | daemon 主线会话存储：session/input/message/canonical message part/event/run/task/permission request；支持单会话原子 snapshot + SSE cursor，使用 daemon 独占的 SQLite 数据库与迁移文件                                                        |
 | `ScheduledTaskService`     | 已安排任务：一次性时间 / RRULE 计算、Agent 执行、重叠与错过策略、运行历史和未读结果                                                                                                                                                          |
 | `DetachedProcessSupervisor` | shell/dream/显式 Agent 子进程的进程内句柄与停止能力；跨端可恢复的状态由 `SessionStore` execution 投影持久化                                                                                                                                |
-| `MemoryManager`            | 四层记忆体系的持久层：frontmatter + 加权搜索 + MEMORY.md 索引；配套 `/remember`（LLM 提取持久记忆）、`/dream`（梦境整合）、会话 checkpoint 与环境事实抽取。详见 [docs/memory-system.md](docs/memory-system.md)                               |
+| `ContextPersistenceService` | 长期 Context 的唯一写入口：按 user/machine/project 作用域处理显式记住、冲突、敏感信息和候选；底层使用受管 Markdown 主题文档，Agent 和客户端只看到逻辑条目。`ContextQueryService` 在每次真实模型请求前热检索，`ContextConsolidationService` 负责受控 `/dream`。详见 [docs/memory-system.md](docs/memory-system.md) |
 | `LspClient`                | LSP 客户端：与 Language Server Protocol 通信                                                                                                                                                                                                 |
 
 ### 扩展层
@@ -491,7 +490,7 @@ OpenHarness-ts/
 | `HookExecutor`          | Hook 系统：10 类事件（`session_start/end`、`pre/post_tool_use`、`pre/post_compact`、`user_prompt_submit`、`notification`、`stop`、`subagent_stop`），支持 command/http/prompt/agent 四种类型、priority、matcher、`$ARGUMENTS`                                                                                            |
 | `Swarm`                 | 多 Agent 团队：framework 创建并执行 child agent，daemon 投影 parent task、child session 与 child run。详见 [docs/agent-child-session-flow.md](docs/agent-child-session-flow.md)                                                                                                                                          |
 | `PluginLoader`          | Native Plugin v1 校验、安装状态、版本 cache 和 Skills/Agents/Hooks/MCP 激活；外部 Claude Code 插件由独立 Converter 导入，Runtime 不解析来源格式，Tool 隔离完成前不执行。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md)             |
-| `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤 |
+| `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；加载 bundled、user 与 project 来源。Slash 选择只随普通用户消息发送 skill invocation metadata，Runtime 再通过原生 Skill 机制定位并读取内容；消息列表只显示一个 Skill 胶囊。 |
 | `BridgeManager`         | 会话桥接：多进程间共享会话状态                                                                                                                                                                                                                                                                                           |
 | `PermissionChecker`     | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                                                                                                                                                                                                                     |
 | `DaemonApplication`     | daemon durable application composition：store recovery、run engine、Agent loader/pool、permission、task、projection 与四类 session services                                                                                                                                                                              |
@@ -712,10 +711,17 @@ ohs sandbox status
     "pathRules": [],
     "deniedCommands": []
   },
-  "memory": {
+  "context": {
     "enabled": true,
-    "maxFiles": 5,
-    "maxEntrypointLines": 200
+    "explicitCommitThreshold": 0.85,
+    "automaticEnvironmentCommitThreshold": 0.95,
+    "automaticExtractionEnabled": true,
+    "candidateRetentionDays": 30,
+    "promptMaxChars": 12000,
+    "promptMaxEntries": 40
+  },
+  "sessionContinuity": {
+    "enabled": true
   },
   "mcpServers": {
     "my-stdio-server": {
