@@ -44,3 +44,14 @@ describe("desktop attachment preload bridge", () => {
     )
   })
 })
+
+describe("desktop window preload bridge", () => {
+  it("opens an address in the system browser through the window IPC channel", async () => {
+    await desktopAPI.window.openExternal("file:///D:/demo/index.html")
+
+    expect(electron.invoke).toHaveBeenCalledWith(
+      IpcChannels.windowOpenExternal,
+      "file:///D:/demo/index.html"
+    )
+  })
+})

@@ -1,3 +1,5 @@
+import { toExternalBrowserUrl } from "@shared/external-browser-url"
+
 export function normalizeBrowserUrl(input: string): string | null {
   const trimmed = input.trim()
   if (!trimmed) return null
@@ -7,6 +9,12 @@ export function normalizeBrowserUrl(input: string): string | null {
   if (/^localhost(?::\d+)?(\/.*)?$/i.test(trimmed)) return `http://${trimmed}`
   if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$/.test(trimmed)) return `http://${trimmed}`
   return `https://${trimmed}`
+}
+
+export function resolveExternalBrowserUrl(input: string | null | undefined): string | null {
+  if (input == null) return null
+  const normalized = normalizeBrowserUrl(input)
+  return normalized ? toExternalBrowserUrl(normalized) : null
 }
 
 export function toLocalFileUrl(projectPath: string, relativePath: string): string {

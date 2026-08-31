@@ -13,7 +13,12 @@ import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-st
 import { Button } from "@renderer/components/ui/button"
 import { cn } from "@renderer/lib/utils"
 
-import { browserTitleFromUrl, displayBrowserUrl, normalizeBrowserUrl } from "./browser-navigation"
+import {
+  browserTitleFromUrl,
+  displayBrowserUrl,
+  normalizeBrowserUrl,
+  resolveExternalBrowserUrl,
+} from "./browser-navigation"
 
 export type BrowserToolTab = {
   id: string
@@ -89,6 +94,12 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
   }
 
   const getWebview = (): BrowserWebviewElement | null => webviewRef.current
+  const externalUrl = resolveExternalBrowserUrl(tab.url ?? tab.input)
+
+  const openInSystemBrowser = (): void => {
+    if (!externalUrl) return
+    void window.desktop.window.openExternal(externalUrl)
+  }
 
   return (
     <section
@@ -155,7 +166,9 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
             size="icon-xs"
             aria-label="在浏览器中打开"
             title="在浏览器中打开"
+            disabled={!externalUrl}
             className="text-muted-foreground hover:bg-background"
+            onClick={openInSystemBrowser}
           >
             <ArrowUpRight />
           </Button>

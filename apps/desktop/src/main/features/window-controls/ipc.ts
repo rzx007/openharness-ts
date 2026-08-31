@@ -1,10 +1,11 @@
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, shell } from "electron"
 
 import { IpcChannels, type DesktopAppInfo, type PlatformInfo } from "../../../shared/ipc-channels"
 import type { IpcContribution } from "../../core/ipc/types"
 import { quitApp, setForceQuit } from "../../core/services/lifecycle"
 import { showMainWindow } from "../main-window/window"
 import { normalizeZoomLevel } from "../../../shared/zoom"
+import { openUrlInDefaultBrowser } from "./open-external-url"
 
 export const windowControlsIpcContribution: IpcContribution = {
   id: "window-controls",
@@ -67,6 +68,14 @@ export const windowControlsIpcContribution: IpcContribution = {
           event.sender.setZoomLevel(normalizedLevel)
           return normalizedLevel
         },
+      },
+      {
+        channel: IpcChannels.windowOpenExternal,
+        handler: (_event, url) =>
+          openUrlInDefaultBrowser(url, {
+            openExternal: (target) => shell.openExternal(target),
+            openPath: (path) => shell.openPath(path),
+          }),
       },
     ]
   },

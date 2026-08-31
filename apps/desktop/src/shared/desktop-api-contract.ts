@@ -117,6 +117,7 @@ export type DesktopAPI = {
     isMaximized: () => Promise<boolean>
     getZoomLevel: () => Promise<number>
     setZoomLevel: (level: number) => Promise<number>
+    openExternal: (url: string) => Promise<void>
     onMaximizedChanged: (listener: (value: boolean) => void) => () => void
   }
   tray: {

@@ -31,6 +31,7 @@ export const desktopAPI = {
     isMaximized: () => invoke(IpcChannels.windowIsMaximized),
     getZoomLevel: () => invoke(IpcChannels.windowGetZoomLevel),
     setZoomLevel: (level: number) => invoke(IpcChannels.windowSetZoomLevel, level),
+    openExternal: (url: string) => invoke(IpcChannels.windowOpenExternal, url),
     onMaximizedChanged: (listener: (value: boolean) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, value: boolean): void => listener(value)
       ipcRenderer.on(IpcEvents.windowMaximizedChanged, wrapped)

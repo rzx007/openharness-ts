@@ -4,6 +4,7 @@ import {
   browserTitleFromUrl,
   displayBrowserUrl,
   normalizeBrowserUrl,
+  resolveExternalBrowserUrl,
   toLocalFileUrl,
 } from "./browser-navigation"
 
@@ -29,6 +30,22 @@ describe("toLocalFileUrl", () => {
     expect(toLocalFileUrl("D:\\code\\OpenHarness", "examples/page demo/index.html")).toBe(
       "file:///D:/code/OpenHarness/examples/page%20demo/index.html"
     )
+  })
+})
+
+describe("resolveExternalBrowserUrl", () => {
+  it("turns the current page or typed address into a system-browser URL", () => {
+    expect(resolveExternalBrowserUrl("file:///D:/demo/index.html")).toBe(
+      "file:///D:/demo/index.html"
+    )
+    expect(resolveExternalBrowserUrl("localhost:5173/demo")).toBe("http://localhost:5173/demo")
+    expect(resolveExternalBrowserUrl("example.com")).toBe("https://example.com/")
+  })
+
+  it("returns null when there is nothing safe to open", () => {
+    expect(resolveExternalBrowserUrl(null)).toBeNull()
+    expect(resolveExternalBrowserUrl("")).toBeNull()
+    expect(resolveExternalBrowserUrl("javascript:alert(1)")).toBeNull()
   })
 })
 
