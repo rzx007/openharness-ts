@@ -34,7 +34,7 @@ import {
   type SessionStore,
   type ApplicationOwnerLease,
 } from "@openharness/services";
-import { MarkdownContextStore, type ContextScopeRef } from "@openharness/services/context";
+import { ContextBackupService, MarkdownContextStore, type ContextScopeRef } from "@openharness/services/context";
 
 import {
   createDaemonAgentLoader,
@@ -84,7 +84,9 @@ import { createDefaultModelService } from "./default-services/model-service.js";
 import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
 import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
-import { ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, DeterministicEnvironmentFactExtractor, detectContextSensitivity } from "./context/index.js";
+import { ContextConsolidationService, ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, DeterministicContextConsolidationPlanner, DeterministicEnvironmentFactExtractor, detectContextSensitivity } from "./context/index.js";
+import { createDefaultDreamService } from "./default-services/dream-service.js";
+import type { DreamService } from "./settings-api.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -129,6 +131,7 @@ export interface DurableAgentApplication {
   readonly channels: ChannelApplicationService;
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
+  readonly dream: DreamService;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -158,6 +161,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly channels: ChannelApplicationService;
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
+  readonly dream: DreamService;
   private readonly attachmentResources: SessionAttachmentResources;
 
   private readonly eventPublisher: SessionEventPublisher;
@@ -300,6 +304,20 @@ export class DaemonApplication implements DurableAgentApplication {
 
       const contextStore = new MarkdownContextStore({
         root: join(dirname(store.path), "context"),
+      });
+      const contextConsolidation = new ContextConsolidationService({
+        store: contextStore,
+        backup: new ContextBackupService({ root: contextStore.paths.root }),
+        planner: new DeterministicContextConsolidationPlanner(),
+      });
+      this.dream = createDefaultDreamService({
+        consolidation: contextConsolidation,
+        resolveScope: ({ cwd, sessionId }) => ({
+          scope: "project",
+          scopeKey: sessionId
+            ? (store.getSession(sessionId)?.projectId ?? store.inspectProject(cwd).id)
+            : store.inspectProject(cwd).id,
+        }),
       });
       const contextPersistence = new ContextPersistenceService({
         store: contextStore,

@@ -1,41 +1,30 @@
-import { startDreamNow } from "@openharness/services";
+import type { ContextScope } from "@openharness/context";
 
+import type { ContextConsolidationService } from "../context/context-consolidation-service.js";
 import type { DreamService } from "../settings-api.js";
-import { openMemoryManager } from "./memory-service.js";
-import type { DaemonSettingsRef } from "./shared.js";
 
-export function createDefaultDreamService(ref: DaemonSettingsRef): DreamService {
+/** Adapts the governed Context consolidator to the existing `/dream` surface. */
+export function createDefaultDreamService(options: {
+  consolidation: ContextConsolidationService;
+  resolveScope(input: { cwd: string; sessionId?: string }): Promise<{ scope: ContextScope; scopeKey: string }> | { scope: ContextScope; scopeKey: string };
+}): DreamService {
   return {
     async start({ cwd, sessionId, preview }) {
-      const { manager, directory } = await openMemoryManager(cwd);
-      const stale = await manager.findStaleCandidates();
-      const staleSection = stale
-        .slice(0, 20)
-        .map((entry) =>
-          `- ${entry.id}: ${entry.id}.md (importance=${entry.importance ?? 0}, updated_at=${new Date(entry.updatedAt).toISOString().slice(0, 10)})`,
-        )
-        .join("\n");
-      const settings = {
-        ...ref.current,
-        memory: { enabled: true, ...ref.current.memory },
+      const scope = await options.resolveScope({ cwd, ...(sessionId ? { sessionId } : {}) });
+      const result = await options.consolidation.consolidate({ ...scope, preview: preview === true });
+      const applied = result.results.filter(({ status }) => status === "applied").length;
+      const failed = result.results.filter(({ status }) => status === "failed").length;
+      return {
+        started: true,
+        taskId: result.backupId ? `context-consolidation:${result.backupId}` : "context-consolidation:preview",
+        consolidation: {
+          preview: result.preview,
+          operationCount: result.operations.length,
+          applied,
+          failed,
+          ...(result.backupId ? { backupId: result.backupId } : {}),
+        },
       };
-      const task = await startDreamNow({
-        cwd,
-        settings,
-        memoryDir: directory,
-        recentSessionIds: sessionId ? [sessionId] : [],
-        force: true,
-        preview: preview === true,
-        currentSessionId: sessionId,
-        staleSection,
-      });
-      if (!task) {
-        return {
-          started: false,
-          reason: "Dream was not started: consolidation lock held, disabled, or inside a dream subprocess",
-        };
-      }
-      return { started: true, taskId: task.id };
     },
   };
 }

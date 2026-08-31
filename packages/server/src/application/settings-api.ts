@@ -159,6 +159,13 @@ export interface DreamStartResult {
   started: boolean;
   taskId?: string;
   reason?: string;
+  consolidation?: {
+    preview: boolean;
+    operationCount: number;
+    applied: number;
+    failed: number;
+    backupId?: string;
+  };
 }
 
 export interface DreamService {

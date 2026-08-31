@@ -61,7 +61,6 @@ export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
     memory: createDefaultMemoryService(),
     auth: createDefaultAuthService(),
     context: createDefaultContextService(ref),
-    dream: createDefaultDreamService(ref),
     profile: createDefaultProfileService(),
     outputStyle: createDefaultOutputStyleService(),
     projectInit: createDefaultProjectInitService(),

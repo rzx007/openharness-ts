@@ -346,7 +346,7 @@ export class OpenHarnessHttpServer {
       "/",
       createServiceRoutes({
         contextService: this.services.context,
-        dreamService: this.services.dream,
+        dreamService: this.services.dream ?? this.application.dream,
         profileService: this.services.profile,
         outputStyleService: this.services.outputStyle,
         projectInitService: this.services.projectInit,
