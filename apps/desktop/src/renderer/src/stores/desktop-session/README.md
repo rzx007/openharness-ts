@@ -60,7 +60,7 @@
 1. **入口 → 创建。** `session-actions.ts` 先在 `newConversationRuntime.operations` 写入 `create-session`，随后调用 `sessions.create`。
 2. **调用返回 → 绑定状态。** main process 返回真实 `sessionId` 后，创建 operation 从 `newConversationRuntime` 原子移动到 `sessionRuntimes[sessionId]`；首条普通消息同时写为 `placement: transcript` 的本地 submission。
 3. **是否接管页面 → 打开 primary。** 只有这次创建仍拥有当前导航代次时，才调用 `sessions.open(sessionId)`，并把返回 snapshot 写到 `activeSessionId/sessionView`；用户期间改去别的会话时，首条消息仍会发送，但不会抢回 primary。
-4. **发送 → 等待 SSE。** 普通首条消息调用 `sendPrompt` 后标成 `accepted`；首条命令只有 primary snapshot 成功写入后才调用 `invokeCommand`。打开失败会把错误留在新 session 的 `open-session` owner、向 composer 返回失败并保留草稿。IPC 只表示请求已接收，不能伪造 cursor 或 transcript。
+4. **发送 → 等待 SSE。** 首条消息统一调用 `sendPrompt` 后标成 `accepted`；Slash Skill 也走普通 prompt，只额外携带 `metadata.skillInvocation`，由运行时要求 Agent 使用原生 Skill 工具加载。打开失败会把错误留在新 session 的 `open-session` owner、向 composer 返回失败并保留草稿。IPC 只表示请求已接收，不能伪造 cursor 或 transcript。
 5. **SSE 返回 → 清理。** `applySessionUpdate` 接受同会话、cursor 不倒退的快照；`reconcileRuntimeWithView` 按 input/run ID 清掉已经确认的 submission 与 operation。
 6. **失败 → 留给所属页面。** 创建尚未返回 session 时，失败写回 `newConversationRuntime`；已拿到 session 后，失败写到对应 `sessionRuntimes[sessionId]`。SSE 已确认首条消息时，迟到的 IPC 失败不改写为失败。
 
@@ -130,7 +130,7 @@ operation 的阶段是 `pending`、`acknowledged`、`failed`。
 | `acknowledged` | IPC 接收成功但仍要等 SSE 证实结果时。                                                 | SSE 对账到稳定 ID 后删除。                                               |
 | `failed`       | IPC 失败且 SSE 尚未证明成功时。                                                       | 错误留在最具体的 owner，重试同类动作会清掉旧失败；成功或明确清理时移除。 |
 
-完成后不需要 SSE 的操作（例如命令、编辑、停止、授权回复和项目动作）在 IPC 完成时删除。后台创建的首命令成功后，创建和命令 operation 一起删除；失败的 `invoke-command` 只保留当前会话最新一条，避免不同命令无限堆积，同时 selector 仍能显示最新错误。失败操作不进入全局 `error`：应用失败在 `appOperations`，项目失败在 `projectOperations[projectId]`，新会话失败在 `newConversationRuntime`，会话失败在 `sessionRuntimes[sessionId]`，prompt/排队项的错误跟随各自实体。这样切换会话不会串错错误。
+完成后不需要 SSE 的操作（例如编辑、停止、授权回复和项目动作）在 IPC 完成时删除。Slash Skill 不再创建单独的命令 operation，而是作为普通 prompt submission 跟随 input/run 对账。失败操作不进入全局 `error`：应用失败在 `appOperations`，项目失败在 `projectOperations[projectId]`，新会话失败在 `newConversationRuntime`，会话失败在 `sessionRuntimes[sessionId]`，prompt/排队项的错误跟随各自实体。这样切换会话不会串错错误。
 
 ## 新增状态或动作的放置检查清单
 

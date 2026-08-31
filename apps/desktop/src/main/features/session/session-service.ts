@@ -51,7 +51,6 @@ import type {
   DesktopSessionView,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
-  InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
   PromoteDesktopQueuedPromptInput,
   CancelDesktopQueuedPromptInput,
@@ -389,7 +388,7 @@ export class DesktopSessionService {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const content = typeof input.content === "string" ? input.content.trim() : ""
     const attachments = normalizePromptAttachments(input.attachments, true)
-    if (!content && attachments.length === 0) {
+    if (!content && attachments.length === 0 && !input.skillInvocation) {
       throw new Error("消息内容和附件不能同时为空。")
     }
     const client = await this.getClient()
@@ -404,15 +403,9 @@ export class DesktopSessionService {
           component: "composer",
           action: "append_prompt",
         },
+        ...(input.skillInvocation ? { skillInvocation: input.skillInvocation } : {}),
       },
     })
-  }
-
-  async invokeCommand(input: InvokeDesktopCommandInput): Promise<void> {
-    const sessionId = requireString(input.sessionId, "会话 ID")
-    const line = requireString(input.line, "命令内容")
-    const client = await this.getClient()
-    await client.invokeCommand(sessionId, { line })
   }
 
   async editLatestPrompt(input: EditLatestDesktopPromptInput): Promise<void> {
@@ -421,7 +414,9 @@ export class DesktopSessionService {
     const content = typeof input.content === "string" ? input.content.trim() : ""
     const sourceMessageId = requireString(input.sourceMessageId, "原消息 ID")
     const attachments = normalizePromptAttachments(input.attachments, false)
-    if (!content && attachments.length === 0) throw new Error("消息内容和附件不能同时为空。")
+    if (!content && attachments.length === 0 && !input.skillInvocation) {
+      throw new Error("消息内容、附件和技能不能同时为空。")
+    }
     const client = await this.getClient()
     await client.editLatestPrompt(sessionId, {
       id,
@@ -434,6 +429,7 @@ export class DesktopSessionService {
           component: "latest-message-editor",
           action: "edit_latest_prompt",
         },
+        ...(input.skillInvocation ? { skillInvocation: input.skillInvocation } : {}),
       },
     })
   }

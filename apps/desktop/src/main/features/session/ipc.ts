@@ -6,7 +6,6 @@ import type {
   CreateDesktopSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
-  InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
   PromoteDesktopQueuedPromptInput,
   CancelDesktopQueuedPromptInput,
@@ -120,11 +119,6 @@ export const sessionIpcContribution: IpcContribution = {
         channel: IpcChannels.sessionSendPrompt,
         handler: (_event, input) =>
           desktopSessionService.sendPrompt(input as SendDesktopPromptInput),
-      },
-      {
-        channel: IpcChannels.sessionInvokeCommand,
-        handler: (_event, input) =>
-          desktopSessionService.invokeCommand(input as InvokeDesktopCommandInput),
       },
       {
         channel: IpcChannels.sessionEditLatestPrompt,

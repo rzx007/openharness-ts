@@ -4,8 +4,8 @@ import {
   draftForSelectedSkillCommand,
   filterSkillCommands,
   getSkillCommandTrigger,
+  parseSkillCommandInvocation,
   parseSelectedSkillCommandDraft,
-  skillCommandInvocationLine,
   toComposerSkillCommands,
 } from "./composer-skill-commands"
 
@@ -17,10 +17,11 @@ describe("composer skill commands", () => {
           name: "/review",
           description: "Review changes",
           kind: "template",
-          source: "skill",
+          source: "user",
         },
         {
           name: "/project-review",
+          displayName: "Project Reviewer",
           description: "Review with project rules",
           kind: "template",
           source: "project",
@@ -32,6 +33,12 @@ describe("composer skill commands", () => {
           source: "plugin",
         },
         {
+          name: "/plan",
+          description: "Plan the work",
+          kind: "template",
+          source: "bundled",
+        },
+        {
           name: "/help",
           description: "Show help",
           kind: "session",
@@ -40,22 +47,32 @@ describe("composer skill commands", () => {
       ])
     ).toEqual([
       {
-        name: "/plugin-review",
-        label: "plugin review",
-        description: "Review with plugin rules",
-        sourceLabel: "插件",
-      },
-      {
         name: "/project-review",
-        label: "project review",
+        label: "Project Reviewer",
         description: "Review with project rules",
         sourceLabel: "项目",
+        source: "project",
       },
       {
         name: "/review",
         label: "review",
         description: "Review changes",
         sourceLabel: "个人",
+        source: "user",
+      },
+      {
+        name: "/plugin-review",
+        label: "plugin review",
+        description: "Review with plugin rules",
+        sourceLabel: "插件",
+        source: "plugin",
+      },
+      {
+        name: "/plan",
+        label: "plan",
+        description: "Plan the work",
+        sourceLabel: "内置",
+        source: "bundled",
       },
     ])
   })
@@ -74,13 +91,13 @@ describe("composer skill commands", () => {
         name: "/review",
         description: "Audit current diff",
         kind: "template",
-        source: "skill",
+        source: "user",
       },
       {
         name: "/commit",
         description: "Prepare git changes",
         kind: "template",
-        source: "skill",
+        source: "user",
       },
     ])
 
@@ -90,6 +107,7 @@ describe("composer skill commands", () => {
         label: "review",
         description: "Audit current diff",
         sourceLabel: "个人",
+        source: "user",
       },
     ])
   })
@@ -129,17 +147,35 @@ describe("composer skill commands", () => {
     expect(parseSelectedSkillCommandDraft("/unknown", [command])).toBeNull()
   })
 
-  it("only returns an invocation line for known skill commands", () => {
+  it("turns a known skill draft into prompt content and invocation metadata", () => {
     const command = {
       name: "/design-md",
       label: "design md",
       description: "Design markdown output",
       sourceLabel: "个人",
+      source: "user" as const,
     }
 
-    expect(skillCommandInvocationLine("/design-md make a spec", [command])).toBe(
-      "/design-md make a spec"
-    )
-    expect(skillCommandInvocationLine("/design", [command])).toBeNull()
+    expect(parseSkillCommandInvocation("/design-md make a spec", [command])).toEqual({
+      content: "make a spec",
+      skillInvocation: {
+        name: "design-md",
+        commandName: "design-md",
+        displayName: "design md",
+        source: "user",
+        invocationSource: "slash",
+      },
+    })
+    expect(parseSkillCommandInvocation("/design-md", [command])).toEqual({
+      content: "",
+      skillInvocation: {
+        name: "design-md",
+        commandName: "design-md",
+        displayName: "design md",
+        source: "user",
+        invocationSource: "slash",
+      },
+    })
+    expect(parseSkillCommandInvocation("/design", [command])).toBeNull()
   })
 })

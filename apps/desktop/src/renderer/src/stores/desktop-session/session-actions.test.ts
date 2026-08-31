@@ -7,7 +7,6 @@ import {
   selectActiveSessionOpening,
   selectActiveSessionSending,
   selectNewConversationSending,
-  selectSessionComposerError,
 } from "./selectors"
 import {
   projectDetails,
@@ -15,7 +14,7 @@ import {
   resetDesktopSessionStore,
   sessionRuntime,
 } from "./store-test-fixtures"
-import { attachDesktopSessionEvents, useDesktopSessionStore } from "./store"
+import { useDesktopSessionStore } from "./store"
 import type { DesktopSessionRuntime } from "./types"
 
 function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
@@ -123,6 +122,37 @@ describe("desktop session actions", () => {
     expect(useDesktopSessionStore.getState().sessions).toContainEqual(
       expect.objectContaining({ id: session.id, title: "asset-first.png" })
     )
+  })
+
+  it("starts a session with a selected skill through the normal prompt API", async () => {
+    const session = emptySessionView("session-skill").session
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => emptySessionView(session.id, 1)),
+          sendPrompt,
+        },
+      },
+    })
+    resetNewConversationState()
+    const skillInvocation = {
+      name: "archify",
+      commandName: "archify",
+      source: "project" as const,
+      invocationSource: "slash" as const,
+    }
+
+    await useDesktopSessionStore.getState().startSession("画架构图", { skillInvocation })
+
+    expect(sendPrompt).toHaveBeenCalledWith({
+      id: expect.any(String),
+      sessionId: session.id,
+      content: "画架构图",
+      attachments: [],
+      skillInvocation,
+    })
   })
 
   it("clears the migrated first-prompt draft while sending is still pending", async () => {
@@ -840,177 +870,6 @@ describe("desktop session actions", () => {
     )
   })
 
-  it("keeps create acknowledged and records a first slash-command failure separately", async () => {
-    const session = emptySessionView("session-command").session
-    let resolveCreate!: (value: typeof session) => void
-    const create = vi.fn(
-      () =>
-        new Promise<typeof session>((resolve) => {
-          resolveCreate = resolve
-        })
-    )
-    vi.stubGlobal("window", {
-      desktop: {
-        sessions: {
-          create,
-          open: vi.fn(async (sessionId: string) => emptySessionView(sessionId)),
-          invokeCommand: vi.fn(async () => {
-            throw new Error("first command failed")
-          }),
-        },
-      },
-    })
-    resetNewConversationState()
-
-    const starting = useDesktopSessionStore
-      .getState()
-      .startSession("/compact", { commandLine: "/compact" })
-    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce())
-    await useDesktopSessionStore.getState().openSession("session-b")
-    resolveCreate(session)
-
-    await expect(starting).rejects.toThrow("first command failed")
-
-    const operations = Object.values(
-      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations ?? {}
-    )
-    expect(operations).toContainEqual(
-      expect.objectContaining({ kind: "create-session", phase: "acknowledged" })
-    )
-    expect(operations).toContainEqual(
-      expect.objectContaining({
-        kind: "invoke-command",
-        phase: "failed",
-        error: "first command failed",
-      })
-    )
-  })
-
-  it("records the first slash-command failure after its active open snapshot", async () => {
-    const session = emptySessionView("session-active-command").session
-    const snapshot = emptySessionView(session.id)
-    snapshot.inputs = [
-      { id: "00000000-0000-4000-8000-000000000002" },
-    ] as DesktopSessionView["inputs"]
-    const open = vi.fn(async () => snapshot)
-    const randomUUID = vi
-      .spyOn(globalThis.crypto, "randomUUID")
-      .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
-      .mockReturnValueOnce("00000000-0000-4000-8000-000000000002")
-      .mockReturnValueOnce("00000000-0000-4000-8000-000000000003")
-    vi.stubGlobal("window", {
-      desktop: {
-        sessions: {
-          create: vi.fn(async () => session),
-          open,
-          invokeCommand: vi.fn(async () => {
-            throw new Error("active command failed")
-          }),
-        },
-      },
-    })
-    resetNewConversationState()
-
-    await expect(
-      useDesktopSessionStore.getState().startSession("/compact", { commandLine: "/compact" })
-    ).rejects.toThrow("active command failed")
-
-    expect(open).toHaveBeenCalledWith(session.id)
-    const operations = Object.values(
-      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations ?? {}
-    )
-    expect(operations).toContainEqual(
-      expect.objectContaining({
-        kind: "invoke-command",
-        phase: "failed",
-        error: "active command failed",
-      })
-    )
-    expect(operations).not.toContainEqual(
-      expect.objectContaining({ kind: "create-session", phase: "failed" })
-    )
-    expect(selectSessionComposerError(useDesktopSessionStore.getState(), session.id)).toBe(
-      "active command failed"
-    )
-    randomUUID.mockRestore()
-  })
-
-  it("rejects the first slash command when its active open fails and leaves the command uninvoked", async () => {
-    const session = emptySessionView("session-open-failure").session
-    const invokeCommand = vi.fn(async () => undefined)
-    vi.stubGlobal("window", {
-      desktop: {
-        sessions: {
-          create: vi.fn(async () => session),
-          open: vi.fn(async () => {
-            throw new Error("open snapshot failed")
-          }),
-          invokeCommand,
-        },
-      },
-    })
-    resetNewConversationState()
-
-    await expect(
-      useDesktopSessionStore.getState().startSession("/compact", { commandLine: "/compact" })
-    ).rejects.toThrow("open snapshot failed")
-
-    expect(invokeCommand).not.toHaveBeenCalled()
-    const operations = Object.values(
-      useDesktopSessionStore.getState().sessionRuntimes[session.id]?.operations ?? {}
-    )
-    expect(operations).toContainEqual(
-      expect.objectContaining({
-        kind: "open-session",
-        phase: "failed",
-        error: "open snapshot failed",
-      })
-    )
-    expect(operations).toContainEqual(
-      expect.objectContaining({ kind: "create-session", phase: "acknowledged" })
-    )
-    expect(operations).not.toContainEqual(expect.objectContaining({ kind: "invoke-command" }))
-  })
-
-  it("runs a cancelled active slash command in the background without reclaiming primary", async () => {
-    const session = emptySessionView("session-command").session
-    let resolveCreatedOpen!: (view: DesktopSessionView) => void
-    const open = vi.fn((sessionId: string) => {
-      if (sessionId === session.id) {
-        return new Promise<DesktopSessionView>((resolve) => {
-          resolveCreatedOpen = resolve
-        })
-      }
-      return Promise.resolve(emptySessionView(sessionId, 1))
-    })
-    const invokeCommand = vi.fn(async () => undefined)
-    vi.stubGlobal("window", {
-      desktop: {
-        sessions: {
-          create: vi.fn(async () => session),
-          open,
-          invokeCommand,
-        },
-      },
-    })
-    resetNewConversationState()
-
-    const starting = useDesktopSessionStore
-      .getState()
-      .startSession("/compact", { commandLine: "/compact" })
-    await vi.waitFor(() => expect(open).toHaveBeenCalledWith(session.id))
-    await useDesktopSessionStore.getState().openSession("session-b")
-    resolveCreatedOpen(emptySessionView(session.id))
-    await starting
-
-    expect(invokeCommand).toHaveBeenCalledWith({ sessionId: session.id, line: "/compact" })
-    expect(useDesktopSessionStore.getState()).toMatchObject({
-      activeSessionId: "session-b",
-      sessionView: { session: { id: "session-b" } },
-    })
-    expect(sessionRuntime(session.id).operations).toEqual({})
-  })
-
   it("keeps the latest selected model when an older default-model request fails late", async () => {
     let rejectFirst!: (error: Error) => void
     let resolveSecond!: (value: typeof refreshedBootstrap) => void
@@ -1168,39 +1027,6 @@ describe("desktop session actions", () => {
       selectedPermissionMode: "plan",
       defaultPermissionMode: "plan",
     })
-  })
-
-  it("does not replace a pending first-command open while event listeners reattach", async () => {
-    const session = emptySessionView("session-reattach-command").session
-    let resolveOpen!: (view: DesktopSessionView) => void
-    const open = vi.fn(() => new Promise<DesktopSessionView>((resolve) => (resolveOpen = resolve)))
-    const invokeCommand = vi.fn(async () => undefined)
-    vi.stubGlobal("window", {
-      desktop: {
-        sessions: {
-          create: vi.fn(async () => session),
-          open,
-          invokeCommand,
-          onUpdated: vi.fn(() => () => undefined),
-          onDaemonStatusChanged: vi.fn(() => () => undefined),
-        },
-      },
-    })
-    resetNewConversationState()
-
-    const start = useDesktopSessionStore
-      .getState()
-      .startSession("/compact", { commandLine: "/compact" })
-    await vi.waitFor(() => expect(open).toHaveBeenCalledOnce())
-    const detach = attachDesktopSessionEvents()
-    detach()
-    const reattach = attachDesktopSessionEvents()
-    expect(open).toHaveBeenCalledOnce()
-
-    resolveOpen(emptySessionView(session.id))
-    await expect(start).resolves.toBe(session.id)
-    expect(invokeCommand).toHaveBeenCalledWith({ sessionId: session.id, line: "/compact" })
-    reattach()
   })
 
   it("does not let an open-side project inspection overwrite a later checkout", async () => {

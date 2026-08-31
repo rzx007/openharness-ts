@@ -28,6 +28,11 @@ export function derivePendingHandoffSubmission(
     id: input.id,
     sessionId: input.sessionId,
     content: input.content,
+    ...(readSkillInvocation(input.metadata)
+      ? {
+          skillInvocation: readSkillInvocation(input.metadata),
+        }
+      : {}),
     attachments: [...input.attachments]
       .sort((left, right) => left.seq - right.seq)
       .map(({ assetId, intent, displayName, mediaType, sizeBytes }) => ({
@@ -80,22 +85,28 @@ export function mergeOptimisticTranscript(
 
 function optimisticParts(submission: PendingPromptSubmission): DesktopSessionPart[] {
   const messageId = `optimistic-message:${submission.id}`
-  const textParts: DesktopSessionPart[] = submission.content
-    ? [
-        {
-          id: `optimistic-part:${submission.id}`,
-          sessionId: submission.sessionId,
-          messageId,
-          seq: 0,
-          type: "text",
-          status: "completed",
-          text: submission.content,
-          metadata: { optimistic: true },
-          createdAt: submission.createdAt,
-          updatedAt: submission.createdAt,
-        },
-      ]
-    : []
+  const textParts: DesktopSessionPart[] =
+    submission.content || submission.skillInvocation
+      ? [
+          {
+            id: `optimistic-part:${submission.id}`,
+            sessionId: submission.sessionId,
+            messageId,
+            seq: 0,
+            type: "text",
+            status: "completed",
+            text: submission.content,
+            metadata: {
+              optimistic: true,
+              ...(submission.skillInvocation
+                ? { skillInvocation: submission.skillInvocation }
+                : {}),
+            },
+            createdAt: submission.createdAt,
+            updatedAt: submission.createdAt,
+          },
+        ]
+      : []
   const offset = textParts.length
   return [
     ...textParts,
@@ -119,4 +130,25 @@ function optimisticParts(submission: PendingPromptSubmission): DesktopSessionPar
       }
     }),
   ]
+}
+
+function readSkillInvocation(
+  metadata: Record<string, unknown>
+): PendingPromptSubmission["skillInvocation"] {
+  const value = metadata.skillInvocation
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (record.invocationSource !== "slash" || typeof record.name !== "string") return undefined
+  const name = record.name.trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) return undefined
+  const source = record.source
+  return {
+    name,
+    invocationSource: "slash",
+    ...(typeof record.commandName === "string" ? { commandName: record.commandName } : {}),
+    ...(typeof record.displayName === "string" ? { displayName: record.displayName } : {}),
+    ...(source === "bundled" || source === "user" || source === "project" || source === "plugin"
+      ? { source }
+      : {}),
+  }
 }

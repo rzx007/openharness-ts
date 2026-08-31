@@ -14,13 +14,11 @@ const permissionReplyStatesByOperations = new WeakMap<
 
 const composerOperationKinds = new Set<DesktopOperationKind>([
   "send-prompt",
-  "invoke-command",
   "edit-prompt",
 ])
 
 const sessionErrorOperationKinds = new Set<DesktopOperationKind>([
   "open-session",
-  "invoke-command",
   "edit-prompt",
   "interrupt-run",
 ])

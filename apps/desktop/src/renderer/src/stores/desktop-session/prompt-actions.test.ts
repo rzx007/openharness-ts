@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { DesktopSessionView, SendDesktopPromptInput } from "@shared/session-types"
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import { createEmptySessionRuntime } from "./operation-state"
-import { createPromptActions } from "./prompt-actions"
 import { createQueuedPromptActions } from "./queued-prompt-actions"
 import { emptySessionView, resetDesktopSessionStore, sessionRuntime } from "./store-test-fixtures"
 import { useDesktopSessionStore } from "./store"
@@ -212,18 +211,46 @@ describe("prompt actions session runtime", () => {
     expect(sendPrompt.mock.calls[0]?.[0].id).not.toBe(sendPrompt.mock.calls[1]?.[0].id)
   })
 
-  it("blocks skill commands from silently carrying attachments", async () => {
-    const invokeCommand = vi.fn(async () => undefined)
-    vi.stubGlobal("window", { desktop: { sessions: { invokeCommand } } })
+  it("submits a selected skill as normal prompt metadata and keeps attachments", async () => {
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
     useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+    const skillInvocation = {
+      name: "review",
+      commandName: "review",
+      displayName: "review",
+      source: "project" as const,
+      invocationSource: "slash" as const,
+    }
 
-    await expect(
-      useDesktopSessionStore.getState().sendMessage("/review", {
-        commandLine: "/review",
-        attachments: [readyAttachment("draft-a", "asset-a")],
+    await useDesktopSessionStore.getState().sendMessage("review this", {
+      skillInvocation,
+      attachments: [readyAttachment("draft-a", "asset-a")],
+    })
+
+    expect(sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "review this",
+        skillInvocation,
+        attachments: [{ assetId: "asset-a", intent: "auto", displayName: "asset-a.png" }],
       })
-    ).rejects.toThrow("命令暂不支持附件")
-    expect(invokeCommand).not.toHaveBeenCalled()
+    )
+  })
+
+  it("submits a selected skill even when it has no task text", async () => {
+    const sendPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
+    useDesktopSessionStore.setState({ activeSessionId: "session-1" })
+    const skillInvocation = {
+      name: "archify",
+      invocationSource: "slash" as const,
+    }
+
+    await useDesktopSessionStore.getState().sendMessage("", { skillInvocation })
+
+    expect(sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "", skillInvocation })
+    )
   })
 
   it("cleans an acknowledged send after its session loses the primary stream", async () => {
@@ -320,36 +347,6 @@ describe("prompt actions session runtime", () => {
     const runtime = useDesktopSessionStore.getState().sessionRuntimes["session-1"]!
     expect(runtime.pendingPromptSubmissions[inputId]).toMatchObject({ phase: "accepted" })
     expect(runtime.operations).toEqual({})
-  })
-
-  it("assigns command operations to the invoking session without creating a prompt submission", async () => {
-    let resolveCommand!: () => void
-    const invokeCommand = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveCommand = resolve
-        })
-    )
-    vi.stubGlobal("window", { desktop: { sessions: { invokeCommand } } })
-    useDesktopSessionStore.setState({
-      activeSessionId: "session-1",
-      sessionRuntimes: { "session-1": createEmptySessionRuntime() },
-    })
-
-    const request = useDesktopSessionStore
-      .getState()
-      .sendMessage("/compact", { commandLine: "/compact" })
-
-    const runtime = useDesktopSessionStore.getState().sessionRuntimes["session-1"]!
-    expect(runtime.pendingPromptSubmissions).toEqual({})
-    expect(Object.values(runtime.operations)).toEqual([
-      expect.objectContaining({ kind: "invoke-command", sessionId: "session-1", phase: "pending" }),
-    ])
-    expect(createPromptActions).toBeTypeOf("function")
-
-    resolveCommand()
-    await request
-    expect(useDesktopSessionStore.getState().sessionRuntimes["session-1"]!.operations).toEqual({})
   })
 
   it("reconciles a queued action and its stable operation key when SSE reaches its run", async () => {
@@ -557,25 +554,6 @@ describe("desktop session store prompt intent boundaries", () => {
       attachments: [],
     })
     expect(editLatestPrompt).not.toHaveBeenCalled()
-  })
-
-  it("does not leave a normal prompt placeholder for a slash command", async () => {
-    const invokeCommand = vi.fn(async () => undefined)
-    vi.stubGlobal("window", {
-      desktop: {
-        sessions: {
-          invokeCommand,
-        },
-      },
-    })
-    useDesktopSessionStore.setState({
-      activeSessionId: "session-1",
-    })
-
-    await useDesktopSessionStore.getState().sendMessage("/compact", { commandLine: "/compact" })
-
-    expect(invokeCommand).toHaveBeenCalledWith({ sessionId: "session-1", line: "/compact" })
-    expect(sessionRuntime("session-1").pendingPromptSubmissions).toEqual({})
   })
 
   it("does not let an old session request clear a newer session sending state", async () => {
@@ -821,6 +799,53 @@ describe("desktop session store prompt intent boundaries", () => {
       content: "replacement",
       attachments: [],
     })
+  })
+
+  it("preserves the selected skill when editing its task", async () => {
+    const editLatestPrompt = vi.fn(async () => undefined)
+    vi.stubGlobal("window", { desktop: { sessions: { editLatestPrompt } } })
+    const view = emptySessionView("session-1", 1)
+    const skillInvocation = {
+      name: "archify",
+      commandName: "archify",
+      source: "project",
+      invocationSource: "slash" as const,
+    }
+    view.messages = [
+      {
+        id: "message-skill",
+        sessionId: "session-1",
+        seq: 1,
+        role: "user",
+        inputId: "input-skill",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]
+    view.inputs = [
+      {
+        id: "input-skill",
+        sessionId: "session-1",
+        seq: 1,
+        delivery: "queue",
+        content: "旧任务",
+        attachments: [],
+        metadata: { skillInvocation },
+        createdAt: 1,
+      },
+    ]
+    useDesktopSessionStore.setState({ activeSessionId: "session-1", sessionView: view })
+
+    await useDesktopSessionStore.getState().editLatestMessage("message-skill", "新任务")
+
+    expect(editLatestPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMessageId: "message-skill",
+        content: "新任务",
+        skillInvocation,
+      })
+    )
   })
 
   it("preserves authoritative ordered attachment refs when editing a pure-attachment message", async () => {

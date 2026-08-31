@@ -18,7 +18,6 @@ import type {
   CloseDesktopAuxSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
-  InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
   PromoteDesktopQueuedPromptInput,
   CancelDesktopQueuedPromptInput,
@@ -234,7 +233,6 @@ export type DesktopAPI = {
     fork: (input: ForkDesktopSessionInput) => Promise<DesktopSessionRecord>
     close: () => Promise<void>
     sendPrompt: (input: SendDesktopPromptInput) => Promise<void>
-    invokeCommand: (input: InvokeDesktopCommandInput) => Promise<void>
     editLatestPrompt: (input: EditLatestDesktopPromptInput) => Promise<void>
     promoteQueuedPrompt: (input: PromoteDesktopQueuedPromptInput) => Promise<void>
     cancelQueuedPrompt: (input: CancelDesktopQueuedPromptInput) => Promise<void>

@@ -1,4 +1,6 @@
-import type { SessionInputAttachmentRecord } from "@openharness/client"
+import type { SessionInputAttachmentRecord, SkillInvocationMetadata } from "@openharness/client"
+
+export type { SkillInvocationMetadata } from "@openharness/client"
 
 import type { DesktopAttachmentSupport, DesktopPromptAttachmentInput } from "./attachment-types"
 
@@ -190,10 +192,16 @@ export interface DesktopProjectDetails {
 }
 
 export type DesktopCommandKind = "session" | "template"
-export type DesktopCommandSource = "builtin" | "skill" | "plugin" | "project"
+export type DesktopCommandSource =
+  | "builtin"
+  | "bundled"
+  | "user"
+  | "plugin"
+  | "project"
 
 export interface DesktopCommandCatalogEntry {
   name: string
+  displayName?: string
   description?: string
   kind: DesktopCommandKind
   source?: DesktopCommandSource
@@ -246,11 +254,7 @@ export interface SendDesktopPromptInput {
   sessionId: string
   content: string
   attachments: DesktopPromptAttachmentInput[]
-}
-
-export interface InvokeDesktopCommandInput {
-  sessionId: string
-  line: string
+  skillInvocation?: SkillInvocationMetadata
 }
 
 export interface EditLatestDesktopPromptInput {
@@ -259,6 +263,7 @@ export interface EditLatestDesktopPromptInput {
   content: string
   sourceMessageId: string
   attachments: DesktopPromptAttachmentInput[]
+  skillInvocation?: SkillInvocationMetadata
 }
 
 export interface InterruptDesktopSessionInput {

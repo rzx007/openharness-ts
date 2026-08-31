@@ -11,7 +11,6 @@ import type {
   CloseDesktopAuxSessionInput,
   EditLatestDesktopPromptInput,
   ForkDesktopSessionInput,
-  InvokeDesktopCommandInput,
   InterruptDesktopSessionInput,
   PromoteDesktopQueuedPromptInput,
   CancelDesktopQueuedPromptInput,
@@ -138,7 +137,6 @@ export const IpcChannels = {
   sessionFork: "session:fork",
   sessionClose: "session:close",
   sessionSendPrompt: "session:send-prompt",
-  sessionInvokeCommand: "session:invoke-command",
   sessionEditLatestPrompt: "session:edit-latest-prompt",
   sessionPromoteQueuedPrompt: "session:promote-queued-prompt",
   sessionCancelQueuedPrompt: "session:cancel-queued-prompt",
@@ -350,7 +348,6 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.sessionClose]: { args: []; result: void }
   [IpcChannels.sessionSendPrompt]: { args: [input: SendDesktopPromptInput]; result: void }
-  [IpcChannels.sessionInvokeCommand]: { args: [input: InvokeDesktopCommandInput]; result: void }
   [IpcChannels.sessionEditLatestPrompt]: {
     args: [input: EditLatestDesktopPromptInput]
     result: void

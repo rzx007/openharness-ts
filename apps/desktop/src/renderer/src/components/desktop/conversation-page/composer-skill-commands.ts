@@ -1,10 +1,15 @@
-import type { DesktopCommandCatalogEntry, DesktopCommandSource } from "@shared/session-types"
+import type {
+  DesktopCommandCatalogEntry,
+  DesktopCommandSource,
+  SkillInvocationMetadata,
+} from "@shared/session-types"
 
 export interface ComposerSkillCommand {
   name: string
   label: string
   description: string
   sourceLabel: string
+  source?: DesktopCommandSource
   argumentHint?: string
 }
 
@@ -17,6 +22,11 @@ export interface SelectedSkillCommandDraft {
   body: string
 }
 
+export interface ParsedSkillCommandInvocation {
+  content: string
+  skillInvocation: SkillInvocationMetadata
+}
+
 export function toComposerSkillCommands(
   commands: readonly DesktopCommandCatalogEntry[]
 ): ComposerSkillCommand[] {
@@ -26,13 +36,18 @@ export function toComposerSkillCommands(
       const name = normalizeCommandName(command.name)
       return {
         name,
-        label: commandLabel(name),
+        label: command.displayName?.trim() || commandLabel(name),
         description: command.description?.trim() || "使用此技能处理当前请求",
         sourceLabel: sourceLabel(command.source),
+        ...(command.source ? { source: command.source } : {}),
         ...(command.argumentHint?.trim() ? { argumentHint: command.argumentHint.trim() } : {}),
       }
     })
-    .sort((left, right) => left.label.localeCompare(right.label))
+    .sort(
+      (left, right) =>
+        sourcePriority(left.source) - sourcePriority(right.source) ||
+        left.label.localeCompare(right.label)
+    )
 }
 
 export function getSkillCommandTrigger(draft: string): SkillCommandTrigger | null {
@@ -92,18 +107,32 @@ export function parseSelectedSkillCommandDraft(
   return { command, body: draft.slice(command.name.length) }
 }
 
-export function isKnownSkillCommandDraft(
+export function parseSkillCommandInvocation(
   draft: string,
   commands: readonly ComposerSkillCommand[]
-): boolean {
-  return parseSelectedSkillCommandDraft(draft, commands) !== null
+): ParsedSkillCommandInvocation | null {
+  const selected = parseSelectedSkillCommandDraft(draft, commands)
+  if (!selected) return null
+  const commandName = selected.command.name.replace(/^\//, "")
+  const source = skillSource(selected.command.source)
+  return {
+    content: selected.body.trim(),
+    skillInvocation: {
+      name: commandName,
+      commandName,
+      displayName: selected.command.label,
+      ...(source ? { source } : {}),
+      invocationSource: "slash",
+    },
+  }
 }
 
-export function skillCommandInvocationLine(
-  draft: string,
-  commands: readonly ComposerSkillCommand[]
-): string | null {
-  return isKnownSkillCommandDraft(draft, commands) ? draft : null
+function skillSource(
+  source: DesktopCommandSource | undefined
+): SkillInvocationMetadata["source"] | undefined {
+  return source === "bundled" || source === "user" || source === "project" || source === "plugin"
+    ? source
+    : undefined
 }
 
 function normalizeCommandName(name: string): string {
@@ -123,7 +152,16 @@ function commandLabel(name: string): string {
 function sourceLabel(source: DesktopCommandSource | undefined): string {
   if (source === "project") return "项目"
   if (source === "plugin") return "插件"
+  if (source === "bundled" || source === "builtin") return "内置"
   return "个人"
+}
+
+function sourcePriority(source: DesktopCommandSource | undefined): number {
+  if (source === "project") return 0
+  if (source === "user") return 1
+  if (source === "plugin") return 2
+  if (source === "bundled" || source === "builtin") return 3
+  return 3
 }
 
 function normalizeSearchText(value: string): string {

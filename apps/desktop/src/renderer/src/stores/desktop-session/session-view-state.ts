@@ -92,7 +92,6 @@ function operationConfirmedByView(
       const permission = view.permissions.find((candidate) => candidate.id === operation.target)
       return Boolean(permission && permission.status !== "pending")
     }
-    case "invoke-command":
     case "project-action":
       return false
   }

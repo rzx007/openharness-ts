@@ -91,6 +91,64 @@ describe("resolveDesktopRuntimeSnapshot", () => {
 })
 
 describe("DesktopSessionService.sendPrompt attachments", () => {
+  it("forwards a selected skill as prompt metadata", async () => {
+    const admitPrompt = vi.fn(async () => undefined)
+    const service = serviceWithClient({ admitPrompt })
+    const skillInvocation = {
+      name: "archify",
+      commandName: "archify",
+      displayName: "archify",
+      source: "user",
+      invocationSource: "slash" as const,
+    }
+
+    await service.sendPrompt({
+      id: "input-skill",
+      sessionId: "session-1",
+      content: "画一下系统架构",
+      attachments: [],
+      skillInvocation,
+    })
+
+    expect(admitPrompt).toHaveBeenCalledWith("session-1", {
+      id: "input-skill",
+      content: "画一下系统架构",
+      delivery: "queue",
+      attachments: [],
+      metadata: {
+        origin: {
+          client: "desktop",
+          component: "composer",
+          action: "append_prompt",
+        },
+        skillInvocation,
+      },
+    })
+  })
+
+  it("accepts a selected skill without task text or attachments", async () => {
+    const admitPrompt = vi.fn(async () => undefined)
+    const service = serviceWithClient({ admitPrompt })
+
+    await service.sendPrompt({
+      id: "input-skill-only",
+      sessionId: "session-1",
+      content: "",
+      attachments: [],
+      skillInvocation: { name: "archify", invocationSource: "slash" },
+    })
+
+    expect(admitPrompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        content: "",
+        metadata: expect.objectContaining({
+          skillInvocation: { name: "archify", invocationSource: "slash" },
+        }),
+      })
+    )
+  })
+
   it("accepts an attachment-only prompt and preserves attachment order", async () => {
     const admitPrompt = vi.fn(async () => undefined)
     const service = serviceWithClient({ admitPrompt })

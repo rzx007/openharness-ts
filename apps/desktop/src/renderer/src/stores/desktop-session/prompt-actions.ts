@@ -19,6 +19,7 @@ import type {
   PromptActions,
 } from "./types"
 import { removeDraftAttachment, sessionComposerScope } from "./composer-draft-state"
+import type { SkillInvocationMetadata } from "@shared/session-types"
 
 interface PromptActionsContext extends DesktopStoreContext {
   scheduleSelectedProjectGitRefresh: (force: boolean) => void
@@ -46,13 +47,10 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
             ]
           : []
       )
-      if (attachments.length !== attachmentDrafts.length || (!prompt && attachments.length === 0)) {
-        return
-      }
-
-      if (options?.commandLine) {
-        if (attachments.length > 0) throw new Error("命令暂不支持附件，请先移除附件。")
-        await invokeCommand(sessionId, options.commandLine)
+      if (
+        attachments.length !== attachmentDrafts.length ||
+        (!prompt && attachments.length === 0 && !options?.skillInvocation)
+      ) {
         return
       }
 
@@ -62,6 +60,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
         (submission) =>
           submission.content === prompt &&
           submission.phase === "failed" &&
+          sameSkillInvocation(submission.skillInvocation, options?.skillInvocation) &&
           sameAttachmentSnapshot(submission.attachments, attachments)
       )
       const submission: PendingPromptSubmission = retry
@@ -70,6 +69,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
             id: globalThis.crypto.randomUUID(),
             sessionId,
             content: prompt,
+            ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
             attachments,
             createdAt: Date.now(),
             phase: "submitting",
@@ -104,6 +104,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
             intent,
             displayName,
           })),
+          ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
         })
         clearSubmittedAttachments(sessionId, attachmentDrafts)
         const keepLocalAcknowledgement = get().activeSessionId === sessionId
@@ -184,7 +185,12 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       const attachments = [...(sourceInput?.attachments ?? [])]
         .sort((left, right) => left.seq - right.seq)
         .map(({ assetId, intent, displayName }) => ({ assetId, intent, displayName }))
-      if ((!prompt && attachments.length === 0) || !sourceMessageId || !sessionId) return
+      const skillInvocation = readSkillInvocationMetadata(sourceInput?.metadata.skillInvocation)
+      if (
+        (!prompt && attachments.length === 0 && !skillInvocation) ||
+        !sourceMessageId ||
+        !sessionId
+      ) return
 
       const runtime = getSessionRuntime(current, sessionId)
       const edit: PendingPromptEdit =
@@ -219,6 +225,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           content: prompt,
           sourceMessageId,
           attachments,
+          ...(skillInvocation ? { skillInvocation } : {}),
         })
         replaceRuntime(sessionId, (currentRuntime) =>
           removeOperation(
@@ -307,31 +314,6 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
     },
   }
 
-  async function invokeCommand(sessionId: string, line: string): Promise<void> {
-    const operationId = globalThis.crypto.randomUUID()
-    replaceRuntime(sessionId, (runtime) =>
-      beginOperation(runtime, {
-        id: operationId,
-        kind: "invoke-command",
-        sessionId,
-        target: line,
-        startedAt: Date.now(),
-      })
-    )
-    try {
-      await window.desktop.sessions.invokeCommand({ sessionId, line })
-      replaceRuntime(sessionId, (runtime) => removeOperation(runtime, operationId))
-    } catch (error) {
-      const message = errorMessage(error)
-      replaceRuntime(sessionId, (runtime) =>
-        failOperation(runtime, operationId, message, Date.now())
-      )
-      throw error
-    } finally {
-      context.scheduleSelectedProjectGitRefresh(true)
-    }
-  }
-
   function replaceRuntime(
     sessionId: string,
     update: (runtime: DesktopSessionRuntime) => DesktopSessionRuntime
@@ -366,6 +348,28 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
   }
 }
 
+function readSkillInvocationMetadata(value: unknown): SkillInvocationMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (record.invocationSource !== "slash" || typeof record.name !== "string") return undefined
+  const name = record.name.trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) return undefined
+  const source = readSkillSource(record.source)
+  return {
+    name,
+    invocationSource: "slash",
+    ...(typeof record.commandName === "string" ? { commandName: record.commandName } : {}),
+    ...(typeof record.displayName === "string" ? { displayName: record.displayName } : {}),
+    ...(source ? { source } : {}),
+  }
+}
+
+function readSkillSource(value: unknown): SkillInvocationMetadata["source"] | undefined {
+  return value === "bundled" || value === "user" || value === "project" || value === "plugin"
+    ? value
+    : undefined
+}
+
 function sameAttachmentSnapshot(
   left: readonly { assetId: string }[],
   right: readonly { assetId: string }[]
@@ -374,6 +378,13 @@ function sameAttachmentSnapshot(
     left.length === right.length &&
     left.every((attachment, index) => attachment.assetId === right[index]?.assetId)
   )
+}
+
+function sameSkillInvocation(
+  left: SkillInvocationMetadata | undefined,
+  right: SkillInvocationMetadata | undefined
+): boolean {
+  return left?.name === right?.name && left?.invocationSource === right?.invocationSource
 }
 
 function getSessionRuntime(

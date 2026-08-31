@@ -68,6 +68,28 @@ describe("mergeOptimisticTranscript", () => {
     expect(result.parts).toEqual([])
   })
 
+  it("shows a selected skill capsule immediately, including for an empty task", () => {
+    const skillInvocation = {
+      name: "archify",
+      displayName: "Archify",
+      source: "project" as const,
+      invocationSource: "slash" as const,
+    }
+    const result = mergeOptimisticTranscript([], [], [{
+      ...submission,
+      content: "",
+      skillInvocation,
+    }])
+
+    expect(result.parts).toEqual([
+      expect.objectContaining({
+        type: "text",
+        text: "",
+        metadata: { optimistic: true, skillInvocation },
+      }),
+    ])
+  })
+
   it("renders ordered attachment parts and omits an empty text part", () => {
     const result = mergeOptimisticTranscript(
       [],

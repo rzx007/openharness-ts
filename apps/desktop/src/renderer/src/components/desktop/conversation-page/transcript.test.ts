@@ -7,6 +7,56 @@ import { MessageBlock } from "./message-block"
 import { visibleTranscriptParts } from "./transcript-visibility"
 
 describe("visibleTranscriptParts", () => {
+  it("renders selected skill metadata as a compact capsule above the user task", () => {
+    const message: DesktopSessionMessage = {
+      id: "message-skill",
+      sessionId: "session-1",
+      seq: 1,
+      role: "user",
+      inputId: "input-skill",
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const html = renderToStaticMarkup(
+      createElement(MessageBlock, {
+        message,
+        parts: [
+          {
+            id: "text-skill",
+            sessionId: "session-1",
+            messageId: "message-skill",
+            seq: 0,
+            type: "text",
+            status: "completed",
+            text: "画一下系统架构",
+            metadata: {
+              skillInvocation: {
+                name: "archify",
+                displayName: "Archify",
+                source: "project",
+                invocationSource: "slash",
+              },
+            },
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        streaming: false,
+        onOpenFile: () => undefined,
+        canOpenReview: false,
+        onOpenReview: () => undefined,
+        onOpenTerminal: () => undefined,
+      })
+    )
+
+    expect(html).toContain('aria-label="使用的技能"')
+    expect(html).toContain("Archify")
+    expect(html).toContain("项目")
+    expect(html).toContain("画一下系统架构")
+    expect(html).not.toContain("SKILL.md")
+  })
+
   it("removes reasoning from a read-only child replay without hiding other activity", () => {
     const parts = [
       part("reasoning", "private reasoning"),

@@ -71,7 +71,7 @@ function renderAppError(state: DesktopSessionState): string {
 describe("scoped operation errors", () => {
   it.each([
     ["open-session", "无法打开会话"],
-    ["invoke-command", "命令执行失败"],
+    ["edit-prompt", "消息编辑失败"],
   ] as const)("shows a failed active %s operation", (kind, message) => {
     const state = stateWith({
       activeSessionId: "session-a",
@@ -91,7 +91,7 @@ describe("scoped operation errors", () => {
       ),
       sessionRuntimes: {
         "session-old": runtimeWith(
-          failedOperation("command-old", "invoke-command", "session-old", "旧会话命令失败")
+          failedOperation("edit-old", "edit-prompt", "session-old", "旧会话编辑失败")
         ),
       },
     })
@@ -99,7 +99,7 @@ describe("scoped operation errors", () => {
     const html = renderConversationError(state)
 
     expect(html).toContain("无法创建新会话")
-    expect(html).not.toContain("旧会话命令失败")
+    expect(html).not.toContain("旧会话编辑失败")
   })
 
   it("shows only the selected project's operation error", () => {

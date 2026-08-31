@@ -36,7 +36,7 @@ import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
 import { derivePendingHandoffSubmission, mergeOptimisticTranscript } from "./optimistic-transcript"
 import {
-  skillCommandInvocationLine,
+  parseSkillCommandInvocation,
   toComposerSkillCommands,
   type ComposerSkillCommand,
 } from "./composer-skill-commands"
@@ -142,18 +142,24 @@ function ConversationPane({
   const submitDraft = async (): Promise<void> => {
     const content = draft.trim()
     const ready = areDesktopAttachmentsSendable(attachments)
-    if ((!content && attachments.length === 0) || !ready || sending || archived) return
+    const skill = parseSkillCommandInvocation(content, skillCommands)
+    if ((!content && attachments.length === 0 && !skill) || !ready || sending || archived) return
     const submittedSessionId = activeSessionId
-    const commandLine = skillCommandInvocationLine(content, skillCommands) ?? undefined
-    if (commandLine && attachments.length > 0) {
-      setComposerValidationError("命令暂不支持附件，请先移除附件后再执行。")
-      return
-    }
+    const submittedContent = skill?.content ?? content
     setComposerValidationError(null)
     try {
       let completedSessionId = submittedSessionId
-      if (hasSession) await sendMessage(content, { commandLine, attachments })
-      else completedSessionId = await startSession(content, { commandLine, attachments })
+      if (hasSession) {
+        await sendMessage(submittedContent, {
+          skillInvocation: skill?.skillInvocation,
+          attachments,
+        })
+      } else {
+        completedSessionId = await startSession(submittedContent, {
+          skillInvocation: skill?.skillInvocation,
+          attachments,
+        })
+      }
       const currentSessionId = useDesktopSessionStore.getState().activeSessionId
       setDraft((current) =>
         resolveDraftAfterSubmission(current, content, completedSessionId, currentSessionId)

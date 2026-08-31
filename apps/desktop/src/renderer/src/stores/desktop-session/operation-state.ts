@@ -18,7 +18,7 @@ export function beginOperation(
       ([, operation]) =>
         operation.phase !== "failed" ||
         operation.kind !== input.kind ||
-        (input.kind !== "invoke-command" && operation.target !== input.target)
+        operation.target !== input.target
     )
   )
   return {

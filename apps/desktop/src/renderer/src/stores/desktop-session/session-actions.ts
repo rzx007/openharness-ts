@@ -515,9 +515,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           : []
       )
       if (attachments.length !== attachmentDrafts.length) return null
-      if (options?.commandLine && attachments.length > 0) {
-        throw new Error("命令暂不支持附件，请先移除附件。")
-      }
       const {
         selectedProject,
         workspaceMode,
@@ -530,7 +527,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       const model = selectedModel ?? defaultModel
       const provider = selectedProvider ?? defaultProvider
       if (
-        (!prompt && attachments.length === 0) ||
+        (!prompt && attachments.length === 0 && !options?.skillInvocation) ||
         Object.values(get().newConversationRuntime.operations).some(
           (operation) => operation.kind === "create-session" && operation.phase === "pending"
         )
@@ -551,7 +548,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         sessionId: null,
         startedAt: Date.now(),
       }
-      let commandOperationId: string | null = null
       let startedSessionId: string | null = null
       let clearedFirstPromptDraft = false
       set((state) => {
@@ -577,17 +573,16 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
               }
         const session = await window.desktop.sessions.create(sessionInput)
         startedSessionId = session.id
-        const firstSubmission: PendingPromptSubmission | null = options?.commandLine
-          ? null
-          : {
-              id: promptSubmissionId,
-              sessionId: session.id,
-              content: prompt,
-              attachments,
-              createdAt: Date.now(),
-              phase: "submitting",
-              placement: "transcript",
-            }
+        const firstSubmission: PendingPromptSubmission = {
+          id: promptSubmissionId,
+          sessionId: session.id,
+          content: prompt,
+          ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
+          attachments,
+          createdAt: Date.now(),
+          phase: "submitting",
+          placement: "transcript",
+        }
         let ownsCurrentPage = false
         set((state) => {
           const ownsNewConversationRuntime =
@@ -611,15 +606,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                   session.id
                 ).target,
               }
-          const runtime = firstSubmission
-            ? {
-                ...bound.target,
-                pendingPromptSubmissions: {
-                  ...bound.target.pendingPromptSubmissions,
-                  [promptSubmissionId]: firstSubmission,
-                },
-              }
-            : bound.target
+          const runtime = {
+            ...bound.target,
+            pendingPromptSubmissions: {
+              ...bound.target.pendingPromptSubmissions,
+              [promptSubmissionId]: firstSubmission,
+            },
+          }
           const acknowledgedRuntime = acknowledgeOperation(runtime, promptSubmissionId, Date.now())
           const composerState = ownsNewConversationRuntime
             ? migrateComposerScope(
@@ -628,7 +621,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
                 sessionComposerScope(session.id)
               )
             : { composerDraftsByScope: state.composerDraftsByScope }
-          clearedFirstPromptDraft = Boolean(firstSubmission && ownsNewConversationRuntime)
+          clearedFirstPromptDraft = ownsNewConversationRuntime
           return {
             sessions: upsertSession(state.sessions, session),
             newConversationRuntime: bound.source,
@@ -654,87 +647,48 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           )
           throw new Error(openError?.error ?? "无法打开新会话")
         }
-        if (options?.commandLine) {
-          const invokeCommandOperationId = globalThis.crypto.randomUUID()
-          commandOperationId = invokeCommandOperationId
-          set((state) => {
-            const sessionRuntimes = updateSessionRuntime(
-              state.sessionRuntimes,
-              session.id,
-              (runtime) =>
-                beginOperation(runtime, {
-                  id: invokeCommandOperationId,
-                  kind: "invoke-command",
-                  sessionId: session.id,
-                  target: options.commandLine,
-                  startedAt: Date.now(),
-                })
-            )
-            return { sessionRuntimes }
-          })
-          await window.desktop.sessions.invokeCommand({
-            sessionId: session.id,
-            line: options.commandLine,
-          })
-          if (commandOperationId) {
-            set((state) => {
-              const backgroundCommand = get().activeSessionId !== session.id
-              const sessionRuntimes = updateSessionRuntime(
-                state.sessionRuntimes,
-                session.id,
-                (runtime) => {
-                  const afterCommand = removeOperation(runtime, invokeCommandOperationId)
-                  return backgroundCommand
-                    ? removeOperation(afterCommand, promptSubmissionId)
-                    : afterCommand
-                }
-              )
-              return { sessionRuntimes }
-            })
-          }
-        } else {
-          await window.desktop.sessions.sendPrompt({
-            id: promptSubmissionId,
-            sessionId: session.id,
-            content: prompt,
-            attachments: attachments.map(({ assetId, intent, displayName }) => ({
-              assetId,
-              intent,
-              displayName,
-            })),
-          })
-          clearFirstPromptDraft(session.id, prompt, attachmentDrafts)
-          const keepLocalAcknowledgement = get().activeSessionId === session.id
-          set((state) => {
-            const sessionRuntimes = updateSessionRuntime(
-              state.sessionRuntimes,
-              session.id,
-              (runtime) => {
-                const acceptedRuntime = {
-                  ...runtime,
-                  pendingPromptSubmissions: updatePendingPromptSubmission(
-                    runtime.pendingPromptSubmissions,
-                    promptSubmissionId,
-                    (submission) => ({ ...submission, phase: "accepted", error: undefined })
-                  ),
-                }
-                return keepLocalAcknowledgement
-                  ? acceptedRuntime
-                  : removeOperation(
-                      {
-                        ...acceptedRuntime,
-                        pendingPromptSubmissions: removePendingPromptSubmission(
-                          acceptedRuntime.pendingPromptSubmissions,
-                          promptSubmissionId
-                        ),
-                      },
-                      promptSubmissionId
-                    )
+        await window.desktop.sessions.sendPrompt({
+          id: promptSubmissionId,
+          sessionId: session.id,
+          content: prompt,
+          attachments: attachments.map(({ assetId, intent, displayName }) => ({
+            assetId,
+            intent,
+            displayName,
+          })),
+          ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
+        })
+        clearFirstPromptDraft(session.id, prompt, attachmentDrafts)
+        const keepLocalAcknowledgement = get().activeSessionId === session.id
+        set((state) => {
+          const sessionRuntimes = updateSessionRuntime(
+            state.sessionRuntimes,
+            session.id,
+            (runtime) => {
+              const acceptedRuntime = {
+                ...runtime,
+                pendingPromptSubmissions: updatePendingPromptSubmission(
+                  runtime.pendingPromptSubmissions,
+                  promptSubmissionId,
+                  (submission) => ({ ...submission, phase: "accepted", error: undefined })
+                ),
               }
-            )
-            return { sessionRuntimes }
-          })
-        }
+              return keepLocalAcknowledgement
+                ? acceptedRuntime
+                : removeOperation(
+                    {
+                      ...acceptedRuntime,
+                      pendingPromptSubmissions: removePendingPromptSubmission(
+                        acceptedRuntime.pendingPromptSubmissions,
+                        promptSubmissionId
+                      ),
+                    },
+                    promptSubmissionId
+                  )
+            }
+          )
+          return { sessionRuntimes }
+        })
         const title = prompt
           ? formatSessionTitle(prompt)
           : [...(attachments[0]?.displayName || "新对话")].slice(0, 20).join("")
@@ -759,7 +713,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           ? currentState.sessionRuntimes[startedSessionId]
           : null
         const confirmed =
-          !options?.commandLine &&
           Boolean(
             startedSessionId &&
             currentSessionRuntime &&
@@ -773,9 +726,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             state.newConversationRuntime.operations[promptSubmissionId]?.phase === "pending"
           const sessionRuntimes = startedSessionId
             ? updateSessionRuntime(state.sessionRuntimes, startedSessionId, (runtime) => {
-                if (commandOperationId) {
-                  return failOperation(runtime, commandOperationId, message, Date.now())
-                }
                 return {
                   ...runtime,
                   pendingPromptSubmissions: confirmed

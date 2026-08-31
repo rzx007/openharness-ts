@@ -6,6 +6,7 @@ import type {
   DesktopSessionRecord,
   DesktopSessionView,
   DesktopWorkspaceMode,
+  SkillInvocationMetadata,
 } from "@shared/session-types"
 import type { DesktopAttachmentSupport } from "@shared/attachment-types"
 import type {
@@ -21,7 +22,7 @@ import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
 export type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 export interface SubmitPromptOptions {
-  commandLine?: string
+  skillInvocation?: SkillInvocationMetadata
   attachments?: readonly DesktopAttachmentDraft[]
 }
 
@@ -34,6 +35,7 @@ export interface PendingPromptSubmission {
   id: string
   sessionId: string
   content: string
+  skillInvocation?: SkillInvocationMetadata
   attachments: PendingPromptAttachmentSnapshot[]
   createdAt: number
   phase: "submitting" | "accepted" | "failed"
@@ -64,7 +66,6 @@ export type DesktopOperationKind =
   | "create-session"
   | "open-session"
   | "send-prompt"
-  | "invoke-command"
   | "edit-prompt"
   | "promote-prompt"
   | "cancel-prompt"

@@ -85,12 +85,14 @@ export function MessageBlock({
 }): React.JSX.Element {
   if (message.role === "user") {
     const content = messageTextContent(parts)
+    const skillInvocation = readSkillInvocation(parts)
     const attachmentParts = parts
       .filter((part): part is DesktopAttachmentSessionPart => part.type === "attachment")
       .sort((left, right) => left.seq - right.seq)
     return (
       <UserMessageBlock
         content={content}
+        skillInvocation={skillInvocation}
         attachmentParts={attachmentParts}
         timestamp={message.updatedAt}
         userActions={userActions}
@@ -117,11 +119,13 @@ export function MessageBlock({
 
 function UserMessageBlock({
   content,
+  skillInvocation,
   attachmentParts,
   timestamp,
   userActions,
 }: {
   content: string
+  skillInvocation: DisplaySkillInvocation | null
   attachmentParts: DesktopAttachmentSessionPart[]
   timestamp: number
   userActions?: { canEdit: boolean; onEdit: (content: string) => void }
@@ -220,6 +224,7 @@ function UserMessageBlock({
             ))}
           </AttachmentGroup>
         ) : null}
+        {skillInvocation ? <SkillInvocationCapsule invocation={skillInvocation} /> : null}
         {content.trim() ? <UserMessageBubble content={content} /> : null}
         <MessageToolbar align="end" timestamp={timestamp}>
           {content.trim() ? (
@@ -239,6 +244,60 @@ function UserMessageBlock({
       </MessageContent>
     </Message>
   )
+}
+
+interface DisplaySkillInvocation {
+  name: string
+  displayName?: string
+  source?: string
+}
+
+function SkillInvocationCapsule({
+  invocation,
+}: {
+  invocation: DisplaySkillInvocation
+}): React.JSX.Element {
+  return (
+    <div
+      aria-label="使用的技能"
+      className="inline-flex max-w-[78%] items-center gap-1.5 rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] leading-none text-ui-muted"
+    >
+      <span>Skill</span>
+      <span className="font-medium text-foreground">{invocation.displayName ?? invocation.name}</span>
+      {invocation.source ? <span>· {skillSourceLabel(invocation.source)}</span> : null}
+    </div>
+  )
+}
+
+function readSkillInvocation(parts: DesktopSessionPart[]): DisplaySkillInvocation | null {
+  for (const part of parts) {
+    if (part.type !== "text") continue
+    const value = part.metadata.skillInvocation
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue
+    const record = value as Record<string, unknown>
+    if (record.invocationSource !== "slash" || typeof record.name !== "string") continue
+    const name = record.name.trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) continue
+    const source = record.source
+    return {
+      name,
+      ...(typeof record.displayName === "string" && record.displayName.trim()
+        ? { displayName: record.displayName.trim() }
+        : {}),
+      ...(source === "bundled" || source === "user" || source === "project" || source === "plugin"
+        ? { source }
+        : {}),
+    }
+  }
+  return null
+}
+
+function skillSourceLabel(source: string): string {
+  if (source === "project") return "项目"
+  if (source === "plugin") return "插件"
+  if (source === "bundled" || source === "builtin") return "内置"
+  if (source === "user") return "个人"
+  return source
 }
 
 function UserMessageBubble({ content }: { content: string }): React.JSX.Element {

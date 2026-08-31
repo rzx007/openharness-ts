@@ -79,7 +79,7 @@ describe("desktop session selectors", () => {
           operations: {
             "send-a": {
               id: "send-a",
-              kind: "invoke-command",
+              kind: "edit-prompt",
               phase: "failed",
               sessionId: "session-a",
               startedAt: 1,
@@ -169,7 +169,7 @@ describe("desktop session selectors", () => {
     )
   })
 
-  it.each(["open-session", "invoke-command", "edit-prompt", "interrupt-run"] as const)(
+  it.each(["open-session", "edit-prompt", "interrupt-run"] as const)(
     "selects a failed %s operation for its active session owner",
     (kind) => {
       const state = stateWith({
