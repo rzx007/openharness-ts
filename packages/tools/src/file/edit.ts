@@ -45,6 +45,15 @@ export const fileEditTool: ToolDefinition = {
 
     const filePath = resolveToolPath(rawPath, cwd);
 
+    const managed = context.managedResources?.check(filePath, "edit");
+    if (managed && !managed.allowed) {
+      return {
+        content: [{ type: "text", text: "Error: this is a managed context resource; use its semantic tool instead." }],
+        isError: true,
+        failureKind: "policy",
+      };
+    }
+
     if (isSystemPath(filePath)) {
       return {
         content: [{ type: "text", text: `Error: editing system directory files is not allowed: ${filePath}` }],

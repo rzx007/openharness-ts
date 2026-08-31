@@ -22,7 +22,7 @@ import type {
   ModelService,
   OutputStyleService,
   PluginService,
-  ProfileService,
+  AgentIdentityService,
   ProjectInitService,
   ProviderService,
   SettingsService,
@@ -74,7 +74,7 @@ export interface OpenHarnessServerServices {
   memory?: MemoryService;
   auth?: AuthService;
   dream?: DreamService;
-  profile?: ProfileService;
+  agentIdentity?: AgentIdentityService;
   outputStyle?: OutputStyleService;
   projectInit?: ProjectInitService;
   plugin?: PluginService;
@@ -352,7 +352,7 @@ export class OpenHarnessHttpServer {
       "/",
       createServiceRoutes({
         dreamService: this.services.dream ?? this.application.dream,
-        profileService: this.services.profile,
+        agentIdentityService: this.services.agentIdentity,
         outputStyleService: this.services.outputStyle,
         projectInitService: this.services.projectInit,
         pluginService: this.services.plugin,

@@ -23,6 +23,7 @@ export {
   fileReadTool,
   fileWriteTool,
   globTool,
+  ManagedResourcePolicy,
   normalizeToolPath,
   resolveToolPath,
   type FileChangePreview,

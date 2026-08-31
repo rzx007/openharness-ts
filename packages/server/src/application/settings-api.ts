@@ -176,7 +176,7 @@ export interface DreamService {
   }): Promise<DreamStartResult> | DreamStartResult;
 }
 
-export interface ProfileService {
+export interface AgentIdentityService {
   status(): Promise<{ report: string }> | { report: string };
   init(): Promise<{ report: string }> | { report: string };
 }

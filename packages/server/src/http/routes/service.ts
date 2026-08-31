@@ -7,14 +7,14 @@ import type {
   HooksService,
   OutputStyleService,
   PluginService,
-  ProfileService,
+  AgentIdentityService,
   ProjectInitService,
 } from "../../application/index.js";
 import type { DaemonControlService } from "../../application/control/index.js";
 
 export interface ServiceRoutesContext {
   dreamService?: DreamService;
-  profileService?: ProfileService;
+  agentIdentityService?: AgentIdentityService;
   outputStyleService?: OutputStyleService;
   projectInitService?: ProjectInitService;
   pluginService?: PluginService;
@@ -54,22 +54,22 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
       }
     })
-    .get("/profile", async () => {
-      if (!context.profileService) return errorResponse(501, "Profile service is not configured");
+    .get("/agent-identity", async () => {
+      if (!context.agentIdentityService) return errorResponse(501, "Agent identity service is not configured");
       try {
-        return jsonResponse(await context.profileService.status());
+        return jsonResponse(await context.agentIdentityService.status());
       } catch (error) {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
       }
     })
-    .post("/profile/init", async () => {
-      if (!context.profileService) return errorResponse(501, "Profile service is not configured");
+    .post("/agent-identity/init", async () => {
+      if (!context.agentIdentityService) return errorResponse(501, "Agent identity service is not configured");
       const lease = context.control.acquireGlobalMutation();
       if (!lease) {
-        return errorResponse(409, "Cannot initialize profile while session runs are active");
+        return errorResponse(409, "Cannot initialize agent identity while session runs are active");
       }
       try {
-        const result = await context.profileService.init();
+        const result = await context.agentIdentityService.init();
         await context.control.closeAllRuntimes();
         return jsonResponse(result);
       } catch (error) {

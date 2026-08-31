@@ -697,19 +697,19 @@ export class OpenHarnessClient {
     });
   }
 
-  /** `GET /profile` */
-  async getProfileStatus(
+  /** `GET /agent-identity` */
+  async getAgentIdentityStatus(
     options: { signal?: AbortSignal } = {},
   ): Promise<string> {
-    const response = await this.request<{ report: string }>("/profile", {
+    const response = await this.request<{ report: string }>("/agent-identity", {
       signal: options.signal,
     });
     return response.report;
   }
 
-  /** `POST /profile/init` */
-  async initProfile(options: { signal?: AbortSignal } = {}): Promise<string> {
-    const response = await this.request<{ report: string }>("/profile/init", {
+  /** `POST /agent-identity/init` */
+  async initAgentIdentity(options: { signal?: AbortSignal } = {}): Promise<string> {
+    const response = await this.request<{ report: string }>("/agent-identity/init", {
       method: "POST",
       signal: options.signal,
     });

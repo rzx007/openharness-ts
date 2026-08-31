@@ -16,6 +16,7 @@ import type {
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
   AgentContextMemoryHost,
+  AgentManagedResourcePolicy,
   AgentEffects,
   AgentEventListener,
   Settings,
@@ -75,6 +76,7 @@ export interface DaemonAgentLoaderOptions {
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
   contextMemory?: AgentContextMemoryHost;
+  managedResources?: AgentManagedResourcePolicy;
   createContextRetriever?(session: SessionRecord): MemoryRetriever;
   attachmentResourceRoot?(session: SessionRecord): string;
   /**
@@ -150,6 +152,7 @@ export function createDaemonAgentLoader(
         ...(options.imageToText ? { imageToText: options.imageToText } : {}),
         ...(options.attachments ? { attachments: options.attachments } : {}),
         ...(options.contextMemory ? { contextMemory: options.contextMemory } : {}),
+        ...(options.managedResources ? { managedResources: options.managedResources } : {}),
         ...(contextRetriever ? { contextRetriever } : {}),
         ...(attachmentResourceRoot ? { attachmentResourceRoot } : {}),
       },

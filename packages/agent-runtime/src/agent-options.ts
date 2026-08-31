@@ -4,6 +4,7 @@ import type {
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
   AgentContextMemoryHost,
+  AgentManagedResourcePolicy,
   AgentEffects,
   AgentScheduleEffects,
   PermissionMode,
@@ -35,6 +36,7 @@ export interface AgentHostCapabilities {
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
   contextMemory?: AgentContextMemoryHost;
+  managedResources?: AgentManagedResourcePolicy;
   contextRetriever?: MemoryRetriever;
   /** Stable per-session directory exposed read-only inside Docker. */
   attachmentResourceRoot?: string;

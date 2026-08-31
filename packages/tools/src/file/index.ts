@@ -1,6 +1,7 @@
 export * from "./diff.js";
 export * from "./edit.js";
 export * from "./glob.js";
+export * from "./managed-resource-policy.js";
 export * from "./operations.js";
 export * from "./path.js";
 export * from "./preview.js";

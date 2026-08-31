@@ -7,7 +7,7 @@ export { createDefaultMemoryService } from "./memory-service.js";
 export { createDefaultModelService } from "./model-service.js";
 export { createDefaultOutputStyleService } from "./output-style-service.js";
 export { createDefaultPluginService } from "./plugin-service.js";
-export { createDefaultProfileService } from "./profile-service.js";
+export { createDefaultAgentIdentityService } from "./profile-service.js";
 export { createDefaultProjectInitService } from "./project-init-service.js";
 export {
   createDefaultProviderService,

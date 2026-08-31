@@ -404,6 +404,7 @@ export interface QueryEngine {
   setImageToText(imageToText: AgentImageToTextHost | undefined): void;
   setAttachments(attachments: AgentAttachmentResourceHost | undefined): void;
   setContextMemory(contextMemory: AgentContextMemoryHost | undefined): void;
+  setManagedResources(managedResources: import("./tools").AgentManagedResourcePolicy | undefined): void;
 }
 
 export interface MemoryRetriever {

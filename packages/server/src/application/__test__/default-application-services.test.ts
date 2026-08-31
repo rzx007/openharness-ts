@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,7 +13,7 @@ import {
   createDefaultAgentPersonaService,
   createDefaultAuthService,
   createDefaultContextService,
-  createDefaultProfileService,
+  createDefaultAgentIdentityService,
   createDefaultProviderService,
   createDefaultModelService,
   createDefaultSettingsService,
@@ -34,11 +34,12 @@ afterEach(() => {
 });
 
 describe("default daemon application services", () => {
-  it("shows profile status and initializes missing personal prompt files", async () => {
-    const profile = createDefaultProfileService();
-    expect((await profile.status()).report).toContain("SOUL.md: missing");
-    expect((await profile.init()).report).toContain("Created: 2");
-    expect((await profile.init()).report).toContain("Skipped existing: 2");
+  it("shows agent identity status and initializes only SOUL.md", async () => {
+    const identity = createDefaultAgentIdentityService();
+    expect((await identity.status()).report).toContain("SOUL.md: missing");
+    expect((await identity.init()).report).toContain("Created: 1");
+    expect((await identity.init()).report).toContain("Skipped existing: 1");
+    expect(() => accessSync(join(process.env.OPENHARNESS_CONFIG_DIR!, "USER.md"))).toThrow();
   });
 
   it("reports blocked personal prompt files in context preview", async () => {

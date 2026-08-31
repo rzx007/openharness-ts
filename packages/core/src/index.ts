@@ -39,6 +39,9 @@ export type {
   AgentAttachmentTextSlice,
   AgentContextMemoryCallContext,
   AgentContextMemoryHost,
+  AgentManagedResourcePolicy,
+  ManagedResourceDecision,
+  ManagedResourceOperation,
   ToolRegistry as IToolRegistry,
 } from "./types/tools";
 

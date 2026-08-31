@@ -23,6 +23,7 @@ import type {
 } from "../index";
 import type {
   ToolContext,
+  AgentManagedResourcePolicy,
   ToolDefinition,
   ToolExecutionResult,
   ToolRegistry as IToolRegistry,
@@ -202,6 +203,7 @@ export class QueryEngine implements IQueryEngine {
   private imageToText: AgentImageToTextHost | undefined;
   private attachments: AgentAttachmentResourceHost | undefined;
   private contextMemory: AgentContextMemoryHost | undefined;
+  private managedResources: AgentManagedResourcePolicy | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -286,6 +288,10 @@ export class QueryEngine implements IQueryEngine {
 
   setContextMemory(contextMemory: AgentContextMemoryHost | undefined): void {
     this.contextMemory = contextMemory;
+  }
+
+  setManagedResources(managedResources: AgentManagedResourcePolicy | undefined): void {
+    this.managedResources = managedResources;
   }
 
   /**
@@ -725,6 +731,7 @@ export class QueryEngine implements IQueryEngine {
             imageToText: this.imageToText,
             attachments: this.attachments,
             contextMemory: this.contextMemory,
+            managedResources: this.managedResources,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(

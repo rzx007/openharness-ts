@@ -97,6 +97,13 @@ export interface AgentContextMemoryHost {
   forget(input: { id: string }, context: AgentContextMemoryCallContext): Promise<unknown>;
 }
 
+export type ManagedResourceOperation = "write" | "edit";
+export type ManagedResourceDecision = { allowed: true } | { allowed: false; reason: string };
+
+export interface AgentManagedResourcePolicy {
+  check(path: string, operation: ManagedResourceOperation): ManagedResourceDecision;
+}
+
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
@@ -128,6 +135,8 @@ export interface ToolContext {
   attachments?: AgentAttachmentResourceHost;
   /** Host-owned governed persistent context. Tools never receive its storage location. */
   contextMemory?: AgentContextMemoryHost;
+  /** Host-owned files that semantic services, rather than generic file tools, may mutate. */
+  managedResources?: AgentManagedResourcePolicy;
   agent?: AgentExecutionContext;
 }
 

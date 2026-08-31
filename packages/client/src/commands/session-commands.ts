@@ -140,7 +140,7 @@ function shouldPresentSlashOutput(slash: SlashLine): boolean {
       const sub = firstArg(slash.args);
       return !sub || sub === "status";
     }
-    case "/profile": {
+    case "/agent-identity": {
       const action = firstArg(slash.args) ?? "status";
       return action === "status" || action === "show";
     }
@@ -680,17 +680,17 @@ export async function dispatchSessionCommand(
     return "handled";
   }
 
-  if (slash?.name === "/profile") {
+  if (slash?.name === "/agent-identity") {
     const action = slash.args.trim().split(/\s+/).filter(Boolean)[0] ?? "status";
     if (action === "status" || action === "show") {
-      emit(await client.getProfileStatus());
+      emit(await client.getAgentIdentityStatus());
       return "handled";
     }
     if (action === "init") {
-      emit(await client.initProfile());
+      emit(await client.initAgentIdentity());
       return "handled";
     }
-    emit("Usage: /profile [status|init]");
+    emit("Usage: /agent-identity [status|init]");
     return "handled";
   }
 

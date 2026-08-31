@@ -3,7 +3,7 @@ import { mkdir, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { AgentBackgroundShellHost, AgentContextMemoryHost, Settings } from "@openharness/core";
+import { getConfigDir, getCredentialsFilePath, type AgentBackgroundShellHost, type AgentContextMemoryHost, type Settings } from "@openharness/core";
 import { normalizeContextContent, routeContextTopic, type ContextEntryRecord, type ContextTopic } from "@openharness/context";
 import {
   buildChildAgentWorktreeSlug,
@@ -11,6 +11,7 @@ import {
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
+import { ManagedResourcePolicy } from "@openharness/tools";
 import {
   readSessionRuntimeConfig,
   type AttachmentLimits,
@@ -326,6 +327,10 @@ export class DaemonApplication implements DurableAgentApplication {
         resolver: new ContextIntentResolver(),
       });
       const contextQuery = new ContextQueryService({ store: contextStore });
+      const managedResources = new ManagedResourcePolicy({
+        directories: [contextStore.paths.root],
+        files: [getCredentialsFilePath(), join(getConfigDir(), "SOUL.md")],
+      });
       this.context = new ContextResourceService({
         store: contextStore,
         sessions: store,
@@ -461,6 +466,7 @@ export class DaemonApplication implements DurableAgentApplication {
           attachments: this.attachments,
         }),
         contextMemory,
+        managedResources,
         createContextRetriever: (session) => async (userInput) => contextQuery.retrieve(userInput, {
           userScopeKey: "local-user",
           machineId: await contextStore.paths.getOrCreateMachineId(),

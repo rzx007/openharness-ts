@@ -423,6 +423,23 @@ export async function inspectPersonalPromptFiles(): Promise<PersonalPromptFileDi
   return [soul.diagnostic, user.diagnostic];
 }
 
+export async function inspectSoulMd(): Promise<PersonalPromptFileDiagnostic> {
+  return (await inspectPersonalPromptFile("SOUL.md", MAX_SOUL_CHARS)).diagnostic;
+}
+
+export async function initializeSoulMd(): Promise<PersonalPromptInitResult> {
+  const configDir = getConfigDir();
+  await mkdir(configDir, { recursive: true });
+  const path = join(configDir, "SOUL.md");
+  try {
+    await access(path);
+    return { configDir, created: [], skipped: [path] };
+  } catch {
+    await writeFile(path, SOUL_TEMPLATE.trimEnd() + "\n", "utf-8");
+    return { configDir, created: [path], skipped: [] };
+  }
+}
+
 export async function initializePersonalPromptFiles(): Promise<PersonalPromptInitResult> {
   const configDir = getConfigDir();
   await mkdir(configDir, { recursive: true });

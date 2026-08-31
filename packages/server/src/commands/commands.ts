@@ -146,8 +146,8 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     argumentHint: "[--preview]",
   },
   {
-    name: "/profile",
-    description: "Show or initialize SOUL.md / USER.md",
+    name: "/agent-identity",
+    description: "Show or initialize the agent SOUL.md identity",
     kind: "session",
     source: "builtin",
     argumentHint: "[status|init]",

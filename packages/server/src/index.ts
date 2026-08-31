@@ -64,7 +64,7 @@ export type {
   OutputStyleService,
   PluginInfo,
   PluginService,
-  ProfileService,
+  AgentIdentityService,
   ProjectInitService,
   ProviderInfo,
   ProviderService,

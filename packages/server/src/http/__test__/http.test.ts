@@ -434,7 +434,7 @@ async function withServer(
       memory: options.memoryService,
       auth: options.authService,
       dream: options.dreamService,
-      profile: options.profileService,
+      agentIdentity: options.agentIdentityService,
       outputStyle: options.outputStyleService,
       projectInit: options.projectInitService,
       plugin: options.pluginService,
@@ -470,7 +470,7 @@ interface TestServerOptions extends Pick<
   memoryService?: OpenHarnessServerServices["memory"];
   authService?: OpenHarnessServerServices["auth"];
   dreamService?: OpenHarnessServerServices["dream"];
-  profileService?: OpenHarnessServerServices["profile"];
+  agentIdentityService?: OpenHarnessServerServices["agentIdentity"];
   outputStyleService?: OpenHarnessServerServices["outputStyle"];
   projectInitService?: OpenHarnessServerServices["projectInit"];
   pluginService?: OpenHarnessServerServices["plugin"];
@@ -3527,7 +3527,7 @@ describe("OpenHarnessHttpServer", () => {
     );
   });
 
-  it("starts dream and manages profile via resource APIs", async () => {
+  it("starts dream and manages agent identity via resource APIs", async () => {
     await withServer(
       async ({ baseUrl, token }) => {
         const dream = await fetch(`${baseUrl}/dream`, {
@@ -3538,13 +3538,13 @@ describe("OpenHarnessHttpServer", () => {
         expect(dream.status).toBe(201);
         expect(await dream.json()).toEqual({ taskId: "dream_1" });
 
-        const status = await fetch(`${baseUrl}/profile`, {
+        const status = await fetch(`${baseUrl}/agent-identity`, {
           headers: auth(token),
         });
         expect(status.status).toBe(200);
         expect(await status.json()).toEqual({ report: "PROFILE STATUS" });
 
-        const init = await fetch(`${baseUrl}/profile/init`, {
+        const init = await fetch(`${baseUrl}/agent-identity/init`, {
           method: "POST",
           headers: auth(token),
         });
@@ -3557,7 +3557,7 @@ describe("OpenHarnessHttpServer", () => {
             return { started: true, taskId: "dream_1" };
           },
         },
-        profileService: {
+        agentIdentityService: {
           async status() {
             return { report: "PROFILE STATUS" };
           },
@@ -4132,7 +4132,7 @@ describe("OpenHarnessHttpServer", () => {
             headers: { ...auth(token), "content-type": "application/json" },
             body: JSON.stringify({ provider: "openai", apiKey: "sk-test" }),
           }),
-          fetch(`${baseUrl}/profile/init`, {
+          fetch(`${baseUrl}/agent-identity/init`, {
             method: "POST",
             headers: auth(token),
           }),
@@ -4214,7 +4214,7 @@ describe("OpenHarnessHttpServer", () => {
             return { message: "unexpected" };
           },
         },
-        profileService: {
+        agentIdentityService: {
           async status() {
             return { report: "unused" };
           },

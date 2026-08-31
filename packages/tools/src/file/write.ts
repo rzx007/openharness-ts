@@ -35,6 +35,15 @@ export const fileWriteTool: ToolDefinition = {
     // Resolve to absolute path, then guard against system directories.
     const filePath = resolveToolPath(rawPath, cwd);
 
+    const managed = context.managedResources?.check(filePath, "write");
+    if (managed && !managed.allowed) {
+      return {
+        content: [{ type: "text", text: "Error: this is a managed context resource; use its semantic tool instead." }],
+        isError: true,
+        failureKind: "policy",
+      };
+    }
+
     if (isSystemPath(filePath)) {
       return {
         content: [{ type: "text", text: `Error: writing to system directory is not allowed: ${filePath}` }],
