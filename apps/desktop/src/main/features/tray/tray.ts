@@ -1,9 +1,10 @@
-import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
+import { app, Menu, nativeImage, Notification, Tray, type BrowserWindow } from "electron"
 
-import type { AppContext } from '../../core/app-context'
-import { quitApp } from '../../core/services/lifecycle'
-import { showMainWindow } from '../main-window/window'
-import { hidePetWindow, showPetWindow } from '../pet/window'
+import type { AppContext } from "../../core/app-context"
+import { quitApp } from "../../core/services/lifecycle"
+import { showMainWindow } from "../main-window/window"
+import { hidePetWindow, showPetWindow } from "../pet/window"
+import { noteUnfocusedAttention } from "./attention-badge"
 
 let tray: Tray | null = null
 let normalIcon: Electron.NativeImage | null = null
@@ -21,9 +22,9 @@ export function createTray(ctx: AppContext): void {
     tray = new Tray(normalIcon)
     tray.setToolTip(app.getName())
     tray.setContextMenu(createTrayMenu(ctx))
-    tray.on('double-click', () => showMainFromTray(ctx))
+    tray.on("double-click", () => showMainFromTray(ctx))
   } catch (error) {
-    console.error('[tray] failed to create tray', error)
+    console.error("[tray] failed to create tray", error)
     tray = null
     normalIcon = null
     notifyIcon = null
@@ -62,20 +63,24 @@ export function stopFlashTray(): void {
   }
 }
 
-export function sendTrayNotification(options: {
-  title: string
-  body: string
-  silent?: boolean
-  showWhenFocused?: boolean
-}): void {
-  const focused = Boolean(ctxFocusedWindow())
+export function sendTrayNotification(
+  options: {
+    title: string
+    body: string
+    silent?: boolean
+    showWhenFocused?: boolean
+  },
+  getMainWindow: () => BrowserWindow | null
+): void {
+  const focused = Boolean(getMainWindow()?.isFocused())
+  if (!focused) noteUnfocusedAttention(getMainWindow)
   if (focused && !options.showWhenFocused) return
   if (!Notification.isSupported()) return
 
   new Notification({
     title: options.title,
     body: options.body,
-    silent: options.silent
+    silent: options.silent,
   }).show()
 }
 
@@ -90,34 +95,34 @@ export function destroyTray(): void {
 function createTrayMenu(ctx: AppContext): Electron.Menu {
   return Menu.buildFromTemplate([
     {
-      label: 'Show main window',
-      click: () => showMainFromTray(ctx)
+      label: "Show main window",
+      click: () => showMainFromTray(ctx),
     },
     {
-      label: 'Show desktop Pet',
-      click: () => showPetWindow(ctx)
+      label: "Show desktop Pet",
+      click: () => showPetWindow(ctx),
     },
     {
-      label: 'Hide desktop Pet',
-      click: () => hidePetWindow(ctx)
+      label: "Hide desktop Pet",
+      click: () => hidePetWindow(ctx),
     },
-    { type: 'separator' },
+    { type: "separator" },
     {
-      label: 'Restart app',
+      label: "Restart app",
       click: () => {
-        app.relaunch({ args: process.argv.slice(1).concat(['--relaunched']) })
+        app.relaunch({ args: process.argv.slice(1).concat(["--relaunched"]) })
         quitApp()
-      }
+      },
     },
     {
-      label: 'Quit',
-      click: () => quitApp()
-    }
+      label: "Quit",
+      click: () => quitApp(),
+    },
   ])
 }
 
 function prepareTrayIcon(image: Electron.NativeImage): Electron.NativeImage {
-  if (process.platform !== 'darwin') return image
+  if (process.platform !== "darwin") return image
 
   const resized = image.resize({ width: 18, height: 18 })
   resized.setTemplateImage(true)
@@ -125,7 +130,7 @@ function prepareTrayIcon(image: Electron.NativeImage): Electron.NativeImage {
 }
 
 function createNotifyIcon(image: Electron.NativeImage): Electron.NativeImage {
-  if (process.platform === 'darwin') return image
+  if (process.platform === "darwin") return image
 
   const size = 20
   const source = image.resize({ width: size, height: size })
@@ -158,19 +163,16 @@ function createNotifyIcon(image: Electron.NativeImage): Electron.NativeImage {
 
   return nativeImage.createFromBuffer(canvas, {
     width: canvasSize,
-    height: canvasSize
+    height: canvasSize,
   })
 }
 
 function shouldSkipTray(): boolean {
-  if (process.platform !== 'linux') return false
+  if (process.platform !== "linux") return false
 
   const gdkBackend = process.env.GDK_BACKEND
-  const waylandOnly = gdkBackend?.split(':').includes('wayland') && !gdkBackend.includes('x11')
-  const hasWayland = process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY)
+  const waylandOnly = gdkBackend?.split(":").includes("wayland") && !gdkBackend.includes("x11")
+  const hasWayland =
+    process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY)
   return Boolean(waylandOnly || (hasWayland && !process.env.DISPLAY))
-}
-
-function ctxFocusedWindow(): BrowserWindow | null {
-  return BrowserWindow.getFocusedWindow()
 }
