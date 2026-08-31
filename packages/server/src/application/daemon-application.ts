@@ -84,7 +84,7 @@ import { createDefaultModelService } from "./default-services/model-service.js";
 import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
 import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
-import { ContextConsolidationService, ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, DeterministicContextConsolidationPlanner, DeterministicEnvironmentFactExtractor, detectContextSensitivity } from "./context/index.js";
+import { ContextConsolidationService, ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, ContextResourceService, DeterministicContextConsolidationPlanner, DeterministicEnvironmentFactExtractor, detectContextSensitivity } from "./context/index.js";
 import { createDefaultDreamService } from "./default-services/dream-service.js";
 import type { DreamService } from "./settings-api.js";
 
@@ -132,6 +132,7 @@ export interface DurableAgentApplication {
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
   readonly dream: DreamService;
+  readonly context: ContextResourceService;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -162,6 +163,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
   readonly dream: DreamService;
+  readonly context: ContextResourceService;
   private readonly attachmentResources: SessionAttachmentResources;
 
   private readonly eventPublisher: SessionEventPublisher;
@@ -324,6 +326,12 @@ export class DaemonApplication implements DurableAgentApplication {
         resolver: new ContextIntentResolver(),
       });
       const contextQuery = new ContextQueryService({ store: contextStore });
+      this.context = new ContextResourceService({
+        store: contextStore,
+        sessions: store,
+        persistence: contextPersistence,
+        query: contextQuery,
+      });
       const contextExtraction = new ContextExtractionService({
         store: contextStore,
         extractor: new DeterministicEnvironmentFactExtractor(),

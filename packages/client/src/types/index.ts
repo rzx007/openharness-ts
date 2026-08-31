@@ -373,6 +373,44 @@ export interface MemoryListResponse {
   entries: MemoryEntryRecord[];
 }
 
+export type ContextScope = "user" | "machine" | "project";
+export type ContextKind = "user_preference" | "project_rule" | "project_knowledge" | "environment_fact";
+export type ContextTopic = "preferences" | "ui-design" | "development-workflow" | "rules" | "knowledge" | "environment" | "pending";
+
+export interface ContextEntryRecord {
+  id: string;
+  title: string;
+  scope: ContextScope;
+  scopeKey: string;
+  kind: ContextKind;
+  semanticKey: string;
+  topic: ContextTopic;
+  content: string;
+  status: "active" | "candidate" | "superseded" | "disabled";
+  sensitivity: "none" | "sensitive" | "secret";
+  sourceSessionId?: string;
+  sourceMessageId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ContextStatus {
+  enabled: boolean;
+  active: number;
+  candidates: number;
+  byScope: Record<string, number>;
+  byKind: Record<string, number>;
+}
+
+export interface ContextMutationResult {
+  status: "completed";
+  results: Array<
+    | { status: "committed"; entry: ContextEntryRecord }
+    | { status: "noop"; existingId: string }
+    | { status: "clarification" | "rejected" | "failed"; reason: string }
+  >;
+}
+
 export interface AuthStatus {
   codex: {
     configured: boolean;

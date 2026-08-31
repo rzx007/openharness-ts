@@ -36,6 +36,12 @@ import type {
   McpServerStatus,
   MemoryEntryRecord,
   MemoryListResponse,
+  ContextEntryRecord,
+  ContextKind,
+  ContextMutationResult,
+  ContextScope,
+  ContextStatus,
+  ContextTopic,
   ModelProviderInfo,
   OpenHarnessClientOptions,
   OpenHarnessServerHealth,
@@ -576,30 +582,73 @@ export class OpenHarnessClient {
     });
   }
 
-  /** `GET /context?cwd=` */
+  /** `GET /context/entries` */
+  async listContextEntries(options: { cwd: string; scope?: ContextScope; kind?: ContextKind; signal?: AbortSignal }): Promise<ContextEntryRecord[]> {
+    const { signal, ...query } = options;
+    const response = await this.request<{ entries: ContextEntryRecord[] }>(this.path("/context/entries", query), { signal });
+    return response.entries;
+  }
+
+  async getContextEntry(entryId: string, options: { cwd: string; signal?: AbortSignal }): Promise<ContextEntryRecord> {
+    const { signal, cwd } = options;
+    const response = await this.request<{ entry: ContextEntryRecord }>(this.path(`/context/entries/${encodeURIComponent(entryId)}`, { cwd }), { signal });
+    return response.entry;
+  }
+
+  async addContextEntry(input: { cwd: string; content: string }, options: { signal?: AbortSignal } = {}): Promise<ContextMutationResult> {
+    const response = await this.request<{ result: ContextMutationResult }>("/context/entries", { method: "POST", body: input, signal: options.signal });
+    return response.result;
+  }
+
+  async updateContextEntry(entryId: string, input: { cwd: string; content: string; title?: string }, options: { signal?: AbortSignal } = {}): Promise<ContextEntryRecord> {
+    const response = await this.request<{ entry: ContextEntryRecord }>(`/context/entries/${encodeURIComponent(entryId)}`, { method: "PATCH", body: input, signal: options.signal });
+    return response.entry;
+  }
+
+  async removeContextEntry(entryId: string, options: { cwd: string; signal?: AbortSignal }): Promise<void> {
+    const { signal, cwd } = options;
+    await this.request(this.path(`/context/entries/${encodeURIComponent(entryId)}`, { cwd }), { method: "DELETE", signal });
+  }
+
+  async listContextCandidates(options: { cwd: string; signal?: AbortSignal }): Promise<ContextEntryRecord[]> {
+    const { signal, cwd } = options;
+    const response = await this.request<{ candidates: ContextEntryRecord[] }>(this.path("/context/candidates", { cwd }), { signal });
+    return response.candidates;
+  }
+
+  async acceptContextCandidate(entryId: string, input: { cwd: string; topic?: ContextTopic }, options: { signal?: AbortSignal } = {}): Promise<ContextEntryRecord> {
+    const response = await this.request<{ entry: ContextEntryRecord }>(`/context/candidates/${encodeURIComponent(entryId)}/accept`, { method: "POST", body: input, signal: options.signal });
+    return response.entry;
+  }
+
+  async rejectContextCandidate(entryId: string, input: { cwd: string }, options: { signal?: AbortSignal } = {}): Promise<void> {
+    await this.request(`/context/candidates/${encodeURIComponent(entryId)}/reject`, { method: "POST", body: input, signal: options.signal });
+  }
+
+  /** `GET /context/preview?cwd=` */
   async getContextPreview(options: {
     cwd: string;
     signal?: AbortSignal;
   }): Promise<string> {
     const { signal, ...query } = options;
-    const response = await this.request<{ report: string }>(
-      this.path("/context", query),
+    const response = await this.request<{ content: string }>(
+      this.path("/context/preview", query),
       { signal },
     );
-    return response.report;
+    return response.content;
   }
 
   /** `GET /context/status?cwd=` */
   async getContextStatus(options: {
     cwd: string;
     signal?: AbortSignal;
-  }): Promise<string> {
+  }): Promise<ContextStatus> {
     const { signal, ...query } = options;
-    const response = await this.request<{ report: string }>(
+    const response = await this.request<ContextStatus>(
       this.path("/context/status", query),
       { signal },
     );
-    return response.report;
+    return response;
   }
 
   /** `POST /sessions/:id/compact` */

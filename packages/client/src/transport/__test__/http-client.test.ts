@@ -32,6 +32,24 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("uses logical Context resource endpoints without storage paths", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: async (url, init = {}) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith("/context/entries") && init.method === "POST") return jsonResponse({ result: { status: "completed", results: [] } }, 201);
+        return jsonResponse({ entries: [] });
+      },
+    });
+    await client.listContextEntries({ cwd: "C:\\repo", scope: "project" });
+    await client.addContextEntry({ cwd: "C:\\repo", content: "记住这个规则" });
+    expect(calls.map(({ url, init }) => `${init.method ?? "GET"} ${url}`)).toEqual([
+      "GET http://daemon.test/context/entries?cwd=C%3A%5Crepo&scope=project",
+      "POST http://daemon.test/context/entries",
+    ]);
+    expect(JSON.stringify(calls)).not.toContain("directory");
+  });
   it("scans, repairs, and garbage-collects attachment storage", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = new OpenHarnessClient({

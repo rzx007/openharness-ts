@@ -1,5 +1,5 @@
 import type { OpenHarnessClient } from "../transport/http-client.js";
-import type { CommandCatalogEntry, OpenHarnessClientState } from "../types/index.js";
+import type { CommandCatalogEntry, ContextEntryRecord, ContextMutationResult, OpenHarnessClientState } from "../types/index.js";
 import type { JobReadResult, JobSnapshot } from "@openharness/protocol";
 import { patchSessionRuntimeMetadata } from "@openharness/protocol";
 
@@ -525,13 +525,63 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/context") {
-    const action = slash.args.trim().split(/\s+/).filter(Boolean)[0] ?? "preview";
+    const args = slash.args.trim();
+    const tokens = args.split(/\s+/).filter(Boolean);
+    const action = tokens[0] ?? "list";
+    const rest = tokens.slice(1);
+    if (action === "list") {
+      const scopeIndex = rest.indexOf("--scope");
+      const kindIndex = rest.indexOf("--kind");
+      const scope = scopeIndex >= 0 ? rest[scopeIndex + 1] as "user" | "machine" | "project" | undefined : undefined;
+      const kind = kindIndex >= 0 ? rest[kindIndex + 1] as "user_preference" | "project_rule" | "project_knowledge" | "environment_fact" | undefined : undefined;
+      await readPresentation(`context:${cwd}:list:${scope ?? "all"}:${kind ?? "all"}`, "Context", async () => formatContextEntries(await client.listContextEntries({ cwd, ...(scope ? { scope } : {}), ...(kind ? { kind } : {}) })));
+      return "handled";
+    }
+    if (action === "show" && rest[0]) {
+      await readPresentation(`context:${cwd}:show:${rest[0]}`, "Context", async () => formatContextEntry(await client.getContextEntry(rest[0]!, { cwd })));
+      return "handled";
+    }
+    if (action === "add") {
+      const content = args.slice(action.length).trim();
+      if (!content) { emit("Usage: /context add <content>"); return "handled"; }
+      emit(formatContextMutation(await client.addContextEntry({ cwd, content })));
+      return "handled";
+    }
+    if (action === "update" && rest[0]) {
+      const content = args.slice(args.indexOf(rest[0]) + rest[0].length).trim();
+      if (!content) { emit("Usage: /context update <id> <content>"); return "handled"; }
+      const entry = await client.updateContextEntry(rest[0], { cwd, content });
+      emit(`Context updated: ${entry.id}`);
+      return "handled";
+    }
+    if (action === "remove" && rest[0]) {
+      await client.removeContextEntry(rest[0], { cwd });
+      emit(`Context removed: ${rest[0]}`);
+      return "handled";
+    }
+    if (action === "candidates") {
+      await readPresentation(`context:${cwd}:candidates`, "Context candidates", async () => formatContextEntries(await client.listContextCandidates({ cwd })));
+      return "handled";
+    }
+    if (action === "accept" && rest[0]) {
+      const entry = await client.acceptContextCandidate(rest[0], { cwd });
+      emit(`Context candidate accepted: ${entry.id}`);
+      return "handled";
+    }
+    if (action === "reject" && rest[0]) {
+      await client.rejectContextCandidate(rest[0], { cwd });
+      emit(`Context candidate rejected: ${rest[0]}`);
+      return "handled";
+    }
     if (action === "status") {
-      await readPresentation(`context:${cwd}:status`, "Context", async () => await client.getContextStatus({ cwd }));
+      await readPresentation(`context:${cwd}:status`, "Context", async () => {
+        const status = await client.getContextStatus({ cwd });
+        return [`Context: ${status.enabled ? "enabled" : "disabled"}`, `Active entries: ${status.active}`, `Candidates: ${status.candidates}`].join("\n");
+      });
       return "handled";
     }
     if (action !== "preview") {
-      emit("Usage: /context [status]");
+      emit("Usage: /context list|show|add|update|remove|candidates|accept|reject|status|preview");
       return "handled";
     }
     await readPresentation(`context:${cwd}`, "Context", async () => await client.getContextPreview({ cwd }));
@@ -613,13 +663,9 @@ export async function dispatchSessionCommand(
   }
 
   if (slash?.name === "/remember") {
-    if (!sessionId) return "handled";
-    const result = await client.rememberSession(sessionId);
-    if (result.skipped) {
-      emit(`未写入记忆:${result.reason ?? "skipped"}`);
-      return "handled";
-    }
-    emit(`已写入 ${result.writtenIds.length} 条记忆:${result.titles.join("、")}`);
+    const content = slash.args.trim();
+    if (!content) { emit("Usage: /remember <content>"); return "handled"; }
+    emit(formatContextMutation(await client.addContextEntry({ cwd, content })));
     return "handled";
   }
 
@@ -630,7 +676,7 @@ export async function dispatchSessionCommand(
       ...(sessionId ? { sessionId } : {}),
       preview,
     });
-    emit(`Dream started as Job ${result.taskId}. Use /jobs to inspect it.`);
+    emit(`Context consolidation completed: ${result.taskId}.`);
     return "handled";
   }
 
@@ -976,4 +1022,33 @@ export async function dispatchSessionCommand(
   }
 
   return "unhandled";
+}
+
+function formatContextEntries(entries: ContextEntryRecord[]): string {
+  if (entries.length === 0) return "No context entries found.";
+  return [
+    `Context entries (${entries.length}):`,
+    "",
+    ...entries.map((entry) => `- ${entry.id} [${entry.scope}/${entry.kind}] ${entry.title}: ${entry.content}`),
+  ].join("\n");
+}
+
+function formatContextEntry(entry: ContextEntryRecord): string {
+  return [
+    `ID: ${entry.id}`,
+    `Scope: ${entry.scope}`,
+    `Kind: ${entry.kind}`,
+    `Status: ${entry.status}`,
+    `Updated: ${new Date(entry.updatedAt).toISOString()}`,
+    "",
+    entry.content,
+  ].join("\n");
+}
+
+function formatContextMutation(result: ContextMutationResult): string {
+  return result.results.map((item) => {
+    if (item.status === "committed") return `Context saved: ${item.entry.id}`;
+    if (item.status === "noop") return `Context already exists: ${item.existingId}`;
+    return `Context not saved (${item.reason}).`;
+  }).join("\n") || "No context changes.";
 }

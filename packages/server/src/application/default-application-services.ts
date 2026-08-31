@@ -60,7 +60,6 @@ export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
     model: createDefaultModelService(ref),
     memory: createDefaultMemoryService(),
     auth: createDefaultAuthService(),
-    context: createDefaultContextService(ref),
     profile: createDefaultProfileService(),
     outputStyle: createDefaultOutputStyleService(),
     projectInit: createDefaultProjectInitService(),

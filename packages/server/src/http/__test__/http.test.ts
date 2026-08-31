@@ -433,7 +433,6 @@ async function withServer(
       provider: options.providerService,
       memory: options.memoryService,
       auth: options.authService,
-      context: options.contextService,
       dream: options.dreamService,
       profile: options.profileService,
       outputStyle: options.outputStyleService,
@@ -470,7 +469,6 @@ interface TestServerOptions extends Pick<
   providerService?: OpenHarnessServerServices["provider"];
   memoryService?: OpenHarnessServerServices["memory"];
   authService?: OpenHarnessServerServices["auth"];
-  contextService?: OpenHarnessServerServices["context"];
   dreamService?: OpenHarnessServerServices["dream"];
   profileService?: OpenHarnessServerServices["profile"];
   outputStyleService?: OpenHarnessServerServices["outputStyle"];
@@ -2833,25 +2831,21 @@ describe("OpenHarnessHttpServer", () => {
     );
   });
 
-  it("returns context preview reports", async () => {
+  it("returns governed context preview and status resources", async () => {
     await withServer(
       async ({ baseUrl, token }) => {
         const response = await fetch(
-          `${baseUrl}/context?cwd=${encodeURIComponent(process.cwd())}`,
+          `${baseUrl}/context/preview?cwd=${encodeURIComponent(process.cwd())}`,
           { headers: auth(token) },
         );
         expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ report: "CONTEXT REPORT" });
-      },
-      {
-        contextService: {
-          async preview() {
-            return { report: "CONTEXT REPORT" };
-          },
-          async status() {
-            return { report: "CONTEXT STATUS" };
-          },
-        },
+        expect(await response.json()).toEqual({ content: "" });
+        const status = await fetch(
+          `${baseUrl}/context/status?cwd=${encodeURIComponent(process.cwd())}`,
+          { headers: auth(token) },
+        );
+        expect(status.status).toBe(200);
+        expect(await status.json()).toMatchObject({ enabled: true, active: 0, candidates: 0 });
       },
     );
   });

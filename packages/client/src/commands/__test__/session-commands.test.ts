@@ -145,8 +145,8 @@ describe("dispatchSessionCommand", () => {
   });
 
   it("routes cache-first read commands through the presentation cache host", async () => {
-    const getContextPreview = vi.fn(async () => "CONTEXT");
-    const client = fakeClient({ getContextPreview });
+    const listContextEntries = vi.fn(async () => []);
+    const client = fakeClient({ listContextEntries });
     const { host: h, emitted } = host({ client });
     const reads: Array<{ key: string; title: string; load: () => Promise<string> }> = [];
     Object.assign(h, {
@@ -160,15 +160,15 @@ describe("dispatchSessionCommand", () => {
 
     expect(outcome).toBe("handled");
     expect(emitted).toHaveLength(0);
-    expect(getContextPreview).not.toHaveBeenCalled();
-    expect(reads[0]?.key).toBe("context:/tmp/project");
+    expect(listContextEntries).not.toHaveBeenCalled();
+    expect(reads[0]?.key).toBe("context:/tmp/project:list:all:all");
     expect(reads[0]?.title).toBe("Context");
-    await expect(reads[0]!.load()).resolves.toBe("CONTEXT");
-    expect(getContextPreview).toHaveBeenCalledWith({ cwd: "/tmp/project" });
+    await expect(reads[0]!.load()).resolves.toBe("No context entries found.");
+    expect(listContextEntries).toHaveBeenCalledWith({ cwd: "/tmp/project" });
   });
 
   it("routes /context status to the context status reader", async () => {
-    const getContextStatus = vi.fn(async () => "STATUS TABLE");
+    const getContextStatus = vi.fn(async () => ({ enabled: true, active: 2, candidates: 1, byScope: {}, byKind: {} }));
     const client = fakeClient({ getContextStatus });
     const { host: h, emitted } = host({ client });
     const reads: Array<{ key: string; title: string; load: () => Promise<string> }> = [];
@@ -184,7 +184,7 @@ describe("dispatchSessionCommand", () => {
     expect(outcome).toBe("handled");
     expect(emitted).toHaveLength(0);
     expect(reads[0]?.key).toBe("context:/tmp/project:status");
-    await expect(reads[0]!.load()).resolves.toBe("STATUS TABLE");
+    await expect(reads[0]!.load()).resolves.toBe("Context: enabled\nActive entries: 2\nCandidates: 1");
     expect(getContextStatus).toHaveBeenCalledWith({ cwd: "/tmp/project" });
   });
 
@@ -400,14 +400,32 @@ describe("dispatchSessionCommand", () => {
     expect(emitted.at(-1)).not.toContain("Jobs:           0");
   });
 
-  it("presents dream receipts as Jobs", async () => {
+  it("presents governed context consolidation receipts", async () => {
     const startDream = vi.fn(async () => ({ taskId: "dream-1" }));
     const { host: h, emitted } = host({ client: fakeClient({ startDream }) });
     Object.assign(h, { sessionId: "s1" });
 
     await dispatchSessionCommand({ name: "/dream", args: "" }, h);
 
-    expect(emitted.at(-1)).toBe("Dream started as Job dream-1. Use /jobs to inspect it.");
+    expect(emitted.at(-1)).toBe("Context consolidation completed: dream-1.");
+  });
+
+  it("routes explicit remember content through Context instead of session transcript extraction", async () => {
+    const addContextEntry = vi.fn(async () => ({ status: "completed" as const, results: [{ status: "noop" as const, existingId: "ctx-1" }] }));
+    const rememberSession = vi.fn();
+    const { host: h, emitted } = host({ client: fakeClient({ addContextEntry, rememberSession }) });
+    await dispatchSessionCommand({ name: "/remember", args: "回答简洁" }, h);
+    expect(addContextEntry).toHaveBeenCalledWith({ cwd: "/tmp/project", content: "回答简洁" });
+    expect(rememberSession).not.toHaveBeenCalled();
+    expect(emitted.at(-1)).toBe("Context already exists: ctx-1");
+  });
+
+  it("shows usage when /remember has no content", async () => {
+    const addContextEntry = vi.fn();
+    const { host: h, emitted } = host({ client: fakeClient({ addContextEntry }) });
+    await dispatchSessionCommand({ name: "/remember", args: "" }, h);
+    expect(addContextEntry).not.toHaveBeenCalled();
+    expect(emitted.at(-1)).toBe("Usage: /remember <content>");
   });
 
   it("returns unhandled for unknown non-local commands", async () => {

@@ -15,7 +15,6 @@ import type { CreateDaemonAgent } from "../daemon/daemon-agent.js";
 import type {
   AgentPersonaService,
   AuthService,
-  ContextService,
   DreamService,
   GitService,
   HooksService,
@@ -49,6 +48,7 @@ import { createChannelRoutes } from "./routes/channel.js";
 import { createScheduleRoutes } from "./routes/schedules.js";
 import { HttpEventHub } from "./routes/events.js";
 import { createGitRoutes } from "./routes/git.js";
+import { createContextRoutes } from "./routes/context.js";
 import { createJobRoutes } from "./routes/job.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createPermissionRoutes } from "./routes/permission.js";
@@ -73,7 +73,6 @@ export interface OpenHarnessServerServices {
   model?: ModelService;
   memory?: MemoryService;
   auth?: AuthService;
-  context?: ContextService;
   dream?: DreamService;
   profile?: ProfileService;
   outputStyle?: OutputStyleService;
@@ -336,6 +335,13 @@ export class OpenHarnessHttpServer {
       }),
     );
     this.app.route(
+      "/context",
+      createContextRoutes({
+        service: this.application.context,
+        control: this.application.control,
+      }),
+    );
+    this.app.route(
       "/auth",
       createAuthRoutes({
         authService: this.services.auth,
@@ -345,7 +351,6 @@ export class OpenHarnessHttpServer {
     this.app.route(
       "/",
       createServiceRoutes({
-        contextService: this.services.context,
         dreamService: this.services.dream ?? this.application.dream,
         profileService: this.services.profile,
         outputStyleService: this.services.outputStyle,
