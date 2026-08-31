@@ -15,6 +15,7 @@
 - 创建 `apps/desktop/src/renderer/src/components/desktop/tools/code-preview-worker-options.ts`：集中定义单 Worker 配置和 4,000 字符单行高亮上限。
 - 创建 `apps/desktop/src/renderer/src/components/desktop/tools/code-preview-worker-options.test.ts`：验证 Worker 数量、工厂透传和 Shiki 限制。
 - 修改 `apps/desktop/src/renderer/src/components/desktop/tools/virtualized-code-preview.tsx`：创建 Pierre Worker，并用 `WorkerPoolContextProvider` 包住现有虚拟化文件预览。
+- 修改 `apps/desktop/electron.vite.config.ts`：把 renderer Worker 输出格式设为 ES module，允许 Pierre Worker 按需加载语言资源。
 
 ### 任务 1：建立可测试的 Worker 配置
 
@@ -103,6 +104,7 @@ git commit -m "perf(desktop): 配置源码高亮 Worker"
 
 **文件：**
 - 修改：`apps/desktop/src/renderer/src/components/desktop/tools/virtualized-code-preview.tsx`
+- 修改：`apps/desktop/electron.vite.config.ts`
 
 - [ ] **步骤 1：接入 Vite Worker 构造器和 Pierre Provider**
 
@@ -139,12 +141,22 @@ const codePreviewWorkerPoolOptions = createCodePreviewWorkerPoolOptions(
 
 同时保留 `FileOptions` 中的主题、语言高亮和现有虚拟滚动配置。将 `tokenizeMaxLineLength: 4_000` 加入文件选项，确保 Worker 和回退路径使用同一个限制。
 
+在 `electron.vite.config.ts` 的 `renderer` 配置中加入：
+
+```ts
+worker: {
+  format: "es",
+},
+```
+
+Pierre Worker 会按需加载语言模块，ES module 输出允许 Vite 为这些模块生成独立分包；默认 IIFE Worker 不支持该代码分包。
+
 - [ ] **步骤 2：运行桌面端定向测试和类型检查**
 
 运行：
 
 ```powershell
-pnpm --filter @openharness/desktop test -- src/renderer/src/components/desktop/tools/code-preview-worker-options.test.ts src/renderer/src/components/desktop/tools/virtualized-code-preview-model.test.ts
+pnpm --filter @openharness/desktop test -- src/renderer/src/components/desktop/tools/code-preview-worker-options.test.ts src/renderer/src/components/desktop/tools/virtualized-code-preview.test.ts
 pnpm --filter @openharness/desktop typecheck
 ```
 
@@ -174,7 +186,6 @@ git status --short
 - [ ] **步骤 5：提交集成改动**
 
 ```powershell
-git add -- apps/desktop/src/renderer/src/components/desktop/tools/virtualized-code-preview.tsx
+git add -- apps/desktop/electron.vite.config.ts apps/desktop/src/renderer/src/components/desktop/tools/virtualized-code-preview.tsx docs/superpowers/plans/2026-08-31-large-code-preview-worker.md
 git commit -m "perf(desktop): 后台处理源码语法高亮"
 ```
-

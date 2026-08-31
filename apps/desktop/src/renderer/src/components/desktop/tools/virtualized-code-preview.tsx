@@ -3,10 +3,16 @@ import {
   File as PierreFile,
   type FileOptions,
   Virtualizer,
+  WorkerPoolContextProvider,
   useVirtualizer,
 } from "@pierre/diffs/react"
+import PierreDiffsWorker from "@pierre/diffs/worker/worker.js?worker"
 import { useEffect, useMemo } from "react"
 
+import {
+  codePreviewHighlighterOptions,
+  createCodePreviewWorkerPoolOptions,
+} from "./code-preview-worker-options"
 import {
   createPreviewFile,
   resolveActiveLineIndex,
@@ -25,6 +31,9 @@ interface VirtualizedCodePreviewProps {
 
 const codeLineHeight = 20
 const virtualizerConfig = { overscrollSize: 800 }
+const codePreviewWorkerPoolOptions = createCodePreviewWorkerPoolOptions(
+  () => new PierreDiffsWorker()
+)
 const codeViewerCSS = `
   :host {
     display: block;
@@ -61,6 +70,7 @@ export function VirtualizedCodePreview({
       preferredHighlighter: "shiki-js",
       theme: DEFAULT_THEMES,
       themeType,
+      tokenizeMaxLineLength: codePreviewHighlighterOptions.tokenizeMaxLineLength,
       unsafeCSS: codeViewerCSS,
     }),
     [themeType]
@@ -70,25 +80,30 @@ export function VirtualizedCodePreview({
   const activeLineIndex = resolveActiveLineIndex({ searchLine, targetLine })
 
   return (
-    <Virtualizer
-      className="h-full min-h-0 min-w-0 flex-1 overflow-auto"
-      contentClassName="relative min-h-full min-w-max"
-      config={virtualizerConfig}
+    <WorkerPoolContextProvider
+      poolOptions={codePreviewWorkerPoolOptions}
+      highlighterOptions={codePreviewHighlighterOptions}
     >
-      <PreviewScrollController top={scrollTop} />
-      {activeLineIndex !== null ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute left-0 z-0 h-5 min-w-full bg-amber-200/28 ring-1 ring-amber-300/30 dark:bg-amber-300/12 dark:ring-amber-200/10"
-          style={{ top: activeLineIndex * codeLineHeight }}
+      <Virtualizer
+        className="h-full min-h-0 min-w-0 flex-1 overflow-auto"
+        contentClassName="relative min-h-full min-w-max"
+        config={virtualizerConfig}
+      >
+        <PreviewScrollController top={scrollTop} />
+        {activeLineIndex !== null ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 z-0 h-5 min-w-full bg-amber-200/28 ring-1 ring-amber-300/30 dark:bg-amber-300/12 dark:ring-amber-200/10"
+            style={{ top: activeLineIndex * codeLineHeight }}
+          />
+        ) : null}
+        <PierreFile
+          file={file}
+          options={options}
+          className="desktop-code-file relative z-10 min-w-max"
         />
-      ) : null}
-      <PierreFile
-        file={file}
-        options={options}
-        className="desktop-code-file relative z-10 min-w-max"
-      />
-    </Virtualizer>
+      </Virtualizer>
+    </WorkerPoolContextProvider>
   )
 }
 
