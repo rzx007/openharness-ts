@@ -12,6 +12,14 @@ import type {
 const posixShell: HostShellLauncher = { kind: "posix-sh" };
 
 describe("createBashTool", () => {
+  it("steers long-running commands toward background jobs instead of blocking Bash", () => {
+    const tool = createBashTool(fakeExecutor(result()));
+
+    expect(tool.description).toContain("short-lived");
+    expect(tool.description).toContain("BackgroundShellCreate");
+    expect(tool.description).toContain("JobWait");
+  });
+
   it("resolves raw input before running the command", async () => {
     const resolve = vi.fn(async (request: ShellExecRequest, context: ShellExecContext) => {
       expect(request).toEqual({
@@ -37,6 +45,62 @@ describe("createBashTool", () => {
     expect(run).toHaveBeenCalledOnce();
     expect(toolResult).toEqual({
       content: [{ type: "text", text: "hello" }],
+      isError: false,
+    });
+  });
+
+  it("creates a background job for obvious long-running commands when Bash is misused", async () => {
+    const resolve = vi.fn(async (request: ShellExecRequest) => spec({ command: request.command }));
+    const run = vi.fn(async () => result({ output: "should not run inline" }));
+    const create = vi.fn(async () => ({ jobId: "job-dev", label: "pnpm dev" }));
+    const tool = createBashTool({ resolve, run });
+
+    const toolResult = await tool.execute({
+      command: "pnpm dev",
+    }, {
+      cwd: "/repo",
+      sessionId: "session-1",
+      toolCallId: "call-1",
+      backgroundShell: { create },
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({
+      requestId: "tool:call-1",
+      cwd: "/repo",
+      sessionId: "session-1",
+      command: "pnpm dev",
+      description: "pnpm dev",
+      settings: undefined,
+    });
+    expect(JSON.parse((toolResult.content[0] as { text: string }).text)).toMatchObject({
+      kind: "job",
+      action: "created",
+      jobKind: "shell",
+      jobId: "job-dev",
+      label: "pnpm dev",
+      note: expect.stringContaining("JobWait"),
+    });
+  });
+
+  it("keeps explicitly timed commands inline even when they look long-running", async () => {
+    const executor = fakeExecutor(result({ output: "done" }));
+    const create = vi.fn(async () => ({ jobId: "job-dev", label: "pnpm dev" }));
+    const tool = createBashTool(executor);
+
+    const toolResult = await tool.execute({
+      command: "pnpm dev",
+      timeout: 1_000,
+    }, {
+      cwd: "/repo",
+      sessionId: "session-1",
+      toolCallId: "call-1",
+      backgroundShell: { create },
+    });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(toolResult).toEqual({
+      content: [{ type: "text", text: "done" }],
       isError: false,
     });
   });

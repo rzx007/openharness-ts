@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { backgroundShellCreateTool } from "../background-shell-tools.js";
 
 describe("BackgroundShellCreate", () => {
+  it("is discoverable for long-running bash or shell commands", () => {
+    expect(backgroundShellCreateTool.description).toMatch(/long-running/i);
+    expect(backgroundShellCreateTool.description).toMatch(/bash|shell/i);
+    expect(backgroundShellCreateTool.description).toContain("JobWait");
+    expect(backgroundShellCreateTool.description).toContain("JobRead");
+  });
+
   it("exposes only background-shell inputs", () => {
     const schema = backgroundShellCreateTool.inputSchema as {
       properties: Record<string, unknown>;

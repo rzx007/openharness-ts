@@ -129,6 +129,16 @@ describe("buildDelegationSection", () => {
   });
 });
 
+describe("background shell guidance", () => {
+  it("directs long-running shell commands through BackgroundShellCreate and Job tools", () => {
+    const prompt = getInvariantGuidance();
+    expect(prompt).toContain("BackgroundShellCreate");
+    expect(prompt).toContain("long-running");
+    expect(prompt).toContain("JobWait");
+    expect(prompt).toContain("JobRead");
+  });
+});
+
 describe("CLAUDE.md upward traversal", () => {
   let root: string;
   let parent: string;

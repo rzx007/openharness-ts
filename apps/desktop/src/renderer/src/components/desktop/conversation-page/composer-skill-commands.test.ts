@@ -10,7 +10,7 @@ import {
 } from "./composer-skill-commands"
 
 describe("composer skill commands", () => {
-  it("maps only skill commands for the composer menu", () => {
+  it("maps template skill commands for the composer menu", () => {
     expect(
       toComposerSkillCommands([
         {
@@ -18,6 +18,18 @@ describe("composer skill commands", () => {
           description: "Review changes",
           kind: "template",
           source: "skill",
+        },
+        {
+          name: "/project-review",
+          description: "Review with project rules",
+          kind: "template",
+          source: "project",
+        },
+        {
+          name: "/plugin-review",
+          description: "Review with plugin rules",
+          kind: "template",
+          source: "plugin",
         },
         {
           name: "/help",
@@ -28,9 +40,22 @@ describe("composer skill commands", () => {
       ])
     ).toEqual([
       {
+        name: "/plugin-review",
+        label: "plugin review",
+        description: "Review with plugin rules",
+        sourceLabel: "插件",
+      },
+      {
+        name: "/project-review",
+        label: "project review",
+        description: "Review with project rules",
+        sourceLabel: "项目",
+      },
+      {
         name: "/review",
         label: "review",
         description: "Review changes",
+        sourceLabel: "个人",
       },
     ])
   })
@@ -64,6 +89,7 @@ describe("composer skill commands", () => {
         name: "/review",
         label: "review",
         description: "Audit current diff",
+        sourceLabel: "个人",
       },
     ])
   })
@@ -74,6 +100,7 @@ describe("composer skill commands", () => {
         name: "/review",
         label: "review",
         description: "Review changes",
+        sourceLabel: "个人",
       })
     ).toBe("/review ")
     expect(
@@ -81,6 +108,7 @@ describe("composer skill commands", () => {
         name: "/review",
         label: "review",
         description: "Review changes",
+        sourceLabel: "个人",
         argumentHint: "<path>",
       })
     ).toBe("/review <path>")
@@ -91,6 +119,7 @@ describe("composer skill commands", () => {
       name: "/review",
       label: "review",
       description: "Review changes",
+      sourceLabel: "个人",
     }
 
     expect(parseSelectedSkillCommandDraft("/review update this", [command])).toEqual({
@@ -105,6 +134,7 @@ describe("composer skill commands", () => {
       name: "/design-md",
       label: "design md",
       description: "Design markdown output",
+      sourceLabel: "个人",
     }
 
     expect(skillCommandInvocationLine("/design-md make a spec", [command])).toBe(

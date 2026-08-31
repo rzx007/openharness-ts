@@ -14,7 +14,7 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
   return {
     name: "Bash",
     description:
-      "Execute a shell command using the environment's active shell. On Windows this may be bash.exe, PowerShell, or cmd; check the Environment shell facts before choosing syntax. Use for git, npm, docker, etc.",
+      "Execute a short-lived shell command using the environment's active shell. On Windows this may be bash.exe, PowerShell, or cmd; check the Environment shell facts before choosing syntax. For long-running commands such as dev servers, watchers, installs, builds, migrations, docker compose, or commands likely to take more than a brief moment, use BackgroundShellCreate and then JobWait or JobRead instead of blocking Bash.",
     inputSchema: {
       type: "object",
       properties: {
@@ -31,6 +31,41 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
       required: ["command"],
     },
     async execute(input, context) {
+      const command = typeof input.command === "string" ? input.command.trim() : "";
+      const hasExplicitTimeout = input.timeout !== undefined;
+      if (command && !hasExplicitTimeout && shouldCreateBackgroundShell(command, context)) {
+        try {
+          const created = await context.backgroundShell!.create({
+            requestId: `tool:${context.toolCallId}`,
+            command,
+            description: summarizeCommand(command),
+            cwd: typeof input.workdir === "string" && input.workdir.trim()
+              ? input.workdir.trim()
+              : context.cwd,
+            sessionId: context.sessionId!,
+            settings: context.settings,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                kind: "job",
+                action: "created",
+                jobId: created.jobId,
+                jobKind: "shell",
+                label: created.label,
+                note: "Bash was converted to a background job because the command looks long-running. Use JobWait for bounded progress or JobRead for output snapshots.",
+              }),
+            }],
+          };
+        } catch (error) {
+          return {
+            content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+            isError: true,
+          };
+        }
+      }
+
       const spec = await executor.resolve({
         command: input.command as string,
         timeoutMs: input.timeout as number | undefined,
@@ -73,6 +108,28 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
 }
 
 export const bashTool: ToolDefinition = createBashTool();
+
+function shouldCreateBackgroundShell(command: string, context: Parameters<ToolDefinition["execute"]>[1]): boolean {
+  return Boolean(context.backgroundShell && context.sessionId && context.toolCallId && isLikelyLongRunningCommand(command));
+}
+
+function isLikelyLongRunningCommand(command: string): boolean {
+  const normalized = command.toLowerCase().replace(/\s+/g, " ").trim();
+  return [
+    /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve|watch)\b/,
+    /\b(?:vite|next|nuxt|astro|webpack|rollup|parcel|tsc)\b.*\b(?:dev|serve|watch|-w|--watch)\b/,
+    /\b(?:npm|pnpm|yarn|bun)\s+(?:install|add|upgrade|update|ci)\b/,
+    /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:build|test|lint|typecheck|check-types)\b/,
+    /\bdocker\s+compose\s+up\b/,
+    /\bdocker-compose\s+up\b/,
+    /\b(?:prisma|drizzle|typeorm|sequelize)\b.*\b(?:migrate|generate|studio)\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function summarizeCommand(command: string): string {
+  const compact = command.replace(/\s+/g, " ").trim();
+  return compact.length <= 80 ? compact : `${compact.slice(0, 77)}...`;
+}
 
 export interface ShellDialectProblem {
   code: string;

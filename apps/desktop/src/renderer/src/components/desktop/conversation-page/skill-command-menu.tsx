@@ -109,7 +109,9 @@ function SkillCommandMenuItem({
       <span className="min-w-0 flex-[1.35] truncate text-xs text-muted-foreground">
         {command.description}
       </span>
-      <span className="shrink-0 text-[11px] text-muted-foreground/65">个人</span>
+      <span className="shrink-0 text-[11px] text-muted-foreground/65">
+        {command.sourceLabel}
+      </span>
     </Button>
   )
 }

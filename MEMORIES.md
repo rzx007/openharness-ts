@@ -1,3 +1,5 @@
 # 已报告问题
 
 - 2026-08-29 — `packages/server/src/application/attachment-processing/agent-image-to-text-host.ts:46-48,87-95` / `packages/permissions/src/index.ts:108-129,199-203`：`ImageToText` 接受绝对或越界 `image_path`，而权限检查不识别该字段，导致自动批准工具时绕过路径拒绝规则并 OCR 读取工作区外图片；引入提交 `ef842b320dfcd9732a0e8cf7a3b78aa7e7b25c8c`；状态 `pending-review`。
+- 2026-08-30 — `apps/desktop/src/renderer/src/components/desktop/conversation-page/message-attachment.tsx:149-177` / `apps/desktop/src/main/features/attachment/attachment-service.ts:242-256`：历史消息中的每张图片都会立即下载并长期保留最多 10 MiB 的原图 Blob，无懒加载、缩略图、并发或总内存上限，合法的大图会话可稳定耗尽 Desktop 渲染进程内存；引入提交 `d0abb414f9b95525aad514511cace50d60323edb`；状态 `pending-review`。
+- 2026-08-31 — `packages/plugins/src/installation/cache.ts:41-42` / `packages/plugins/src/installation/installer.ts:60-92` / `packages/agent-runtime/src/extensions.ts:42-53`：插件缓存仅按 plugin ID 共用一个 `current` 目录，不同 scope 或项目中同 ID 的安装会互相覆盖；运行时却继续使用各自安装记录中的旧权限清单校验被覆盖后的插件内容，导致未批准的新插件能力可在其他项目或用户作用域加载；引入提交 `c7ae371c4db9e0c063385873abde12fb866d85d5`；状态 `pending-review`。

@@ -2,7 +2,7 @@ import type { ToolDefinition } from "@openharness/core";
 
 export const backgroundShellCreateTool: ToolDefinition = {
   name: "BackgroundShellCreate",
-  description: "Start a detached background shell process. Use JobRead, JobWait, and JobCancel with the returned jobId.",
+  description: "Start a detached background shell/bash command for long-running work such as dev servers, watchers, installs, builds, migrations, docker compose, or any command that should not block the conversation. Returns a jobId; use JobWait for bounded progress, JobRead for output snapshots, and JobCancel to stop it.",
   inputSchema: {
     type: "object",
     properties: {

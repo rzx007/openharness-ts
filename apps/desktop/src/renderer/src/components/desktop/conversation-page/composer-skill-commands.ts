@@ -1,9 +1,10 @@
-import type { DesktopCommandCatalogEntry } from "@shared/session-types"
+import type { DesktopCommandCatalogEntry, DesktopCommandSource } from "@shared/session-types"
 
 export interface ComposerSkillCommand {
   name: string
   label: string
   description: string
+  sourceLabel: string
   argumentHint?: string
 }
 
@@ -20,13 +21,14 @@ export function toComposerSkillCommands(
   commands: readonly DesktopCommandCatalogEntry[]
 ): ComposerSkillCommand[] {
   return commands
-    .filter((command) => command.source === "skill")
+    .filter((command) => command.kind === "template")
     .map((command) => {
       const name = normalizeCommandName(command.name)
       return {
         name,
         label: commandLabel(name),
         description: command.description?.trim() || "使用此技能处理当前请求",
+        sourceLabel: sourceLabel(command.source),
         ...(command.argumentHint?.trim() ? { argumentHint: command.argumentHint.trim() } : {}),
       }
     })
@@ -116,6 +118,12 @@ function commandLabel(name: string): string {
       .replace(/[-_:]+/g, " ")
       .trim() || name
   )
+}
+
+function sourceLabel(source: DesktopCommandSource | undefined): string {
+  if (source === "project") return "项目"
+  if (source === "plugin") return "插件"
+  return "个人"
 }
 
 function normalizeSearchText(value: string): string {
