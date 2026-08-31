@@ -16,6 +16,10 @@
     "./executions": {
       "import": "./src/executions/index.ts",
       "types": "./src/executions/index.ts"
+    },
+    "./context": {
+      "import": "./src/context/index.ts",
+      "types": "./src/context/index.ts"
     }
   },
   "scripts": {

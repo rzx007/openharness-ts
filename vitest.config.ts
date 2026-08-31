@@ -25,6 +25,13 @@ aliases["@openharness/services/executions"] = resolve(
   "executions",
   "index.ts",
 );
+aliases["@openharness/services/context"] = resolve(
+  packagesDir,
+  "services",
+  "src",
+  "context",
+  "index.ts",
+);
 
 export default defineConfig({
   test: {

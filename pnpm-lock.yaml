@@ -880,6 +880,9 @@ importers:
       '@openharness/coordinator':
         specifier: workspace:*
         version: link:../coordinator
+      '@openharness/context':
+        specifier: workspace:*
+        version: link:../context
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
