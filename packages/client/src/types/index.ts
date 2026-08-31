@@ -29,6 +29,7 @@ import type {
   SessionExecutionRecord,
   SessionStateSnapshot,
   SessionTransformationMessagePartRecord,
+  SkillInvocationMetadata,
   ListMessagePartsOptions,
   JobSnapshot,
 } from "@openharness/protocol";
@@ -55,6 +56,7 @@ export type {
   SessionExecutionRecord,
   SessionStateSnapshot,
   SessionTransformationMessagePartRecord,
+  SkillInvocationMetadata,
   ListMessagePartsOptions,
 };
 
@@ -257,11 +259,17 @@ export interface ResumeInterruptedRunResponse extends PromptResponse {
 }
 
 export type CommandKind = "session" | "template";
-export type CommandSource = "builtin" | "skill" | "plugin" | "project";
+export type CommandSource =
+  | "builtin"
+  | "bundled"
+  | "user"
+  | "plugin"
+  | "project";
 
 /** `GET /commands` 返回的命令元数据。 */
 export interface CommandCatalogEntry {
   name: string;
+  displayName?: string;
   description?: string;
   kind: CommandKind;
   source?: CommandSource;
@@ -294,18 +302,6 @@ export interface ProjectRecord {
 
 export interface ListProjectsOptions {
   includeArchived?: boolean;
-}
-
-/** `POST /sessions/:id/commands` 请求体。 */
-export interface InvokeClientCommandInput {
-  name?: string;
-  args?: string;
-  line?: string;
-}
-
-/** `POST /sessions/:id/commands` 响应。 */
-export interface InvokeCommandResponse extends PromptResponse {
-  command: CommandCatalogEntry;
 }
 
 export interface ProviderInfo {

@@ -21,8 +21,6 @@ export {
   type CommandCatalogProvider,
   type CommandKind,
   type CommandSource,
-  type ExpandCommandInput,
-  type ExpandCommandResult,
   type ListCommandsInput,
 } from "./commands/index.js";
 export { rewindTranscript, type RewindTranscriptResult } from "./session/index.js";

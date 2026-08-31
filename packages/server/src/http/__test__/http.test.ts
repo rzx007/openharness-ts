@@ -2415,7 +2415,7 @@ describe("OpenHarnessHttpServer", () => {
             name: "/pr",
             description: "Write a PR",
             kind: "template",
-            source: "skill",
+            source: "user",
           },
         ];
       },
@@ -2449,46 +2449,6 @@ describe("OpenHarnessHttpServer", () => {
         ).toMatchObject({
           kind: "session",
         });
-      },
-      { commandCatalog },
-    );
-  });
-
-  it("expands template commands into admitted prompts", async () => {
-    const commandCatalog: CommandCatalogProvider = {
-      async list() {
-        return [
-          { name: "/pr", description: "PR", kind: "template", source: "skill" },
-        ];
-      },
-      async expand({ name, args }) {
-        if (name !== "/pr") return null;
-        return {
-          prompt: `PR PROMPT\n## Arguments\n${args}`,
-          command: { name: "/pr", kind: "template", source: "skill" },
-        };
-      },
-    };
-    await withServer(
-      async ({ baseUrl, token }) => {
-        await fetch(`${baseUrl}/sessions`, {
-          method: "POST",
-          headers: { ...auth(token), "content-type": "application/json" },
-          body: JSON.stringify({ id: "s1", cwd: process.cwd(), model: "m" }),
-        });
-        const response = await fetch(`${baseUrl}/sessions/s1/commands`, {
-          method: "POST",
-          headers: { ...auth(token), "content-type": "application/json" },
-          body: JSON.stringify({ name: "/pr", args: "fix parser" }),
-        });
-        expect(response.status).toBe(202);
-        const body = (await response.json()) as {
-          input: { content: string };
-          command: { name: string; kind: string };
-        };
-        expect(body.command).toMatchObject({ name: "/pr", kind: "template" });
-        expect(body.input.content).toContain("PR PROMPT");
-        expect(body.input.content).toContain("fix parser");
       },
       { commandCatalog },
     );

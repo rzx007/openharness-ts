@@ -983,9 +983,19 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
           if (catalogEntry?.kind === "template") {
             if (!sessionId) return;
             setLocalBusy(true);
-            const response = await client.invokeCommand(sessionId, {
-              name: slash.name,
-              args: slash.args,
+            const commandName = slash.name.replace(/^\//, "");
+            const response = await client.admitPrompt(sessionId, {
+              id: createPromptRequestId(),
+              content: slash.args,
+              metadata: {
+                skillInvocation: {
+                  name: commandName,
+                  commandName,
+                  ...(catalogEntry.displayName ? { displayName: catalogEntry.displayName } : {}),
+                  source: catalogEntry.source,
+                  invocationSource: "slash",
+                },
+              },
             });
             setLocalBusy(false);
             setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);

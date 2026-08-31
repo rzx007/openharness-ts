@@ -15,8 +15,6 @@ import type {
   EventSyncOptions,
   ForkClientSessionInput,
   InterruptSessionResponse,
-  InvokeClientCommandInput,
-  InvokeCommandResponse,
   ListClientMessagePartsOptions,
   ListCommandsOptions,
   ListEventsOptions,
@@ -1160,25 +1158,6 @@ export class OpenHarnessClient {
       {
         method: "POST",
         body: { ...input, id: input.id ?? createPromptRequestId() },
-        signal: options.signal,
-      },
-    );
-  }
-
-  /**
-   * `POST /sessions/:id/commands` — expand a template/skill command into a prompt
-   * and admit it through the normal run path. Not a generic slash executor.
-   */
-  async invokeCommand(
-    sessionId: string,
-    input: InvokeClientCommandInput,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<InvokeCommandResponse> {
-    return await this.request<InvokeCommandResponse>(
-      `/sessions/${encodeURIComponent(sessionId)}/commands`,
-      {
-        method: "POST",
-        body: input,
         signal: options.signal,
       },
     );

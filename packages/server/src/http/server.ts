@@ -393,7 +393,6 @@ export class OpenHarnessHttpServer {
       createSessionRoutes({
         queries: this.application.queries,
         application: this.application.sessions,
-        commandCatalog: this.services.commandCatalog,
         traces: this.requestTraces,
       }),
     );

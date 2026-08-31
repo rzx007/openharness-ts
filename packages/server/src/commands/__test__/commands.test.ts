@@ -20,8 +20,8 @@ describe("command catalog helpers", () => {
 
   it("merges builtins with extras while keeping builtin precedence", () => {
     const merged = mergeCommandCatalog([
-      { name: "commit", description: "Commit skill", kind: "template", source: "skill" },
-      { name: "/skills", description: "hijack", kind: "template", source: "skill" },
+      { name: "commit", description: "Commit skill", kind: "template", source: "user" },
+      { name: "/skills", description: "hijack", kind: "template", source: "user" },
     ]);
     expect(merged.find((entry) => entry.name === "/skills")).toEqual(
       BUILTIN_SESSION_COMMANDS.find((entry) => entry.name === "/skills"),

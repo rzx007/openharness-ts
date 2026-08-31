@@ -8,11 +8,17 @@
 
 export type CommandKind = "session" | "template";
 
-export type CommandSource = "builtin" | "skill" | "plugin" | "project";
+export type CommandSource =
+  | "builtin"
+  | "bundled"
+  | "user"
+  | "plugin"
+  | "project";
 
 export interface CommandCatalogEntry {
   /** Slash form, e.g. `/models` or `/commit`. */
   name: string;
+  displayName?: string;
   description?: string;
   kind: CommandKind;
   source?: CommandSource;
@@ -23,21 +29,8 @@ export interface ListCommandsInput {
   cwd: string;
 }
 
-export interface ExpandCommandInput {
-  cwd: string;
-  /** Slash form or bare name; normalized by helpers. */
-  name: string;
-  args?: string;
-}
-
-export interface ExpandCommandResult {
-  prompt: string;
-  command: CommandCatalogEntry;
-}
-
 export interface CommandCatalogProvider {
   list(input: ListCommandsInput): Promise<CommandCatalogEntry[]> | CommandCatalogEntry[];
-  expand?(input: ExpandCommandInput): Promise<ExpandCommandResult | null> | ExpandCommandResult | null;
 }
 
 /** Always-visible server/session commands (resource APIs, not REPL handlers). */

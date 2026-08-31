@@ -459,7 +459,7 @@ describe("OpenHarnessClient", () => {
     );
   });
 
-  it("lists commands and invokes template commands", async () => {
+  it("lists commands without a command execution endpoint", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (
       url: string | URL | Request,
@@ -475,28 +475,11 @@ describe("OpenHarnessClient", () => {
             {
               name: "/commit",
               kind: "template",
-              source: "skill",
+              source: "user",
               description: "Commit",
             },
           ],
         });
-      }
-      if (String(url).includes("/sessions/s1/commands")) {
-        return jsonResponse(
-          {
-            input: {
-              id: "i1",
-              sessionId: "s1",
-              seq: 1,
-              delivery: "queue",
-              content: "PROMPT",
-              metadata: {},
-              createdAt: 1,
-            },
-            command: { name: "/commit", kind: "template", source: "skill" },
-          },
-          202,
-        );
       }
       if (String(url).includes("/sessions/s1") && init?.method === "PATCH") {
         return jsonResponse({
@@ -525,16 +508,10 @@ describe("OpenHarnessClient", () => {
       {
         name: "/commit",
         kind: "template",
-        source: "skill",
+        source: "user",
         description: "Commit",
       },
     ]);
-    await expect(
-      client.invokeCommand("s1", { name: "/commit", args: "fix" }),
-    ).resolves.toMatchObject({
-      command: { name: "/commit", kind: "template" },
-      input: { content: "PROMPT" },
-    });
     await expect(
       client.updateSession("s1", {
         metadata: { runtime: { model: "new-model" } },
@@ -544,7 +521,6 @@ describe("OpenHarnessClient", () => {
       calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`),
     ).toEqual([
       "GET http://127.0.0.1:3456/commands?cwd=%2Frepo",
-      "POST http://127.0.0.1:3456/sessions/s1/commands",
       "PATCH http://127.0.0.1:3456/sessions/s1",
     ]);
   });

@@ -5,11 +5,6 @@ import {
 } from "@openharness/protocol";
 
 import {
-  normalizeCommandName,
-  parseSlashLine,
-  type CommandCatalogProvider,
-} from "../../commands/index.js";
-import {
   applicationErrorResponse,
   errorResponse,
   jsonResponse,
@@ -22,7 +17,6 @@ import {
 import type { RequestTraceRegistry } from "../control/index.js";
 import type { SessionApplicationService } from "../../application/session/session-application-service.js";
 import type { SessionQueryService } from "../../application/session/session-query-service.js";
-import type { AdmitPromptResult } from "../../application/session/session-run-engine.js";
 
 export interface SessionRoutesContext {
   queries: Pick<
@@ -43,7 +37,6 @@ export interface SessionRoutesContext {
     | "getSession"
     | "updateSession"
   >;
-  commandCatalog?: CommandCatalogProvider;
   traces: Pick<RequestTraceRegistry, "get">;
 }
 
@@ -177,53 +170,6 @@ export function createSessionRoutes(context: SessionRoutesContext): Hono {
         return errorResponse(
           404,
           error instanceof Error ? error.message : String(error),
-        );
-      }
-    })
-    .post("/:sessionId/commands", async (c) => {
-      const sessionId = c.req.param("sessionId");
-      if (!sessionId) return errorResponse(400, "sessionId is required");
-      const body = await readJson(c);
-      const session = context.queries.getSession(sessionId);
-      if (!session) return errorResponse(404, "Session not found");
-
-      let name =
-        typeof body.name === "string" ? normalizeCommandName(body.name) : "";
-      let args = typeof body.args === "string" ? body.args : "";
-      if (!name && typeof body.line === "string") {
-        const parsed = parseSlashLine(body.line);
-        if (!parsed) return errorResponse(400, "line must be a slash command");
-        name = parsed.name;
-        args = parsed.args;
-      }
-      if (!name) return errorResponse(400, "name or line is required");
-
-      if (!context.commandCatalog?.expand) {
-        return errorResponse(400, "Command expansion is not available");
-      }
-
-      try {
-        const expanded = await context.commandCatalog.expand({
-          cwd: session.cwd,
-          name,
-          args,
-        });
-        if (!expanded) return errorResponse(404, `Unknown command: ${name}`);
-        const admitted: AdmitPromptResult =
-          await context.application.admitPrompt(sessionId, {
-            content: expanded.prompt,
-            metadata: {
-              command: expanded.command.name,
-              commandKind: expanded.command.kind,
-              commandArgs: args,
-            },
-            traceId: context.traces.get(c.req.raw),
-          });
-        return jsonResponse({ ...admitted, command: expanded.command }, 202);
-      } catch (error) {
-        return applicationErrorResponse(
-          error,
-          sessionMutationErrorStatus(error),
         );
       }
     });

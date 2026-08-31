@@ -23,7 +23,7 @@ function minimalSettings(): Settings {
 }
 
 describe("createDefaultCommandCatalog", () => {
-  it("lists bundled user-invocable skills as template commands and expands them", async () => {
+  it("lists bundled user-invocable skills as template commands", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-catalog-"));
     try {
       const catalog = createDefaultCommandCatalog(minimalSettings());
@@ -32,11 +32,9 @@ describe("createDefaultCommandCatalog", () => {
         expect.arrayContaining(["/commit", "/review", "/plan"]),
       );
       expect(commands.every((command) => command.kind === "template")).toBe(true);
-
-      const expanded = await catalog.expand!({ cwd: dir, name: "/commit", args: "fix auth" });
-      expect(expanded?.command.name).toBe("/commit");
-      expect(expanded?.prompt).toContain("## Arguments");
-      expect(expanded?.prompt).toContain("fix auth");
+      expect(commands.find((command) => command.name === "/commit")?.source).toBe(
+        "bundled",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

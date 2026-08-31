@@ -581,7 +581,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           {
             name: "/pr",
             kind: "template",
-            source: "skill",
+            source: "user",
             description: "Write a PR",
           },
         ],
@@ -818,28 +818,6 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           metadata: body.metadata ? { ...base.metadata, ...body.metadata } : base.metadata,
           updatedAt: 9,
         },
-      });
-    }
-    if (pathname === "/sessions/s1/commands" && init?.method === "POST") {
-      return jsonResponse({
-        input: {
-          id: "i-cmd",
-          sessionId: "s1",
-          seq: 2,
-          delivery: "queue",
-          content: "PR PROMPT",
-          metadata: {},
-          createdAt: 11,
-        },
-        run: {
-          id: "r-cmd",
-          sessionId: "s1",
-          status: "running",
-          metadata: {},
-          createdAt: 11,
-          updatedAt: 11,
-        },
-        command: { name: "/pr", kind: "template", source: "skill" },
       });
     }
     if (pathname === "/sessions/s1/rewind" && init?.method === "POST") {
@@ -1276,7 +1254,22 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
     captured?.sendRequest({ type: "submit_line", line: "/pr fix auth" });
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
-  expect(calls.some((call) => call.url === "http://daemon.test/sessions/s1/commands" && call.init.method === "POST")).toBe(true);
+  const skillPrompt = calls.find(
+    (call) => call.url === "http://daemon.test/sessions/s1/prompts" &&
+      call.init.method === "POST" &&
+      String(call.init.body ?? "").includes("fix auth"),
+  );
+  expect(JSON.parse(String(skillPrompt?.init.body ?? "{}"))).toMatchObject({
+    content: "fix auth",
+    metadata: {
+      skillInvocation: {
+        name: "pr",
+        commandName: "pr",
+        source: "user",
+        invocationSource: "slash",
+      },
+    },
+  });
 
   const promptCallsBeforeUnknown = calls.filter((call) => call.url.includes("/prompts")).length;
   await act(async () => {

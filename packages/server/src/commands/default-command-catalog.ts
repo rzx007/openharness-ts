@@ -2,8 +2,6 @@ import type { Settings } from "@openharness/core";
 import type {
   CommandCatalogEntry,
   CommandCatalogProvider,
-  ExpandCommandInput,
-  ExpandCommandResult,
   ListCommandsInput,
 } from "./commands.js";
 import { normalizeCommandName } from "./commands.js";
@@ -14,9 +12,10 @@ function skillToCatalogEntry(skill: SkillDefinition): CommandCatalogEntry {
   const name = normalizeCommandName(skill.commandName ?? skill.name);
   return {
     name,
+    ...(skill.displayName ? { displayName: skill.displayName } : {}),
     description: skill.description,
     kind: "template",
-    source: skill.source === "plugin" ? "plugin" : skill.source === "project" ? "project" : "skill",
+    source: skill.source ?? "user",
     ...(skill.argumentHint ? { argumentHint: skill.argumentHint } : {}),
   };
 }
@@ -40,21 +39,6 @@ export function createDefaultCommandCatalog(
         .getAll()
         .filter((skill) => skill.userInvocable)
         .map(skillToCatalogEntry);
-    },
-
-    async expand(input: ExpandCommandInput): Promise<ExpandCommandResult | null> {
-      const skillRegistry = await loadSkillRegistry(input.cwd, getSettings());
-      const line = `${normalizeCommandName(input.name)}${input.args ? ` ${input.args}` : ""}`;
-      const trimmed = line.trim();
-      const separator = trimmed.indexOf(" ");
-      const name = (separator < 0 ? trimmed : trimmed.slice(0, separator)).replace(/^\//, "");
-      const args = separator < 0 ? "" : trimmed.slice(separator + 1).trim();
-      const skill = skillRegistry.resolve(name);
-      if (!skill?.userInvocable) return null;
-      return {
-        prompt: args ? `${skill.content.trimEnd()}\n\n## Arguments\n${args}\n` : skill.content,
-        command: skillToCatalogEntry(skill),
-      };
     },
   };
 }
