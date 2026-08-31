@@ -185,6 +185,9 @@ export const desktopAPI = {
     snapshot: () => invoke(IpcChannels.settingsSnapshot),
     updateWorkStyle: (input: IpcInvokeMap[typeof IpcChannels.settingsUpdateWorkStyle]["args"][0]) =>
       invoke(IpcChannels.settingsUpdateWorkStyle, input),
+    updateNotificationMode: (
+      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateNotificationMode]["args"][0]
+    ) => invoke(IpcChannels.settingsUpdateNotificationMode, input),
   },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>

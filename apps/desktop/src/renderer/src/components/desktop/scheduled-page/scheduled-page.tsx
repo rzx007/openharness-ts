@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { CalendarClock, CircleAlert, ExternalLink } from "lucide-react"
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
@@ -44,15 +44,31 @@ export function ScheduledPage({
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTask, setEditorTask] = useState<DesktopScheduledTask | null>(null)
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
+  const refreshInitializedRef = useRef(false)
+  const unreadCountRef = useRef(0)
+  const notifiedRunIdsRef = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
+      const previousUnread = unreadCountRef.current
+      const initialized = refreshInitializedRef.current
       const [nextStatus, nextTasks] = await Promise.all([
         window.desktop.schedules.status(),
         window.desktop.schedules.list(),
       ])
       const latestRuns =
         nextStatus.executing > 0 ? await window.desktop.schedules.listRuns({ limit: 50 }) : []
+      if (initialized && nextStatus.unread > previousUnread) {
+        const unreadRuns = await window.desktop.schedules.listRuns({ unread: true, limit: 10 })
+        await notifyUnreadScheduledRuns(
+          unreadRuns,
+          nextTasks,
+          selectedId,
+          notifiedRunIdsRef.current
+        )
+      }
+      unreadCountRef.current = nextStatus.unread
+      refreshInitializedRef.current = true
       setStatus(nextStatus)
       setTasks(nextTasks)
       setRunningTaskIds(
@@ -71,7 +87,7 @@ export function ScheduledPage({
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedId])
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void refresh(), 0)
@@ -359,4 +375,41 @@ export function ScheduledPage({
       ) : null}
     </section>
   )
+}
+
+async function notifyUnreadScheduledRuns(
+  runs: readonly DesktopScheduledRun[],
+  tasks: readonly DesktopScheduledTask[],
+  selectedTaskId: string | null,
+  notifiedRunIds: Set<string>
+): Promise<void> {
+  const mode = await readNotificationMode()
+  if (mode === "never") return
+
+  const taskNames = new Map(tasks.map((task) => [task.id, task.name]))
+  for (const run of runs) {
+    if (run.taskId === selectedTaskId || notifiedRunIds.has(run.id)) continue
+    notifiedRunIds.add(run.id)
+    const taskName = taskNames.get(run.taskId)?.trim() || "已安排任务"
+    await window.desktop.tray.notify({
+      title: scheduledRunNotificationTitle(run),
+      body: `${taskName} 有新的运行结果。`,
+      ...(mode === "always" ? { showWhenFocused: true } : {}),
+    })
+  }
+}
+
+async function readNotificationMode(): Promise<"never" | "when_unfocused" | "always"> {
+  try {
+    return (await window.desktop.settings.snapshot()).notificationMode
+  } catch {
+    return "when_unfocused"
+  }
+}
+
+function scheduledRunNotificationTitle(run: DesktopScheduledRun): string {
+  if (run.status === "succeeded") return "已安排任务完成"
+  if (run.status === "needs_attention") return "已安排任务需要处理"
+  if (run.status === "failed" || run.status === "interrupted") return "已安排任务失败"
+  return "已安排任务有新结果"
 }

@@ -1,16 +1,23 @@
 import type { OpenHarnessClient } from "@openharness/client"
 
-import { buildDesktopSettingsSnapshot, isDesktopWorkStyle } from "../../../shared/settings-types"
+import {
+  buildDesktopSettingsSnapshot,
+  isDesktopNotificationMode,
+  isDesktopWorkStyle,
+} from "../../../shared/settings-types"
 import type {
+  UpdateDesktopNotificationModeInput,
   DesktopSettingsSnapshot,
   UpdateDesktopWorkStyleInput,
 } from "../../../shared/settings-types"
 import { desktopSessionService } from "../session/session-service"
+import { getDesktopPreferences, patchDesktopPreferences } from "./desktop-preferences"
 
 export class DesktopSettingsService {
   snapshot(): Promise<DesktopSettingsSnapshot> {
+    const preferences = getDesktopPreferences()
     return withDaemonRetry(async (client) =>
-      buildDesktopSettingsSnapshot(await client.getSettings())
+      buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
     )
   }
 
@@ -20,7 +27,20 @@ export class DesktopSettingsService {
     }
     return withDaemonRetry(async (client) => {
       const settings = await client.patchSettings({ workStyle: input.workStyle })
-      return buildDesktopSettingsSnapshot(settings)
+      return buildDesktopSettingsSnapshot(settings, getDesktopPreferences())
+    })
+  }
+
+  async updateNotificationMode(
+    input: UpdateDesktopNotificationModeInput
+  ): Promise<DesktopSettingsSnapshot> {
+    if (!isDesktopNotificationMode(input.notificationMode)) {
+      throw new Error("未知的通知设置，请选择从不、仅失去焦点时或始终。")
+    }
+    const preferences = patchDesktopPreferences({ notificationMode: input.notificationMode })
+    return withDaemonRetry(async (client) => {
+      const settings = await client.getSettings()
+      return buildDesktopSettingsSnapshot(settings, preferences)
     })
   }
 }

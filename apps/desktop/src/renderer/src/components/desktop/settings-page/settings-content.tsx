@@ -15,8 +15,8 @@ import { Separator } from "@renderer/components/ui/separator"
 import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
 import { AttachmentStorageSettings } from "./attachment-storage-settings"
-import { isDesktopWorkStyle } from "@shared/settings-types"
-import type { DesktopWorkStyle } from "@shared/settings-types"
+import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
+import type { DesktopNotificationMode, DesktopWorkStyle } from "@shared/settings-types"
 
 type SettingsContentProps = {
   selectedSection: string
@@ -94,6 +94,12 @@ function GeneralSettings(): React.JSX.Element {
         />
         <Separator />
         <SettingRow
+          title="通知"
+          description="选择任务完成、失败或需要你处理时是否发送系统通知。"
+          control={<NotificationModeControl />}
+        />
+        <Separator />
+        <SettingRow
           title="默认文件打开目标"
           description="选择打开代码文件和文件夹时使用的应用"
           control={<SettingSelect icon={<Code2 />} label="VS Code" />}
@@ -159,6 +165,12 @@ function GeneralSettings(): React.JSX.Element {
   )
 }
 
+const notificationModeLabels = {
+  never: "从不",
+  when_unfocused: "仅失去焦点时",
+  always: "始终",
+} satisfies Record<DesktopNotificationMode, string>
+
 function WorkStyleControl(): React.JSX.Element {
   const [style, setStyle] = useState<DesktopWorkStyle>("practical")
   const [loading, setLoading] = useState(true)
@@ -214,6 +226,74 @@ function WorkStyleControl(): React.JSX.Element {
           <SelectGroup>
             <SelectItem value="practical">务实</SelectItem>
             <SelectItem value="efficient">高效</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      {error ? (
+        <p role="alert" className="max-w-56 text-right text-[11px] text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function NotificationModeControl(): React.JSX.Element {
+  const [mode, setMode] = useState<DesktopNotificationMode>("when_unfocused")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.desktop.settings
+      .snapshot()
+      .then((snapshot) => {
+        if (!cancelled) setMode(snapshot.notificationMode)
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setError(errorMessage(loadError))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const update = (nextMode: DesktopNotificationMode): void => {
+    if (saving || nextMode === mode) return
+    const previous = mode
+    setMode(nextMode)
+    setSaving(true)
+    setError(null)
+    void window.desktop.settings
+      .updateNotificationMode({ notificationMode: nextMode })
+      .then((snapshot) => setMode(snapshot.notificationMode))
+      .catch((saveError: unknown) => {
+        setMode(previous)
+        setError(errorMessage(saveError))
+      })
+      .finally(() => setSaving(false))
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <Select
+        value={mode}
+        onValueChange={(value) => {
+          if (isDesktopNotificationMode(value)) update(value)
+        }}
+      >
+        <SelectTrigger aria-label="通知" disabled={loading || saving} className="min-w-36">
+          <SelectValue>{notificationModeLabels[mode]}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="never">从不</SelectItem>
+            <SelectItem value="when_unfocused">仅失去焦点时</SelectItem>
+            <SelectItem value="always">始终</SelectItem>
           </SelectGroup>
         </SelectContent>
       </Select>

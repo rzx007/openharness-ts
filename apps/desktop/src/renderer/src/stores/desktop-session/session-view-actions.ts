@@ -7,6 +7,7 @@ import {
 import { createEmptySessionRuntime } from "./operation-state"
 import { clearPersistedActiveSessionId, writePersistedActiveSessionId } from "./persistence"
 import { acceptActiveSessionView, reconcileRuntimeWithView } from "./session-view-state"
+import { notifyForSessionViewChange } from "./notification-observer"
 import type { DesktopSessionState, DesktopStoreContext } from "./types"
 
 interface SessionViewActionsContext extends DesktopStoreContext {
@@ -21,6 +22,7 @@ export function createApplySessionUpdate(
   return (view) => {
     const current = get().sessionView
     if (acceptActiveSessionView(get().activeSessionId, current, view) !== view) return
+    void notifyForSessionViewChange({ previous: current, next: view })
     if (view.session.status === "archived") clearPersistedActiveSessionId()
     else writePersistedActiveSessionId(view.session.id)
     set((state) => {

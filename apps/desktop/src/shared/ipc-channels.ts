@@ -74,7 +74,11 @@ import type {
   DesktopPluginContextInput,
   DesktopPluginSnapshot,
 } from "./plugin-types"
-import type { DesktopSettingsSnapshot, UpdateDesktopWorkStyleInput } from "./settings-types"
+import type {
+  DesktopSettingsSnapshot,
+  UpdateDesktopNotificationModeInput,
+  UpdateDesktopWorkStyleInput,
+} from "./settings-types"
 import type {
   CancelDesktopAttachmentUploadInput,
   DesktopAttachmentAssetInput,
@@ -210,6 +214,7 @@ export const IpcChannels = {
 
   settingsSnapshot: "settings:snapshot",
   settingsUpdateWorkStyle: "settings:update-work-style",
+  settingsUpdateNotificationMode: "settings:update-notification-mode",
 } as const
 
 export const IpcEvents = {
@@ -286,6 +291,10 @@ export interface IpcInvokeMap {
   [IpcChannels.settingsSnapshot]: { args: []; result: DesktopSettingsSnapshot }
   [IpcChannels.settingsUpdateWorkStyle]: {
     args: [input: UpdateDesktopWorkStyleInput]
+    result: DesktopSettingsSnapshot
+  }
+  [IpcChannels.settingsUpdateNotificationMode]: {
+    args: [input: UpdateDesktopNotificationModeInput]
     result: DesktopSettingsSnapshot
   }
 

@@ -82,7 +82,11 @@ import type {
   DesktopPluginContextInput,
   DesktopPluginSnapshot,
 } from "./plugin-types"
-import type { DesktopSettingsSnapshot, UpdateDesktopWorkStyleInput } from "./settings-types"
+import type {
+  DesktopSettingsSnapshot,
+  UpdateDesktopNotificationModeInput,
+  UpdateDesktopWorkStyleInput,
+} from "./settings-types"
 import type {
   CancelDesktopAttachmentUploadInput,
   DesktopAttachmentAssetInput,
@@ -197,6 +201,9 @@ export type DesktopAPI = {
   settings: {
     snapshot: () => Promise<DesktopSettingsSnapshot>
     updateWorkStyle: (input: UpdateDesktopWorkStyleInput) => Promise<DesktopSettingsSnapshot>
+    updateNotificationMode: (
+      input: UpdateDesktopNotificationModeInput
+    ) => Promise<DesktopSettingsSnapshot>
   }
   plugins: {
     snapshot: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
