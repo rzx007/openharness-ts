@@ -84,7 +84,7 @@ import { createDefaultModelService } from "./default-services/model-service.js";
 import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
 import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
-import { ContextIntentResolver, ContextPersistenceService, ContextQueryService, detectContextSensitivity } from "./context/index.js";
+import { ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, DeterministicEnvironmentFactExtractor, detectContextSensitivity } from "./context/index.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -306,6 +306,10 @@ export class DaemonApplication implements DurableAgentApplication {
         resolver: new ContextIntentResolver(),
       });
       const contextQuery = new ContextQueryService({ store: contextStore });
+      const contextExtraction = new ContextExtractionService({
+        store: contextStore,
+        extractor: new DeterministicEnvironmentFactExtractor(),
+      });
       const contextMemory: AgentContextMemoryHost = {
         remember: async (input, context) => {
           const session = requireContextSession(store, context.sessionId, context.cwd);
@@ -507,6 +511,17 @@ export class DaemonApplication implements DurableAgentApplication {
         log: options.log,
         sessionMemoryWriter: (cwd, messages, sessionId) =>
           updateSessionMemoryFile(cwd, messages, { sessionId }),
+        contextExtractor: async ({ sessionId, projectId, messages }) => {
+          await contextExtraction.extract({
+            messages,
+            runtimeScope: {
+              userScopeKey: "local-user",
+              machineId: await contextStore.paths.getOrCreateMachineId(),
+              ...(projectId ? { projectId } : {}),
+            },
+            sourceSessionId: sessionId,
+          });
+        },
         lastConsolidatedAt: readLastConsolidatedAt,
         autoDream: executeAutoDream,
       });

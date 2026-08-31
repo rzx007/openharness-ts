@@ -19,6 +19,13 @@ export interface SessionPostRunMaintenanceContext {
     recentSessionIds: string[];
     model: string;
   }) => Promise<unknown>;
+  contextExtractor?: (input: {
+    sessionId: string;
+    runId: string;
+    cwd: string;
+    projectId?: string;
+    messages: SessionMessageLike[];
+  }) => Promise<void>;
   log(event: ObservabilityEvent): void;
 }
 
@@ -64,6 +71,16 @@ export class SessionPostRunMaintenance {
         this.context.sessionMemoryWriter?.(session.cwd, messages, sessionId);
       });
     }
+
+    await this.bestEffort("session.context.auto_extract_failed", sessionId, runId, async () => {
+      await this.context.contextExtractor?.({
+        sessionId,
+        runId,
+        cwd: session.cwd,
+        ...(session.projectId ? { projectId: session.projectId } : {}),
+        messages,
+      });
+    });
 
     if (settings.memory?.autoExtractEnabled !== false) {
       await this.bestEffort("session.memory.auto_extract_failed", sessionId, runId, async () => {

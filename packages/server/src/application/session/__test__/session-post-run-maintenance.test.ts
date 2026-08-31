@@ -57,6 +57,19 @@ describe("SessionPostRunMaintenance", () => {
     expect(getSettings).not.toHaveBeenCalled();
   });
 
+  it("extracts governed context only after a completed run", async () => {
+    const contextExtractor = vi.fn(async () => {});
+    const maintenance = new SessionPostRunMaintenance({
+      store: createStore() as any,
+      getSettings: vi.fn(async () => ({ memory: { enabled: true, sessionMemoryEnabled: true, autoExtractEnabled: false } } as any)),
+      sessionMemoryWriter: vi.fn(),
+      contextExtractor,
+      log: vi.fn(),
+    });
+    await maintenance.run("s1", "run-1", { remember: vi.fn() } as any);
+    expect(contextExtractor).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s1", runId: "run-1", cwd: "/repo" }));
+  });
+
   it("keeps personalization active when semantic memory is disabled", async () => {
     const personalizationUpdater = vi.fn(() => 1);
     const remember = vi.fn();
