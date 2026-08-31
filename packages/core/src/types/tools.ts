@@ -78,6 +78,25 @@ export interface AgentAttachmentResourceHost {
   ): Promise<AgentAttachmentTextSlice>;
 }
 
+export interface AgentContextMemoryCallContext {
+  sessionId: string;
+  runId: string;
+  inputId: string;
+  cwd: string;
+  signal: AbortSignal;
+}
+
+export interface AgentContextMemoryHost {
+  remember(input: { content: string }, context: AgentContextMemoryCallContext): Promise<unknown>;
+  recall(input: { query?: string }, context: AgentContextMemoryCallContext): Promise<unknown>;
+  resolve(
+    input: { id: string; action: "accept" | "reject"; topic?: string },
+    context: AgentContextMemoryCallContext,
+  ): Promise<unknown>;
+  update(input: { id: string; content: string }, context: AgentContextMemoryCallContext): Promise<unknown>;
+  forget(input: { id: string }, context: AgentContextMemoryCallContext): Promise<unknown>;
+}
+
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
@@ -107,6 +126,8 @@ export interface ToolContext {
   imageToText?: AgentImageToTextHost;
   /** Session-authorized immutable text attachment access. */
   attachments?: AgentAttachmentResourceHost;
+  /** Host-owned governed persistent context. Tools never receive its storage location. */
+  contextMemory?: AgentContextMemoryHost;
   agent?: AgentExecutionContext;
 }
 

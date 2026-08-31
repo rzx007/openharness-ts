@@ -1,4 +1,5 @@
 export { createDefaultToolRegistry } from "./registry.js";
+export * from "./context/index.js";
 export {
   bashTool,
   createBashTool,

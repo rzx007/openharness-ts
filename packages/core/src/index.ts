@@ -37,6 +37,8 @@ export type {
   AgentImageToTextResult,
   AgentAttachmentResourceHost,
   AgentAttachmentTextSlice,
+  AgentContextMemoryCallContext,
+  AgentContextMemoryHost,
   ToolRegistry as IToolRegistry,
 } from "./types/tools";
 

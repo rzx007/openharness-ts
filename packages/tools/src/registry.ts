@@ -51,6 +51,7 @@ import { backgroundShellCreateTool } from "./background-shell/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
 import { terminalTools } from "./terminal/index.js";
 import { jobTools } from "./job/index.js";
+import { contextMemoryTools } from "./context/index.js";
 
 export function createDefaultToolRegistry(
   options: {
@@ -58,6 +59,7 @@ export function createDefaultToolRegistry(
     terminal?: boolean;
     jobs?: boolean;
     imageToText?: boolean;
+    contextMemory?: boolean;
     agentDefinitions?: AgentDefinition[];
     workflowRepository?: WorkflowRunRepository;
   } = {},
@@ -116,5 +118,8 @@ export function createDefaultToolRegistry(
   if (options.imageToText) registry.register(imageToTextTool);
   registry.register(imageGenerationTool);
   registry.register(feishuPushTool);
+  if (options.contextMemory) {
+    for (const tool of contextMemoryTools) registry.register(tool);
+  }
   return registry;
 }

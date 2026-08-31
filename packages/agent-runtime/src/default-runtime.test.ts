@@ -129,6 +129,23 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
+  it("registers governed context tools only for a capable host", async () => {
+    const client = { async *streamMessage() { yield { type: "complete" as const, stopReason: "end_turn" as const }; } };
+    const withoutHost = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: { client },
+    });
+    const withHost = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: { client },
+      hostCapabilities: { contextMemory: true },
+    });
+
+    expect(withoutHost.toolRegistry.has("ContextRemember")).toBe(false);
+    expect(withHost.toolRegistry.has("ContextRemember")).toBe(true);
+    await withoutHost.close();
+    await withHost.close();
+  });
   it("rejects removed lifecycle names with the Jobs replacement", async () => {
     await expect(createOpenHarnessRuntime({
       settings: {

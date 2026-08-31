@@ -3,6 +3,7 @@ import type {
   AgentBackgroundShellHost,
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
+  AgentContextMemoryHost,
   McpAuthHost,
   ToolRegistry,
 } from "./tools";
@@ -401,6 +402,7 @@ export interface QueryEngine {
   setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void;
   setImageToText(imageToText: AgentImageToTextHost | undefined): void;
   setAttachments(attachments: AgentAttachmentResourceHost | undefined): void;
+  setContextMemory(contextMemory: AgentContextMemoryHost | undefined): void;
 }
 
 export interface MemoryRetriever {

@@ -125,6 +125,21 @@ describe("createDaemonAgentLoader", () => {
     });
   });
 
+  it("passes the governed context host into every durable Agent", async () => {
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const contextMemory = { remember: vi.fn(), recall: vi.fn(), resolve: vi.fn(), update: vi.fn(), forget: vi.fn() } as any;
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model" } as any,
+      createAgent,
+      contextMemory,
+    })!;
+
+    await loader({ session, history: [], parts: [] });
+
+    expect(createAgent.mock.calls[0]![0].options.hostCapabilities.contextMemory).toBe(contextMemory);
+  });
+
   it("does not let session metadata bypass the persistent plugin master switch", async () => {
     const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
     const createAgent = vi.fn(async () => agent);

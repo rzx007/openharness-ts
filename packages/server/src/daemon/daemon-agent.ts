@@ -15,6 +15,7 @@ import type {
   AgentBackgroundShellHost,
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
+  AgentContextMemoryHost,
   AgentEffects,
   AgentEventListener,
   Settings,
@@ -72,6 +73,7 @@ export interface DaemonAgentLoaderOptions {
   workflowRepository?: WorkflowRunRepository;
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
+  contextMemory?: AgentContextMemoryHost;
   attachmentResourceRoot?(session: SessionRecord): string;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
@@ -144,6 +146,7 @@ export function createDaemonAgentLoader(
           : {}),
         ...(options.imageToText ? { imageToText: options.imageToText } : {}),
         ...(options.attachments ? { attachments: options.attachments } : {}),
+        ...(options.contextMemory ? { contextMemory: options.contextMemory } : {}),
         ...(attachmentResourceRoot ? { attachmentResourceRoot } : {}),
       },
       ...(options.createEventSink

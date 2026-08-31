@@ -5,6 +5,11 @@ import { createDefaultToolRegistry } from "../registry.js";
 import { SkillRegistry } from "@openharness/skills";
 
 describe("createDefaultToolRegistry", () => {
+  it("registers context tools only when the host capability is enabled", () => {
+    expect(createDefaultToolRegistry().getAll().map(({ name }) => name)).not.toContain("ContextRemember");
+    expect(createDefaultToolRegistry({ contextMemory: true }).getAll().map(({ name }) => name))
+      .toEqual(expect.arrayContaining(["ContextRemember", "ContextRecall", "ContextResolve", "ContextUpdate", "ContextForget"]));
+  });
   it("registers all built-in tools", () => {
     const registry = createDefaultToolRegistry();
     const tools = registry.getAll();

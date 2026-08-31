@@ -3,6 +3,7 @@ import type {
   AgentBackgroundShellHost,
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
+  AgentContextMemoryHost,
   AgentEffects,
   AgentScheduleEffects,
   PermissionMode,
@@ -32,6 +33,7 @@ export interface AgentHostCapabilities {
   workflowRepository?: WorkflowRunRepository;
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
+  contextMemory?: AgentContextMemoryHost;
   /** Stable per-session directory exposed read-only inside Docker. */
   attachmentResourceRoot?: string;
 }

@@ -79,6 +79,7 @@ interface OpenHarnessRuntimeOptions {
     workflowRepository?: WorkflowRunRepository;
     imageToText?: boolean;
     attachments?: boolean;
+    contextMemory?: boolean;
     attachmentResourceRoot?: string;
   };
 }
@@ -152,6 +153,7 @@ export async function createOpenHarnessRuntime(
     agentDefinitions: options.agentDefinitions,
     workflowRepository: options.hostCapabilities?.workflowRepository,
     imageToText: options.hostCapabilities?.imageToText,
+    contextMemory: options.hostCapabilities?.contextMemory,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
@@ -205,7 +207,7 @@ export async function createOpenHarnessRuntime(
   // 自定义 prompt（CLI override）优先，跳过默认 prompt 构建。只在走默认 prompt
   // 时才注入 model 可见的 skills 段，使 print/backend 三模式与 REPL 一致——REPL
   // 由 refreshSystemPrompt 注入，print/backend 走默认 composition root 由此处注入。
-  const systemPrompt =
+  let systemPrompt =
     configuration.systemPrompt ??
     (await buildRuntimeSystemPrompt({
       customPrompt: settings.systemPrompt,
@@ -217,6 +219,9 @@ export async function createOpenHarnessRuntime(
       passes: settings.passes,
       skillsList: options.skillRegistry?.modelVisibleList(),
     }));
+  if (options.hostCapabilities?.contextMemory) {
+    systemPrompt = `${systemPrompt}\n\n## Persistent Context\n\nWhen the user explicitly asks you to remember, update, or forget durable information, use the Context tools. Never locate or edit persistent context files directly. If a Context tool reports that clarification is needed, ask only the returned clarification question.`;
+  }
 
   const engineOptions = {
     maxTurns: configuration.maxTurns ?? settings.maxTurns,

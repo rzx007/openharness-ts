@@ -18,6 +18,7 @@ import type {
   AgentBackgroundShellHost,
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
+  AgentContextMemoryHost,
   McpAuthHost,
 } from "../index";
 import type {
@@ -199,6 +200,7 @@ export class QueryEngine implements IQueryEngine {
   private backgroundShell: AgentBackgroundShellHost | undefined;
   private imageToText: AgentImageToTextHost | undefined;
   private attachments: AgentAttachmentResourceHost | undefined;
+  private contextMemory: AgentContextMemoryHost | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -274,6 +276,10 @@ export class QueryEngine implements IQueryEngine {
 
   setAttachments(attachments: AgentAttachmentResourceHost | undefined): void {
     this.attachments = attachments;
+  }
+
+  setContextMemory(contextMemory: AgentContextMemoryHost | undefined): void {
+    this.contextMemory = contextMemory;
   }
 
   /**
@@ -700,6 +706,7 @@ export class QueryEngine implements IQueryEngine {
             backgroundShell: this.backgroundShell,
             imageToText: this.imageToText,
             attachments: this.attachments,
+            contextMemory: this.contextMemory,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(

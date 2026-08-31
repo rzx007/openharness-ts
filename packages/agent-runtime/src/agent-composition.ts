@@ -91,6 +91,7 @@ export async function composeOpenHarnessAgent(
       workflowRepository: explicitCapabilities?.workflowRepository,
       imageToText: Boolean(explicitCapabilities?.imageToText),
       attachments: Boolean(explicitCapabilities?.attachments),
+      contextMemory: Boolean(explicitCapabilities?.contextMemory),
       attachmentResourceRoot: explicitCapabilities?.attachmentResourceRoot,
     },
     skillRegistry: discovery.skillRegistry,
@@ -171,6 +172,7 @@ export async function composeOpenHarnessAgent(
     runtime.queryEngine.setBackgroundShell(backgroundShell);
     runtime.queryEngine.setImageToText(explicitCapabilities?.imageToText);
     runtime.queryEngine.setAttachments(explicitCapabilities?.attachments);
+    runtime.queryEngine.setContextMemory(explicitCapabilities?.contextMemory);
     const hostCapabilities = [
       "permissions",
       ...(jobs ? ["jobs"] : []),
@@ -185,6 +187,7 @@ export async function composeOpenHarnessAgent(
       ...(explicitCapabilities?.workflowRepository ? ["workflowRepository"] : []),
       ...(explicitCapabilities?.imageToText ? ["imageToText"] : []),
       ...(explicitCapabilities?.attachments ? ["attachments"] : []),
+      ...(explicitCapabilities?.contextMemory ? ["contextMemory"] : []),
     ];
     return {
       runtime,
