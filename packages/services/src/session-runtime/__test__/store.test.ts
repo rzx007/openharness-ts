@@ -466,6 +466,26 @@ describe("SessionStore", () => {
         expect(() =>
           store.admitPrompt({ id: "empty", sessionId: "s1", content: "" }),
         ).toThrow(/prompt_content_required/);
+        expect(
+          store.admitPrompt({
+            id: "skill-only",
+            sessionId: "s1",
+            content: "",
+            metadata: {
+              skillInvocation: { name: "archify", invocationSource: "slash" },
+            },
+          }),
+        ).toMatchObject({ id: "skill-only", content: "" });
+        expect(() =>
+          store.admitPrompt({
+            id: "invalid-skill-only",
+            sessionId: "s1",
+            content: "",
+            metadata: {
+              skillInvocation: { name: "bad\nname", invocationSource: "slash" },
+            },
+          }),
+        ).toThrow(/prompt_content_required/);
         expect(() =>
           store.admitPrompt({
             id: "unknown",

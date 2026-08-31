@@ -185,7 +185,7 @@ export class SessionApplicationService {
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const content = input.content.trim();
     const attachments = normalizePromptAttachments(input.attachments);
-    if (!content && attachments.length === 0) {
+    if (!content && attachments.length === 0 && !hasSkillInvocation(input.metadata)) {
       throw new SessionApplicationError(
         400,
         "content or attachments are required",
@@ -900,6 +900,14 @@ export class SessionApplicationService {
     }
     return result;
   }
+}
+
+function hasSkillInvocation(metadata: Record<string, unknown> | undefined): boolean {
+  const value = metadata?.skillInvocation;
+  if (!isRecord(value) || value.invocationSource !== "slash" || typeof value.name !== "string") {
+    return false;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value.name.trim());
 }
 
 function mergeSessionMetadata(

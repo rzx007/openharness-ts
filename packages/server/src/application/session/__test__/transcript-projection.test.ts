@@ -60,6 +60,32 @@ function createInput(
 }
 
 describe("SessionTranscriptProjection", () => {
+  it("projects selected skill metadata onto the durable user text part", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store as any);
+    const skillInvocation = {
+      name: "archify",
+      commandName: "archify",
+      displayName: "Archify",
+      source: "project",
+      invocationSource: "slash",
+    };
+
+    projection.beginRun("s1", "i1", "r1", createInput({
+      content: "画一下系统架构",
+      metadata: { skillInvocation },
+    }));
+
+    expect(store.upsertMessagePart).toHaveBeenCalledWith({
+      sessionId: "s1",
+      messageId: "m1",
+      type: "text",
+      status: "completed",
+      text: "画一下系统架构",
+      metadata: { skillInvocation },
+    });
+  });
+
   it("projects direct and blocked attachment transformations onto one user message", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store as any);

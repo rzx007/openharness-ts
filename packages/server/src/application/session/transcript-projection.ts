@@ -318,13 +318,15 @@ export class SessionTranscriptProjection {
   }
 
   private projectUserInput(messageId: string, input: SessionInputRecord): void {
-    if (input.content.trim().length > 0) {
+    const skillInvocation = readSkillInvocation(input.metadata);
+    if (input.content.trim().length > 0 || skillInvocation) {
       this.store.upsertMessagePart({
         sessionId: input.sessionId,
         messageId,
         type: "text",
         status: "completed",
         text: input.content,
+        ...(skillInvocation ? { metadata: { skillInvocation } } : {}),
       });
     }
     for (const attachment of [...input.attachments].sort(
@@ -344,6 +346,23 @@ export class SessionTranscriptProjection {
       });
     }
   }
+}
+
+function readSkillInvocation(metadata: Record<string, unknown>): Record<string, unknown> | null {
+  const value = recordValue(metadata.skillInvocation);
+  if (!value || value.invocationSource !== "slash" || typeof value.name !== "string") return null;
+  const name = value.name.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) return null;
+  const source = value.source;
+  return {
+    name,
+    invocationSource: "slash",
+    ...(typeof value.commandName === "string" ? { commandName: value.commandName } : {}),
+    ...(typeof value.displayName === "string" ? { displayName: value.displayName } : {}),
+    ...(source === "bundled" || source === "user" || source === "project" || source === "plugin"
+      ? { source }
+      : {}),
+  };
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

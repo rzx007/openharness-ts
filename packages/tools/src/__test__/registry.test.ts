@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { createDefaultToolRegistry } from "../registry.js";
+import { SkillRegistry } from "@openharness/skills";
 
 describe("createDefaultToolRegistry", () => {
   it("registers all built-in tools", () => {
@@ -128,6 +131,45 @@ describe("createDefaultToolRegistry", () => {
     expect(registry.get("WebFetch")).toBeDefined();
     expect(registry.get("WebSearch")).toBeDefined();
     expect(registry.get("NonExistent")).toBeUndefined();
+  });
+
+  it("returns a skill with its trusted file and resource root", async () => {
+    const skills = new SkillRegistry();
+    const skillRoot = join(tmpdir(), "location-fixture");
+    const skillFile = join(skillRoot, "SKILL.md");
+    skills.register({
+      name: "location-fixture",
+      description: "fixture",
+      content: "# Location fixture\n\nRead references/guide.md.",
+      path: skillFile,
+      source: "project",
+      userInvocable: true,
+      disableModelInvocation: false,
+    });
+    const tool = createDefaultToolRegistry().get("Skill")!;
+
+    const result = await tool.execute(
+      { name: "location-fixture" },
+      { cwd: dirname(skillRoot), skillRegistry: skills } as any,
+    );
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: [
+        "Skill: location-fixture",
+        `Skill file: ${skillFile}`,
+        `Skill root: ${skillRoot}`,
+        "",
+        "Resolve relative paths mentioned by this skill against Skill root.",
+        "",
+        "<skill-content>",
+        "# Location fixture",
+        "",
+        "Read references/guide.md.",
+        "</skill-content>",
+      ].join("\n"),
+    });
   });
 
   it("has() works for registered tools", () => {

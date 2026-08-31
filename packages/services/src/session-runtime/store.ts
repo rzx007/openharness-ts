@@ -1371,7 +1371,11 @@ export class SessionStore {
       const session = assertSession(this.state, input.sessionId);
       assertMutableSession(session);
       const normalized = normalizePromptAttachments(input.attachments);
-      if (input.content.trim().length === 0 && normalized.length === 0) {
+      if (
+        input.content.trim().length === 0 &&
+        normalized.length === 0 &&
+        !hasSkillInvocation(input.metadata)
+      ) {
         throw new AttachmentError(
           "prompt_content_required",
           "Prompt text and attachments cannot both be empty",
@@ -4566,6 +4570,15 @@ export class SessionStore {
       if (session) updateSession.run(session.updatedAt, session.id);
     }
   }
+}
+
+function hasSkillInvocation(metadata: Record<string, unknown> | undefined): boolean {
+  const value = metadata?.skillInvocation;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.invocationSource === "slash" &&
+    typeof record.name === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(record.name.trim());
 }
 
 function withoutUndefined<T extends object>(value: T): Partial<T> {

@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "@openharness/core";
 import type { SkillDefinition, SkillRegistry } from "@openharness/skills";
+import { dirname } from "node:path";
 
 type SkillRegistryInstance = InstanceType<typeof SkillRegistry>;
 type SkillVisibility = "model" | "user" | "all";
@@ -27,7 +28,9 @@ export const skillTool: ToolDefinition = {
         isError: true,
       };
     }
-    return { content: [{ type: "text", text: skill.content }] };
+    return {
+      content: [{ type: "text", text: formatLoadedSkill(skill) }],
+    };
   },
 };
 
@@ -124,5 +127,21 @@ function formatSkillList(skills: readonly SkillDefinition[], visibility: SkillVi
         metadata.length ? ` (${metadata.join(", ")})` : ""
       }`;
     }),
+  ].join("\n");
+}
+
+function formatLoadedSkill(skill: SkillDefinition): string {
+  const skillFile = skill.path || "(embedded)";
+  const skillRoot = skill.path ? dirname(skill.path) : "(embedded)";
+  return [
+    `Skill: ${skill.name}`,
+    `Skill file: ${skillFile}`,
+    `Skill root: ${skillRoot}`,
+    "",
+    "Resolve relative paths mentioned by this skill against Skill root.",
+    "",
+    "<skill-content>",
+    skill.content,
+    "</skill-content>",
   ].join("\n");
 }

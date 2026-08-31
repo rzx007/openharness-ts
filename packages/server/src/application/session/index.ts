@@ -4,6 +4,7 @@ export * from "./session-maintenance-service.js";
 export * from "./session-query-service.js";
 export * from "./session-run-engine.js";
 export * from "./session-run-executor.js";
+export * from "./skill-invocation.js";
 export * from "./session-execution-projector.js";
 export * from "./background-shell-service.js";
 export * from "./transcript-projection.js";

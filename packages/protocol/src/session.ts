@@ -26,6 +26,15 @@ export type SessionMessagePartStatus =
 export type ProjectionSettlementAction = "retry-terminal-projection" | "compensate-child";
 export type ProjectionSettlementStatus = "pending" | "retrying" | "resolved" | "abandoned";
 
+/** A user explicitly selected a skill before submitting a normal prompt. */
+export interface SkillInvocationMetadata {
+  name: string;
+  commandName?: string;
+  displayName?: string;
+  source?: "bundled" | "user" | "project" | "plugin";
+  invocationSource: "slash";
+}
+
 /** Current durable session-event envelope version. Payload versions are added by the event registry. */
 export const SESSION_EVENT_SCHEMA_VERSION = 1;
 

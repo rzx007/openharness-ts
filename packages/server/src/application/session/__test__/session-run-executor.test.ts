@@ -40,6 +40,46 @@ describe("SessionRunExecutor", () => {
     expect(postRunMaintenance.run).toHaveBeenCalledWith("s1", "run-1", agent);
   });
 
+  it("submits an explicit Skill tool instruction for selected skill metadata", async () => {
+    const submitMessage = vi.fn(() => completedHandle());
+    const store = createStore({
+      metadata: {
+        skillInvocation: {
+          name: "archify",
+          commandName: "archify",
+          source: "project",
+          invocationSource: "slash",
+        },
+      },
+    });
+    const executor = new SessionRunExecutor({
+      store: store as any,
+      agentPool: {
+        configured: true,
+        acquireSession: vi.fn(async () => ({ setModel: vi.fn(), submitMessage })),
+        close: vi.fn(),
+      } as any,
+      events: { checkpoint: () => 1, publishSince: vi.fn() },
+      transcriptProjection: { finalizeRunParts: vi.fn() },
+      traceIdForRun: () => "trace-1",
+      log: vi.fn(),
+    });
+
+    await executor.execute(
+      { sessionId: "s1", inputId: "input-1", runId: "run-1" },
+      { signal: new AbortController().signal, registerHandle: vi.fn() },
+    );
+
+    expect(submitMessage).toHaveBeenCalledWith(
+      '请先使用 Skill 工具加载 "archify" 技能，然后按该技能要求完成下面的任务：\n\nhello',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          skillInvocation: expect.objectContaining({ name: "archify" }),
+        }),
+      }),
+    );
+  });
+
   it("falls back to a durable failure when agent creation fails before events", async () => {
     const store = createStore();
     const publishSince = vi.fn();
@@ -235,7 +275,10 @@ describe("SessionRunExecutor", () => {
   });
 });
 
-function createStore(options: { attachments?: ReturnType<typeof attachment>[] } = {}) {
+function createStore(options: {
+  attachments?: ReturnType<typeof attachment>[];
+  metadata?: Record<string, unknown>;
+} = {}) {
   const run = { id: "run-1", sessionId: "s1", inputId: "input-1", status: "pending" };
   return {
     transaction: <T>(work: () => T) => work(),
@@ -251,7 +294,7 @@ function createStore(options: { attachments?: ReturnType<typeof attachment>[] } 
       content: "hello",
       attachments: options.attachments ?? [],
       delivery: "queue",
-      metadata: { requestedBy: "test", traceId: "trace-1" },
+      metadata: options.metadata ?? { requestedBy: "test", traceId: "trace-1" },
     })),
     getRun: vi.fn(() => run),
     appendEvent: vi.fn(),
