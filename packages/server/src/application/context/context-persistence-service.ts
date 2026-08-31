@@ -7,12 +7,16 @@ import {
   routeContextTopic,
   validateKindScope,
   type ContextEntryRecord,
+  type ContextEntryStatus,
+  type ContextKind,
   type ContextProposal,
   type ContextScope,
+  type ContextTopic,
 } from "@openharness/context";
 import type { MarkdownContextStore } from "@openharness/services/context";
 
 import { ContextIntentResolver, type ContextRuntimeScope } from "./context-intent-resolver.js";
+import { detectContextSensitivity } from "./context-sensitive-data.js";
 
 export interface RememberContextInput {
   content: string;
@@ -34,7 +38,7 @@ export interface ContextPersistenceResult {
 }
 
 export interface ContextPersistenceServiceOptions {
-  store: Pick<MarkdownContextStore, "list" | "upsertMany">;
+  store: MarkdownContextStore;
   resolver: ContextIntentResolver;
   now?: () => number;
   createId?: () => string;
@@ -68,6 +72,84 @@ export class ContextPersistenceService {
       }
     }
     return { status: "completed", results };
+  }
+
+  async list(input: {
+    runtimeScope: ContextRuntimeScope;
+    scope?: ContextScope;
+    kind?: ContextKind;
+    status?: ContextEntryStatus;
+  }): Promise<ContextEntryRecord[]> {
+    const refs = this.scopeRefs(input.runtimeScope).filter((ref) => !input.scope || ref.scope === input.scope);
+    const entries = (await Promise.all(refs.map((ref) => this.store.list({ ...ref, status: input.status })))).flat();
+    return entries.filter((entry) => !input.kind || entry.kind === input.kind);
+  }
+
+  async get(input: {
+    runtimeScope: ContextRuntimeScope;
+    id: string;
+    status?: ContextEntryStatus;
+  }): Promise<ContextEntryRecord | undefined> {
+    return (await this.locate(input.runtimeScope, input.id, input.status ?? "active"))?.entry;
+  }
+
+  async recall(input: { runtimeScope: ContextRuntimeScope; query?: string }) {
+    const entries = await this.list({ runtimeScope: input.runtimeScope });
+    const query = input.query?.trim().toLocaleLowerCase("en-US");
+    return {
+      status: "completed" as const,
+      entries: entries
+        .filter((entry) => !query || `${entry.title}\n${entry.content}\n${entry.semanticKey}`.toLocaleLowerCase("en-US").includes(query))
+        .map(recallContextEntry),
+    };
+  }
+
+  async update(input: {
+    runtimeScope: ContextRuntimeScope;
+    id: string;
+    content: string;
+    title?: string;
+  }) {
+    const sensitivity = detectContextSensitivity(input.content);
+    if (sensitivity === "secret") return { status: "rejected" as const, reason: "secret", id: input.id };
+    if (sensitivity === "sensitive") return { status: "clarification" as const, reason: "sensitive", id: input.id };
+    const located = await this.locate(input.runtimeScope, input.id, "active");
+    if (!located) return { status: "not_found" as const, id: input.id };
+    const entry = {
+      ...located.entry,
+      ...(input.title?.trim() ? { title: input.title.trim() } : {}),
+      content: input.content.trim(),
+      normalizedContent: normalizeContextContent(input.content),
+      updatedAt: this.now(),
+    };
+    await this.store.update(entry);
+    return { status: "committed" as const, entry };
+  }
+
+  async forget(input: { runtimeScope: ContextRuntimeScope; id: string }) {
+    const located = await this.locate(input.runtimeScope, input.id, "active");
+    if (!located) return { status: "not_found" as const, id: input.id };
+    await this.store.forget({ ...located.ref, id: input.id });
+    return { status: "forgotten" as const, id: input.id };
+  }
+
+  async resolve(input: {
+    runtimeScope: ContextRuntimeScope;
+    id: string;
+    action: "accept" | "reject";
+    topic?: string;
+  }) {
+    const located = await this.locate(input.runtimeScope, input.id, "candidate");
+    if (!located) return { status: "not_found" as const, id: input.id };
+    if (input.action === "reject") {
+      await this.store.forget({ ...located.ref, id: input.id });
+      return { status: "rejected" as const, id: input.id };
+    }
+    const topic = input.topic && isContextTopic(input.topic)
+      ? input.topic
+      : routeContextTopic({ ...located.entry, evidence: located.entry.content, replace: false });
+    const entry = await this.store.acceptCandidate({ ...located.ref, id: input.id, topic });
+    return { status: "committed" as const, entry };
   }
 
   private async commitProposal(
@@ -120,8 +202,40 @@ export class ContextPersistenceService {
     await this.store.upsertMany([entry]);
     return { status: "committed", entry };
   }
+
+  private scopeRefs(runtimeScope: ContextRuntimeScope) {
+    return [
+      { scope: "user" as const, scopeKey: runtimeScope.userScopeKey },
+      ...(runtimeScope.machineId ? [{ scope: "machine" as const, scopeKey: runtimeScope.machineId }] : []),
+      ...(runtimeScope.projectId ? [{ scope: "project" as const, scopeKey: runtimeScope.projectId }] : []),
+    ];
+  }
+
+  private async locate(runtimeScope: ContextRuntimeScope, id: string, status?: ContextEntryStatus) {
+    for (const ref of this.scopeRefs(runtimeScope)) {
+      const entry = status
+        ? (await this.store.list({ ...ref, status })).find((candidate) => candidate.id === id)
+        : await this.store.get({ ...ref, id });
+      if (entry) return { ref, entry };
+    }
+    return undefined;
+  }
 }
 
 function defaultImportance(scope: ContextScope): number {
   return scope === "project" ? 0.9 : 0.8;
+}
+
+export function publicContextEntry(entry: ContextEntryRecord) {
+  const { id, title, scope, kind, semanticKey, content, status, updatedAt } = entry;
+  return { id, title, scope, kind, semanticKey, content, status, updatedAt };
+}
+
+function recallContextEntry(entry: ContextEntryRecord) {
+  const { id, title, scope, kind, semanticKey, content, updatedAt } = entry;
+  return { id, title, scope, kind, semanticKey, content, updatedAt };
+}
+
+function isContextTopic(value: string): value is ContextTopic {
+  return ["preferences", "ui-design", "development-workflow", "rules", "knowledge", "environment"].includes(value);
 }

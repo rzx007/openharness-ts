@@ -11,6 +11,7 @@ import type {
   AgentEventInput,
   AgentRunHandle,
   AgentRunResult,
+  AgentContextMemoryHost,
   CompactAttachmentsProvider,
   Message,
 } from "@openharness/core";
@@ -131,6 +132,50 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
+  it("injects a governed Context host that derives scope from the durable session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openharness-context-host-"));
+    const store = new SessionStore({ path: join(dir, "store.db") });
+    let contextMemory: AgentContextMemoryHost | undefined;
+    const application = new DaemonApplication({
+      store,
+      createAgent: async (context) => {
+        contextMemory = context.options.hostCapabilities?.contextMemory;
+        return await createEchoAgent(context);
+      },
+      log: () => {},
+    });
+
+    try {
+      await application.ready();
+      const session = application.sessions.createSession({ cwd: dir, model: "test-model" });
+      const admission = await application.sessions.admitPrompt(session.id, { content: "initialize context host" });
+      await application.sessions.awaitRun(session.id, admission.run!.id);
+      const callContext = {
+        sessionId: session.id,
+        runId: "run-context",
+        inputId: "input-context",
+        cwd: session.cwd,
+        signal: new AbortController().signal,
+      };
+
+      expect(contextMemory).toBeDefined();
+      const remembered = await contextMemory!.remember({ content: "记住这个项目统一使用 npm" }, callContext);
+      expect(remembered).toMatchObject({ results: [{ status: "committed", entry: { scopeKey: session.projectId } }] });
+      const recalled = await contextMemory!.recall({ query: "包管理器" }, callContext);
+      expect(recalled).toMatchObject({ entries: [{ content: "当前项目使用 npm。" }] });
+      expect(JSON.stringify(recalled)).not.toContain("scopeKey");
+
+      await expect(contextMemory!.recall({}, { ...callContext, cwd: join(dir, "other") }))
+        .rejects.toThrow("Context session cwd mismatch");
+      await application.sessions.archiveSessionTree(session.id);
+      await expect(contextMemory!.recall({}, callContext)).rejects.toThrow("Context session is unavailable");
+    } finally {
+      await application.close().catch(() => {});
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("把成功 Run 写入的 session checkpoint 提供给 compact", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-session-memory-"));
     const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;

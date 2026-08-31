@@ -45,11 +45,10 @@ describe("Context persistence lifecycle", () => {
       });
       const query = new ContextQueryService({ store });
       const resource = new ContextResourceService({
-        store,
         sessions: { inspectProject: () => ({ id: runtimeScope.projectId }) },
         persistence,
         query,
-        now: () => 1_788_166_900_000 + sequence,
+        getMachineId: () => Promise.resolve(runtimeScope.machineId),
       });
 
       const ui = await persistence.remember({

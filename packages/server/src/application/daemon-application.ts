@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { getConfigDir, getCredentialsFilePath, type AgentBackgroundShellHost, type AgentContextMemoryHost, type Settings } from "@openharness/core";
-import { normalizeContextContent, routeContextTopic, type ContextEntryRecord, type ContextTopic } from "@openharness/context";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
@@ -33,7 +32,7 @@ import {
   type SessionStore,
   type ApplicationOwnerLease,
 } from "@openharness/services";
-import { ContextBackupService, MarkdownContextStore, type ContextScopeRef } from "@openharness/services/context";
+import { ContextBackupService, MarkdownContextStore } from "@openharness/services/context";
 
 import {
   createDaemonAgentLoader,
@@ -83,7 +82,7 @@ import { createDefaultModelService } from "./default-services/model-service.js";
 import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
 import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
-import { ContextConsolidationService, ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, ContextResourceService, DeterministicContextConsolidationPlanner, DeterministicEnvironmentFactExtractor, detectContextSensitivity } from "./context/index.js";
+import { ContextConsolidationService, ContextExtractionService, ContextIntentResolver, ContextPersistenceService, ContextQueryService, ContextResourceService, DeterministicContextConsolidationPlanner, DeterministicEnvironmentFactExtractor, publicContextEntry } from "./context/index.js";
 import { createDefaultDreamService } from "./default-services/dream-service.js";
 import type { DreamService } from "./settings-api.js";
 
@@ -330,96 +329,58 @@ export class DaemonApplication implements DurableAgentApplication {
         files: [getCredentialsFilePath(), join(getConfigDir(), "SOUL.md")],
       });
       this.context = new ContextResourceService({
-        store: contextStore,
         sessions: store,
         persistence: contextPersistence,
         query: contextQuery,
+        getMachineId: () => contextStore.paths.getOrCreateMachineId(),
       });
       const contextExtraction = new ContextExtractionService({
         store: contextStore,
         extractor: new DeterministicEnvironmentFactExtractor(),
       });
+      const resolveContextRuntimeScope = async (context: Parameters<AgentContextMemoryHost["remember"]>[1]) => {
+        const session = requireContextSession(store, context.sessionId, context.cwd);
+        return {
+          userScopeKey: "local-user" as const,
+          machineId: await contextStore.paths.getOrCreateMachineId(),
+          ...(session.projectId ? { projectId: session.projectId } : {}),
+        };
+      };
       const contextMemory: AgentContextMemoryHost = {
         remember: async (input, context) => {
-          const session = requireContextSession(store, context.sessionId, context.cwd);
           return contextPersistence.remember({
             content: input.content,
-            runtimeScope: {
-              userScopeKey: "local-user",
-              machineId: await contextStore.paths.getOrCreateMachineId(),
-              ...(session.projectId ? { projectId: session.projectId } : {}),
-            },
+            runtimeScope: await resolveContextRuntimeScope(context),
             sourceSessionId: context.sessionId,
             sourceMessageId: context.inputId,
           });
         },
-        recall: async (input, context) => {
-          const session = requireContextSession(store, context.sessionId, context.cwd);
-          const machineId = await contextStore.paths.getOrCreateMachineId();
-          const entries = [
-            ...await contextStore.list({ scope: "user", scopeKey: "local-user" }),
-            ...await contextStore.list({ scope: "machine", scopeKey: machineId }),
-            ...(session.projectId
-              ? await contextStore.list({ scope: "project", scopeKey: session.projectId })
-              : []),
-          ];
-          const query = input.query?.trim().toLocaleLowerCase("en-US");
-          return {
-            status: "completed",
-            entries: entries
-              .filter((entry) => !query || `${entry.title}\n${entry.content}\n${entry.semanticKey}`.toLocaleLowerCase("en-US").includes(query))
-              .map(({ id, title, scope, kind, semanticKey, content, updatedAt }) => ({ id, title, scope, kind, semanticKey, content, updatedAt })),
-          };
-        },
+        recall: async (input, context) => contextPersistence.recall({
+          runtimeScope: await resolveContextRuntimeScope(context),
+          ...(input.query !== undefined ? { query: input.query } : {}),
+        }),
         resolve: async (input, context) => {
-          const session = requireContextSession(store, context.sessionId, context.cwd);
-          const refs = await contextScopeRefs(contextStore, session.projectId);
-          const located = await findContextEntry(contextStore, refs, input.id);
-          if (!located) return { status: "not_found", id: input.id };
-          if (input.action === "reject") {
-            await contextStore.forget({ ...located.ref, id: input.id });
-            return { status: "rejected", id: input.id };
-          }
-          const topic = input.topic && isContextTopic(input.topic)
-            ? input.topic
-            : routeContextTopic({
-                title: located.entry.title,
-                content: located.entry.content,
-                kind: located.entry.kind,
-                scope: located.entry.scope,
-                scopeKey: located.entry.scopeKey,
-                semanticKey: located.entry.semanticKey,
-                confidence: located.entry.confidence,
-                sensitivity: located.entry.sensitivity,
-                evidence: located.entry.content,
-                replace: false,
-              });
-          const entry = await contextStore.acceptCandidate({ ...located.ref, id: input.id, topic });
-          return { status: "committed", entry: publicContextEntry(entry) };
+          const result = await contextPersistence.resolve({
+            runtimeScope: await resolveContextRuntimeScope(context),
+            ...input,
+          });
+          return result.status === "committed"
+            ? { ...result, entry: publicContextEntry(result.entry) }
+            : result;
         },
         update: async (input, context) => {
-          const session = requireContextSession(store, context.sessionId, context.cwd);
-          const sensitivity = detectContextSensitivity(input.content);
-          if (sensitivity === "secret") return { status: "rejected", reason: "secret", id: input.id };
-          if (sensitivity === "sensitive") return { status: "clarification", reason: "sensitive", id: input.id };
-          const located = await findContextEntry(contextStore, await contextScopeRefs(contextStore, session.projectId), input.id);
-          if (!located) return { status: "not_found", id: input.id };
-          const entry = {
-            ...located.entry,
-            content: input.content,
-            normalizedContent: normalizeContextContent(input.content),
-            updatedAt: Date.now(),
-          };
-          await contextStore.update(entry);
-          return { status: "committed", entry: publicContextEntry(entry) };
+          const result = await contextPersistence.update({
+            runtimeScope: await resolveContextRuntimeScope(context),
+            ...input,
+          });
+          return result.status === "committed"
+            ? { ...result, entry: publicContextEntry(result.entry) }
+            : result;
         },
-        forget: async (input, context) => {
-          const session = requireContextSession(store, context.sessionId, context.cwd);
-          const located = await findContextEntry(contextStore, await contextScopeRefs(contextStore, session.projectId), input.id);
-          if (!located) return { status: "not_found", id: input.id };
-          await contextStore.forget({ ...located.ref, id: input.id });
-          return { status: "forgotten", id: input.id };
-        },
+        forget: async (input, context) => contextPersistence.forget({
+          runtimeScope: await resolveContextRuntimeScope(context),
+          id: input.id,
+        }),
       };
 
       // 每个会话第一次用时，在这里造活 Agent，并接上投影。
@@ -997,38 +958,6 @@ function requireContextSession(
   if (!session || session.status === "archived") throw new Error("Context session is unavailable");
   if (session.cwd !== cwd) throw new Error("Context session cwd mismatch");
   return session;
-}
-
-async function contextScopeRefs(
-  contextStore: MarkdownContextStore,
-  projectId: string | undefined,
-): Promise<ContextScopeRef[]> {
-  return [
-    { scope: "user", scopeKey: "local-user" },
-    { scope: "machine", scopeKey: await contextStore.paths.getOrCreateMachineId() },
-    ...(projectId ? [{ scope: "project" as const, scopeKey: projectId }] : []),
-  ];
-}
-
-async function findContextEntry(
-  contextStore: MarkdownContextStore,
-  refs: ContextScopeRef[],
-  id: string,
-): Promise<{ ref: ContextScopeRef; entry: ContextEntryRecord } | undefined> {
-  for (const ref of refs) {
-    const entry = await contextStore.get({ ...ref, id });
-    if (entry) return { ref, entry };
-  }
-  return undefined;
-}
-
-function publicContextEntry(entry: ContextEntryRecord) {
-  const { id, title, scope, kind, semanticKey, content, status, updatedAt } = entry;
-  return { id, title, scope, kind, semanticKey, content, status, updatedAt };
-}
-
-function isContextTopic(value: string): value is ContextTopic {
-  return ["preferences", "ui-design", "development-workflow", "rules", "knowledge", "environment"].includes(value);
 }
 
 async function readAttachmentBytes(

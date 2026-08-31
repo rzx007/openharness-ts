@@ -13,6 +13,21 @@ OpenHarness 中“让 Agent 以后还知道一件事”分成三类能力。它�
 
 长期 Context 和 Session Continuity 都使用 Markdown，但 Agent 不接触文件位置。Agent 只表达“记住、回忆、修改、确认、忘记”，服务负责选择作用域、主题、条目 ID、校验规则和写盘方式。
 
+## 运行所有权
+
+```text
+Agent Context tools ──┐
+HTTP / Desktop ───────┼─→ ContextPersistenceService ─→ MarkdownContextStore
+候选管理入口 ─────────┘              ↑
+                                     │ daemon 持有实例并解析 scope
+
+每轮模型请求 ─────────────→ ContextQueryService ───────→ MarkdownContextStore
+```
+
+这里的分工是“runtime 拥有使用能力，daemon 拥有持久资源”：`agent-runtime` 安装语义工具并消费 Host Capability；daemon 验证 session/cwd，计算 user/machine/project scope，再把调用交给统一服务。daemon 的 Host adapter 和 HTTP/Desktop 的 Resource adapter 都不能直接读写 Store。
+
+Prompt 查询单独走 `ContextQueryService`，因为它解决的是相关性、覆盖和字符预算，不是管理操作；所有管理型读取和写入则统一经过 `ContextPersistenceService`。
+
 ## 长期 Context 的逻辑模型
 
 ### 三种作用域

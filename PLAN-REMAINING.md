@@ -5,7 +5,7 @@
 > 状态图例：✅ 基本对齐 · 🟡 可用但简化 · 🟠 骨架/部分 · 🔴 未实现 · ⛔ 不在复刻范围
 
 > **进度（分支 `feat/align-phase-ab`）**：**Phase A、Phase B 已完成**（4 commit，`check-types` 26/26、`test` 25/25 全绿）。
-> 2026-08-31 更新：长期记忆已完成统一 Context Persistence 硬切。旧 Memory、Personalization、`USER.md`、local rules、旧 `/memory` 与旧 `memory.*` 配置均已移除，不做兼容读取。当前实现与验收以 `docs/memory-system.md` 和 `docs/superpowers/plans/2026-08-31-context-persistence-control-plane.md` 为准。
+> 2026-08-31 更新：长期记忆已完成统一 Context Persistence 硬切。旧 Memory、Personalization、`USER.md`、local rules、旧 `/memory` 与旧 `memory.*` 配置均已移除，不做兼容读取。管理操作已进一步收口到同一个 `ContextPersistenceService`，daemon 和资源 API 仅解析作用域并委托。当前实现与验收以 `docs/memory-system.md`、`docs/superpowers/plans/2026-08-31-context-persistence-control-plane.md` 和 `docs/superpowers/plans/2026-08-31-context-persistence-service-convergence.md` 为准。
 
 ## 原则
 
@@ -25,7 +25,7 @@
 | mcp | ✅ | stdio + HTTP(streamable)/SSE 传输 + headers/env 静态鉴权 + `McpAuth` 保存配置并重连 + 失败隔离已补(C.3)；仅 MCP OAuth flow 待补 |
 | engine/compact | ✅ | context collapse/PTL 重试/配对保护/图片占位/boundary/hooks/checkpoint/attachments 全部完成(B.2) |
 | hooks | ✅ | priority/10 事件/prompt·agent/`$ARGUMENTS`+转义/matcher 已补(B.1) |
-| context | ✅ | 统一 Markdown 主题文档、逻辑 entry blocks、user/machine/project 作用域、secret/sensitive/conflict 治理、候选、热检索、受控整合、REST/Slash/Desktop 管理和 managed resource 保护已完成 |
+| context | ✅ | 统一 Markdown 主题文档、逻辑 entry blocks、user/machine/project 作用域、单一 Persistence 管理入口、secret/sensitive/conflict 治理、候选、热检索、受控整合、REST/Slash/Desktop 管理和 managed resource 保护已完成 |
 | prompts | ✅ | 项目 Instructions、permission/delegation 与每次模型请求前的 governed Context 注入已完成；`SOUL.md` 仅负责身份，旧用户档案和 local rules 不再加载 |
 | tasks | ✅ | 真实子进程执行/stdin/落盘/completion listener/断管重启/优雅关停(B.3) |
 | coordinator | ✅ | ✅mode env(A.5)+用户/plugin agent 加载器+mode 辅助+CLI接线(C.4)；✅agent 级字段运行时生效(tools/disallowedTools/maxTurns/effort/permissionMode) |

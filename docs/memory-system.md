@@ -17,6 +17,18 @@
 
 这套设计保留 Markdown 可读、可备份、可审查的优点，同时消除 Agent 猜路径、多个子系统抢写和一个规则一个文件的问题。
 
+## 所有权边界
+
+Context 是 `agent-runtime` 的原生能力，但不是由 runtime 自己持有的磁盘状态：
+
+- daemon 拥有 `MarkdownContextStore` 实例，验证 session/cwd，并解析稳定的 user、machine、project scope。
+- `ContextPersistenceService` 是唯一的管理操作入口，统一执行 remember、list/get、recall、update、forget 和 candidate resolve。
+- `ContextResourceService` 只把 HTTP/Desktop 的 cwd 转成 runtime scope，再把服务结果映射成资源错误；它不接收 Store。
+- daemon 注入的 `AgentContextMemoryHost` 只校验会话、解析 scope、委托服务和裁剪 Agent 可见字段；它不直接读写 Store，也不重复敏感度、冲突或 topic 规则。
+- `agent-runtime` 负责条件注册 Context 工具和逐轮 Context 注入，不知道 Markdown 的位置。
+
+`ContextQueryService` 是有意保留的独立只读路径：它专门为模型 Prompt 做相关性选择、作用域覆盖和预算渲染，不承担管理型查询或 mutation。
+
 ## 明确记住
 
 用户明确要求记住且作用域清晰、置信度高、没有冲突时，系统立即保存。例如：

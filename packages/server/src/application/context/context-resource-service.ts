@@ -1,32 +1,32 @@
-import { normalizeContextContent, routeContextTopic, type ContextEntryRecord, type ContextEntryStatus, type ContextKind, type ContextScope, type ContextTopic } from "@openharness/context";
-import type { MarkdownContextStore } from "@openharness/services/context";
+import type { ContextEntryRecord, ContextEntryStatus, ContextKind, ContextScope, ContextTopic } from "@openharness/context";
 
 import type { ContextPersistenceService } from "./context-persistence-service.js";
 import type { ContextQueryService } from "./context-query-service.js";
-import { detectContextSensitivity } from "./context-sensitive-data.js";
 import { ContextResourceError } from "./context-resource-error.js";
 
 export { ContextResourceError } from "./context-resource-error.js";
 
 export class ContextResourceService {
   constructor(private readonly options: {
-    store: MarkdownContextStore;
     sessions: { inspectProject(cwd: string): { id: string } };
     persistence: ContextPersistenceService;
     query: ContextQueryService;
-    now?: () => number;
+    getMachineId(): Promise<string>;
   }) {}
 
   async list(input: { cwd: string; scope?: ContextScope; kind?: ContextKind; status?: ContextEntryStatus }) {
-    const refs = await this.refs(input.cwd, input.scope);
-    const rows = (await Promise.all(refs.map((ref) => this.options.store.list({ ...ref, status: input.status })))).flat();
-    return rows.filter((entry) => !input.kind || entry.kind === input.kind);
+    return await this.options.persistence.list({
+      runtimeScope: await this.runtimeScope(input.cwd),
+      ...(input.scope ? { scope: input.scope } : {}),
+      ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.status ? { status: input.status } : {}),
+    });
   }
 
   async get(input: { cwd: string; id: string }): Promise<ContextEntryRecord> {
-    const located = await this.locate(input.cwd, input.id);
-    if (!located) throw new ContextResourceError("not_found", `Context entry not found: ${input.id}`);
-    return located.entry;
+    const entry = await this.options.persistence.get({ runtimeScope: await this.runtimeScope(input.cwd), id: input.id });
+    if (!entry) throw new ContextResourceError("not_found", `Context entry not found: ${input.id}`);
+    return entry;
   }
 
   async add(input: { cwd: string; content: string }) {
@@ -39,19 +39,21 @@ export class ContextResourceService {
   }
 
   async update(input: { cwd: string; id: string; content: string; title?: string }) {
-    const current = await this.get(input);
-    const sensitivity = detectContextSensitivity(input.content);
-    if (sensitivity === "secret") throw new ContextResourceError("secret", "Secret context cannot be stored");
-    if (sensitivity === "sensitive") throw new ContextResourceError("sensitive", "Sensitive context requires confirmation");
-    const entry = { ...current, ...(input.title?.trim() ? { title: input.title.trim() } : {}), content: input.content.trim(), normalizedContent: normalizeContextContent(input.content), updatedAt: (this.options.now ?? Date.now)() };
-    await this.options.store.update(entry);
-    return entry;
+    const result = await this.options.persistence.update({
+      runtimeScope: await this.runtimeScope(input.cwd),
+      id: input.id,
+      content: input.content,
+      ...(input.title !== undefined ? { title: input.title } : {}),
+    });
+    if (result.status === "not_found") throw new ContextResourceError("not_found", `Context entry not found: ${input.id}`);
+    if (result.status === "rejected") throw new ContextResourceError("secret", "Secret context cannot be stored");
+    if (result.status === "clarification") throw new ContextResourceError("sensitive", "Sensitive context requires confirmation");
+    return result.entry;
   }
 
   async remove(input: { cwd: string; id: string }): Promise<void> {
-    const located = await this.locate(input.cwd, input.id);
-    if (!located) throw new ContextResourceError("not_found", `Context entry not found: ${input.id}`);
-    await this.options.store.forget({ ...located.ref, id: input.id });
+    const result = await this.options.persistence.forget({ runtimeScope: await this.runtimeScope(input.cwd), id: input.id });
+    if (result.status === "not_found") throw new ContextResourceError("not_found", `Context entry not found: ${input.id}`);
   }
 
   async candidates(cwd: string) {
@@ -59,16 +61,23 @@ export class ContextResourceService {
   }
 
   async accept(input: { cwd: string; id: string; topic?: ContextTopic }) {
-    const located = await this.locate(input.cwd, input.id, "candidate");
-    if (!located) throw new ContextResourceError("not_found", `Context candidate not found: ${input.id}`);
-    const topic = input.topic ?? routeContextTopic({ ...located.entry, evidence: located.entry.content, replace: false });
-    return await this.options.store.acceptCandidate({ ...located.ref, id: input.id, topic });
+    const result = await this.options.persistence.resolve({
+      runtimeScope: await this.runtimeScope(input.cwd),
+      id: input.id,
+      action: "accept",
+      ...(input.topic ? { topic: input.topic } : {}),
+    });
+    if (result.status === "not_found") throw new ContextResourceError("not_found", `Context candidate not found: ${input.id}`);
+    return result.entry;
   }
 
   async reject(input: { cwd: string; id: string }): Promise<void> {
-    const located = await this.locate(input.cwd, input.id, "candidate");
-    if (!located) throw new ContextResourceError("not_found", `Context candidate not found: ${input.id}`);
-    await this.options.store.forget({ ...located.ref, id: input.id });
+    const result = await this.options.persistence.resolve({
+      runtimeScope: await this.runtimeScope(input.cwd),
+      id: input.id,
+      action: "reject",
+    });
+    if (result.status === "not_found") throw new ContextResourceError("not_found", `Context candidate not found: ${input.id}`);
   }
 
   async status(cwd: string) {
@@ -90,27 +99,9 @@ export class ContextResourceService {
   private async runtimeScope(cwd: string) {
     return {
       userScopeKey: "local-user" as const,
-      machineId: await this.options.store.paths.getOrCreateMachineId(),
+      machineId: await this.options.getMachineId(),
       projectId: this.options.sessions.inspectProject(cwd).id,
     };
-  }
-
-  private async refs(cwd: string, scope?: ContextScope) {
-    const runtime = await this.runtimeScope(cwd);
-    const refs = [
-      { scope: "user" as const, scopeKey: runtime.userScopeKey },
-      { scope: "machine" as const, scopeKey: runtime.machineId },
-      { scope: "project" as const, scopeKey: runtime.projectId },
-    ];
-    return scope ? refs.filter((ref) => ref.scope === scope) : refs;
-  }
-
-  private async locate(cwd: string, id: string, status?: ContextEntryStatus) {
-    for (const ref of await this.refs(cwd)) {
-      const entry = (await this.options.store.list({ ...ref, status })).find((candidate) => candidate.id === id);
-      if (entry) return { ref, entry };
-    }
-    return undefined;
   }
 }
 
