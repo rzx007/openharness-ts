@@ -1,20 +1,18 @@
 /* eslint-disable react-refresh/only-export-components */
-import { FileCode2, FileText } from "lucide-react"
-import { useState } from "react"
+import { ExternalLink, FileCode2, FileText } from "lucide-react"
 import { Streamdown } from "streamdown"
 
 import { streamdownComponents } from "@renderer/components/desktop/conversation-page/message/streamdown-components"
 import { streamdownPlugins } from "@renderer/components/desktop/conversation-page/message/streamdown-plugins"
 import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
+import { Button } from "@renderer/components/ui/button"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { useTheme } from "@renderer/components/theme-provider"
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
 import { VirtualizedCodePreview } from "./virtualized-code-preview"
-import { LargePreviewNotice } from "./large-preview-notice"
-import { resolveMarkdownRenderMode } from "./file-viewer-model"
-import { resolvePreviewDecision } from "./file-preview-policy"
+import { shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
 
 export type FileViewMode = "preview" | "source"
 
@@ -54,7 +52,7 @@ interface FileViewerProps {
   searchMatchIndex: number
   searchMatches: FileSearchMatch[]
   targetLine?: number
-  onViewModeChange: (mode: FileViewMode) => void
+  onOpenHtmlInBrowser: (projectPath: string, relativePath: string, name: string) => void
 }
 
 export function FileViewer({
@@ -66,12 +64,13 @@ export function FileViewer({
   searchMatchIndex,
   searchMatches,
   targetLine,
-  onViewModeChange,
+  onOpenHtmlInBrowser,
 }: FileViewerProps): React.JSX.Element {
   const { resolvedTheme: themeType } = useTheme()
-  const [forcedHighlightPaths, setForcedHighlightPaths] = useState<Set<string>>(() => new Set())
-  const [forcedMarkdownPaths, setForcedMarkdownPaths] = useState<Set<string>>(() => new Set())
   const activeTab = tabs.find((tab) => tab.preview.path === activePath) ?? null
+  const showLargeHtmlAction = activeTab
+    ? shouldOfferHtmlBrowserOpen(activeTab.preview.path, activeTab.preview.content ?? "")
+    : false
 
   if (tabs.length === 0 && !loadingPath) {
     return (
@@ -94,44 +93,39 @@ export function FileViewer({
         ) : activeTab?.type === "document" ? (
           <DocumentPlaceholder preview={activeTab.preview} />
         ) : activeTab?.type === "markdown" && viewMode === "preview" ? (
-          resolveMarkdownRenderMode(
-            resolvePreviewDecision("markdown", activeTab.preview.content ?? ""),
-            forcedMarkdownPaths.has(activeTab.preview.path)
-          ) === "paused" ? (
-            <LargePreviewNotice
-              title="文档较大，完整预览已暂停"
-              description="可查看源码，或确认后继续渲染完整 Markdown。"
-              secondaryLabel="查看源码"
-              onSecondary={() => onViewModeChange("source")}
-              primaryLabel="仍然预览"
-              onPrimary={() => {
-                setForcedMarkdownPaths((current) => {
-                  const next = new Set(current)
-                  next.add(activeTab.preview.path)
-                  return next
-                })
-              }}
-            />
-          ) : (
-            <MarkdownPreview preview={activeTab.preview} />
-          )
+          <MarkdownPreview preview={activeTab.preview} />
         ) : activeTab ? (
-          <VirtualizedCodePreview
-            key={activeTab.preview.path}
-            preview={activeTab.preview}
-            themeType={themeType}
-            searchQuery={searchQuery}
-            searchMatch={searchMatches[searchMatchIndex]}
-            targetLine={targetLine}
-            forceHighlight={forcedHighlightPaths.has(activeTab.preview.path)}
-            onForceHighlight={() => {
-              setForcedHighlightPaths((current) => {
-                const next = new Set(current)
-                next.add(activeTab.preview.path)
-                return next
-              })
-            }}
-          />
+          <div className="flex h-full min-h-0 flex-col">
+            {showLargeHtmlAction && activeTab.projectPath ? (
+              <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-3 text-xs text-muted-foreground">
+                <span>HTML 文件较大，当前展示源码</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (!activeTab.projectPath) return
+                    onOpenHtmlInBrowser(
+                      activeTab.projectPath,
+                      activeTab.preview.path,
+                      activeTab.preview.name
+                    )
+                  }}
+                >
+                  <ExternalLink />
+                  在浏览器中打开
+                </Button>
+              </div>
+            ) : null}
+            <VirtualizedCodePreview
+              key={activeTab.preview.path}
+              preview={activeTab.preview}
+              themeType={themeType}
+              searchQuery={searchQuery}
+              searchMatch={searchMatches[searchMatchIndex]}
+              targetLine={targetLine}
+            />
+          </div>
         ) : (
           <DesktopEmptyState
             icon={FileCode2}

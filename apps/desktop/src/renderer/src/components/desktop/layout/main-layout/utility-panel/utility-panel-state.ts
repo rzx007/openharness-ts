@@ -34,6 +34,22 @@ export type PersistedFileTabsByScope = Record<
   }
 >
 
+export function createBrowserTab(
+  id: string,
+  url: string | null = null,
+  title = "新标签页"
+): BrowserToolTab {
+  return {
+    id,
+    title,
+    url,
+    input: url ?? "",
+    loading: url !== null,
+    canGoBack: false,
+    canGoForward: false,
+  }
+}
+
 export function utilityPanelScopeId(
   activeSessionId: string | null,
   selectedProjectId: string | null

@@ -13,6 +13,8 @@ import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-st
 import { Button } from "@renderer/components/ui/button"
 import { cn } from "@renderer/lib/utils"
 
+import { browserTitleFromUrl, displayBrowserUrl, normalizeBrowserUrl } from "./browser-navigation"
+
 export type BrowserToolTab = {
   id: string
   title: string
@@ -44,20 +46,25 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
   const webviewRef = useRef<BrowserWebviewElement | null>(null)
 
   const navigate = (): void => {
-    const url = normalizeUrl(tab.input)
+    const url = normalizeBrowserUrl(tab.input)
     if (!url) return
-    onUpdate({ url, input: displayUrl(url), title: titleFromUrl(url), loading: true })
+    onUpdate({
+      url,
+      input: displayBrowserUrl(url),
+      title: browserTitleFromUrl(url),
+      loading: true,
+    })
   }
 
   const updateNavigationState = (): void => {
     const webview = webviewRef.current
     if (!webview) return
     const url = webview.getURL?.() ?? null
-    const title = webview.getTitle?.() || (url ? titleFromUrl(url) : "新标签页")
+    const title = webview.getTitle?.() || (url ? browserTitleFromUrl(url) : "新标签页")
     onUpdate({
       title,
       url,
-      input: url ? displayUrl(url) : "",
+      input: url ? displayBrowserUrl(url) : "",
       loading: false,
       canGoBack: webview.canGoBack?.() ?? false,
       canGoForward: webview.canGoForward?.() ?? false,
@@ -139,7 +146,7 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
           <input
             value={tab.input}
             onChange={(event) => onUpdate({ input: event.target.value })}
-            placeholder="输入 URL"
+            placeholder="输入 URL 或本地路径"
             className="h-full min-w-0 flex-1 bg-transparent text-center text-[14px] text-ui-foreground outline-none placeholder:text-[12px]"
           />
           <Button
@@ -171,31 +178,4 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
       </div>
     </section>
   )
-}
-
-function normalizeUrl(input: string): string | null {
-  const trimmed = input.trim()
-  if (!trimmed) return null
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
-  if (/^localhost(?::\d+)?(\/.*)?$/i.test(trimmed)) return `http://${trimmed}`
-  if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$/.test(trimmed)) return `http://${trimmed}`
-  return `https://${trimmed}`
-}
-
-function displayUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    return parsed.host + parsed.pathname.replace(/\/$/, "") + parsed.search
-  } catch {
-    return url
-  }
-}
-
-function titleFromUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname || "新标签页"
-  } catch {
-    return "新标签页"
-  }
 }

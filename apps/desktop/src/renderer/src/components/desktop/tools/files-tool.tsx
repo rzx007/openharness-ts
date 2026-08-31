@@ -65,6 +65,7 @@ type FilesToolProps = {
   restoreActivePath: string | null
   restorePaths: string[]
   openRequest: { id: number; path: string; line?: number } | null
+  onOpenHtmlInBrowser: (projectPath: string, relativePath: string, name: string) => void
 }
 
 export function FilesTool({
@@ -78,6 +79,7 @@ export function FilesTool({
   restoreActivePath,
   restorePaths,
   openRequest,
+  onOpenHtmlInBrowser,
 }: FilesToolProps): React.JSX.Element {
   const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
   const [loadState, setLoadState] = useState<LoadState>("idle")
@@ -395,7 +397,6 @@ export function FilesTool({
               activePath={activePath}
               loadingPath={loadingPath}
               viewMode={activeViewMode}
-              onViewModeChange={setActiveViewMode}
               searchQuery={searchQuery}
               searchMatchIndex={visibleSearchIndex}
               searchMatches={searchMatches}
@@ -405,6 +406,7 @@ export function FilesTool({
                   ? openRequest.line
                   : undefined
               }
+              onOpenHtmlInBrowser={onOpenHtmlInBrowser}
             />
           </Panel>
 

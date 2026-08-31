@@ -3,6 +3,7 @@ import type * as React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { BrowserTool, type BrowserToolTab } from "@renderer/components/desktop/tools/browser-tool"
+import { toLocalFileUrl } from "@renderer/components/desktop/tools/browser-navigation"
 import type { UtilityToolRequest } from "./utility-panel-tabs"
 import { FilesTool } from "@renderer/components/desktop/tools/files-tool"
 import { getFileIcon } from "@renderer/components/desktop/tools/file-icons"
@@ -24,7 +25,7 @@ import {
   readPersistedUtilityFileTabs,
   writePersistedUtilityFileTabs,
 } from "./utility-panel-repository"
-import type { PersistedFileTabsByScope } from "./utility-panel-state"
+import { createBrowserTab, type PersistedFileTabsByScope } from "./utility-panel-state"
 import { EmptyUtilityPanelState, UtilityPanelTabStrip } from "./utility-panel-tab-strip"
 import {
   utilityToolMeta,
@@ -209,6 +210,17 @@ export function UtilityPanel({
     return () => window.clearTimeout(timer)
   }, [activeTabId, selectedProjectGit, setActiveTabId, setTabs])
 
+  const openBrowserTab = useCallback(
+    (url: string | null = null, title = "新标签页"): void => {
+      const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const tab = createBrowserTab(id, url, title)
+      setBrowserTabs((current) => [...current, tab])
+      setTabs((current) => [...current, { id, tool: "browser", title: tab.title }])
+      setActiveTabId(id)
+    },
+    [setActiveTabId, setBrowserTabs, setTabs]
+  )
+
   const addTab = useCallback(
     (tool: UtilityTool): void => {
       if (tool === "terminal") {
@@ -234,19 +246,7 @@ export function UtilityPanel({
       }
 
       if (tool === "browser") {
-        const id = `browser-tab-${Date.now()}-${Math.random().toString(16).slice(2)}`
-        const tab: BrowserToolTab = {
-          id,
-          title: "新标签页",
-          url: null,
-          input: "",
-          loading: false,
-          canGoBack: false,
-          canGoForward: false,
-        }
-        setBrowserTabs((current) => [...current, tab])
-        setTabs((current) => [...current, { id, tool, title: tab.title }])
-        setActiveTabId(id)
+        openBrowserTab()
         return
       }
 
@@ -293,10 +293,10 @@ export function UtilityPanel({
     },
     [
       activeFilePath,
+      openBrowserTab,
       selectedProjectAvailable,
       selectedProjectPath,
       setActiveTabId,
-      setBrowserTabs,
       setFileProjectPath,
       setTabs,
       setTerminalMounted,
@@ -602,6 +602,9 @@ export function UtilityPanel({
               restoreActivePath={persistedFileState?.activePath ?? null}
               restorePaths={persistedFileState?.paths ?? []}
               openRequest={fileOpenRequest}
+              onOpenHtmlInBrowser={(projectPath, relativePath, name) =>
+                openBrowserTab(toLocalFileUrl(projectPath, relativePath), name)
+              }
             />
           )}
           {terminalMounted && (

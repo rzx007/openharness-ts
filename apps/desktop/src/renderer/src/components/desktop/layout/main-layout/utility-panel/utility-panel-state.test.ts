@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  createBrowserTab,
   defaultUtilityPanelViewState,
   parsePersistedFileTabs,
   parseUtilityPanelViewStates,
@@ -33,6 +34,20 @@ describe("utility panel state", () => {
       open: false,
       maximized: false,
       layout: null,
+    })
+  })
+
+  it("creates a browser tab that immediately navigates to a requested local file", () => {
+    expect(
+      createBrowserTab("browser-tab-local", "file:///D:/demo/index.html", "index.html")
+    ).toEqual({
+      id: "browser-tab-local",
+      title: "index.html",
+      url: "file:///D:/demo/index.html",
+      input: "file:///D:/demo/index.html",
+      loading: true,
+      canGoBack: false,
+      canGoForward: false,
     })
   })
 

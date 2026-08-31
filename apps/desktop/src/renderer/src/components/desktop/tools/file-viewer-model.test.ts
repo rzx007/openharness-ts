@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest"
 
-import { resolveMarkdownRenderMode } from "./file-viewer-model"
-import { resolvePreviewDecision } from "./file-preview-policy"
+import { shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
 
-describe("resolveMarkdownRenderMode", () => {
-  it("pauses oversized markdown until the user explicitly continues", () => {
-    const decision = resolvePreviewDecision("markdown", "x".repeat(300_001))
+describe("shouldOfferHtmlBrowserOpen", () => {
+  it("offers browser rendering only when HTML exceeds 5000 lines", () => {
+    expect(shouldOfferHtmlBrowserOpen("report.html", lines(5_000))).toBe(false)
+    expect(shouldOfferHtmlBrowserOpen("report.HTML", lines(5_001))).toBe(true)
+  })
 
-    expect(resolveMarkdownRenderMode(decision, false)).toBe("paused")
-    expect(resolveMarkdownRenderMode(decision, true)).toBe("preview")
+  it("does not offer browser rendering for a non-HTML file", () => {
+    expect(shouldOfferHtmlBrowserOpen("report.ts", lines(5_001))).toBe(false)
   })
 })
+
+function lines(count: number): string {
+  return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n")
+}

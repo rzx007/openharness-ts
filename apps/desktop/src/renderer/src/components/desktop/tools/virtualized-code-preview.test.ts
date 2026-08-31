@@ -1,37 +1,23 @@
 import { describe, expect, it } from "vitest"
 
-import {
-  createPreviewFile,
-  resolveCodeRenderMode,
-  resolvePreviewScrollTop,
-} from "./virtualized-code-preview-model"
-import { resolvePreviewDecision } from "./file-preview-policy"
+import { createPreviewFile, resolvePreviewScrollTop } from "./virtualized-code-preview-model"
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
-describe("resolveCodeRenderMode", () => {
-  it("keeps an oversized file plain until the user explicitly overrides it", () => {
-    const decision = resolvePreviewDecision("file", "x".repeat(200_001))
-
-    expect(resolveCodeRenderMode(decision, false)).toBe("plain")
-    expect(resolveCodeRenderMode(decision, true)).toBe("highlighted")
-  })
-})
-
 describe("createPreviewFile", () => {
-  it("forces the plain path to text even when the filename is TypeScript", () => {
-    expect(createPreviewFile(preview("large.ts"), "plain")).toMatchObject({
-      name: "large.ts.txt",
+  it("preserves syntax highlighting metadata for a large source file", () => {
+    expect(createPreviewFile(preview("large.ts"))).toMatchObject({
+      name: "large.ts",
       contents: "const answer = 42\n",
-      lang: "text",
-      cacheKey: "large.ts:18:plain",
+      lang: "typescript",
+      cacheKey: "large.ts:18",
     })
   })
 
-  it("preserves the detected language in highlighted mode", () => {
-    expect(createPreviewFile(preview("component.tsx"), "highlighted")).toMatchObject({
+  it("detects the language from the filename", () => {
+    expect(createPreviewFile(preview("component.tsx"))).toMatchObject({
       name: "component.tsx",
       lang: "tsx",
-      cacheKey: "component.tsx:18:highlighted",
+      cacheKey: "component.tsx:18",
     })
   })
 })

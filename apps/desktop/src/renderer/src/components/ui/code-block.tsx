@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from "react"
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
 import { useTheme } from "@renderer/components/theme-provider"
-import { previewLimits } from "@renderer/components/desktop/tools/file-preview-policy"
 
 // -- Styles --
 // Injected once at runtime — ships as a single self-contained file with no
@@ -38,7 +37,6 @@ interface CodeBlockProps {
   /** Tailwind class(es) applied to the code body — e.g. "bg-muted", "bg-slate-950" */
   bodyClassName?: string
   className?: string
-  renderMode?: "highlighted" | "plain"
 }
 
 // -- Copy button --
@@ -69,7 +67,6 @@ interface RendererProps {
   maxHeight: number
   highlightLines?: number[]
   bodyClassName?: string
-  renderMode: "highlighted" | "plain"
 }
 
 function CodeRenderer({
@@ -80,17 +77,16 @@ function CodeRenderer({
   maxHeight,
   highlightLines,
   bodyClassName,
-  renderMode,
 }: RendererProps): React.JSX.Element {
   const { resolvedTheme: themeType } = useTheme()
   const file = useMemo<FileContents>(
     () => ({
-      name: renderMode === "plain" ? "snippet.txt" : codeBlockFilename(language),
+      name: codeBlockFilename(language),
       contents: code,
-      lang: renderMode === "plain" ? "text" : normalizeLanguage(language),
-      cacheKey: `${language}:${code.length}:${hashCode(code)}:${renderMode}`,
+      lang: normalizeLanguage(language),
+      cacheKey: `${language}:${code.length}:${hashCode(code)}`,
     }),
-    [code, language, renderMode]
+    [code, language]
   )
   const options = useMemo<FileOptions<undefined>>(
     () => ({
@@ -100,8 +96,8 @@ function CodeRenderer({
       preferredHighlighter: "shiki-js",
       theme: DEFAULT_THEMES,
       themeType,
-      tokenizeMaxLength: previewLimits["code-block"].lines,
-      tokenizeMaxLineLength: previewLimits["code-block"].lineLength,
+      tokenizeMaxLength: 220_000,
+      tokenizeMaxLineLength: 20_000,
       unsafeCSS: `
         :host {
           display: block;
@@ -210,7 +206,6 @@ export function CodeBlock({
   highlightLines,
   bodyClassName,
   className,
-  renderMode = "highlighted",
 }: CodeBlockProps): React.JSX.Element {
   return (
     <div className={cn("overflow-hidden rounded-lg border", className)}>
@@ -229,7 +224,6 @@ export function CodeBlock({
         maxHeight={maxHeight}
         highlightLines={highlightLines}
         bodyClassName={bodyClassName}
-        renderMode={renderMode}
       />
     </div>
   )

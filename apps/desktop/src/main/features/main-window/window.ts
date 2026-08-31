@@ -5,6 +5,7 @@ import type { AppContext } from "../../core/app-context"
 import { isForceQuit } from "../../core/services/lifecycle"
 import { showPetWindow, syncPetWithMainWindow } from "../pet/window"
 import { clearAttention } from "../tray/attention-badge"
+import { isAllowedWebviewUrl } from "./webview-policy"
 
 export function createMainWindow(ctx: AppContext): BrowserWindow {
   const existing = ctx.windowManager.getMain()
@@ -111,17 +112,6 @@ function attachWebviewPolicy(win: BrowserWindow): void {
     ;(webPreferences as WebPreferences & { javascript?: boolean }).javascript = true
     params.partition = "persist:openharness-browser"
   })
-}
-
-function isAllowedWebviewUrl(value: string | undefined): boolean {
-  if (!value) return true
-  if (value === "about:blank") return true
-  try {
-    const url = new URL(value)
-    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:"
-  } catch {
-    return false
-  }
 }
 
 function attachMainWindowDiagnostics(win: BrowserWindow): void {

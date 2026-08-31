@@ -2,29 +2,15 @@ import type { FileContents } from "@pierre/diffs"
 
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
-import type { PreviewDecision } from "./file-preview-policy"
-
-export type CodeRenderMode = "highlighted" | "plain"
-
 const codeLineHeight = 20
 const codeScrollOffset = 72
 
-export function resolveCodeRenderMode(
-  decision: PreviewDecision,
-  forceHighlight: boolean
-): CodeRenderMode {
-  return forceHighlight || decision.mode === "highlighted" ? "highlighted" : "plain"
-}
-
-export function createPreviewFile(
-  preview: WorkspaceReadFileResult,
-  mode: CodeRenderMode
-): FileContents {
+export function createPreviewFile(preview: WorkspaceReadFileResult): FileContents {
   return {
-    name: mode === "plain" ? `${preview.path}.txt` : preview.path,
+    name: preview.path,
     contents: preview.content ?? "",
-    lang: mode === "plain" ? "text" : normalizeLanguage(preview.language, preview.path),
-    cacheKey: `${preview.path}:${preview.size}:${mode}`,
+    lang: normalizeLanguage(preview.language, preview.path),
+    cacheKey: `${preview.path}:${preview.size}`,
   }
 }
 
