@@ -40,6 +40,7 @@ describe("createDefaultNodeAgent", () => {
     expect(agent.children.list()).toEqual([]);
     expect(agent.getHistory()).toEqual([]);
     expect(agent.inspect().tools.length).toBeGreaterThan(0);
+    expect(agent.inspect().tools).toContainEqual({ name: "Remember" });
     expect(agent.inspect().model).toBe("claude-test");
     expect(agent.getUsage()).toEqual(expect.objectContaining({ inputTokens: 0, outputTokens: 0 }));
     await agent.close();

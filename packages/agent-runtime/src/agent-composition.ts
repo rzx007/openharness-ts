@@ -7,6 +7,7 @@ import type {
 } from "@openharness/core";
 import { createAgentSession, loadSettings } from "@openharness/core";
 import { McpClientManager } from "@openharness/mcp";
+import { appendUserProfileUpdate } from "@openharness/prompts";
 import { LocalAgentJobHost } from "@openharness/tools";
 
 import type {
@@ -32,6 +33,7 @@ import {
   type AgentMemoryRuntime,
 } from "./memory-runtime.js";
 import { createMcpAuthHost } from "./mcp-auth.js";
+import { createRememberTool } from "./remember-tool.js";
 
 interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
   settings?: Settings;
@@ -138,6 +140,10 @@ export async function composeOpenHarnessAgent(
       settings.memory?.enabled === false
         ? undefined
         : await createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10);
+    runtime.toolRegistry.register(createRememberTool({
+      appendUserProfile: appendUserProfileUpdate,
+      projectMemory: memory?.manager,
+    }));
     runtime.queryEngine.setMemoryRetriever(
       memory ? (userInput) => memory.retrieve(userInput) : undefined,
     );
