@@ -4,6 +4,7 @@ import { IpcEvents } from "../../../shared/ipc-channels"
 import type { AppContext } from "../../core/app-context"
 import { isForceQuit } from "../../core/services/lifecycle"
 import { showPetWindow, syncPetWithMainWindow } from "../pet/window"
+import { clearAttention } from "../tray/attention-badge"
 
 export function createMainWindow(ctx: AppContext): BrowserWindow {
   const existing = ctx.windowManager.getMain()
@@ -46,6 +47,7 @@ export function showMainWindow(win: BrowserWindow): void {
 
 function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
   attachWebviewPolicy(win)
+  const clearUnreadAttention = (): void => clearAttention(() => win)
 
   win.once("ready-to-show", () => {
     showMainWindow(win)
@@ -64,12 +66,16 @@ function attachMainWindowBehavior(ctx: AppContext, win: BrowserWindow): void {
   })
 
   win.on("restore", () => {
+    clearUnreadAttention()
     syncPetWithMainWindow(ctx, win)
   })
 
   win.on("show", () => {
+    clearUnreadAttention()
     syncPetWithMainWindow(ctx, win)
   })
+
+  win.on("focus", clearUnreadAttention)
 
   win.on("maximize", () => {
     win.webContents.send(IpcEvents.windowMaximizedChanged, true)
