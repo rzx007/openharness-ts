@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { FileCode2, FileText } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { streamdownComponents } from "@renderer/components/desktop/conversation-page/message/streamdown-components"
@@ -8,9 +8,13 @@ import { streamdownPlugins } from "@renderer/components/desktop/conversation-pag
 import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
+import { useTheme } from "@renderer/components/theme-provider"
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
 import { VirtualizedCodePreview } from "./virtualized-code-preview"
+import { LargePreviewNotice } from "./large-preview-notice"
+import { resolveMarkdownRenderMode } from "./file-viewer-model"
+import { resolvePreviewDecision } from "./file-preview-policy"
 
 export type FileViewMode = "preview" | "source"
 
@@ -50,6 +54,7 @@ interface FileViewerProps {
   searchMatchIndex: number
   searchMatches: FileSearchMatch[]
   targetLine?: number
+  onViewModeChange: (mode: FileViewMode) => void
 }
 
 export function FileViewer({
@@ -61,17 +66,12 @@ export function FileViewer({
   searchMatchIndex,
   searchMatches,
   targetLine,
+  onViewModeChange,
 }: FileViewerProps): React.JSX.Element {
-  const [themeType, setThemeType] = useThemeType()
+  const { resolvedTheme: themeType } = useTheme()
   const [forcedHighlightPaths, setForcedHighlightPaths] = useState<Set<string>>(() => new Set())
+  const [forcedMarkdownPaths, setForcedMarkdownPaths] = useState<Set<string>>(() => new Set())
   const activeTab = tabs.find((tab) => tab.preview.path === activePath) ?? null
-
-  useEffect(() => {
-    const update = (): void => setThemeType(resolveThemeType())
-    const observer = new MutationObserver(update)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => observer.disconnect()
-  }, [setThemeType])
 
   if (tabs.length === 0 && !loadingPath) {
     return (
@@ -94,7 +94,27 @@ export function FileViewer({
         ) : activeTab?.type === "document" ? (
           <DocumentPlaceholder preview={activeTab.preview} />
         ) : activeTab?.type === "markdown" && viewMode === "preview" ? (
-          <MarkdownPreview preview={activeTab.preview} />
+          resolveMarkdownRenderMode(
+            resolvePreviewDecision("markdown", activeTab.preview.content ?? ""),
+            forcedMarkdownPaths.has(activeTab.preview.path)
+          ) === "paused" ? (
+            <LargePreviewNotice
+              title="文档较大，完整预览已暂停"
+              description="可查看源码，或确认后继续渲染完整 Markdown。"
+              secondaryLabel="查看源码"
+              onSecondary={() => onViewModeChange("source")}
+              primaryLabel="仍然预览"
+              onPrimary={() => {
+                setForcedMarkdownPaths((current) => {
+                  const next = new Set(current)
+                  next.add(activeTab.preview.path)
+                  return next
+                })
+              }}
+            />
+          ) : (
+            <MarkdownPreview preview={activeTab.preview} />
+          )
         ) : activeTab ? (
           <VirtualizedCodePreview
             key={activeTab.preview.path}
@@ -151,12 +171,4 @@ function DocumentPlaceholder({ preview }: { preview: WorkspaceReadFileResult }):
       description="这类文件的预览后续接入，这里先保留标签页占位。"
     />
   )
-}
-
-function useThemeType(): ["dark" | "light", (value: "dark" | "light") => void] {
-  return useState<"dark" | "light">(() => resolveThemeType())
-}
-
-function resolveThemeType(): "dark" | "light" {
-  return document.documentElement.classList.contains("dark") ? "dark" : "light"
 }

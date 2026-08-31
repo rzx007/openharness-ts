@@ -395,12 +395,13 @@ export function FilesTool({
               activePath={activePath}
               loadingPath={loadingPath}
               viewMode={activeViewMode}
+              onViewModeChange={setActiveViewMode}
               searchQuery={searchQuery}
               searchMatchIndex={visibleSearchIndex}
               searchMatches={searchMatches}
               targetLine={
                 openRequest &&
-                  toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
                   ? openRequest.line
                   : undefined
               }

@@ -13,15 +13,14 @@ type ThemeProviderProps = {
 
 type ThemeProviderState = {
   theme: Theme
+  resolvedTheme: ResolvedTheme
   setTheme: (theme: Theme) => void
 }
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
 const THEME_VALUES: Theme[] = ["dark", "light", "system"]
 
-const ThemeProviderContext = React.createContext<
-  ThemeProviderState | undefined
->(undefined)
+const ThemeProviderContext = React.createContext<ThemeProviderState | undefined>(undefined)
 
 function isTheme(value: string | null): value is Theme {
   if (value === null) {
@@ -67,9 +66,7 @@ function isEditableTarget(target: EventTarget | null) {
     return true
   }
 
-  const editableParent = target.closest(
-    "input, textarea, select, [contenteditable='true']"
-  )
+  const editableParent = target.closest("input, textarea, select, [contenteditable='true']")
   if (editableParent) {
     return true
   }
@@ -92,6 +89,8 @@ export function ThemeProvider({
 
     return defaultTheme
   })
+  const [systemTheme, setSystemTheme] = React.useState<ResolvedTheme>(getSystemTheme)
+  const resolvedTheme = theme === "system" ? systemTheme : theme
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
@@ -104,11 +103,8 @@ export function ThemeProvider({
   const applyTheme = React.useCallback(
     (nextTheme: Theme) => {
       const root = document.documentElement
-      const resolvedTheme =
-        nextTheme === "system" ? getSystemTheme() : nextTheme
-      const restoreTransitions = disableTransitionOnChange
-        ? disableTransitionsTemporarily()
-        : null
+      const resolvedTheme = nextTheme === "system" ? getSystemTheme() : nextTheme
+      const restoreTransitions = disableTransitionOnChange ? disableTransitionsTemporarily() : null
 
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
@@ -129,6 +125,7 @@ export function ThemeProvider({
 
     const mediaQuery = window.matchMedia(COLOR_SCHEME_QUERY)
     const handleChange = () => {
+      setSystemTheme(getSystemTheme())
       applyTheme("system")
     }
 
@@ -207,9 +204,10 @@ export function ThemeProvider({
   const value = React.useMemo(
     () => ({
       theme,
+      resolvedTheme,
       setTheme,
     }),
-    [theme, setTheme]
+    [resolvedTheme, theme, setTheme]
   )
 
   return (

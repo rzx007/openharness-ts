@@ -3,6 +3,7 @@ import { isValidElement } from "react"
 import { useIsCodeFenceIncomplete, type ExtraProps } from "streamdown"
 
 import { CodeBlock } from "@renderer/components/ui/code-block"
+import { resolvePreviewDecision } from "@renderer/components/desktop/tools/file-preview-policy"
 import { cn } from "@renderer/lib/utils"
 
 import { MermaidDiagram } from "./mermaid-diagram"
@@ -20,6 +21,8 @@ export function StreamdownCodeBlock({
   }
 
   const codeType = language || "text"
+  const renderMode =
+    resolvePreviewDecision("code-block", code).mode === "plain" ? "plain" : "highlighted"
   return (
     <CodeBlock
       className="my-4"
@@ -27,6 +30,7 @@ export function StreamdownCodeBlock({
       language={codeType}
       filename={codeType}
       showLineNumbers={false}
+      renderMode={renderMode}
     />
   )
 }
@@ -54,7 +58,7 @@ export function FileButton({
       )}
     >
       <FileReferenceIcon path={path} />
-      <span className="text-file-link truncate">{children}</span>
+      <span className="truncate text-file-link">{children}</span>
     </button>
   )
 }

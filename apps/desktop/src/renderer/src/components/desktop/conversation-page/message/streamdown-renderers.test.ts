@@ -24,6 +24,17 @@ describe("StreamdownCodeBlock", () => {
       language: "typescript",
       filename: "typescript",
       showLineNumbers: false,
+      renderMode: "highlighted",
     })
+  })
+
+  it("renders an oversized fence as plain text", () => {
+    const rendered = StreamdownCodeBlock({
+      className: "language-typescript",
+      children: "x\n".repeat(2_001),
+    })
+
+    expect(rendered.type).toBe(CodeBlock)
+    expect(rendered.props.renderMode).toBe("plain")
   })
 })

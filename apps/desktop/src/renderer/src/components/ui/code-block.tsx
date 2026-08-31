@@ -6,6 +6,8 @@ import { Check, Copy, FileCode2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
+import { useTheme } from "@renderer/components/theme-provider"
+import { previewLimits } from "@renderer/components/desktop/tools/file-preview-policy"
 
 // -- Styles --
 // Injected once at runtime — ships as a single self-contained file with no
@@ -36,6 +38,7 @@ interface CodeBlockProps {
   /** Tailwind class(es) applied to the code body — e.g. "bg-muted", "bg-slate-950" */
   bodyClassName?: string
   className?: string
+  renderMode?: "highlighted" | "plain"
 }
 
 // -- Copy button --
@@ -66,6 +69,7 @@ interface RendererProps {
   maxHeight: number
   highlightLines?: number[]
   bodyClassName?: string
+  renderMode: "highlighted" | "plain"
 }
 
 function CodeRenderer({
@@ -76,17 +80,17 @@ function CodeRenderer({
   maxHeight,
   highlightLines,
   bodyClassName,
+  renderMode,
 }: RendererProps): React.JSX.Element {
-  const [renderPass, setRenderPass] = useState(0)
-  const [themeType, setThemeType] = useThemeType()
+  const { resolvedTheme: themeType } = useTheme()
   const file = useMemo<FileContents>(
     () => ({
-      name: codeBlockFilename(language),
+      name: renderMode === "plain" ? "snippet.txt" : codeBlockFilename(language),
       contents: code,
-      lang: normalizeLanguage(language),
-      cacheKey: `${language}:${code.length}:${hashCode(code)}`,
+      lang: renderMode === "plain" ? "text" : normalizeLanguage(language),
+      cacheKey: `${language}:${code.length}:${hashCode(code)}:${renderMode}`,
     }),
-    [code, language]
+    [code, language, renderMode]
   )
   const options = useMemo<FileOptions<undefined>>(
     () => ({
@@ -96,8 +100,8 @@ function CodeRenderer({
       preferredHighlighter: "shiki-js",
       theme: DEFAULT_THEMES,
       themeType,
-      tokenizeMaxLength: 220_000,
-      tokenizeMaxLineLength: 20_000,
+      tokenizeMaxLength: previewLimits["code-block"].lines,
+      tokenizeMaxLineLength: previewLimits["code-block"].lineLength,
       unsafeCSS: `
         :host {
           display: block;
@@ -128,39 +132,6 @@ function CodeRenderer({
     injectStyles()
   }, [])
 
-  useEffect(() => {
-    const update = (): void => setThemeType(resolveThemeType())
-    const observer = new MutationObserver(update)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => observer.disconnect()
-  }, [setThemeType])
-
-  useEffect(() => {
-    let disposed = false
-    let readyFrame: number | null = null
-    const frame = window.requestAnimationFrame(() => {
-      const ready =
-        "customElements" in window && window.customElements.get("pierre-file")
-          ? Promise.resolve()
-          : "customElements" in window
-            ? window.customElements.whenDefined("pierre-file").catch(() => undefined)
-            : Promise.resolve()
-
-      void ready.then(() => {
-        readyFrame = window.requestAnimationFrame(() => {
-          if (disposed) return
-          setRenderPass((pass) => pass + 1)
-        })
-      })
-    })
-
-    return () => {
-      disposed = true
-      window.cancelAnimationFrame(frame)
-      if (readyFrame !== null) window.cancelAnimationFrame(readyFrame)
-    }
-  }, [code, language, themeType])
-
   return (
     <div
       className={cn(
@@ -171,19 +142,10 @@ function CodeRenderer({
       style={scrollable ? { maxHeight: `${maxHeight}px` } : undefined}
     >
       <div className={cn("px-4 py-3", highlightLines?.length && "cbhl")}>
-        <PierreFile key={`${themeType}:${renderPass}`} file={file} options={options} />
+        <PierreFile file={file} options={options} />
       </div>
     </div>
   )
-}
-
-function useThemeType(): ["dark" | "light", (value: "dark" | "light") => void] {
-  return useState<"dark" | "light">(() => resolveThemeType())
-}
-
-function resolveThemeType(): "dark" | "light" {
-  if (typeof document === "undefined") return "light"
-  return document.documentElement.classList.contains("dark") ? "dark" : "light"
 }
 
 function codeBlockFilename(language: string): string {
@@ -248,6 +210,7 @@ export function CodeBlock({
   highlightLines,
   bodyClassName,
   className,
+  renderMode = "highlighted",
 }: CodeBlockProps): React.JSX.Element {
   return (
     <div className={cn("overflow-hidden rounded-lg border", className)}>
@@ -266,6 +229,7 @@ export function CodeBlock({
         maxHeight={maxHeight}
         highlightLines={highlightLines}
         bodyClassName={bodyClassName}
+        renderMode={renderMode}
       />
     </div>
   )
