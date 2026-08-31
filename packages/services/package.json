@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@arcships/light-ocr": "0.5.7",
+    "@openharness/context": "workspace:*",
     "@openharness/core": "workspace:*",
     "@openharness/memory": "workspace:*",
     "@openharness/protocol": "workspace:*",

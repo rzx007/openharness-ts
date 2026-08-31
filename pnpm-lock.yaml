@@ -935,6 +935,9 @@ importers:
       '@arcships/light-ocr':
         specifier: 0.5.7
         version: 0.5.7
+      '@openharness/context':
+        specifier: workspace:*
+        version: link:../context
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
