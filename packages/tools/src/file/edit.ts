@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@openharness/core";
 import { resolveToolPath } from "./path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
 import { fileOperationsFor } from "./operations.js";
+import { managedPersistencePathKind } from "./managed-persistence-path.js";
 
 // System directories that must never be edited, regardless of permission mode.
 const SYSTEM_DIR_PREFIXES = [
@@ -44,6 +45,13 @@ export const fileEditTool: ToolDefinition = {
     }
 
     const filePath = resolveToolPath(rawPath, cwd);
+
+    if (managedPersistencePathKind(filePath, cwd)) {
+      return {
+        content: [{ type: "text", text: "Error: this is a managed persistence path. Use the Remember tool instead." }],
+        isError: true,
+      };
+    }
 
     if (isSystemPath(filePath)) {
       return {

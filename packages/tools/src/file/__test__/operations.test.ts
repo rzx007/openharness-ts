@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
-import type { Settings } from "@openharness/core";
+import { getConfigDir, getProjectMemoryDir, type Settings } from "@openharness/core";
 import {
   hostPathToContainerPath,
   setActiveSandboxSession,
@@ -111,6 +111,47 @@ describe("fileOperationsFor", () => {
     }
   });
 
+  it("blocks Write and Edit for managed persistence paths without blocking ordinary project files", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "oh-file-ops-managed-"));
+    const configDir = await mkdtemp(join(tmpdir(), "oh-file-ops-config-"));
+    const oldConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = configDir;
+    try {
+      const userProfile = join(getConfigDir(), "USER.md");
+      const memoryEntry = join(getProjectMemoryDir(cwd), "entry.md");
+      const projectUserFile = join(cwd, "USER.md");
+      await mkdir(getProjectMemoryDir(cwd), { recursive: true });
+      await writeFile(userProfile, "existing user preference\n", "utf-8");
+      await writeFile(memoryEntry, "existing project memory\n", "utf-8");
+
+      const context = { cwd, settings: hostSettings() };
+      const userResult = await fileWriteTool.execute!(
+        { file_path: userProfile, content: "overwritten" },
+        context,
+      );
+      const memoryResult = await fileEditTool.execute!(
+        { file_path: memoryEntry, old_string: "existing", new_string: "changed" },
+        context,
+      );
+      const ordinaryResult = await fileWriteTool.execute!(
+        { file_path: projectUserFile, content: "project documentation" },
+        context,
+      );
+
+      expect(userResult.isError).toBe(true);
+      expect(memoryResult.isError).toBe(true);
+      expect(ordinaryResult.isError).not.toBe(true);
+      expect(await readFile(userProfile, "utf-8")).toBe("existing user preference\n");
+      expect(await readFile(memoryEntry, "utf-8")).toBe("existing project memory\n");
+      expect(await readFile(projectUserFile, "utf-8")).toBe("project documentation");
+    } finally {
+      if (oldConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = oldConfigDir;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
   it("fails closed when Docker sandbox is required but no session is active", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "oh-file-ops-no-session-"));
     try {
@@ -134,6 +175,16 @@ function dockerSettings(): Settings {
       backend: "docker",
       failIfUnavailable: true,
     },
+  };
+}
+
+function hostSettings(): Settings {
+  return {
+    model: "m",
+    apiFormat: "openai",
+    maxTurns: 1,
+    permission: { mode: "default" },
+    sandbox: { enabled: false },
   };
 }
 
