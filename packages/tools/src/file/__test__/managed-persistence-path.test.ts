@@ -32,6 +32,14 @@ describe("managedPersistencePathKind", () => {
     expect(managedPersistencePathKind(join(getConfigDir(), "USER.md.backup"), cwd)).toBeNull();
   });
 
+  it.runIf(process.platform === "win32")("recognizes Windows extended-length aliases", () => {
+    const userProfile = join(getConfigDir(), "USER.md");
+    const memoryEntry = join(getProjectMemoryDir(cwd), "entry.md");
+
+    expect(managedPersistencePathKind(`\\\\?\\${userProfile}`, cwd)).toBe("user-profile");
+    expect(managedPersistencePathKind(`\\\\?\\${memoryEntry}`, cwd)).toBe("project-memory");
+  });
+
   it("recognizes the project memory directory and descendants without matching similar prefixes", () => {
     const memoryDir = getProjectMemoryDir(cwd);
 

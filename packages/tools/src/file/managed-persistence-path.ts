@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, normalize, relative, resolve } from "node:path";
 import { getConfigDir, getProjectMemoryDir } from "@openharness/core";
 
 export type ManagedPersistencePathKind = "user-profile" | "project-memory";
@@ -24,5 +24,9 @@ export function managedPersistencePathKind(
 }
 
 function normalizePath(path: string): string {
-  return process.platform === "win32" ? path.toLowerCase() : path;
+  if (process.platform !== "win32") return path;
+  const withoutDevicePrefix = path
+    .replace(/^\\\\\?\\UNC\\/i, "\\\\")
+    .replace(/^\\\\\?\\/i, "");
+  return normalize(withoutDevicePrefix).toLowerCase();
 }

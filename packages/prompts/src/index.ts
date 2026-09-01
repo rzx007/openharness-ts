@@ -477,6 +477,8 @@ function pendingUserProfileUpdatePath(id: string): string {
   return join(getUserProfilePendingDir(), `${id}.json`);
 }
 
+let userProfileWriteQueue: Promise<void> = Promise.resolve();
+
 export async function appendUserProfileUpdate(rawContent: string): Promise<string> {
   const content = rawContent.trim();
   if (!content) throw new Error("Cannot append an empty USER.md update.");
@@ -486,6 +488,12 @@ export async function appendUserProfileUpdate(rawContent: string): Promise<strin
     throw new Error(`Blocked USER.md update: ${blocking.code}`);
   }
 
+  const write = userProfileWriteQueue.then(() => appendValidatedUserProfileUpdate(content));
+  userProfileWriteQueue = write.then(() => undefined, () => undefined);
+  return await write;
+}
+
+async function appendValidatedUserProfileUpdate(content: string): Promise<string> {
   const userProfilePath = join(getConfigDir(), "USER.md");
   let existing = "";
   try {

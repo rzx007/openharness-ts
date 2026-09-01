@@ -625,6 +625,26 @@ describe("prompt layers with SOUL.md and USER.md", () => {
     }
   });
 
+  it("serializes concurrent USER.md updates without losing successful writes", async () => {
+    const cfgDir = await mkdtemp(join(tmpdir(), "ohs-user-append-concurrent-"));
+    const oldConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = cfgDir;
+    try {
+      const preferences = Array.from({ length: 12 }, (_, index) => `Preference ${index + 1}.`);
+
+      await Promise.all(preferences.map((preference) => appendUserProfileUpdate(preference)));
+
+      const profile = await readFile(join(cfgDir, "USER.md"), "utf-8");
+      for (const preference of preferences) {
+        expect(profile.split(preference)).toHaveLength(2);
+      }
+    } finally {
+      if (oldConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = oldConfigDir;
+      await rm(cfgDir, { recursive: true, force: true });
+    }
+  });
+
   it("injects customPrompt as context instructions without replacing stable guidance", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "ohs-custom-prompt-"));
     const cfgDir = await mkdtemp(join(tmpdir(), "ohs-custom-prompt-cfg-"));
