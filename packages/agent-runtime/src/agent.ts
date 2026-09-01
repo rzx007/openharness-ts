@@ -131,6 +131,7 @@ export interface OpenHarnessAgent {
 
 class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   private activeRun?: FrameworkAgentRun;
+  private completedRunMessages?: Message[];
   private maintenance?: {
     kind: "compact" | "remember";
     settled: Promise<void>;
@@ -169,6 +170,8 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     options: OpenHarnessAgentSubmitOptions = {},
   ): AgentRunHandle {
     this.assertIdle("submit a message");
+    const runHistoryStart = this.getHistory().length;
+    this.completedRunMessages = undefined;
     const ids = options.ids ?? {
       inputId: `input_${randomUUID()}`,
       runId: `run_${randomUUID()}`,
@@ -187,8 +190,11 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       externalSignal: options.signal,
       delivery: options.delivery ?? "queue",
       metadata: options.metadata,
-      onSettled: () => {
+      onSettled: (result) => {
         if (this.activeRun !== run) return;
+        if (result) {
+          this.completedRunMessages = result.history.slice(runHistoryStart);
+        }
         this.activeRun = undefined;
         if (this.lifecycleState === "running") this.lifecycleState = "idle";
       },
@@ -212,11 +218,13 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   loadHistory(messages: Message[]): void {
     this.assertIdle("load history");
     this.runtime.queryEngine.loadMessages(messages);
+    this.completedRunMessages = undefined;
   }
 
   clear(): void {
     this.assertIdle("clear history");
     this.session.clear();
+    this.completedRunMessages = undefined;
   }
 
   setModel(model: string): void {
@@ -255,6 +263,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         this.getHistory(),
         this.runtime.apiClient,
         this.model,
+        this.completedRunMessages,
       );
     });
   }

@@ -19,7 +19,12 @@ export interface AgentMemoryRuntime {
   manager: MemoryManager;
   directory: string;
   retrieve(userInput: string): Promise<string | null>;
-  remember(messages: Message[], apiClient: StreamingMessageClient, model: string): Promise<AgentRememberResult>;
+  remember(
+    messages: Message[],
+    apiClient: StreamingMessageClient,
+    model: string,
+    completedRunMessages?: Message[],
+  ): Promise<AgentRememberResult>;
 }
 
 export async function createAgentMemoryRuntime(
@@ -37,7 +42,7 @@ export async function createAgentMemoryRuntime(
       if (selected.ids.length > 0) await manager.markMemoryUsed(selected.ids);
       return selected.text || null;
     },
-    async remember(messages, apiClient, model) {
+    async remember(messages, apiClient, model, completedRunMessages) {
       return await extractMemories({
         apiClient,
         model,
@@ -45,6 +50,7 @@ export async function createAgentMemoryRuntime(
         manager,
         memoryDir: directory,
         cwd,
+        completedRunMessages,
       });
     },
   };
@@ -57,11 +63,16 @@ export async function extractMemories(options: {
   manager: MemoryManager;
   memoryDir: string;
   cwd: string;
+  completedRunMessages?: Message[];
 }): Promise<AgentRememberResult> {
   if (options.messages.length < 2) {
     return { skipped: true, reason: "not enough messages", writtenIds: [], titles: [] };
   }
-  if (hasMemoryWrites(options.messages, options.memoryDir, options.cwd)) {
+  if (hasMemoryWrites(
+    options.completedRunMessages ?? currentRunMessages(options.messages),
+    options.memoryDir,
+    options.cwd,
+  )) {
     return {
       skipped: true,
       reason: "main conversation already wrote memory",
@@ -115,9 +126,8 @@ export async function extractMemories(options: {
 }
 
 function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): boolean {
-  const runMessages = currentRunMessages(messages);
   const memoryWriteIds = new Set<string>();
-  for (const message of runMessages) {
+  for (const message of messages) {
     if (message.type !== "assistant") continue;
     for (const toolUse of message.toolUses ?? []) {
       const input = toolUse.input as Record<string, unknown>;
@@ -129,7 +139,7 @@ function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): b
       }
     }
   }
-  return runMessages.some((message) =>
+  return messages.some((message) =>
     message.type === "tool_result" &&
     message.isError !== true &&
     memoryWriteIds.has(message.toolUseId)

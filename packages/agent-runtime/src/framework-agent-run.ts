@@ -40,7 +40,7 @@ interface FrameworkAgentRunOptions {
   externalSignal?: AbortSignal;
   delivery: "queue" | "steer";
   metadata?: Record<string, unknown>;
-  onSettled(): void;
+  onSettled(result: AgentRunResult | undefined): void;
 }
 
 interface PendingSteer {
@@ -81,8 +81,13 @@ export class FrameworkAgentRun implements AgentRunHandle {
           once: true,
         });
     }
+    let completedResult: AgentRunResult | undefined;
     this.result = Promise.resolve()
       .then(() => this.execute())
+      .then((result) => {
+        completedResult = result;
+        return result;
+      })
       .finally(() => {
         this.active = false;
         this.acceptingInput = false;
@@ -92,7 +97,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
             this.externalAbort,
           );
         }
-        options.onSettled();
+        options.onSettled(completedResult);
       });
     void this.started.catch(() => {});
     void this.result.catch(() => {});

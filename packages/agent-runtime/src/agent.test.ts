@@ -265,6 +265,105 @@ describe("createDefaultNodeAgent", () => {
     await agent.close();
   });
 
+  it("tracks completed memory run boundaries across steering and later submissions", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-memory-run-"));
+    tempDirs.push(cwd);
+    let conversationTurns = 0;
+    let extractionCalls = 0;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (params.tools?.length === 0) {
+          extractionCalls++;
+          yield { type: "text_delta" as const, delta: '{"memories":[]}' };
+          yield { type: "complete" as const, stopReason: "end_turn" as const };
+          return;
+        }
+
+        conversationTurns++;
+        if (conversationTurns === 1) {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "remember-before-steer",
+              name: "Remember",
+              input: {
+                scope: "project",
+                content: "Build commands use pnpm.",
+              },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+
+        yield {
+          type: "text_delta" as const,
+          delta: conversationTurns === 2 ? "steered run complete" : "next run complete",
+        };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      client,
+      settings: {
+        apiFormat: "anthropic",
+        model: "memory-run-boundary-test-model",
+        maxTurns: 4,
+        permission: { mode: "full_auto" },
+        sandbox: { enabled: false },
+      },
+    });
+
+    try {
+      const firstRun = agent.submitMessage("remember before steering");
+      const steer = firstRun.steer({
+        id: "memory-steer",
+        content: "finish this same run",
+      });
+
+      await expect(steer).resolves.toMatchObject({ runId: firstRun.id });
+      await expect(firstRun.result).resolves.toMatchObject({
+        output: "steered run complete",
+      });
+      const runtime = (agent as any).runtime;
+      runtime.queryEngine.compact = async () => {
+        runtime.queryEngine.loadMessages([
+          { type: "user", content: "compacted current history" },
+          { type: "assistant", content: "summary without tool calls" },
+        ]);
+      };
+      await agent.compact();
+      await expect(agent.remember()).resolves.toMatchObject({
+        skipped: true,
+        reason: "main conversation already wrote memory",
+      });
+      expect(extractionCalls).toBe(0);
+
+      agent.loadHistory([
+        { type: "user", content: "loaded history without memory writes" },
+        { type: "assistant", content: "loaded answer" },
+      ]);
+      await expect(agent.remember()).resolves.toMatchObject({
+        skipped: true,
+        reason: "no durable memories proposed",
+      });
+      expect(extractionCalls).toBe(1);
+
+      await expect(agent.runMessage("a new independent run")).resolves.toMatchObject({
+        output: "next run complete",
+      });
+      await expect(agent.remember()).resolves.toMatchObject({
+        skipped: true,
+        reason: "no durable memories proposed",
+      });
+      expect(extractionCalls).toBe(2);
+    } finally {
+      await agent.close();
+    }
+  });
+
   it("serializes runs, maintenance, context mutation, and close through one lifecycle", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
