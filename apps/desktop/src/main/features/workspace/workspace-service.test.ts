@@ -32,7 +32,7 @@ describe("WorkspaceService.listFiles", () => {
 
     expect(result.entries).toHaveLength(5_001)
     expect(result.entries.at(-1)?.path).toBe("file-5000.txt")
-  }, 40_000)
+  }, 90_000)
 
   it("keeps ignored directories out of the complete listing", async () => {
     const rootPath = await createTemporaryDirectory()

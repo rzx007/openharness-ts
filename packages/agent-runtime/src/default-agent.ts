@@ -22,20 +22,39 @@ interface InternalAgentOptions {
   identity?: AgentIdentity;
 }
 
+interface DefaultNodeAgentInternals {
+  createLocalTerminal: typeof createDefaultNodeTerminal;
+}
+
 /** 默认 Node 组装：会读取本机配置、发现扩展，并安装 Node 能力。 */
 export async function createDefaultNodeAgent(
   options: OpenHarnessAgentOptions = {},
 ): Promise<OpenHarnessAgent> {
-  const eventBus = new AgentEventBus(options.onEvent);
-  return await createDefaultNodeAgentInternal(options, {
-    eventBus,
-    childDirectory: new AgentChildRegistry(),
+  return await createDefaultNodeAgentWithInternals(options, {
+    createLocalTerminal: createDefaultNodeTerminal,
   });
+}
+
+/** @internal Test seam for verifying host-provided Terminal precedence. */
+export async function createDefaultNodeAgentWithInternals(
+  options: OpenHarnessAgentOptions,
+  internals: DefaultNodeAgentInternals,
+): Promise<OpenHarnessAgent> {
+  const eventBus = new AgentEventBus(options.onEvent);
+  return await createDefaultNodeAgentInternal(
+    options,
+    {
+      eventBus,
+      childDirectory: new AgentChildRegistry(),
+    },
+    internals,
+  );
 }
 
 async function createDefaultNodeAgentInternal(
   options: OpenHarnessAgentOptions,
   internal: InternalAgentOptions,
+  internals: DefaultNodeAgentInternals,
 ): Promise<OpenHarnessAgent> {
   const effects: AgentEffects = {
     requestPermission: options.effects?.requestPermission ?? (async () => ({
@@ -48,14 +67,18 @@ async function createDefaultNodeAgentInternal(
     resolveDefaultTerminal: ({ override, cwd, sessionId }) =>
       resolveDefaultNodeTerminal({
         override,
-        createLocal: () => createDefaultNodeTerminal({ cwd, sessionId }),
+        createLocal: () => internals.createLocalTerminal({ cwd, sessionId }),
       }),
     createAgent: (childOptions, identity) =>
-      createDefaultNodeAgentInternal(childOptions, {
-        eventBus: internal.eventBus,
-        childDirectory: internal.childDirectory,
-        identity,
-      }),
+      createDefaultNodeAgentInternal(
+        childOptions,
+        {
+          eventBus: internal.eventBus,
+          childDirectory: internal.childDirectory,
+          identity,
+        },
+        internals,
+      ),
   });
   return createAssembledAgent({
     ...composition,

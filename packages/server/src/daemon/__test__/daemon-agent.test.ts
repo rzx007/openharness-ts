@@ -1,20 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@openharness/coordinator", () => ({
-  getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
-  getCoordinatorTools: () => [
-    "Agent",
-    "JobList",
-    "JobRead",
-    "JobWait",
-    "JobSend",
-    "JobCancel",
-    "Workflow",
-  ],
-  getCoordinatorUserContext: vi.fn(() => ({
-    workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, JobWait",
-  })),
-}));
+vi.mock("@openharness/coordinator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@openharness/coordinator")>();
+  return {
+    ...actual,
+    getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
+    getCoordinatorTools: () => [
+      "Agent",
+      "JobList",
+      "JobRead",
+      "JobWait",
+      "JobSend",
+      "JobCancel",
+      "Workflow",
+    ],
+    getCoordinatorUserContext: vi.fn(() => ({
+      workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, JobWait",
+    })),
+  };
+});
 
 vi.mock("@openharness/agent-runtime", () => ({
   createDefaultNodeAgent: vi.fn(async () => {
@@ -24,6 +28,7 @@ vi.mock("@openharness/agent-runtime", () => ({
 
 import { createDaemonAgentLoader } from "../daemon-agent.js";
 import { getCoordinatorUserContext } from "@openharness/coordinator";
+import { createDefaultNodeAgentWithInternals } from "../../../../agent-runtime/src/default-agent.js";
 
 const session = {
   id: "session-1",
@@ -114,38 +119,37 @@ describe("createDaemonAgentLoader", () => {
     expect(sink).toHaveBeenCalledWith(event);
   });
 
-  it("passes the daemon Terminal override without falling back to a local factory", async () => {
+  it("passes the daemon Terminal override through the real default Agent without creating a local Terminal", async () => {
     const terminal = {} as any;
     const terminalJobs = {} as any;
-    const createLocalTerminal = vi.fn(() => {
+    const createLocalTerminal = vi.fn(async () => {
       throw new Error("daemon must not create a local Terminal provider");
     });
-    const agent = {
-      loadHistory: vi.fn(),
-      close: vi.fn(async () => {}),
-      getCapabilities: () => ({ terminal: { status: "available", source: "override" } }),
-    } as any;
-    const createAgent = vi.fn(async ({ options }) => {
-      if (!options.capabilityOverrides?.terminal) createLocalTerminal();
-      return agent;
-    });
     const loader = createDaemonAgentLoader({
-      settings: { model: "default-model" } as any,
-      createAgent,
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "default-model",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      } as any,
+      createAgent: async ({ options }) =>
+        createDefaultNodeAgentWithInternals(options, { createLocalTerminal }),
       createTerminal: () => ({ value: terminal, jobs: terminalJobs }),
     })!;
 
     const loaded = await loader({ session, history: [], parts: [] });
-
-    expect(createLocalTerminal).not.toHaveBeenCalled();
-    expect(createAgent.mock.calls[0]![0].options.capabilityOverrides?.terminal).toEqual({
-      value: terminal,
-      jobs: terminalJobs,
-    });
-    expect(loaded.getCapabilities().terminal).toEqual({
-      status: "available",
-      source: "override",
-    });
+    try {
+      expect(createLocalTerminal).not.toHaveBeenCalled();
+      expect(loaded.getCapabilities().terminal).toEqual({
+        status: "available",
+        source: "override",
+      });
+    } finally {
+      await loaded.close();
+    }
   });
 
   it("loads Agent settings for the durable session cwd", async () => {

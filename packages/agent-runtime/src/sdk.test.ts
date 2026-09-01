@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,13 +12,102 @@ import {
   createWorkflowRunSnapshot,
   FileWorkflowRunRepository,
 } from "@openharness/coordinator";
+import { LocalTerminalProvider } from "@openharness/terminal-node";
 import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultNodeAgent } from "./index.js";
 
+async function withTemporaryAgent<T extends { close(): Promise<void> }, R>(
+  prefix: string,
+  createAgent: (cwd: string) => Promise<T>,
+  run: (agent: T, cwd: string) => Promise<R>,
+): Promise<R> {
+  const cwd = mkdtempSync(join(tmpdir(), prefix));
+  let agent: T | undefined;
+  try {
+    agent = await createAgent(cwd);
+    return await run(agent, cwd);
+  } finally {
+    try {
+      await agent?.close();
+    } finally {
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }
+}
+
+async function probeRealNodePty(): Promise<{ supported: boolean; reason?: string }> {
+  const provider = new LocalTerminalProvider({ resolveCwd: async () => process.cwd() });
+  try {
+    const terminal = await provider.create({
+      projectId: "node-pty-probe",
+      runtime: "local",
+      cols: 40,
+      rows: 10,
+      name: "node-pty probe",
+      cwd: process.cwd(),
+      shell: process.execPath,
+      source: "agent",
+      sessionId: "node-pty-probe",
+    });
+    await provider.kill(terminal.id);
+    await provider.wait({ terminalId: terminal.id, timeoutMs: 5_000 });
+    return { supported: true };
+  } catch (error) {
+    return {
+      supported: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await provider.dispose();
+  }
+}
+
+const realNodePty = await probeRealNodePty();
+const realPtyIt = it.skipIf(!realNodePty.supported);
+
 describe("programmatic agent SDK", () => {
-  it("runs a real Node REPL through Terminal and the shared Jobs control plane", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-real-terminal-"));
+  it("removes the real-Terminal fixture directory when Agent initialization fails", async () => {
+    let cwd: string | undefined;
+
+    await expect(
+      withTemporaryAgent(
+        "openharness-sdk-init-failure-",
+        async (temporaryCwd) => {
+          cwd = temporaryCwd;
+          throw new Error("initialization failed");
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow("initialization failed");
+
+    expect(cwd).toBeDefined();
+    expect(existsSync(cwd!)).toBe(false);
+  });
+
+  it("removes the real-Terminal fixture directory when Agent close fails", async () => {
+    let cwd: string | undefined;
+
+    await expect(
+      withTemporaryAgent(
+        "openharness-sdk-close-failure-",
+        async (temporaryCwd) => {
+          cwd = temporaryCwd;
+          return {
+            close: vi.fn(async () => {
+              throw new Error("close failed");
+            }),
+          } as any;
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow("close failed");
+
+    expect(cwd).toBeDefined();
+    expect(existsSync(cwd!)).toBe(false);
+  });
+
+  realPtyIt("runs a real Node REPL through Terminal and the shared Jobs control plane", async () => {
     let waitPayload: Record<string, any> | undefined;
     let readPayload: Record<string, any> | undefined;
     const client: StreamingMessageClient = {
@@ -59,33 +148,31 @@ describe("programmatic agent SDK", () => {
         yield { type: "complete" as const, stopReason: "end_turn" as const };
       },
     };
-    const agent = await createDefaultNodeAgent({
-      cwd,
-      sessionId: "real-terminal-session",
-      client,
-      settings: { ...testSettings(), maxTurns: 8 },
-    });
-
-    try {
-      await expect(agent.runMessage("exercise the real terminal")).resolves.toMatchObject({
-        output: "real terminal complete",
-      });
-      expect(waitPayload).toMatchObject({
-        results: [{ timedOut: false, snapshot: { status: "completed" } }],
-      });
-      expect(JSON.stringify(waitPayload)).toContain("terminal-ok");
-      expect(readPayload).toMatchObject({
-        snapshot: { status: "completed" },
-      });
-      expect(JSON.stringify(readPayload)).toContain("terminal-ok");
-    } finally {
-      await agent.close();
-      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    }
+    await withTemporaryAgent(
+      "openharness-sdk-real-terminal-",
+      (cwd) => createDefaultNodeAgent({
+        cwd,
+        sessionId: "real-terminal-session",
+        client,
+        settings: { ...testSettings(), maxTurns: 8 },
+      }),
+      async (agent) => {
+        await expect(agent.runMessage("exercise the real terminal")).resolves.toMatchObject({
+          output: "real terminal complete",
+        });
+        expect(waitPayload).toMatchObject({
+          results: [{ timedOut: false, snapshot: { status: "completed" } }],
+        });
+        expect(JSON.stringify(waitPayload)).toContain("terminal-ok");
+        expect(readPayload).toMatchObject({
+          snapshot: { status: "completed" },
+        });
+        expect(JSON.stringify(readPayload)).toContain("terminal-ok");
+      },
+    );
   }, 15_000);
 
-  it("sends interactive stdin to a real Node REPL before closing it", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-real-stdin-"));
+  realPtyIt("sends interactive stdin to a real Node REPL before closing it", async () => {
     let runningWaitPayload: Record<string, any> | undefined;
     let readPayload: Record<string, any> | undefined;
     let finishedWaitPayload: Record<string, any> | undefined;
@@ -141,32 +228,30 @@ describe("programmatic agent SDK", () => {
         yield { type: "complete" as const, stopReason: "end_turn" as const };
       },
     };
-    const agent = await createDefaultNodeAgent({
-      cwd,
-      sessionId: "stdin-terminal-session",
-      client,
-      settings: { ...testSettings(), maxTurns: 10 },
-    });
-
-    try {
-      await expect(agent.runMessage("exercise interactive stdin")).resolves.toMatchObject({
-        output: "interactive terminal complete",
-      });
-      expect(runningWaitPayload).toMatchObject({
-        results: [{ timedOut: true, snapshot: { status: "running" } }],
-      });
-      expect(JSON.stringify(readPayload)).toContain("stdin-echo:hello");
-      expect(finishedWaitPayload).toMatchObject({
-        results: [{ timedOut: false, snapshot: { status: "completed" } }],
-      });
-    } finally {
-      await agent.close();
-      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    }
+    await withTemporaryAgent(
+      "openharness-sdk-real-stdin-",
+      (cwd) => createDefaultNodeAgent({
+        cwd,
+        sessionId: "stdin-terminal-session",
+        client,
+        settings: { ...testSettings(), maxTurns: 10 },
+      }),
+      async (agent) => {
+        await expect(agent.runMessage("exercise interactive stdin")).resolves.toMatchObject({
+          output: "interactive terminal complete",
+        });
+        expect(runningWaitPayload).toMatchObject({
+          results: [{ timedOut: true, snapshot: { status: "running" } }],
+        });
+        expect(JSON.stringify(readPayload)).toContain("stdin-echo:hello");
+        expect(finishedWaitPayload).toMatchObject({
+          results: [{ timedOut: false, snapshot: { status: "completed" } }],
+        });
+      },
+    );
   }, 15_000);
 
-  it("cancels a real Node REPL as a killed Terminal Job", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-real-cancel-"));
+  realPtyIt("cancels a real Node REPL as a killed Terminal Job", async () => {
     let cancelPayload: Record<string, any> | undefined;
     let waitPayload: Record<string, any> | undefined;
     const client: StreamingMessageClient = {
@@ -199,27 +284,26 @@ describe("programmatic agent SDK", () => {
         yield { type: "complete" as const, stopReason: "end_turn" as const };
       },
     };
-    const agent = await createDefaultNodeAgent({
-      cwd,
-      sessionId: "cancel-terminal-session",
-      client,
-      settings: { ...testSettings(), maxTurns: 7 },
-    });
-
-    try {
-      await expect(agent.runMessage("cancel the real terminal")).resolves.toMatchObject({
-        output: "cancelled terminal complete",
-      });
-      expect(cancelPayload).toMatchObject({
-        snapshot: { status: "stopping", capabilities: { send: false, cancel: false } },
-      });
-      expect(waitPayload).toMatchObject({
-        results: [{ timedOut: false, snapshot: { status: "killed" } }],
-      });
-    } finally {
-      await agent.close();
-      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    }
+    await withTemporaryAgent(
+      "openharness-sdk-real-cancel-",
+      (cwd) => createDefaultNodeAgent({
+        cwd,
+        sessionId: "cancel-terminal-session",
+        client,
+        settings: { ...testSettings(), maxTurns: 7 },
+      }),
+      async (agent) => {
+        await expect(agent.runMessage("cancel the real terminal")).resolves.toMatchObject({
+          output: "cancelled terminal complete",
+        });
+        expect(cancelPayload).toMatchObject({
+          snapshot: { status: "stopping", capabilities: { send: false, cancel: false } },
+        });
+        expect(waitPayload).toMatchObject({
+          results: [{ timedOut: false, snapshot: { status: "killed" } }],
+        });
+      },
+    );
   }, 15_000);
 
   it("installs the complete standalone Node capability set without a Host", async () => {

@@ -218,10 +218,11 @@ test("esc key closes top dialog", async () => {
   });
   await waitForFrame((f) => f.includes("esc-closeable dialog"));
 
-  mockInput.pressEscape();
-  // Give the native key parser and React scheduler time to process
-  await new Promise((r) => setTimeout(r, 50));
-  await renderOnce();
+  await act(async () => {
+    mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+  await waitForFrame((frame) => !frame.includes("esc-closeable dialog"));
   expect(captureCharFrame()).not.toContain("esc-closeable dialog");
 
   renderer.destroy();

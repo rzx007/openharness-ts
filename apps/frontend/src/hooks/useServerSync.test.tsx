@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -48,15 +48,23 @@ type DaemonFixture = {
   stop: () => Promise<void>;
 };
 type DaemonChild = ChildProcessByStdio<null, Readable, Readable>;
+type DaemonFixtureOptions = {
+  startupTimeoutMs?: number;
+  scriptSource?: string;
+  onSpawn?: (child: DaemonChild, dir: string) => void;
+};
 
-function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: string }> {
+function waitForFixtureReady(
+  child: DaemonChild,
+  timeoutMs = 90_000,
+): Promise<{ url: string; token: string }> {
   let stdout = "";
   let stderr = "";
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error(`Timed out waiting for daemon fixture.\n${stderr}`));
-    }, 90_000);
+    }, timeoutMs);
     const cleanup = () => {
       clearTimeout(timer);
       child.stdout.off("data", onStdout);
@@ -98,6 +106,35 @@ function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: 
   });
 }
 
+function waitForChildExit(child: DaemonChild, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    child.once("exit", onExit);
+  });
+}
+
+async function cleanupDaemonFixture(child: DaemonChild | undefined, dir: string): Promise<void> {
+  try {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      if (!(await waitForChildExit(child, 2_000)) && child.exitCode === null) {
+        child.kill("SIGKILL");
+        await waitForChildExit(child, 1_000);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+}
+
 function resolveTsxLoader(repoRoot: string): string {
   const pnpmModulesDir = join(repoRoot, "node_modules", ".pnpm");
   const tsxPackageDir = readdirSync(pnpmModulesDir).find((name) => name.startsWith("tsx@"));
@@ -107,15 +144,20 @@ function resolveTsxLoader(repoRoot: string): string {
   return join(pnpmModulesDir, tsxPackageDir, "node_modules", "tsx", "dist", "loader.mjs");
 }
 
-async function startDaemonFixture(): Promise<DaemonFixture> {
+async function startDaemonFixture(options: DaemonFixtureOptions = {}): Promise<DaemonFixture> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-tui-sync-"));
   const token = "tui-sync-token";
   const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
   const serverModuleUrl = pathToFileURL(join(repoRoot, "packages/server/src/http/server.ts")).href;
   const scriptPath = join(dir, "daemon-fixture.mjs");
-  writeFileSync(
-    scriptPath,
-    `
+  let child: DaemonChild | undefined;
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = () => cleanupPromise ??= cleanupDaemonFixture(child, dir);
+
+  try {
+    writeFileSync(
+      scriptPath,
+      options.scriptSource ?? `
 const { OpenHarnessHttpServer } = await import(${JSON.stringify(serverModuleUrl)});
 const capabilities = Object.fromEntries([
   "terminal",
@@ -238,31 +280,20 @@ process.on("SIGINT", () => {
 const listen = await server.listen();
 console.log(JSON.stringify({ url: listen.url, token: ${JSON.stringify(token)} }));
 `,
-  );
+    );
 
-  const tsxLoaderUrl = pathToFileURL(resolveTsxLoader(repoRoot)).href;
-  const child = spawn("node", ["--import", tsxLoaderUrl, scriptPath], {
-    cwd: repoRoot,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const ready = await waitForFixtureReady(child);
-  return {
-    ...ready,
-    async stop() {
-      try {
-        if (child.exitCode == null && !child.killed) {
-          const waitForExit = (ms: number): Promise<boolean> => Promise.race([new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms))]);
-          child.kill("SIGTERM");
-          if (!(await waitForExit(2_000)) && child.exitCode == null) {
-            child.kill("SIGKILL");
-            await waitForExit(1_000);
-          }
-        }
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    },
-  };
+    const tsxLoaderUrl = pathToFileURL(resolveTsxLoader(repoRoot)).href;
+    child = spawn("node", ["--import", tsxLoaderUrl, scriptPath], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    options.onSpawn?.(child, dir);
+    const ready = await waitForFixtureReady(child, options.startupTimeoutMs);
+    return { ...ready, stop: cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }
 
 test("useServerSync hydrates daemon state and sends prompt/permission replies", async () => {
@@ -1573,8 +1604,35 @@ test("useServerSync drives a real daemon session through prompt, permission, and
     }
   } finally {
     await fixture.stop();
+    await fixture.stop();
   }
 }, 105_000);
+
+test("startDaemonFixture terminates the child and removes its directory when startup fails", async () => {
+  let child: DaemonChild | undefined;
+  let dir: string | undefined;
+  const outcome = await startDaemonFixture({
+    startupTimeoutMs: 100,
+    scriptSource: "setInterval(() => {}, 1_000);",
+    onSpawn(spawnedChild, fixtureDir) {
+      child = spawnedChild;
+      dir = fixtureDir;
+    },
+  }).then(
+    async (fixture) => {
+      await fixture.stop();
+      return undefined;
+    },
+    (error: unknown) => error,
+  );
+
+  expect(outcome).toBeInstanceOf(Error);
+  expect(String(outcome)).toContain("Timed out waiting for daemon fixture");
+  expect(child).toBeDefined();
+  expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true);
+  expect(dir).toBeDefined();
+  expect(existsSync(dir!)).toBe(false);
+}, 5_000);
 
 type WorkflowHttpCall = {
   path: string;

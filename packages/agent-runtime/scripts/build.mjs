@@ -3,6 +3,7 @@ import { cp, mkdir } from "node:fs/promises";
 
 const shared = {
   bundle: true,
+  external: ["node-pty"],
   platform: "node",
   target: "node20",
   logLevel: "info",

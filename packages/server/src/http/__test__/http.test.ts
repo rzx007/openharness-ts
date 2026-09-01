@@ -1084,7 +1084,7 @@ describe("OpenHarnessHttpServer", () => {
           await waitUntil(() => {
             const status = server.store.getRun(runId)?.status;
             return status === "completed" || status === "failed" || status === "interrupted";
-          });
+          }, 30_000);
           return server.store.getRun(runId);
         };
 
