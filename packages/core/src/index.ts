@@ -139,8 +139,8 @@ export {
   CompactService,
   type CompactAttachmentCatalog,
   type CompactAttachmentCatalogEntry,
-  type CompactAttachments,
-  type CompactAttachmentsProvider,
+  type CompactContext,
+  type CompactContextProvider,
 } from "./engine/compact-service";
 export { CostTracker } from "./engine/cost-tracker";
 

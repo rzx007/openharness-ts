@@ -471,6 +471,15 @@ describe("createDefaultNodeAgent", () => {
       sandbox: { enabled: false },
     };
     const agent = await createDefaultNodeAgent({ cwd, settings });
+    const compactContextProvider = () => ({
+      sessionMemory: "current compact checkpoint",
+    });
+    const setCompactContextProvider = vi.spyOn(
+      (agent as any).runtime.queryEngine,
+      "setCompactContextProvider",
+    );
+    agent.setCompactContextProvider(compactContextProvider);
+    expect(setCompactContextProvider).toHaveBeenCalledWith(compactContextProvider);
     let finishCompact!: () => void;
     (agent as any).runtime.queryEngine.compact = () => new Promise<void>((resolve) => {
       finishCompact = resolve;
@@ -482,6 +491,9 @@ describe("createDefaultNodeAgent", () => {
     expect(() => agent.loadHistory([])).toThrow(AgentOperationConflictError);
     expect(() => agent.clear()).toThrow(AgentOperationConflictError);
     expect(() => agent.setModel("other-model")).toThrow(AgentOperationConflictError);
+    expect(() => agent.setCompactContextProvider(undefined)).toThrow(
+      AgentOperationConflictError,
+    );
 
     const closing = agent.close();
     expect(agent.state).toBe("closing");

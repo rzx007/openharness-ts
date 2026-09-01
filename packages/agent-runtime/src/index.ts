@@ -10,6 +10,10 @@ export {
 export {
   createDefaultNodeAgent,
 } from "./default-agent.js";
+export {
+  createCompactContextProvider,
+  type CompactContextSources,
+} from "./compact-context.js";
 export type {
   AgentCapabilityOverrides,
   AgentEffectOverrides,

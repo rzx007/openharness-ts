@@ -11,7 +11,7 @@ import type { HookExecutor } from "./hooks";
 import type { ContentBlock, Message } from "./messages";
 import type { StreamEvent } from "./events";
 import type { Settings } from "./settings";
-import type { CompactAttachmentsProvider } from "../engine/compact-service";
+import type { CompactContextProvider } from "../engine/compact-service";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 
@@ -390,7 +390,7 @@ export interface QueryEngine {
   loadMessages(messages: Message[]): void;
   getTotalUsage(): import("./usage").UsageSnapshot;
   setMemoryRetriever(retriever: MemoryRetriever | undefined): void;
-  setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void;
+  setCompactContextProvider(fn: CompactContextProvider | undefined): void;
   setAllowedTools(tools: string[] | null): void;
   setSessionId(sessionId: string | undefined): void;
   setMcpManager(mgr: unknown): void;
