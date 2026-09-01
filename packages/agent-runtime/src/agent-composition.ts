@@ -123,7 +123,12 @@ export async function composeOpenHarnessAgent(
   );
   const localJobs = overrides.jobs === false
     ? undefined
-    : new LocalAgentJobHost(cwd, sessionId, childManager);
+    : new LocalAgentJobHost({
+        cwd,
+        sessionId,
+        childManager,
+        workflowRepository: capabilityValue(workflowRepository),
+      });
 
   const jobSources: AgentJobHost[] = [];
   if (localJobs) jobSources.push(localJobs);

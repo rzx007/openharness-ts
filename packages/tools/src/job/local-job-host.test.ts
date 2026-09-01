@@ -30,7 +30,12 @@ afterEach(async () => {
 describe("LocalAgentJobHost adapter", () => {
   it("returns one shell job for concurrent retries of the same creation request", async () => {
     const cwd = temporaryDirectory();
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: undefined,
+    });
     const input = {
       requestId: "tool:call-1",
       cwd,
@@ -49,7 +54,12 @@ describe("LocalAgentJobHost adapter", () => {
 
   it("prunes expired settled creation requests", async () => {
     const cwd = temporaryDirectory();
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: undefined,
+    });
     const requests = (host as any).shellRequests as Map<string, any>;
     requests.set("expired", {
       fingerprint: "old",
@@ -72,7 +82,12 @@ describe("LocalAgentJobHost adapter", () => {
 
   it("rejects reusing a creation request identity with different parameters", async () => {
     const cwd = temporaryDirectory();
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: undefined,
+    });
     const common = {
       requestId: "tool:call-conflict",
       cwd,
@@ -88,7 +103,12 @@ describe("LocalAgentJobHost adapter", () => {
 
   it("rejects reusing a creation request identity with different settings", async () => {
     const cwd = temporaryDirectory();
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: undefined,
+    });
     const common = {
       requestId: "tool:settings-conflict",
       cwd,
@@ -118,7 +138,12 @@ describe("LocalAgentJobHost adapter", () => {
       interrupt: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
     };
-    const host = new LocalAgentJobHost(cwd, "session-1", directory(handle));
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(handle),
+      workflowRepository: undefined,
+    });
 
     await expect(host.list({
       sessionId: "session-1",
@@ -144,7 +169,12 @@ describe("LocalAgentJobHost adapter", () => {
 
   it("rejects a different session owner", async () => {
     const cwd = temporaryDirectory();
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: undefined,
+    });
 
     await expect(host.list({ sessionId: "session-2" })).rejects.toThrow("owner session mismatch");
   });
@@ -160,7 +190,12 @@ describe("LocalAgentJobHost adapter", () => {
       interrupt: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
     };
-    const host = new LocalAgentJobHost(cwd, "session-1", directory(failedHandle));
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(failedHandle),
+      workflowRepository: undefined,
+    });
 
     await expect(host.wait({
       sessionId: "session-1",
@@ -177,10 +212,11 @@ describe("LocalAgentJobHost adapter", () => {
     await expect(host.list({ sessionId: "session-1" })).resolves.toHaveLength(1);
   });
 
-  it("returns structured Workflow details from JobRead", async () => {
+  it("reads structured Workflow details from the injected repository", async () => {
     const cwd = temporaryDirectory();
+    const workflows = new FileWorkflowRunRepository({ dir: join(cwd, "external-workflows") });
     const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
-    new FileWorkflowRunRepository({ cwd }).save(createWorkflowRunSnapshot({
+    workflows.save(createWorkflowRunSnapshot({
       runId: "workflow-1",
       ownerSession: "session-1",
       status: "running",
@@ -191,7 +227,12 @@ describe("LocalAgentJobHost adapter", () => {
       running: new Set(["review"]),
       createdAt: 10,
     }));
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: workflows,
+    });
 
     await expect(host.read({ sessionId: "session-1", jobId: "workflow-1" }))
       .resolves.toMatchObject({
@@ -206,10 +247,39 @@ describe("LocalAgentJobHost adapter", () => {
       });
   });
 
+  it("does not discover Workflow files when the repository is disabled", async () => {
+    const cwd = temporaryDirectory();
+    const workflows = new FileWorkflowRunRepository({ cwd });
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    workflows.save(createWorkflowRunSnapshot({
+      runId: "workflow-disabled",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "must remain hidden",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["review"]),
+      createdAt: 10,
+    }));
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: undefined,
+    });
+
+    await expect(host.read({ sessionId: "session-1", jobId: "workflow-disabled" }))
+      .rejects.toThrow("Job not found: workflow-disabled");
+    await expect(host.list({ sessionId: "session-1", kinds: ["workflow"] }))
+      .resolves.toEqual([]);
+  });
+
   it("cancels a Workflow through JobCancel instead of a Workflow action", async () => {
     const cwd = temporaryDirectory();
+    const workflows = new FileWorkflowRunRepository({ cwd });
     const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
-    new FileWorkflowRunRepository({ cwd }).save(createWorkflowRunSnapshot({
+    workflows.save(createWorkflowRunSnapshot({
       runId: "workflow-cancel",
       ownerSession: "session-1",
       status: "running",
@@ -220,7 +290,12 @@ describe("LocalAgentJobHost adapter", () => {
       running: new Set(),
       createdAt: 10,
     }));
-    const host = new LocalAgentJobHost(cwd, "session-1", directory());
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(),
+      workflowRepository: workflows,
+    });
 
     await expect(host.cancel({
       sessionId: "session-1",
@@ -232,7 +307,7 @@ describe("LocalAgentJobHost adapter", () => {
       status: "killed",
       capabilities: { cancel: false },
     });
-    expect(new FileWorkflowRunRepository({ cwd }).load("workflow-cancel")).toMatchObject({
+    expect(workflows.load("workflow-cancel")).toMatchObject({
       status: "failed",
       termination: "cancelled",
       summary: "no longer needed",
@@ -255,8 +330,9 @@ describe("LocalAgentJobHost adapter", () => {
       interrupt,
       close: vi.fn(async () => undefined),
     };
+    const workflows = new FileWorkflowRunRepository({ cwd });
     const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
-    new FileWorkflowRunRepository({ cwd }).save(createWorkflowRunSnapshot({
+    workflows.save(createWorkflowRunSnapshot({
       runId: "workflow-child-cancel",
       ownerSession: "session-1",
       status: "running",
@@ -278,7 +354,12 @@ describe("LocalAgentJobHost adapter", () => {
       ]]),
       createdAt: 10,
     }));
-    const host = new LocalAgentJobHost(cwd, "session-1", directory(handle));
+    const host = new LocalAgentJobHost({
+      cwd,
+      sessionId: "session-1",
+      childManager: directory(handle),
+      workflowRepository: workflows,
+    });
 
     await expect(host.cancel({
       sessionId: "session-1",

@@ -7,7 +7,11 @@ import type {
   Settings,
   StreamingMessageClient,
 } from "@openharness/core";
-import { FileWorkflowRunRepository } from "@openharness/coordinator";
+import {
+  createWorkflowPlan,
+  createWorkflowRunSnapshot,
+  FileWorkflowRunRepository,
+} from "@openharness/coordinator";
 import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultNodeAgent } from "./index.js";
@@ -113,6 +117,70 @@ describe("programmatic agent SDK", () => {
         workflowRepository: { status: "available", source: "default" },
       });
       expect(agent.inspect().tools.map((tool) => tool.name)).toContain("Workflow");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("routes Workflow jobs through the injected repository", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-workflow-jobs-"));
+    const workflows = new FileWorkflowRunRepository({ dir: join(cwd, "external-workflows") });
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    workflows.save(createWorkflowRunSnapshot({
+      runId: "workflow-override",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "shared repository",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["review"]),
+      createdAt: 10,
+    }));
+    let jobReadResult: unknown;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        const toolResult = params.messages.find((message) => message.type === "tool_result");
+        if (!toolResult || toolResult.type !== "tool_result") {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "sdk-workflow-job-read",
+              name: "JobRead",
+              input: { jobId: "workflow-override" },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const text = toolResult.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("");
+        jobReadResult = JSON.parse(text);
+        yield { type: "text_delta" as const, delta: "workflow read" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      sessionId: "session-1",
+      client,
+      capabilityOverrides: { workflowRepository: workflows },
+      settings: testSettings(),
+    });
+
+    try {
+      await expect(agent.runMessage("read workflow job")).resolves.toMatchObject({
+        output: "workflow read",
+      });
+      expect(jobReadResult).toMatchObject({
+        kind: "job",
+        action: "read",
+        snapshot: { id: "workflow-override", kind: "workflow" },
+      });
     } finally {
       await agent.close();
       rmSync(cwd, { recursive: true, force: true });
