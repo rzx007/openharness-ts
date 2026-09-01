@@ -10,11 +10,28 @@ export {
 export {
   createDefaultNodeAgent,
 } from "./default-agent.js";
-export type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 export type {
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  /** @deprecated Migration-only legacy type; remove in phase 1 task 3. */
   AgentHostCapabilities,
+  /** @deprecated Migration-only legacy type; remove in phase 1 task 3. */
   AgentPermissionHost,
+  CapabilityOverride,
+  ObservableJobProducer,
+  OpenHarnessAgentConfiguration,
 } from "./agent-options.js";
+export {
+  assertJobConfiguration,
+  disabledCapability,
+  resolveCapability,
+  toCapabilitySnapshot,
+  unavailableCapability,
+  type AgentCapabilitySnapshot,
+  type CapabilitySnapshot,
+  type ResolvedAgentCapabilities,
+  type ResolvedCapability,
+} from "./capability-resolution.js";
 export {
   createAgentKernel,
   createBasicAgentKernelRuntime,
