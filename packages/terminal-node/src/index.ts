@@ -1,3 +1,4 @@
+export * from "./agent-terminal-host"
 export * from "./local-terminal-provider"
 export * from "./terminal-output-store"
 export * from "./output-buffer"

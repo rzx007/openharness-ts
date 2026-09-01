@@ -1010,6 +1010,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../sandbox
