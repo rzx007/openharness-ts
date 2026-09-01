@@ -6,6 +6,8 @@ import type {
   JobWaitResult,
 } from "@openharness/protocol";
 
+export { CompositeAgentJobHost } from "./composite-agent-job-host.js";
+
 /** Jobs 包对外汇总它实际使用的跨端协议类型。 */
 export type {
   JobCapabilities,
