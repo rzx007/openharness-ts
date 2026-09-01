@@ -130,6 +130,34 @@ describe("DaemonJobService", () => {
     ]);
   });
 
+  it("does not claim a metadata-less framework child as a detached process", async () => {
+    const frameworkChild: SessionExecutionRecord = {
+      ...task,
+      id: "legacy-child-1",
+      childSessionId: "child-session-1",
+      metadata: {},
+    };
+    const { service } = createService(frameworkChild);
+    const jobs = service.createDetachedProcessAgentHost({ id: "session-1" } as any);
+
+    const listed = await jobs.list({
+      sessionId: "session-1",
+      includeFinished: true,
+    });
+    const readFailure = await jobs.read({
+      sessionId: "session-1",
+      jobId: "legacy-child-1",
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect.soft(listed).toEqual([]);
+    expect(readFailure).toMatchObject({
+      message: "Job not found: legacy-child-1",
+    });
+  });
+
   it("projects owned terminals and durable tasks into one list", async () => {
     const { service } = createService();
     const jobs = await service.list({ sessionId: "session-1" });

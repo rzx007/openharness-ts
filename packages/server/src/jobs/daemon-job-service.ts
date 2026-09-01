@@ -89,11 +89,11 @@ export class DaemonJobService {
       includesSnapshot: (snapshot) => {
         const task = this.store.getSessionTask(snapshot.id);
         return task?.sessionId === snapshot.ownerSession &&
-          executionBackend(task) === "detached_process";
+          isDetachedProcessAgentTask(task);
       },
       includesSource: (source) =>
         source.kind === "task" &&
-        executionBackend(source.value) === "detached_process",
+        isDetachedProcessAgentTask(source.value),
     });
   }
 
@@ -452,6 +452,18 @@ function executionBackend(task: SessionExecutionRecord): "detached_process" | "c
   if (task.metadata.executionBackend === "child_agent") return "child_agent";
   if (task.metadata.executionBackend === "detached_process") return "detached_process";
   return task.metadata.origin === "child_session" ? "child_agent" : "detached_process";
+}
+
+function isDetachedProcessAgentTask(task: SessionExecutionRecord): boolean {
+  if (
+    task.childSessionId ||
+    task.metadata.executionBackend === "child_agent" ||
+    task.metadata.origin === "child_session"
+  ) {
+    return false;
+  }
+  return task.type === "shell" ||
+    task.metadata.executionBackend === "detached_process";
 }
 
 function formatWorkflowOutput(workflow: WorkflowRunSnapshot): string {
