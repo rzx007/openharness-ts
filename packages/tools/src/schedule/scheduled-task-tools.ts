@@ -6,7 +6,7 @@ import type {
 } from "@openharness/core";
 
 function host(context: ToolContext): AgentScheduleEffects | undefined {
-  return context.agent?.effects.schedules;
+  return context.schedules;
 }
 
 function unavailable(): ToolResult {

@@ -14,7 +14,6 @@ import { AgentEventBus } from "./event-source.js";
 
 interface InternalAgentOptions {
   eventBus: AgentEventBus;
-  effects: AgentEffects;
   childDirectory: AgentChildRegistry;
   identity?: AgentIdentity;
 }
@@ -24,21 +23,8 @@ export async function createDefaultNodeAgent(
   options: OpenHarnessAgentOptions = {},
 ): Promise<OpenHarnessAgent> {
   const eventBus = new AgentEventBus(options.onEvent);
-  const capabilities = options.hostCapabilities;
-  const effects: AgentEffects = {
-    requestPermission:
-      capabilities?.permissions.requestPermission ??
-      (async () => ({
-        status: "denied",
-        reason: "No permission effect configured",
-      })),
-    ...(capabilities?.schedules
-      ? { schedules: capabilities.schedules }
-      : {}),
-  };
   return await createDefaultNodeAgentInternal(options, {
     eventBus,
-    effects,
     childDirectory: new AgentChildRegistry(),
   });
 }
@@ -47,12 +33,17 @@ async function createDefaultNodeAgentInternal(
   options: OpenHarnessAgentOptions,
   internal: InternalAgentOptions,
 ): Promise<OpenHarnessAgent> {
+  const effects: AgentEffects = {
+    requestPermission: options.effects?.requestPermission ?? (async () => ({
+      status: "denied",
+      reason: "No permission effect configured",
+    })),
+  };
   const composition = await composeOpenHarnessAgent(options, {
     ...internal,
     createAgent: (childOptions, identity) =>
       createDefaultNodeAgentInternal(childOptions, {
         eventBus: internal.eventBus,
-        effects: internal.effects,
         childDirectory: internal.childDirectory,
         identity,
       }),
@@ -60,7 +51,7 @@ async function createDefaultNodeAgentInternal(
   return createAssembledAgent({
     ...composition,
     eventBus: internal.eventBus,
-    effects: internal.effects,
+    effects,
     identity: internal.identity,
     childDirectory: internal.childDirectory,
   });

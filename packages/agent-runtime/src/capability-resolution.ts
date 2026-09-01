@@ -79,6 +79,22 @@ export function toCapabilitySnapshot<T>(
   }
 }
 
+export function toAgentCapabilitySnapshot(
+  capabilities: ResolvedAgentCapabilities,
+): AgentCapabilitySnapshot {
+  return {
+    terminal: toCapabilitySnapshot(capabilities.terminal),
+    backgroundShell: toCapabilitySnapshot(capabilities.backgroundShell),
+    jobs: toCapabilitySnapshot(capabilities.jobs),
+    attachments: toCapabilitySnapshot(capabilities.attachments),
+    memory: toCapabilitySnapshot(capabilities.memory),
+    childEnvironment: toCapabilitySnapshot(capabilities.childEnvironment),
+    workflowRepository: toCapabilitySnapshot(capabilities.workflowRepository),
+    imageToText: toCapabilitySnapshot(capabilities.imageToText),
+    schedules: toCapabilitySnapshot(capabilities.schedules),
+  };
+}
+
 export function assertJobConfiguration(
   overrides: AgentCapabilityOverrides,
 ): void {

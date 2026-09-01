@@ -13,10 +13,6 @@ export {
 export type {
   AgentCapabilityOverrides,
   AgentEffectOverrides,
-  /** @deprecated Migration-only legacy type; remove in phase 1 task 3. */
-  AgentHostCapabilities,
-  /** @deprecated Migration-only legacy type; remove in phase 1 task 3. */
-  AgentPermissionHost,
   CapabilityOverride,
   ObservableJobProducer,
   OpenHarnessAgentConfiguration,
@@ -25,6 +21,7 @@ export {
   assertJobConfiguration,
   disabledCapability,
   resolveCapability,
+  toAgentCapabilitySnapshot,
   toCapabilitySnapshot,
   unavailableCapability,
   type AgentCapabilitySnapshot,

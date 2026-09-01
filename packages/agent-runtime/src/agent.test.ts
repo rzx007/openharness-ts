@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  type AgentEvent,
   AgentRunNotAcceptingInputError,
   RuntimeBundle,
+  type StreamingMessageClient,
   type Settings,
 } from "@openharness/core";
 import { McpClientManager } from "@openharness/mcp";
@@ -21,6 +23,61 @@ afterEach(() => {
 });
 
 describe("createDefaultNodeAgent", () => {
+  it("denies an ask decision when no permission effect is configured", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-permission-"));
+    tempDirs.push(cwd);
+    const events: AgentEvent[] = [];
+    let turn = 0;
+    const client: StreamingMessageClient = {
+      async *streamMessage() {
+        turn += 1;
+        if (turn === 1) {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "permission-test-tool",
+              name: "Bash",
+              input: { command: "echo must-not-run" },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "permission handled" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      client,
+      settings: {
+        apiFormat: "anthropic",
+        model: "permission-test-model",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    try {
+      await expect(agent.runMessage("run a command")).resolves.toMatchObject({
+        output: "permission handled",
+      });
+      expect(events.find((event) => event.type === "permission.resolved")).toMatchObject({
+        data: {
+          decision: {
+            status: "denied",
+            reason: "No permission effect configured",
+          },
+        },
+      });
+    } finally {
+      await agent.close();
+    }
+  });
+
   it("constructs a standalone programmatic agent without daemon services", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);

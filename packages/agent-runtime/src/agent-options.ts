@@ -14,34 +14,6 @@ import type { AgentJobHost } from "@openharness/jobs";
 import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type { AgentChildEnvironmentProvider } from "./child-environment.js";
 
-/**
- * 迁移期间供尚未迁移的内部调用方使用；阶段一任务 3 迁移所有消费者后删除。
- * 新的 DefaultNodeAgent 装配 API 请使用 AgentEffectOverrides。
- * @deprecated Migration-only legacy type; remove in phase 1 task 3.
- */
-export interface AgentPermissionHost {
-  requestPermission: AgentEffects["requestPermission"];
-}
-
-/**
- * 迁移期间供尚未迁移的内部调用方使用；阶段一任务 3 迁移所有消费者后删除。
- * 新的 DefaultNodeAgent 装配 API 请使用 AgentCapabilityOverrides。
- * @deprecated Migration-only legacy type; remove in phase 1 task 3.
- */
-export interface AgentHostCapabilities {
-  permissions: AgentPermissionHost;
-  jobs?: AgentJobHost;
-  backgroundShell?: AgentBackgroundShellHost;
-  terminal?: AgentTerminalHost;
-  schedules?: AgentScheduleEffects;
-  childEnvironment?: AgentChildEnvironmentProvider;
-  workflowRepository?: WorkflowRunRepository;
-  imageToText?: AgentImageToTextHost;
-  attachments?: AgentAttachmentResourceHost;
-  /** Stable per-session directory exposed read-only inside Docker. */
-  attachmentResourceRoot?: string;
-}
-
 export type CapabilityOverride<T> = T | false;
 
 export interface ObservableJobProducer<T> {

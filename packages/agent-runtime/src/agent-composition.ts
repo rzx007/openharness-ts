@@ -1,19 +1,32 @@
+import { randomUUID } from "node:crypto";
+
 import type {
-  AgentEffects,
   AgentSession,
   McpServerConfig,
   RuntimeBundle,
   Settings,
 } from "@openharness/core";
 import { createAgentSession, loadSettings } from "@openharness/core";
+import { FileWorkflowRunRepository } from "@openharness/coordinator";
+import { CompositeAgentJobHost, type AgentJobHost } from "@openharness/jobs";
 import { McpClientManager } from "@openharness/mcp";
 import { appendUserProfileUpdate } from "@openharness/prompts";
 import { LocalAgentJobHost } from "@openharness/tools";
 
 import type {
-  AgentHostCapabilities,
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  ObservableJobProducer,
   OpenHarnessAgentConfiguration,
 } from "./agent-options.js";
+import {
+  assertJobConfiguration,
+  disabledCapability,
+  resolveCapability,
+  unavailableCapability,
+  type ResolvedAgentCapabilities,
+  type ResolvedCapability,
+} from "./capability-resolution.js";
 import {
   AgentChildManager,
   type AgentChildEnvironmentProvider,
@@ -42,7 +55,8 @@ interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
   mcpServers?: Record<string, McpServerConfig>;
   extensions?: OpenHarnessAgentExtension[];
   childIdleTtlMs?: number;
-  hostCapabilities?: AgentHostCapabilities;
+  capabilityOverrides?: AgentCapabilityOverrides;
+  effects?: AgentEffectOverrides;
 }
 
 export interface AgentIdentity {
@@ -53,7 +67,6 @@ export interface AgentIdentity {
 
 export interface AgentCompositionContext {
   eventBus: AgentEventBus;
-  effects: AgentEffects;
   childDirectory: AgentChildRegistry;
   identity?: AgentIdentity;
   createAgent: AgentChildManagerOptions["createAgent"];
@@ -65,7 +78,7 @@ export interface AgentComposition {
   mcpConnections: () => ReturnType<McpClientManager["getConnections"]>;
   memory: AgentMemoryRuntime | undefined;
   childManager: AgentChildManager;
-  hostCapabilities: string[];
+  capabilities: ResolvedAgentCapabilities;
   model: string;
 }
 
@@ -75,26 +88,106 @@ export async function composeOpenHarnessAgent(
 ): Promise<AgentComposition> {
   const cwd = options.cwd ?? process.cwd();
   const settings = options.settings ?? (await loadSettings({}));
-  const explicitCapabilities = options.hostCapabilities;
+  const overrides = options.capabilityOverrides ?? {};
+  assertJobConfiguration(overrides);
+
   const discovery = await discoverOpenHarnessExtensions(cwd, settings, {
     pluginsEnabled: options.pluginsEnabled,
   });
-  for (const warning of discovery.warnings)
+  for (const warning of discovery.warnings) {
     process.stderr.write(`[plugins] ${warning}\n`);
+  }
+
+  const sessionId = options.sessionId ?? `agent_session_${randomUUID()}`;
+  const childEnvironment = await resolveCapability(
+    overrides.childEnvironment,
+    async () => createDefaultChildEnvironmentProvider(),
+  );
+  const childManager = new AgentChildManager({
+    settings,
+    configuration: options,
+    capabilityOverrides: options.capabilityOverrides,
+    effects: options.effects,
+    cwd,
+    idleTtlMs: options.childIdleTtlMs,
+    eventBus: internal.eventBus,
+    directory: internal.childDirectory,
+    environment: capabilityValue(childEnvironment) ?? unavailableChildEnvironment(),
+    onWarning: (event) => process.stderr.write(`${JSON.stringify(event)}\n`),
+    createAgent: internal.createAgent,
+  });
+
+  const workflowRepository = await resolveCapability(
+    overrides.workflowRepository,
+    async () => new FileWorkflowRunRepository({ cwd }),
+  );
+  const localJobs = overrides.jobs === false
+    ? undefined
+    : new LocalAgentJobHost(cwd, sessionId, childManager);
+
+  const jobSources: AgentJobHost[] = [];
+  if (localJobs) jobSources.push(localJobs);
+  const terminal = resolveProducerOverride(
+    overrides.terminal,
+    "Default Node runtime does not provide terminal",
+    jobSources,
+  );
+  const backgroundShell = overrides.backgroundShell === undefined
+    ? localJobs ? {
+        status: "available" as const,
+        value: localJobs,
+        source: "default" as const,
+      } : unavailableCapability("Default Node runtime does not provide background shell")
+    : resolveProducerOverride(
+        overrides.backgroundShell,
+        "Default Node runtime does not provide background shell",
+        jobSources,
+      );
+  const jobs = overrides.jobs === false
+    ? disabledCapability<AgentJobHost>()
+    : {
+        status: "available" as const,
+        value: new CompositeAgentJobHost(jobSources),
+        source: hasProducerOverride(overrides) ? "override" as const : "default" as const,
+      };
+
+  const memory = await resolveCapability(
+    overrides.memory === false || settings.memory?.enabled === false
+      ? false
+      : undefined,
+    async () => createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10),
+  );
+  const attachments = resolveOptionalOverride(
+    overrides.attachments,
+    "Default Node runtime does not provide attachments",
+  );
+  const imageToText = resolveOptionalOverride(
+    overrides.imageToText,
+    "Default Node runtime does not provide image to text",
+  );
+  const schedules = resolveOptionalOverride(
+    overrides.schedules,
+    "Default Node runtime does not provide schedules",
+  );
+
+  const capabilities: ResolvedAgentCapabilities = {
+    terminal,
+    backgroundShell,
+    jobs,
+    attachments,
+    memory,
+    childEnvironment,
+    workflowRepository,
+    imageToText,
+    schedules,
+  };
+
   const runtime = await createOpenHarnessRuntime({
     settings,
     cwd,
-    sessionId: options.sessionId,
+    sessionId,
     configuration: options,
-    hostCapabilities: {
-      schedules: Boolean(explicitCapabilities?.schedules ?? internal.effects.schedules),
-      terminal: Boolean(explicitCapabilities?.terminal),
-      jobs: Boolean(explicitCapabilities?.jobs) || !explicitCapabilities,
-      workflowRepository: explicitCapabilities?.workflowRepository,
-      imageToText: Boolean(explicitCapabilities?.imageToText),
-      attachments: Boolean(explicitCapabilities?.attachments),
-      attachmentResourceRoot: explicitCapabilities?.attachmentResourceRoot,
-    },
+    capabilities,
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
   });
@@ -115,90 +208,37 @@ export async function composeOpenHarnessAgent(
       });
     }
 
-    const mcpManager = new McpClientManager({
-      cwd,
-      settings,
-      sessionId: options.sessionId,
-    });
+    const mcpManager = new McpClientManager({ cwd, settings, sessionId });
     runtime.addCleanup(() => mcpManager.disconnectAll());
     const mcpServers = options.mcpServers ?? discovery.mcpServers;
-    if (Object.keys(mcpServers).length > 0)
+    if (Object.keys(mcpServers).length > 0) {
       await mcpManager.connectAll(mcpServers);
-    for (const tool of mcpManager.getAsToolDefinitions())
+    }
+    for (const tool of mcpManager.getAsToolDefinitions()) {
       runtime.toolRegistry.register(tool);
+    }
     runtime.queryEngine.setMcpManager(mcpManager);
     runtime.queryEngine.setMcpAuth(
-      createMcpAuthHost({
-        settings,
-        mcpManager,
-        toolRegistry: runtime.toolRegistry,
-      }),
+      createMcpAuthHost({ settings, mcpManager, toolRegistry: runtime.toolRegistry }),
     );
-    runtime.queryEngine.setTerminal(explicitCapabilities?.terminal);
 
-    const memory =
-      settings.memory?.enabled === false
-        ? undefined
-        : await createAgentMemoryRuntime(cwd, settings.memory?.maxFiles ?? 10);
+    const memoryRuntime = capabilityValue(memory);
     runtime.toolRegistry.register(createRememberTool({
       appendUserProfile: appendUserProfileUpdate,
-      projectMemory: memory?.manager,
+      projectMemory: memoryRuntime?.manager,
     }));
     runtime.queryEngine.setMemoryRetriever(
-      memory ? (userInput) => memory.retrieve(userInput) : undefined,
+      memoryRuntime ? (userInput) => memoryRuntime.retrieve(userInput) : undefined,
     );
 
-    const session = createAgentSession({
-      queryEngine: runtime.queryEngine,
-      sessionId: options.sessionId,
-    });
-    const childManager = new AgentChildManager({
-      settings,
-      configuration: options,
-      cwd,
-      idleTtlMs: options.childIdleTtlMs,
-      eventBus: internal.eventBus,
-      directory: internal.childDirectory,
-      environment:
-        explicitCapabilities?.childEnvironment ??
-        createDefaultChildEnvironmentProvider(),
-      hostCapabilities: explicitCapabilities,
-      onWarning: (event) => process.stderr.write(`${JSON.stringify(event)}\n`),
-      createAgent: internal.createAgent,
-    });
-    const localJobs = !explicitCapabilities
-      ? new LocalAgentJobHost(cwd, session.id, childManager)
-      : undefined;
-    const jobs = explicitCapabilities?.jobs ?? localJobs;
-    runtime.queryEngine.setJobs(jobs);
-    const backgroundShell =
-      explicitCapabilities?.backgroundShell ??
-      localJobs;
-    runtime.queryEngine.setBackgroundShell(backgroundShell);
-    runtime.queryEngine.setImageToText(explicitCapabilities?.imageToText);
-    runtime.queryEngine.setAttachments(explicitCapabilities?.attachments);
-    const hostCapabilities = [
-      "permissions",
-      ...(jobs ? ["jobs"] : []),
-      ...(backgroundShell ? ["backgroundShell"] : []),
-      ...(explicitCapabilities?.terminal ? ["terminal"] : []),
-      ...(explicitCapabilities?.schedules ?? internal.effects.schedules
-        ? ["schedules"]
-        : []),
-      ...(!explicitCapabilities || explicitCapabilities.childEnvironment
-        ? ["childEnvironment"]
-        : []),
-      ...(explicitCapabilities?.workflowRepository ? ["workflowRepository"] : []),
-      ...(explicitCapabilities?.imageToText ? ["imageToText"] : []),
-      ...(explicitCapabilities?.attachments ? ["attachments"] : []),
-    ];
+    const session = createAgentSession({ queryEngine: runtime.queryEngine, sessionId });
     return {
       runtime,
       session,
       mcpConnections: () => mcpManager.getConnections(),
-      memory,
+      memory: memoryRuntime,
       childManager,
-      hostCapabilities,
+      capabilities,
       model: options.model ?? settings.model,
     };
   } catch (error) {
@@ -212,4 +252,48 @@ export async function composeOpenHarnessAgent(
     }
     throw error;
   }
+}
+
+function capabilityValue<T>(
+  capability: ResolvedCapability<T>,
+): T | undefined {
+  return capability.status === "available" ? capability.value : undefined;
+}
+
+function resolveOptionalOverride<T>(
+  override: T | false | undefined,
+  unavailableReason: string,
+): ResolvedCapability<T> {
+  if (override === false) return disabledCapability();
+  if (override !== undefined) {
+    return { status: "available", value: override, source: "override" };
+  }
+  return unavailableCapability(unavailableReason);
+}
+
+function resolveProducerOverride<T>(
+  override: ObservableJobProducer<T> | false | undefined,
+  unavailableReason: string,
+  jobSources: AgentJobHost[],
+): ResolvedCapability<T> {
+  if (override === false) return disabledCapability();
+  if (override === undefined) return unavailableCapability(unavailableReason);
+  jobSources.push(override.jobs);
+  return { status: "available", value: override.value, source: "override" };
+}
+
+function hasProducerOverride(overrides: AgentCapabilityOverrides): boolean {
+  return (
+    overrides.terminal !== undefined && overrides.terminal !== false
+  ) || (
+    overrides.backgroundShell !== undefined && overrides.backgroundShell !== false
+  );
+}
+
+function unavailableChildEnvironment(): AgentChildEnvironmentProvider {
+  return {
+    async acquire() {
+      throw new Error("Child environment capability is not available");
+    },
+  };
 }

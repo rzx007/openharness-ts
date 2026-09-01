@@ -19,7 +19,11 @@ import type {
 import { AgentChildBudgetExceededError, AgentRunNotAcceptingInputError } from "@openharness/core";
 
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "./agent.js";
-import type { AgentHostCapabilities, OpenHarnessAgentConfiguration } from "./agent-options.js";
+import type {
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  OpenHarnessAgentConfiguration,
+} from "./agent-options.js";
 import {
   createInProcessChildEnvironmentProvider,
   type AgentChildEnvironmentLease,
@@ -72,7 +76,8 @@ interface AgentChildBudgetReservation {
 export interface AgentChildManagerOptions {
   settings: Settings;
   configuration: OpenHarnessAgentConfiguration;
-  hostCapabilities?: AgentHostCapabilities;
+  capabilityOverrides?: AgentCapabilityOverrides;
+  effects?: AgentEffectOverrides;
   cwd: string;
   idleTtlMs?: number;
   eventBus: AgentEventBus;
@@ -301,7 +306,8 @@ export class AgentChildManager implements AgentChildDirectory {
         effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
           ? input.effort
           : this.options.configuration.effort,
-        hostCapabilities: this.options.hostCapabilities,
+        capabilityOverrides: this.options.capabilityOverrides,
+        effects: this.options.effects,
       }, {
         childId,
         parentSessionId: parentScope.sessionId,

@@ -33,9 +33,8 @@ import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import type { AgentDefinition } from "@openharness/coordinator";
-import type { WorkflowRunRepository } from "@openharness/coordinator";
-
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+import type { ResolvedAgentCapabilities } from "./capability-resolution.js";
 
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
@@ -72,15 +71,7 @@ interface OpenHarnessRuntimeOptions {
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
-  hostCapabilities?: {
-    schedules?: boolean;
-    terminal?: boolean;
-    jobs?: boolean;
-    workflowRepository?: WorkflowRunRepository;
-    imageToText?: boolean;
-    attachments?: boolean;
-    attachmentResourceRoot?: string;
-  };
+  capabilities?: ResolvedAgentCapabilities;
 }
 
 /**
@@ -145,13 +136,20 @@ export async function createOpenHarnessRuntime(
     configuration.client ??
     (await resolveApiClient(settings, configuration, storage));
 
+  const terminal = availableValue(options.capabilities?.terminal);
+  const jobs = availableValue(options.capabilities?.jobs);
+  const backgroundShell = availableValue(options.capabilities?.backgroundShell);
+  const workflowRepository = availableValue(options.capabilities?.workflowRepository);
+  const imageToText = availableValue(options.capabilities?.imageToText);
+  const attachments = availableValue(options.capabilities?.attachments);
+  const schedules = availableValue(options.capabilities?.schedules);
   const baseToolRegistry = createDefaultToolRegistry({
-    schedules: options.hostCapabilities?.schedules,
-    terminal: options.hostCapabilities?.terminal,
-    jobs: options.hostCapabilities?.jobs,
+    schedules: schedules !== undefined,
+    terminal: terminal !== undefined,
+    jobs: jobs !== undefined,
     agentDefinitions: options.agentDefinitions,
-    workflowRepository: options.hostCapabilities?.workflowRepository,
-    imageToText: options.hostCapabilities?.imageToText,
+    workflowRepository,
+    imageToText: imageToText !== undefined,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
@@ -235,6 +233,12 @@ export async function createOpenHarnessRuntime(
     hookExecutor,
     engineOptions,
   );
+  queryEngine.setTerminal(terminal);
+  queryEngine.setJobs(jobs);
+  queryEngine.setBackgroundShell(backgroundShell);
+  queryEngine.setImageToText(imageToText);
+  queryEngine.setAttachments(attachments);
+  queryEngine.setSchedules(schedules);
 
   const bundle = new RuntimeBuilder()
     .setApiClient(apiClient)
@@ -249,7 +253,6 @@ export async function createOpenHarnessRuntime(
     cwd,
     options.sandboxReporter,
     options.sessionId,
-    options.hostCapabilities?.attachmentResourceRoot,
   );
   return bundle;
 }
@@ -333,21 +336,12 @@ async function attachSandboxRuntime(
   cwd: string,
   reporter?: SandboxRuntimeReporter,
   sessionId?: string,
-  attachmentResourceRoot?: string,
 ): Promise<void> {
   const sandboxRuntime = await startSandboxRuntime({
     settings: bundle.settings,
     cwd,
     sessionId,
     reporter,
-    ...(attachmentResourceRoot
-      ? {
-          managedReadOnlyMounts: [{
-            source: attachmentResourceRoot,
-            target: "/mnt/openharness-attachments",
-          }],
-        }
-      : {}),
   });
   bundle.sandboxStatus = sandboxRuntime.status;
 
@@ -363,6 +357,12 @@ async function attachSandboxRuntime(
     () => sandboxRuntime.stopSync(),
   );
   registerExitCleanup(bundle);
+}
+
+function availableValue<T>(
+  capability: import("./capability-resolution.js").ResolvedCapability<T> | undefined,
+): T | undefined {
+  return capability?.status === "available" ? capability.value : undefined;
 }
 
 function registerExitCleanup(bundle: RuntimeBundle): void {

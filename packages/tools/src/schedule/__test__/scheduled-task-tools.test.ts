@@ -7,8 +7,9 @@ function context(schedules: AgentScheduleEffects): ToolContext {
   return {
     cwd: "/repo",
     sessionId: "chat-1",
+    schedules,
     agent: {
-      effects: { requestPermission: vi.fn(), schedules },
+      effects: { requestPermission: vi.fn() },
     } as ToolContext["agent"],
   };
 }

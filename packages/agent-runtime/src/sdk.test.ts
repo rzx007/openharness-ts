@@ -13,6 +13,68 @@ import { describe, expect, it, vi } from "vitest";
 import { createDefaultNodeAgent } from "./index.js";
 
 describe("programmatic agent SDK", () => {
+  it("overrides attachments without disabling default background shell and jobs", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-capabilities-"));
+    const attachmentHost = {
+      async readText() {
+        return { text: "attachment", offset: 0, nextOffset: 10, done: true };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      capabilityOverrides: { attachments: attachmentHost },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        attachments: { status: "available", source: "override" },
+        backgroundShell: { status: "available", source: "default" },
+        jobs: { status: "available", source: "default" },
+      });
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("disables image to text without disabling the default workflow", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-workflow-capability-"));
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      capabilityOverrides: { imageToText: false },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        imageToText: { status: "disabled" },
+        workflowRepository: { status: "available", source: "default" },
+      });
+      expect(agent.inspect().tools.map((tool) => tool.name)).toContain("Workflow");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("does not register Schedule tools when schedules are explicitly disabled", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-schedule-capability-"));
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      capabilityOverrides: { schedules: false },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities().schedules).toEqual({ status: "disabled" });
+      expect(agent.inspect().tools.map((tool) => tool.name)).not.toContain("ScheduleCreate");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("runs a complete turn without daemon, including events and permission decisions", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-"));
     const reliableEvents: AgentEvent[] = [];
@@ -58,7 +120,7 @@ describe("programmatic agent SDK", () => {
       cwd,
       settings,
       client,
-      hostCapabilities: { permissions: { requestPermission } },
+      effects: { requestPermission },
       onEvent: (event) => { reliableEvents.push(event); },
     });
     agent.subscribe(() => { throw new Error("observer failures are isolated"); });
@@ -229,8 +291,8 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      hostCapabilities: {
-        permissions: { requestPermission: async () => ({ status: "approved" }) },
+      effects: { requestPermission: async () => ({ status: "approved" }) },
+      capabilityOverrides: {
         workflowRepository: new FileWorkflowRunRepository({ cwd }),
       },
       onEvent: (event) => { events.push(event); },
@@ -351,8 +413,8 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      hostCapabilities: {
-        permissions: { requestPermission: async () => ({ status: "approved" }) },
+      effects: { requestPermission: async () => ({ status: "approved" }) },
+      capabilityOverrides: {
         workflowRepository: new FileWorkflowRunRepository({ cwd }),
       },
       roleAllowedTools: [
@@ -498,4 +560,15 @@ function toolResultText(
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");
+}
+
+function testSettings(): Settings {
+  return {
+    apiFormat: "anthropic",
+    model: "sdk-capability-test-model",
+    maxTurns: 3,
+    permission: { mode: "full_auto" },
+    sandbox: { enabled: false },
+    memory: { enabled: false },
+  };
 }

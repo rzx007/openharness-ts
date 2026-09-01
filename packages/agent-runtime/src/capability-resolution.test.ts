@@ -11,6 +11,7 @@ import {
   assertJobConfiguration,
   disabledCapability,
   resolveCapability,
+  toAgentCapabilitySnapshot,
   toCapabilitySnapshot,
   unavailableCapability,
 } from "./capability-resolution.js";
@@ -62,6 +63,37 @@ describe("resolveCapability", () => {
     expect(toCapabilitySnapshot(unavailableCapability("No local scheduler"))).toEqual({
       status: "unavailable",
       reason: "No local scheduler",
+    });
+  });
+
+  it("removes every implementation value from an agent capability snapshot", () => {
+    const available = {
+      status: "available" as const,
+      value: { secret: "implementation" },
+      source: "default" as const,
+    };
+    const snapshot = toAgentCapabilitySnapshot({
+      terminal: available,
+      backgroundShell: available,
+      jobs: available,
+      attachments: unavailableCapability("No attachments"),
+      memory: disabledCapability(),
+      childEnvironment: available,
+      workflowRepository: available,
+      imageToText: unavailableCapability("No image to text"),
+      schedules: unavailableCapability("No schedules"),
+    });
+
+    expect(snapshot).toEqual({
+      terminal: { status: "available", source: "default" },
+      backgroundShell: { status: "available", source: "default" },
+      jobs: { status: "available", source: "default" },
+      attachments: { status: "unavailable", reason: "No attachments" },
+      memory: { status: "disabled" },
+      childEnvironment: { status: "available", source: "default" },
+      workflowRepository: { status: "available", source: "default" },
+      imageToText: { status: "unavailable", reason: "No image to text" },
+      schedules: { status: "unavailable", reason: "No schedules" },
     });
   });
 });

@@ -24,8 +24,16 @@ import {
   AgentOperationConflictError,
   type OpenHarnessAgentState,
 } from "./agent-errors.js";
-import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
-import type { AgentHostCapabilities } from "./agent-options.js";
+import type {
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  OpenHarnessAgentConfiguration,
+} from "./agent-options.js";
+import {
+  toAgentCapabilitySnapshot,
+  type AgentCapabilitySnapshot,
+  type ResolvedAgentCapabilities,
+} from "./capability-resolution.js";
 import {
   AgentChildRegistry,
   type AgentChildManager,
@@ -52,8 +60,10 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   childIdleTtlMs?: number;
   /** Reliable ordered host sink. A rejection fails the active framework operation. */
   onEvent?: AgentEventListener;
-  /** 宿主明确交给 Agent 的能力。未提供时使用默认 Node 组装。 */
-  hostCapabilities?: AgentHostCapabilities;
+  /** 逐项替换或关闭默认能力；未传的项目继续使用各自默认值。 */
+  capabilityOverrides?: AgentCapabilityOverrides;
+  /** 宿主交互副作用；未提供审批器时 ask 会安全拒绝。 */
+  effects?: AgentEffectOverrides;
 }
 
 export interface OpenHarnessAgentSubmitOptions {
@@ -87,8 +97,7 @@ export interface AgentInspection {
   }>;
   sandbox?: NonNullable<RuntimeBundle["sandboxStatus"]>;
   childBudget: AgentChildBudgetSnapshot;
-  /** 当前真正安装的宿主能力，不是配置文件中可能存在的能力。 */
-  hostCapabilities: string[];
+  capabilities: AgentCapabilitySnapshot;
 }
 
 export interface OpenHarnessAgent {
@@ -115,6 +124,7 @@ export interface OpenHarnessAgent {
   compact(): Promise<AgentCompactResult>;
   remember(): Promise<AgentRememberResult>;
   getUsage(): UsageSnapshot;
+  getCapabilities(): AgentCapabilitySnapshot;
   inspect(): AgentInspection;
   close(): Promise<void>;
 }
@@ -138,7 +148,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     private readonly identity: AgentIdentity | undefined,
     private readonly childManager: AgentChildManager,
     readonly children: AgentChildDirectory,
-    private readonly installedHostCapabilities: string[],
+    private readonly capabilities: ResolvedAgentCapabilities,
     private model: string,
   ) {}
 
@@ -253,6 +263,10 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     return this.runtime.queryEngine.getTotalUsage();
   }
 
+  getCapabilities(): AgentCapabilitySnapshot {
+    return toAgentCapabilitySnapshot(this.capabilities);
+  }
+
   inspect(): AgentInspection {
     return {
       model: this.model,
@@ -267,7 +281,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       })),
       mcpServers: this.mcpConnections().map(toMcpInspection),
       childBudget: this.childManager.getBudgetSnapshot(),
-      hostCapabilities: [...this.installedHostCapabilities],
+      capabilities: this.getCapabilities(),
       ...(this.runtime.sandboxStatus
         ? { sandbox: this.runtime.sandboxStatus }
         : {}),
@@ -349,7 +363,7 @@ export interface AssembledAgentOptions {
   identity: AgentIdentity | undefined;
   childManager: AgentChildManager;
   childDirectory: AgentChildRegistry;
-  hostCapabilities: string[];
+  capabilities: ResolvedAgentCapabilities;
   model: string;
 }
 
@@ -367,7 +381,7 @@ export function createAssembledAgent(
     options.identity,
     options.childManager,
     options.childDirectory,
-    options.hostCapabilities,
+    options.capabilities,
     options.model,
   );
 }

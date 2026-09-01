@@ -112,7 +112,6 @@ export interface AgentEffects {
     input: AgentPermissionRequest,
     context: AgentEffectContext,
   ): Promise<AgentPermissionDecision>;
-  schedules?: AgentScheduleEffects;
 }
 
 export interface AgentChildSpawnInput {
@@ -401,6 +400,7 @@ export interface QueryEngine {
   setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void;
   setImageToText(imageToText: AgentImageToTextHost | undefined): void;
   setAttachments(attachments: AgentAttachmentResourceHost | undefined): void;
+  setSchedules(schedules: AgentScheduleEffects | undefined): void;
 }
 
 export interface MemoryRetriever {

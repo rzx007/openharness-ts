@@ -65,6 +65,7 @@ try {
     `import {
   createAgentKernel,
   createBasicAgentKernelRuntime,
+  createInProcessChildEnvironmentProvider,
 } from "@openharness/agent-runtime/kernel";
 
 const defaultEntry = await import("@openharness/agent-runtime");
@@ -77,6 +78,22 @@ const settings = {
   apiFormat: "anthropic",
   maxTurns: 5,
   permission: { mode: "default" },
+};
+const unavailable = (reason) => ({ status: "unavailable", reason });
+const capabilities = {
+  terminal: unavailable("packed host has no terminal"),
+  backgroundShell: unavailable("packed host has no background shell"),
+  jobs: unavailable("packed host has no jobs"),
+  attachments: unavailable("packed host has no attachments"),
+  memory: unavailable("packed host has no memory"),
+  childEnvironment: {
+    status: "available",
+    value: createInProcessChildEnvironmentProvider(),
+    source: "override",
+  },
+  workflowRepository: unavailable("packed host has no workflow repository"),
+  imageToText: unavailable("packed host has no image to text"),
+  schedules: unavailable("packed host has no schedules"),
 };
 let rootCalls = 0;
 const createRuntime = async (context) => {
@@ -126,10 +143,9 @@ const createRuntime = async (context) => {
 const agent = await createAgentKernel({
   settings,
   cwd: process.cwd(),
-  hostCapabilities: {
-    permissions: {
-      requestPermission: async () => ({ status: "approved" }),
-    },
+  capabilities,
+  effects: {
+    requestPermission: async () => ({ status: "approved" }),
   },
   createRuntime,
 });
