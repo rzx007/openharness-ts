@@ -12,7 +12,6 @@ import {
   createWorkflowRunSnapshot,
   FileWorkflowRunRepository,
 } from "@openharness/coordinator";
-import { LocalTerminalProvider } from "@openharness/terminal-node";
 import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultNodeAgent } from "./index.js";
@@ -36,35 +35,12 @@ async function withTemporaryAgent<T extends { close(): Promise<void> }, R>(
   }
 }
 
-async function probeRealNodePty(): Promise<{ supported: boolean; reason?: string }> {
-  const provider = new LocalTerminalProvider({ resolveCwd: async () => process.cwd() });
-  try {
-    const terminal = await provider.create({
-      projectId: "node-pty-probe",
-      runtime: "local",
-      cols: 40,
-      rows: 10,
-      name: "node-pty probe",
-      cwd: process.cwd(),
-      shell: process.execPath,
-      source: "agent",
-      sessionId: "node-pty-probe",
-    });
-    await provider.kill(terminal.id);
-    await provider.wait({ terminalId: terminal.id, timeoutMs: 5_000 });
-    return { supported: true };
-  } catch (error) {
-    return {
-      supported: false,
-      reason: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    await provider.dispose();
-  }
-}
-
-const realNodePty = await probeRealNodePty();
-const realPtyIt = it.skipIf(!realNodePty.supported);
+const nodePtySupportedPlatforms = new Set<NodeJS.Platform>([
+  "win32",
+  "linux",
+  "darwin",
+]);
+const realPtyIt = nodePtySupportedPlatforms.has(process.platform) ? it : it.skip;
 
 describe("programmatic agent SDK", () => {
   it("removes the real-Terminal fixture directory when Agent initialization fails", async () => {

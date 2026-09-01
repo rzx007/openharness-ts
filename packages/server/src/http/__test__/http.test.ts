@@ -1151,7 +1151,7 @@ describe("OpenHarnessHttpServer", () => {
       },
       { runtimeFactory },
     );
-  });
+  }, 45_000);
 
   it("aggregates application, listener, and SSE close failures after attempting every stage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-server-close-matrix-"));

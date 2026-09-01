@@ -61,6 +61,9 @@ try {
   if (JSON.stringify(installedManifest).includes("workspace:")) {
     throw new Error("packed manifest still contains workspace: dependencies");
   }
+  if (typeof installedManifest.dependencies?.["node-pty"] !== "string") {
+    throw new Error("packed default entry does not declare its direct node-pty runtime dependency");
+  }
 
   writeFileSync(
     app,
@@ -84,7 +87,7 @@ const settings = {
   memory: { enabled: false },
 };
 
-async function probeNodePty() {
+async function verifyNodePty() {
   let pty;
   try {
     const nodePty = await import("node-pty");
@@ -104,9 +107,6 @@ async function probeNodePty() {
       });
       pty.write("process.exit(0)\\r");
     });
-    return { supported: true };
-  } catch (error) {
-    return { supported: false, reason: error instanceof Error ? error.message : String(error) };
   } finally {
     try { pty?.kill(); } catch {}
   }
@@ -184,8 +184,9 @@ try {
   if (!defaultToolNames.includes("TerminalOpen") || !defaultToolNames.includes("JobCancel")) {
     throw new Error("packed default Terminal/Jobs tools are missing");
   }
-  const ptyProbe = await probeNodePty();
-  if (ptyProbe.supported) {
+  const nodePtySupported = new Set(["win32", "linux", "darwin"]).has(process.platform);
+  if (nodePtySupported) {
+    await verifyNodePty();
     const result = await defaultAgent.runMessage("open and cancel the packed default terminal");
     if (result.output !== "packed default terminal complete") {
       throw new Error("packed default Agent did not finish the Terminal flow");
@@ -195,7 +196,7 @@ try {
     }
     console.log("packed default Agent TerminalOpen + JobCancel: ok");
   } else {
-    console.log("packed default Agent PTY skipped: " + ptyProbe.reason);
+    console.log("packed default Agent PTY skipped on unsupported platform: " + process.platform);
   }
 } finally {
   await defaultAgent.close();
