@@ -153,6 +153,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     private readonly effects: AgentEffects,
     private readonly identity: AgentIdentity | undefined,
     private readonly childManager: AgentChildManager,
+    private readonly closeOwnedCapabilities: () => Promise<void>,
     readonly children: AgentChildDirectory,
     private readonly capabilities: ResolvedAgentCapabilities,
     private model: string,
@@ -311,6 +312,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
           () => this.activeRun?.interrupt("Agent closed") ?? Promise.resolve(),
           () => this.maintenance?.settled ?? Promise.resolve(),
           () => this.childManager.closeAll(),
+          () => this.closeOwnedCapabilities(),
           () => this.eventBus.drain(),
           () => this.runtime.close(),
         ]) {
@@ -374,6 +376,7 @@ export interface AssembledAgentOptions {
   effects: AgentEffects;
   identity: AgentIdentity | undefined;
   childManager: AgentChildManager;
+  cleanup?: { close(): Promise<void> };
   childDirectory: AgentChildRegistry;
   capabilities: ResolvedAgentCapabilities;
   model: string;
@@ -392,6 +395,7 @@ export function createAssembledAgent(
     options.effects,
     options.identity,
     options.childManager,
+    options.cleanup ? () => options.cleanup!.close() : async () => {},
     options.childDirectory,
     options.capabilities,
     options.model,

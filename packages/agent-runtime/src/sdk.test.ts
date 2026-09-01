@@ -17,6 +17,32 @@ import { describe, expect, it, vi } from "vitest";
 import { createDefaultNodeAgent } from "./index.js";
 
 describe("programmatic agent SDK", () => {
+  it("installs the complete standalone Node capability set without a Host", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-default-capabilities-"));
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      settings: testSettingsWithDefaultMemory(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        terminal: { status: "available", source: "default" },
+        backgroundShell: { status: "available", source: "default" },
+        jobs: { status: "available", source: "default" },
+        memory: { status: "available", source: "default" },
+        workflowRepository: { status: "available", source: "default" },
+        attachments: { status: "unavailable" },
+        schedules: { status: "unavailable" },
+      });
+      expect(agent.inspect().tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["TerminalOpen", "JobList"]),
+      );
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("creates managed memory by default without exposing managed paths to the model", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-default-memory-"));
     const requests: Array<Parameters<StreamingMessageClient["streamMessage"]>[0]> = [];

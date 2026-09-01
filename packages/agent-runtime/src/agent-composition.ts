@@ -12,6 +12,7 @@ import { CompositeAgentJobHost, type AgentJobHost } from "@openharness/jobs";
 import { McpClientManager } from "@openharness/mcp";
 import { appendUserProfileUpdate } from "@openharness/prompts";
 import { LocalAgentJobHost } from "@openharness/tools";
+import type { AgentTerminalHost } from "@openharness/terminal";
 
 import type {
   AgentCapabilityOverrides,
@@ -34,6 +35,11 @@ import {
   type AgentChildRegistry,
 } from "./child-agent.js";
 import { createDefaultChildEnvironmentProvider } from "./child-environment.js";
+import {
+  CleanupStack,
+  cleanupAfterInitializationFailure,
+} from "./cleanup-stack.js";
+import type { DefaultNodeTerminalResolution } from "./default-node-terminal.js";
 import { createOpenHarnessRuntime } from "./default-runtime.js";
 import type { AgentEventBus } from "./event-source.js";
 import {
@@ -71,6 +77,11 @@ export interface AgentCompositionContext {
   childDirectory: AgentChildRegistry;
   identity?: AgentIdentity;
   createAgent: AgentChildManagerOptions["createAgent"];
+  resolveDefaultTerminal(input: {
+    override: AgentCapabilityOverrides["terminal"];
+    cwd: string;
+    sessionId: string;
+  }): Promise<DefaultNodeTerminalResolution>;
 }
 
 export interface AgentComposition {
@@ -81,11 +92,33 @@ export interface AgentComposition {
   childManager: AgentChildManager;
   capabilities: ResolvedAgentCapabilities;
   model: string;
+  cleanup: CleanupStack;
 }
 
 export async function composeOpenHarnessAgent(
   options: AgentCompositionOptions,
   internal: AgentCompositionContext,
+): Promise<AgentComposition> {
+  const cleanup = new CleanupStack();
+  const rollback = new CleanupStack();
+  rollback.add(() => cleanup.close(), cleanup);
+  try {
+    return await composeOpenHarnessAgentInternal(
+      options,
+      internal,
+      cleanup,
+      rollback,
+    );
+  } catch (error) {
+    return await cleanupAfterInitializationFailure(rollback, error);
+  }
+}
+
+async function composeOpenHarnessAgentInternal(
+  options: AgentCompositionOptions,
+  internal: AgentCompositionContext,
+  cleanup: CleanupStack,
+  rollback: CleanupStack,
 ): Promise<AgentComposition> {
   const cwd = options.cwd ?? process.cwd();
   const settings = options.settings ?? (await loadSettings({}));
@@ -133,11 +166,28 @@ export async function composeOpenHarnessAgent(
 
   const jobSources: AgentJobHost[] = [];
   if (localJobs) jobSources.push(localJobs);
-  const terminal = resolveProducerOverride(
-    overrides.terminal,
-    "Default Node runtime does not provide terminal",
-    jobSources,
-  );
+  const terminalResolution = await internal.resolveDefaultTerminal({
+    override: overrides.terminal,
+    cwd,
+    sessionId,
+  });
+  let terminal: ResolvedCapability<AgentTerminalHost>;
+  if (terminalResolution.status === "disabled") {
+    terminal = disabledCapability();
+  } else {
+    jobSources.push(terminalResolution.value.jobs);
+    terminal = {
+      status: "available",
+      value: terminalResolution.value.value,
+      source: terminalResolution.source,
+    };
+    if (terminalResolution.source === "default") {
+      cleanup.add(
+        terminalResolution.cleanup,
+        terminalResolution.cleanupIdentity,
+      );
+    }
+  }
   const backgroundShell = overrides.backgroundShell === undefined
     ? localJobs ? {
         status: "available" as const,
@@ -198,7 +248,8 @@ export async function composeOpenHarnessAgent(
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
   });
-  try {
+  rollback.add(() => runtime.close(), runtime);
+  {
     await configureDiscoveredExtensions(discovery, {
       cwd,
       toolRegistry: runtime.toolRegistry,
@@ -249,17 +300,8 @@ export async function composeOpenHarnessAgent(
       childManager,
       capabilities,
       model: options.model ?? settings.model,
+      cleanup,
     };
-  } catch (error) {
-    try {
-      await runtime.close();
-    } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        "Agent creation and cleanup failed",
-      );
-    }
-    throw error;
   }
 }
 

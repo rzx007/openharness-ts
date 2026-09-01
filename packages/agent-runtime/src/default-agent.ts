@@ -11,6 +11,10 @@ import {
 } from "./agent-composition.js";
 import { AgentChildRegistry } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
+import {
+  createDefaultNodeTerminal,
+  resolveDefaultNodeTerminal,
+} from "./default-node-terminal.js";
 
 interface InternalAgentOptions {
   eventBus: AgentEventBus;
@@ -41,6 +45,11 @@ async function createDefaultNodeAgentInternal(
   };
   const composition = await composeOpenHarnessAgent(options, {
     ...internal,
+    resolveDefaultTerminal: ({ override, cwd, sessionId }) =>
+      resolveDefaultNodeTerminal({
+        override,
+        createLocal: () => createDefaultNodeTerminal({ cwd, sessionId }),
+      }),
     createAgent: (childOptions, identity) =>
       createDefaultNodeAgentInternal(childOptions, {
         eventBus: internal.eventBus,
