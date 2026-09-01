@@ -341,6 +341,8 @@ export class DaemonApplication implements DurableAgentApplication {
         attachments: createAgentAttachmentResourceHost({
           store,
           attachments: this.attachments,
+          resolveAuthorizationSessionId: (sessionId) =>
+            this.liveChildren.resolveRootSessionId(sessionId) ?? sessionId,
         }),
         attachmentResourceRoot: (session) =>
           this.attachmentResources.prepareSessionSync(session.id),

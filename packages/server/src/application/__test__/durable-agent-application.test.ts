@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { OpenHarnessAgent } from "@openharness/agent-runtime";
 import type {
   AgentBackgroundShellHost,
+  AgentAttachmentResourceHost,
   AgentEvent,
   AgentEventContext,
   AgentEventInput,
@@ -133,6 +134,99 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
+  it("authorizes a live child attachment read through the root session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openharness-child-attachment-"));
+    const store = new SessionStore({ path: join(dir, "store.db") });
+    let attachmentHost: AgentAttachmentResourceHost | undefined;
+    let emitChildCreated: (() => Promise<void>) | undefined;
+    let childLive = true;
+    const application = new DaemonApplication({
+      store,
+      createAgent: async (context) => {
+        const attachments = context.options.capabilityOverrides?.attachments;
+        if (!attachments || attachments === false) throw new Error("attachment host missing");
+        attachmentHost = attachments;
+        const agent = await createEchoAgent(context);
+        const child = {} as any;
+        emitChildCreated = async () => {
+          await context.options.onEvent?.({
+            id: "event-child-created",
+            sequence: 100,
+            occurredAt: new Date().toISOString(),
+            type: "child.created",
+            data: {
+              childId: "child-1",
+              sessionId: "child-session",
+              spawn: {
+                description: "Read root attachment",
+                prompt: "read",
+                agent: "worker",
+                cwd: context.session.cwd,
+              },
+              cwd: context.session.cwd,
+            },
+            context: {
+              agentId: context.session.id,
+              sessionId: context.session.id,
+              childId: "child-1",
+            },
+          });
+        };
+        return {
+          ...agent,
+          children: {
+            get: (childId: string) =>
+              childLive && childId === "child-1" ? child : undefined,
+            getBySessionId: (sessionId: string) =>
+              childLive && sessionId === "child-session" ? child : undefined,
+            list: () => childLive ? [child] : [],
+          },
+        };
+      },
+      log: () => {},
+    });
+
+    try {
+      await application.ready();
+      const rootSession = application.sessions.createSession({
+        cwd: dir,
+        model: "test-model",
+      });
+      const admission = await application.sessions.admitPrompt(rootSession.id, {
+        content: "initialize",
+      });
+      await application.sessions.awaitRun(rootSession.id, admission.run!.id);
+
+      const attachment = await application.attachments.import({
+        displayName: "root-notes.txt",
+        declaredMediaType: "text/plain",
+        content: new Blob(["root attachment"]).stream(),
+      });
+      store.admitPrompt({
+        id: "root-attachment-input",
+        sessionId: rootSession.id,
+        content: "",
+        attachments: [{ assetId: attachment.id, intent: "tool_resource" }],
+      });
+      await emitChildCreated!();
+
+      await expect(attachmentHost!.readText(
+        { assetId: attachment.id, offset: 1, limit: 1 },
+        { sessionId: "child-session" },
+      )).resolves.toMatchObject({ content: "root attachment" });
+
+      childLive = false;
+      await expect(attachmentHost!.readText(
+        { assetId: attachment.id, offset: 1, limit: 1 },
+        { sessionId: "child-session" },
+      )).rejects.toThrow("attachment_resource_access_denied");
+    } finally {
+      await application.close().catch(() => {});
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("把附件目录和成功 Run 写入的 session checkpoint 一起提供给 compact", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-session-memory-"));
     const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;

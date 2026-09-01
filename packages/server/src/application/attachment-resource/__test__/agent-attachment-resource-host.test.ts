@@ -7,7 +7,7 @@ import {
   AttachmentBlobStore,
   SessionStore,
 } from "@openharness/services";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentAttachmentResourceHost } from "../agent-attachment-resource-host.js";
 
@@ -19,13 +19,16 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function harness() {
+async function harness(
+  resolveAuthorizationSessionId?: (sessionId: string) => string | undefined,
+) {
   const root = await mkdtemp(join(tmpdir(), "oh-attachment-host-"));
   roots.push(root);
   const store = new SessionStore({ path: join(root, "store.db") });
   stores.push(store);
   store.createSession({ id: "session-1", cwd: root, model: "model" });
   store.createSession({ id: "session-2", cwd: root, model: "model" });
+  store.createSession({ id: "child-session", cwd: root, model: "model" });
   const attachments = new AttachmentApplicationService({
     store,
     blobs: new AttachmentBlobStore({ root: join(root, "attachments") }),
@@ -37,7 +40,11 @@ async function harness() {
   return {
     store,
     attachments,
-    host: createAgentAttachmentResourceHost({ store, attachments }),
+    host: createAgentAttachmentResourceHost({
+      store,
+      attachments,
+      resolveAuthorizationSessionId,
+    }),
   };
 }
 
@@ -51,6 +58,46 @@ function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
 }
 
 describe("AgentAttachmentResourceHost", () => {
+  it("authorizes a live child against its root session while preserving the child context", async () => {
+    let childIsLive = true;
+    const resolveAuthorizationSessionId = vi.fn((sessionId: string) =>
+      childIsLive && sessionId === "child-session" ? "session-1" : undefined
+    );
+    const { store, attachments, host } = await harness(resolveAuthorizationSessionId);
+    const asset = await attachments.import({
+      displayName: "root-notes.txt",
+      declaredMediaType: "text/plain",
+      content: byteStream(new TextEncoder().encode("root attachment")),
+    });
+    store.admitPrompt({
+      id: "root-input",
+      sessionId: "session-1",
+      content: "read",
+      attachments: [{ assetId: asset.id, intent: "auto" }],
+    });
+
+    await expect(host.readText(
+      { assetId: asset.id, offset: 1, limit: 1 },
+      { sessionId: "child-session" },
+    )).resolves.toMatchObject({ content: "root attachment" });
+    expect(resolveAuthorizationSessionId).toHaveBeenCalledWith("child-session");
+
+    await expect(host.readText(
+      { assetId: asset.id, offset: 1, limit: 1 },
+      { sessionId: "session-1" },
+    )).resolves.toMatchObject({ content: "root attachment" });
+    await expect(host.readText(
+      { assetId: asset.id, offset: 1, limit: 1 },
+      { sessionId: "session-2" },
+    )).rejects.toThrow("attachment_resource_access_denied");
+
+    childIsLive = false;
+    await expect(host.readText(
+      { assetId: asset.id, offset: 1, limit: 1 },
+      { sessionId: "child-session" },
+    )).rejects.toThrow("attachment_resource_access_denied");
+  });
+
   it("reads only a ready text asset referenced by the current session", async () => {
     const { store, attachments, host } = await harness();
     const asset = await attachments.import({
