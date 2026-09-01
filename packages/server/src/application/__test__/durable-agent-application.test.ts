@@ -4,7 +4,10 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { OpenHarnessAgent } from "@openharness/agent-runtime";
+import {
+  createDefaultNodeAgent,
+  type OpenHarnessAgent,
+} from "@openharness/agent-runtime";
 import type {
   AgentBackgroundShellHost,
   AgentAttachmentResourceHost,
@@ -15,6 +18,7 @@ import type {
   AgentRunResult,
   CompactContextProvider,
   Message,
+  StreamingMessageClient,
 } from "@openharness/core";
 import type { AgentJobHost } from "@openharness/jobs";
 import { SessionStore } from "@openharness/services";
@@ -134,54 +138,145 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
-  it("authorizes a live child attachment read through the root session", async () => {
+  it("lets a real child Agent read its root attachment without authorizing another session", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-child-attachment-"));
     const store = new SessionStore({ path: join(dir, "store.db") });
     let attachmentHost: AgentAttachmentResourceHost | undefined;
-    let emitChildCreated: (() => Promise<void>) | undefined;
-    let childLive = true;
+    const events: AgentEvent[] = [];
+    const agents = new Map<string, OpenHarnessAgent>();
+    let assetId = "";
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        const latestUser = params.messages
+          .filter((message) => message.type === "user")
+          .at(-1);
+        const userText = latestUser?.type === "user" && typeof latestUser.content === "string"
+          ? latestUser.content
+          : "";
+        const usedTools = params.messages
+          .filter((message) => message.type === "assistant")
+          .flatMap((message) => message.type === "assistant" ? message.toolUses ?? [] : [])
+          .map((toolUse) => toolUse.name);
+
+        if (userText === "read the root attachment") {
+          if (!usedTools.includes("Read")) {
+            yield {
+              type: "tool_use_start" as const,
+              toolUse: {
+                type: "tool_use" as const,
+                id: "child-read-attachment",
+                name: "Read",
+                input: {
+                  file_path: `attachment://${assetId}/root-notes.txt`,
+                  offset: 1,
+                  limit: 10,
+                },
+              },
+            };
+            yield { type: "complete" as const, stopReason: "tool_use" };
+            return;
+          }
+          yield {
+            type: "text_delta" as const,
+            delta: `child read: ${latestToolResultText(params.messages)}`,
+          };
+          yield { type: "complete" as const, stopReason: "end_turn" };
+          return;
+        }
+
+        if (userText === "try the other session attachment") {
+          if (!usedTools.includes("Read")) {
+            yield {
+              type: "tool_use_start" as const,
+              toolUse: {
+                type: "tool_use" as const,
+                id: "other-read-attachment",
+                name: "Read",
+                input: {
+                  file_path: `attachment://${assetId}/root-notes.txt`,
+                  offset: 1,
+                  limit: 10,
+                },
+              },
+            };
+            yield { type: "complete" as const, stopReason: "tool_use" };
+            return;
+          }
+          yield {
+            type: "text_delta" as const,
+            delta: `other session: ${latestToolResultText(params.messages)}`,
+          };
+          yield { type: "complete" as const, stopReason: "end_turn" };
+          return;
+        }
+
+        if (!usedTools.includes("Agent")) {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "spawn-attachment-child",
+              name: "Agent",
+              input: {
+                description: "Read the root attachment",
+                prompt: "read the root attachment",
+                cwd: dir,
+              },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" };
+          return;
+        }
+
+        if (!usedTools.includes("JobWait")) {
+          const spawned = JSON.parse(
+            toolResultText(params.messages, "spawn-attachment-child"),
+          ) as { jobId?: string };
+          if (!spawned.jobId) throw new Error("Agent tool did not return a child job id");
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "wait-attachment-child",
+              name: "JobWait",
+              input: { jobIds: [spawned.jobId], timeoutSeconds: 5 },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" };
+          return;
+        }
+
+        yield {
+          type: "text_delta" as const,
+          delta: `root received: ${latestToolResultText(params.messages)}`,
+        };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
     const application = new DaemonApplication({
       store,
+      settings: {
+        apiFormat: "anthropic",
+        model: "child-attachment-e2e-model",
+        maxTurns: 5,
+        permission: { mode: "full_auto" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      },
       createAgent: async (context) => {
         const attachments = context.options.capabilityOverrides?.attachments;
         if (!attachments || attachments === false) throw new Error("attachment host missing");
         attachmentHost = attachments;
-        const agent = await createEchoAgent(context);
-        const child = {} as any;
-        emitChildCreated = async () => {
-          await context.options.onEvent?.({
-            id: "event-child-created",
-            sequence: 100,
-            occurredAt: new Date().toISOString(),
-            type: "child.created",
-            data: {
-              childId: "child-1",
-              sessionId: "child-session",
-              spawn: {
-                description: "Read root attachment",
-                prompt: "read",
-                agent: "worker",
-                cwd: context.session.cwd,
-              },
-              cwd: context.session.cwd,
-            },
-            context: {
-              agentId: context.session.id,
-              sessionId: context.session.id,
-              childId: "child-1",
-            },
-          });
-        };
-        return {
-          ...agent,
-          children: {
-            get: (childId: string) =>
-              childLive && childId === "child-1" ? child : undefined,
-            getBySessionId: (sessionId: string) =>
-              childLive && sessionId === "child-session" ? child : undefined,
-            list: () => childLive ? [child] : [],
+        const agent = await createDefaultNodeAgent({
+          ...context.options,
+          client,
+          onEvent: async (event) => {
+            events.push(event);
+            await context.options.onEvent?.(event);
           },
-        };
+        });
+        agents.set(context.session.id, agent);
+        return agent;
       },
       log: () => {},
     });
@@ -190,36 +285,67 @@ describe("DaemonApplication", () => {
       await application.ready();
       const rootSession = application.sessions.createSession({
         cwd: dir,
-        model: "test-model",
+        model: "child-attachment-e2e-model",
       });
-      const admission = await application.sessions.admitPrompt(rootSession.id, {
-        content: "initialize",
-      });
-      await application.sessions.awaitRun(rootSession.id, admission.run!.id);
-
       const attachment = await application.attachments.import({
         displayName: "root-notes.txt",
         declaredMediaType: "text/plain",
-        content: new Blob(["root attachment"]).stream(),
+        content: new Blob(["attachment visible through the child tool"]).stream(),
       });
+      assetId = attachment.id;
       store.admitPrompt({
         id: "root-attachment-input",
         sessionId: rootSession.id,
         content: "",
         attachments: [{ assetId: attachment.id, intent: "tool_resource" }],
       });
-      await emitChildCreated!();
+      const rootAdmission = await application.sessions.admitPrompt(rootSession.id, {
+        content: "delegate the attachment read",
+      });
+      await expect(
+        application.sessions.awaitRun(rootSession.id, rootAdmission.run!.id),
+      ).resolves.toMatchObject({
+        status: "completed",
+        output: expect.stringContaining("attachment visible through the child tool"),
+      });
+      const childCreated = events.find((event) => event.type === "child.created");
+      if (!childCreated || childCreated.type !== "child.created") {
+        throw new Error("real child lifecycle did not emit child.created");
+      }
+      const childSessionId = childCreated.data.sessionId;
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "tool.started",
+        context: expect.objectContaining({ sessionId: childSessionId }),
+        data: expect.objectContaining({
+          toolUse: expect.objectContaining({ name: "Read" }),
+        }),
+      }));
 
+      const child = agents.get(rootSession.id)?.children.getBySessionId(childSessionId);
+      expect(child).toBeDefined();
+      await child!.close();
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "child.closed",
+        data: expect.objectContaining({ sessionId: childSessionId }),
+      }));
       await expect(attachmentHost!.readText(
         { assetId: attachment.id, offset: 1, limit: 1 },
-        { sessionId: "child-session" },
-      )).resolves.toMatchObject({ content: "root attachment" });
-
-      childLive = false;
-      await expect(attachmentHost!.readText(
-        { assetId: attachment.id, offset: 1, limit: 1 },
-        { sessionId: "child-session" },
+        { sessionId: childSessionId },
       )).rejects.toThrow("attachment_resource_access_denied");
+
+      const otherSession = application.sessions.createSession({
+        cwd: dir,
+        model: "child-attachment-e2e-model",
+      });
+      const otherAdmission = await application.sessions.admitPrompt(otherSession.id, {
+        content: "try the other session attachment",
+      });
+      await expect(
+        application.sessions.awaitRun(otherSession.id, otherAdmission.run!.id),
+      ).resolves.toMatchObject({
+        status: "completed",
+        output: expect.stringContaining("attachment_resource_access_denied"),
+      });
     } finally {
       await application.close().catch(() => {});
       store.close();
@@ -511,3 +637,28 @@ describe("DaemonApplication", () => {
     }
   });
 });
+
+function latestToolResultText(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+): string {
+  const latest = messages.filter((message) => message.type === "tool_result").at(-1);
+  if (!latest || latest.type !== "tool_result") return "";
+  return latest.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
+function toolResultText(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): string {
+  const result = messages.find((message) =>
+    message.type === "tool_result" && message.toolUseId === toolUseId
+  );
+  if (!result || result.type !== "tool_result") return "";
+  return result.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
