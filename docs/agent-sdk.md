@@ -68,7 +68,7 @@ const agent = await createDefaultNodeAgent({
 | `client` | programmatic embedding、自定义 provider 或测试用消息客户端 |
 | `systemPrompt` / `maxTurns` / `effort` / `fastMode` | 执行行为覆盖 |
 | `hostToolCeiling` / `roleAllowedTools` / `disallowedTools` | 工具范围，见下一节 |
-| `capabilityOverrides` | 逐项替换或关闭默认能力；Terminal、后台 Shell 等 producer 使用 `{ value, jobs }` bundle |
+| `capabilityOverrides` | 逐项配置默认能力；可接收 Host 对象的能力与只能禁用的 `jobs` / `memory` 见下文 |
 | `effects` | 宿主交互副作用；目前 `requestPermission` 是可选 permission effect |
 | `onEvent` | 有序、可靠、可等待的 host sink；失败会终止当前 operation |
 | `extensions` / `mcpServers` | OpenHarness extension 与 MCP 增量配置 |
@@ -106,7 +106,9 @@ await createDefaultNodeAgent({
 
 `createDefaultNodeAgent()` 是开箱即用的 Node 入口：未覆盖时会提供本地 Terminal、Jobs、后台 Shell、Git/worktree child environment、Workflow repository 和 Memory；没有 `effects.requestPermission` 时权限会安全拒绝。Attachments 与 Schedules 没有可用的本地默认值，未由 Host 覆盖时状态就是 `unavailable`，相应工具不会注册。
 
-`capabilityOverrides` 按能力独立解析：不传表示使用该能力的默认值，传入 `false` 表示关闭，传入对象表示使用 Host 覆盖。因此只替换 Terminal 不会关掉本地后台 Shell 或 Memory。`terminal` 与 `backgroundShell` 必须同时提供它们创建 Job 所需的 `jobs` producer；这样 `Job*` 工具才能观察与控制这些 Job。
+`capabilityOverrides` 按能力独立解析：不传表示使用该能力的默认值，传入 `false` 表示关闭。只有 `terminal`、`backgroundShell`、`attachments`、`childEnvironment`、`workflowRepository`、`imageToText` 和 `schedules` 接受 Host 对象作为 override；其中 `terminal` 与 `backgroundShell` 必须使用 `{ value, jobs }` bundle，让 `Job*` 工具能观察与控制它们创建的 Job。`jobs` 与 `memory` 不接受 Host 对象，分别只能设为 `false` 来关闭本地 Jobs 或受管 Memory。
+
+`jobs: false` 不是独立开关：Terminal、后台 Shell、child environment 与 Workflow repository 都会产生或依赖 Job，因此必须同时写成 `terminal: false`、`backgroundShell: false`、`childEnvironment: false` 和 `workflowRepository: false`。只替换 Terminal 不会关掉本地后台 Shell 或 Memory。
 
 Host 覆盖是**借用对象**，不是由 Agent 接管的资源：它们必须能覆盖 root session 的整棵 child session tree，且由 Host 自己在合适的生命周期释放。`agent.close()` 只清理 runtime 自己创建的默认资源；不会调用 Host Terminal、后台 Shell 或其 Jobs 的释放逻辑。
 

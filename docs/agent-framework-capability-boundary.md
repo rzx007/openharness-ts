@@ -52,7 +52,9 @@ flowchart LR
 | 插件、Skill、MCP、Memory | 默认 Node 组装 | 会发现或连接外部资源 |
 | Sandbox、process exit cleanup、Git worktree | 默认 Node 能力 | 都依赖具体操作系统环境 |
 | Permission effect | `effects.requestPermission` | 宿主交互副作用；未提供时默认拒绝 |
-| Terminal、后台 Shell、Jobs、Attachments、Schedule 等 | `capabilityOverrides` | 逐项替换或关闭；Kernel 不创建 Node 备用实现 |
+| Terminal、后台 Shell | `capabilityOverrides` | 接受 Host `{ value, jobs }` bundle，逐项替换或关闭；Kernel 不创建 Node 备用实现 |
+| Attachments、child environment、Workflow repository、image to text、Schedule | `capabilityOverrides` | 接受 Host 对象，或用 `false` 逐项关闭 |
+| Jobs、Memory | `capabilityOverrides` | 只接受 `false`；不能传入 Host 对象替换 |
 | HTTP、SQLite、SSE、durable Session/Run | Durable Application | 这是多客户端和进程重启后的状态 |
 
 Kernel 的硬规则：
@@ -66,7 +68,7 @@ Kernel 的硬规则：
 - child 继承 root session tree 的同一份 capability overrides；Host 覆盖必须支持整棵树；
 - 没有显式 child environment 时只沿用 cwd，不查 Git、不建 worktree。
 
-当前实际可覆盖的能力包括 `terminal`、`backgroundShell`、`jobs`、`attachments`、`memory`、`childEnvironment`、`workflowRepository`、`imageToText` 和 `schedules`；权限通过 `effects.requestPermission` 提供。Terminal 与后台 Shell override 都使用 `{ value, jobs }`，确保其 Job 可观察。Artifact 与更细的 Workspace 操作还没有稳定接口，因此本阶段没有添加两个只占名字、不能工作的空对象；以后出现真实调用方时再加入。
+可传入 Host 对象的 override 是 `terminal`、`backgroundShell`、`attachments`、`childEnvironment`、`workflowRepository`、`imageToText` 和 `schedules`；Terminal 与后台 Shell 都使用 `{ value, jobs }`，确保其 Job 可观察。`jobs` 与 `memory` 只能设为 `false`，分别禁用本地 Jobs 或受管 Memory，不能用 Host 对象替换。若设 `jobs: false`，还必须同时设 `terminal: false`、`backgroundShell: false`、`childEnvironment: false` 和 `workflowRepository: false`，因为这些能力会产生或依赖 Job。权限通过 `effects.requestPermission` 提供。Artifact 与更细的 Workspace 操作还没有稳定接口，因此本阶段没有添加两个只占名字、不能工作的空对象；以后出现真实调用方时再加入。
 
 ## 发布形式
 
