@@ -4,7 +4,6 @@ import {
   type AgentJobHost,
   type JobReadResult,
   type JobSnapshot,
-  type JobStatus,
 } from "@openharness/jobs";
 import {
   type AgentTerminalHost,
@@ -38,8 +37,6 @@ export interface AgentTerminalBundle {
 
 interface TerminalObservation {
   updatedAt: number;
-  cancelledAt?: number;
-  status?: JobStatus;
 }
 
 export function createAgentTerminalBundle(
@@ -53,10 +50,6 @@ export function createAgentTerminalBundle(
     const observation = observations.get(event.terminalId);
     if (!observation) return;
     observation.updatedAt = Date.now();
-    if (event.type === "status") observation.status = event.status;
-    if (event.type === "exit" && observation.status !== "killed") {
-      observation.status = event.exitCode === 0 ? "completed" : "failed";
-    }
   };
   const unsubscribe = provider.subscribe(observeEvent);
 
@@ -110,9 +103,7 @@ export function createAgentTerminalBundle(
       const terminal = await requireOwnedTerminal(provider, input.jobId, options.sessionId);
       const observation = observationFor(terminal, observations);
       await provider.kill(input.jobId);
-      observation.cancelledAt = Date.now();
-      observation.updatedAt = observation.cancelledAt;
-      observation.status = "killed";
+      observation.updatedAt = Date.now();
       return snapshot(
         await requireOwnedTerminal(provider, input.jobId, options.sessionId),
         observation,
@@ -199,10 +190,9 @@ function snapshot(
   const providerFinishedAt = terminal.exitedAt === undefined
     ? undefined
     : timestamp(terminal.exitedAt);
-  const finishedAt = providerFinishedAt ?? observation.cancelledAt;
-  const status = observation.status ?? terminal.status;
+  const status = terminal.status;
   const running = status === "running";
-  const updatedAt = finishedAt ?? observation.updatedAt;
+  const updatedAt = providerFinishedAt ?? observation.updatedAt;
   return {
     id: terminal.id,
     kind: "terminal",
@@ -213,7 +203,7 @@ function snapshot(
     cwd: terminal.cwd,
     startedAt,
     updatedAt,
-    ...(isTerminalJobStatus(status) ? { finishedAt: finishedAt ?? updatedAt } : {}),
+    ...(isTerminalJobStatus(status) ? { finishedAt: providerFinishedAt ?? updatedAt } : {}),
   };
 }
 

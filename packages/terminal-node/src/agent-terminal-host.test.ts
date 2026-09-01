@@ -8,7 +8,7 @@ import type {
   TerminalWaitResult,
   TerminalWriteRequest,
 } from "@openharness/terminal";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAgentTerminalBundle,
@@ -17,6 +17,8 @@ import {
 
 const CREATED_AT = "2026-09-01T01:02:03.000Z";
 const EXITED_AT = "2026-09-01T01:02:04.000Z";
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("createAgentTerminalBundle", () => {
   it("opens an agent terminal and lists it as the same terminal Job", async () => {
@@ -113,26 +115,84 @@ describe("createAgentTerminalBundle", () => {
     });
   });
 
-  it("sends input, cancels a running terminal, and disables further control", async () => {
+  it("keeps repeated cancellation at the provider stopping state until exit", async () => {
+    let now = Date.parse(CREATED_AT) + 100;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     const provider = new FakeTerminalProvider();
     const bundle = createAgentTerminalBundle({ cwd: "C:\\repo", sessionId: "session-1", provider });
     const opened = await bundle.terminal.open({ cwd: "C:\\repo", sessionId: "session-1" });
 
     await bundle.jobs.send({ sessionId: "session-1", jobId: opened.id, data: "hello\n" });
-    const cancelled = await bundle.jobs.cancel({
+    const first = await bundle.jobs.cancel({
       sessionId: "session-1",
       jobId: opened.id,
       reason: "no longer needed",
     });
+    now += 100;
+    const second = await bundle.jobs.cancel({
+      sessionId: "session-1",
+      jobId: opened.id,
+      reason: "still no longer needed",
+    });
 
     expect(provider.writeWith).toEqual({ terminalId: opened.id, data: "hello\n" });
-    expect(provider.killed).toEqual([opened.id]);
-    expect(cancelled).toMatchObject({
+    expect(provider.killed).toEqual([opened.id, opened.id]);
+    expect(first).toMatchObject({
       id: opened.id,
-      status: "killed",
+      status: "stopping",
       capabilities: { read: true, wait: true, send: false, cancel: false },
-      finishedAt: Date.parse(EXITED_AT),
+      updatedAt: Date.parse(CREATED_AT) + 100,
     });
+    expect(first).not.toHaveProperty("finishedAt");
+    expect(second).toMatchObject({
+      id: opened.id,
+      status: "stopping",
+      capabilities: { read: true, wait: true, send: false, cancel: false },
+      updatedAt: Date.parse(CREATED_AT) + 200,
+    });
+    expect(second).not.toHaveProperty("finishedAt");
+  });
+
+  it("reports a cancelled terminal as killed only after the provider exits", async () => {
+    const provider = new FakeTerminalProvider();
+    const bundle = createAgentTerminalBundle({ cwd: "C:\\repo", sessionId: "session-1", provider });
+    const opened = await bundle.terminal.open({ cwd: "C:\\repo", sessionId: "session-1" });
+
+    await bundle.jobs.cancel({ sessionId: "session-1", jobId: opened.id });
+    provider.exit(opened.id, 1);
+
+    await expect(bundle.jobs.read({ sessionId: "session-1", jobId: opened.id }))
+      .resolves.toMatchObject({
+        snapshot: {
+          status: "killed",
+          capabilities: { read: true, wait: true, send: false, cancel: false },
+          updatedAt: Date.parse(EXITED_AT),
+          finishedAt: Date.parse(EXITED_AT),
+        },
+      });
+    await expect(bundle.jobs.list({ sessionId: "session-1" })).resolves.toEqual([
+      expect.objectContaining({ status: "killed", finishedAt: Date.parse(EXITED_AT) }),
+    ]);
+  });
+
+  it.each([
+    [0, "completed"],
+    [7, "failed"],
+  ] as const)("does not overwrite terminal exit code %s status %s on cancel", async (
+    exitCode,
+    status,
+  ) => {
+    const provider = new FakeTerminalProvider();
+    const bundle = createAgentTerminalBundle({ cwd: "C:\\repo", sessionId: "session-1", provider });
+    const opened = await bundle.terminal.open({ cwd: "C:\\repo", sessionId: "session-1" });
+    provider.exit(opened.id, exitCode);
+
+    await expect(bundle.jobs.cancel({ sessionId: "session-1", jobId: opened.id }))
+      .resolves.toMatchObject({
+        status,
+        capabilities: { read: true, wait: true, send: false, cancel: false },
+        finishedAt: Date.parse(EXITED_AT),
+      });
   });
 
   it.each([
@@ -176,7 +236,6 @@ describe("createAgentTerminalBundle", () => {
 
     await bundle.jobs.send({ sessionId: "session-1", jobId: opened.id, data: "two" });
     expect((await bundle.jobs.list({ sessionId: "session-1" }))[0]?.updatedAt).toBe(now);
-    nowSpy.mockRestore();
   });
 
   it("rejects every Job operation from another session", async () => {
@@ -239,6 +298,7 @@ describe("createAgentTerminalBundle", () => {
 class FakeTerminalProvider implements AgentTerminalProvider {
   private readonly terminals = new Map<string, TerminalSessionInfo>();
   private readonly listeners = new Set<TerminalEventListener>();
+  private readonly cancelRequested = new Set<string>();
   private readonly disposeFailure: Error | undefined;
   createdWith?: TerminalCreateRequest;
   readWith?: TerminalReadRequest;
@@ -299,13 +359,13 @@ class FakeTerminalProvider implements AgentTerminalProvider {
   async kill(terminalId: string): Promise<void> {
     this.killed.push(terminalId);
     const terminal = this.require(terminalId);
+    if (terminal.status !== "running") return;
+    this.cancelRequested.add(terminalId);
     this.terminals.set(terminalId, {
       ...terminal,
-      status: "killed",
-      exitedAt: EXITED_AT,
-      exitCode: null,
+      status: "stopping",
     });
-    this.emit({ type: "status", terminalId, status: "killed" });
+    this.emit({ type: "status", terminalId, status: "stopping" });
   }
 
   subscribe(listener: TerminalEventListener): () => void {
@@ -324,11 +384,16 @@ class FakeTerminalProvider implements AgentTerminalProvider {
 
   exit(terminalId: string, exitCode: number): void {
     const terminal = this.require(terminalId);
+    const status = this.cancelRequested.has(terminalId)
+      ? "killed"
+      : exitCode === 0 ? "completed" : "failed";
     this.terminals.set(terminalId, {
       ...terminal,
+      status,
       exitedAt: EXITED_AT,
       exitCode,
     });
+    if (status === "killed") this.emit({ type: "status", terminalId, status });
     this.emit({ type: "exit", terminalId, exitCode });
   }
 
