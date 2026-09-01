@@ -103,8 +103,9 @@ export class DaemonJobService {
   ): AgentJobHost {
     return {
       list: async (input) => {
-        const snapshots = await this.list(this.owned(session, input));
-        return snapshots.filter(view.includesSnapshot);
+        const { limit, ...unlimitedInput } = this.owned(session, input);
+        const snapshots = await this.list(unlimitedInput);
+        return filterJobSnapshots(snapshots.filter(view.includesSnapshot), { limit });
       },
       read: async (input) => {
         const owned = this.owned(session, input);

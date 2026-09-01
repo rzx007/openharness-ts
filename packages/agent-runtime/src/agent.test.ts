@@ -409,6 +409,10 @@ describe("createDefaultNodeAgent", () => {
   it("tracks completed memory run boundaries across steering and later submissions", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-memory-run-"));
     tempDirs.push(cwd);
+    const configDir = mkdtempSync(join(tmpdir(), "openharness-agent-memory-config-"));
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    process.env.OPENHARNESS_CONFIG_DIR = configDir;
+    const events: AgentEvent[] = [];
     let conversationTurns = 0;
     let extractionCalls = 0;
     const client: StreamingMessageClient = {
@@ -445,20 +449,22 @@ describe("createDefaultNodeAgent", () => {
         yield { type: "complete" as const, stopReason: "end_turn" as const };
       },
     };
-    const agent = await createDefaultNodeAgent({
-      cwd,
-      client,
-      settings: {
-        apiFormat: "anthropic",
-        model: "memory-run-boundary-test-model",
-        maxTurns: 4,
-        permission: { mode: "full_auto" },
-        sandbox: { enabled: false },
-      },
-    });
-
     try {
-      agent.loadHistory([
+      const agent = await createDefaultNodeAgent({
+        cwd,
+        client,
+        settings: {
+          apiFormat: "anthropic",
+          model: "memory-run-boundary-test-model",
+          maxTurns: 4,
+          permission: { mode: "full_auto" },
+          sandbox: { enabled: false },
+        },
+        onEvent: (event) => events.push(event),
+      });
+
+      try {
+        agent.loadHistory([
         { type: "user", content: "old run" },
         { type: "assistant", content: "old answer" },
       ]);
@@ -476,6 +482,21 @@ describe("createDefaultNodeAgent", () => {
       await expect(steer).resolves.toMatchObject({ runId: firstRun.id });
       await expect(firstRun.result).resolves.toMatchObject({
         output: "steered run complete",
+      });
+      const rememberCompleted = events.find((event) =>
+        event.type === "tool.completed" && event.data.toolUseId === "remember-before-steer",
+      );
+      expect(rememberCompleted).toMatchObject({
+        type: "tool.completed",
+        data: expect.objectContaining({
+          toolUseId: "remember-before-steer",
+          result: expect.objectContaining({
+            content: [expect.objectContaining({ text: "Remembered this project information." })],
+          }),
+        }),
+      });
+      expect(rememberCompleted).not.toMatchObject({
+        data: { result: { isError: true } },
       });
       expect(agent.getHistory()).not.toEqual(expect.arrayContaining([
         expect.objectContaining({
@@ -515,9 +536,14 @@ describe("createDefaultNodeAgent", () => {
         skipped: true,
         reason: "no durable memories proposed",
       });
-      expect(extractionCalls).toBe(2);
+        expect(extractionCalls).toBe(2);
+      } finally {
+        await agent.close();
+      }
     } finally {
-      await agent.close();
+      if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      rmSync(configDir, { recursive: true, force: true });
     }
   });
 

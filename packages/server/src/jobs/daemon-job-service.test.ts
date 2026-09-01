@@ -130,6 +130,27 @@ describe("DaemonJobService", () => {
     ]);
   });
 
+  it("applies a scoped list limit after hiding jobs from other sources", async () => {
+    const detachedTask: SessionExecutionRecord = {
+      ...task,
+      id: "older-detached-task",
+      type: "shell",
+      metadata: {
+        executionBackend: "detached_process",
+        runtimeExecutionId: "process-2",
+      },
+    };
+    const { service } = createService(detachedTask);
+
+    await expect(service.createDetachedProcessAgentHost({ id: "session-1" } as any).list({
+      sessionId: "session-1",
+      includeFinished: true,
+      limit: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({ id: "older-detached-task", kind: "shell" }),
+    ]);
+  });
+
   it("does not claim a metadata-less framework child as a detached process", async () => {
     const frameworkChild: SessionExecutionRecord = {
       ...task,
