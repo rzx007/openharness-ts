@@ -84,6 +84,18 @@ describe("CleanupStack", () => {
     await expect(stack.close()).rejects.toBe(failure);
   });
 
+  it("preserves a user AggregateError thrown by one cleanup", async () => {
+    const failure = new AggregateError([], "user cleanup failed", {
+      cause: new Error("user cause"),
+    });
+    const stack = new CleanupStack();
+    stack.add(() => {
+      throw failure;
+    });
+
+    await expect(stack.close()).rejects.toBe(failure);
+  });
+
   it("runs every cleanup and aggregates multiple failures in execution order", async () => {
     const firstFailure = new Error("first failed");
     const lastFailure = new Error("last failed");
@@ -144,6 +156,28 @@ describe("cleanupAfterInitializationFailure", () => {
     ]);
   });
 
+  it("keeps one user AggregateError as one cleanup failure", async () => {
+    const initializationFailure = new Error("initialization failed");
+    const userAggregate = new AggregateError([], "user cleanup failed", {
+      cause: new Error("user cause"),
+    });
+    const stack = new CleanupStack();
+    stack.add(() => {
+      throw userAggregate;
+    });
+
+    const failure = await cleanupAfterInitializationFailure(
+      stack,
+      initializationFailure,
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      initializationFailure,
+      userAggregate,
+    ]);
+  });
+
   it("puts the initialization failure before every cleanup failure", async () => {
     const initializationFailure = new Error("initialization failed");
     const firstCleanupFailure = new Error("first cleanup failed");
@@ -166,6 +200,34 @@ describe("cleanupAfterInitializationFailure", () => {
       initializationFailure,
       lastCleanupFailure,
       firstCleanupFailure,
+    ]);
+  });
+
+  it("keeps a user AggregateError nested among multiple cleanup failures", async () => {
+    const initializationFailure = new Error("initialization failed");
+    const userAggregate = new AggregateError(
+      [new Error("nested user failure")],
+      "user cleanup failed",
+    );
+    const lastCleanupFailure = new Error("last cleanup failed");
+    const stack = new CleanupStack();
+    stack.add(() => {
+      throw userAggregate;
+    });
+    stack.add(() => {
+      throw lastCleanupFailure;
+    });
+
+    const failure = await cleanupAfterInitializationFailure(
+      stack,
+      initializationFailure,
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      initializationFailure,
+      lastCleanupFailure,
+      userAggregate,
     ]);
   });
 });

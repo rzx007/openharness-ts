@@ -5,6 +5,8 @@ interface CleanupEntry {
   identity: object;
 }
 
+const cleanupStackAggregates = new WeakSet<AggregateError>();
+
 export class CleanupStack {
   private readonly entries: CleanupEntry[] = [];
   private readonly identities = new Set<object>();
@@ -39,7 +41,9 @@ export class CleanupStack {
 
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) {
-      throw new AggregateError(failures, "Capability cleanup failed");
+      const aggregate = new AggregateError(failures, "Capability cleanup failed");
+      cleanupStackAggregates.add(aggregate);
+      throw aggregate;
     }
   }
 }
@@ -52,6 +56,7 @@ export async function cleanupAfterInitializationFailure(
     await stack.close();
   } catch (cleanupFailure) {
     const cleanupFailures = cleanupFailure instanceof AggregateError
+      && cleanupStackAggregates.has(cleanupFailure)
       ? cleanupFailure.errors
       : [cleanupFailure];
     throw new AggregateError(
