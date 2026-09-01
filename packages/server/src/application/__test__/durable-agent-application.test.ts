@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import type { OpenHarnessAgent } from "@openharness/agent-runtime";
 import type {
+  AgentBackgroundShellHost,
   AgentEvent,
   AgentEventContext,
   AgentEventInput,
@@ -14,6 +15,7 @@ import type {
   CompactAttachmentsProvider,
   Message,
 } from "@openharness/core";
+import type { AgentJobHost } from "@openharness/jobs";
 import { SessionStore } from "@openharness/services";
 
 import type { CreateDaemonAgent } from "../../daemon/daemon-agent.js";
@@ -187,11 +189,19 @@ describe("DaemonApplication", () => {
   it("让模型工具创建的后台 shell 立即进入统一 Jobs，并可被取消", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-background-shell-"));
     const store = new SessionStore({ path: join(dir, "store.db") });
-    let backgroundShellHost: NonNullable<Parameters<CreateDaemonAgent>[0]["options"]["hostCapabilities"]>["backgroundShell"];
+    let backgroundShellHost: AgentBackgroundShellHost | undefined;
+    let backgroundShellJobs: AgentJobHost | undefined;
+    let terminalJobs: AgentJobHost | undefined;
     const application = new DaemonApplication({
       store,
       createAgent: async (context) => {
-        backgroundShellHost = context.options.hostCapabilities?.backgroundShell;
+        const backgroundShell = context.options.capabilityOverrides?.backgroundShell;
+        const terminal = context.options.capabilityOverrides?.terminal;
+        if (backgroundShell && backgroundShell !== false) {
+          backgroundShellHost = backgroundShell.value;
+          backgroundShellJobs = backgroundShell.jobs;
+        }
+        if (terminal && terminal !== false) terminalJobs = terminal.jobs;
         return await createEchoAgent(context);
       },
       log: () => {},
@@ -206,6 +216,8 @@ describe("DaemonApplication", () => {
       const admission = await application.sessions.admitPrompt(session.id, { content: "initialize" });
       await application.sessions.awaitRun(session.id, admission.run!.id);
 
+      expect(backgroundShellJobs).not.toBe(terminalJobs);
+
       const created = await backgroundShellHost!.create({
         requestId: "tool:durable-shell-test",
         cwd: session.cwd,
@@ -213,6 +225,17 @@ describe("DaemonApplication", () => {
         command: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`,
         description: "long-running test server",
       });
+
+      await expect(backgroundShellJobs!.list({
+        sessionId: session.id,
+        includeFinished: true,
+      })).resolves.toEqual([
+        expect.objectContaining({ id: created.jobId, kind: "shell" }),
+      ]);
+      await expect(terminalJobs!.list({
+        sessionId: session.id,
+        includeFinished: true,
+      })).resolves.toEqual([]);
 
       await expect(application.jobs.read({
         sessionId: session.id,

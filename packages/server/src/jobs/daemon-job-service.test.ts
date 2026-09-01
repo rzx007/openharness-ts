@@ -36,6 +36,100 @@ const task: SessionExecutionRecord = {
 };
 
 describe("DaemonJobService", () => {
+  it("gives terminal and detached-process Agent producers non-overlapping Job views", async () => {
+    const shellTask: SessionExecutionRecord = {
+      ...task,
+      id: "shell-1",
+      type: "shell",
+      description: "dev server",
+      metadata: {
+        executionBackend: "detached_process",
+        runtimeExecutionId: "process-1",
+      },
+    };
+    const frameworkShellTask: SessionExecutionRecord = {
+      ...shellTask,
+      id: "framework-shell-1",
+      metadata: {
+        executionBackend: "child_agent",
+        runtimeExecutionId: "child-agent-1",
+      },
+    };
+    const workflow = {
+      runId: "workflow-1",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "coordinate review",
+      plan: { mode: "sequential", tasks: [] },
+      runningTaskIds: [],
+      pendingTaskIds: [],
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const { service } = createService([task, shellTask, frameworkShellTask], {
+      workflows: {
+        list: () => [workflow],
+        load: (runId: string) => runId === workflow.runId ? workflow : undefined,
+      },
+    });
+    const owner = { id: "session-1" } as any;
+    const terminalJobs = service.createTerminalAgentHost(owner);
+    const shellJobs = service.createDetachedProcessAgentHost(owner);
+
+    await expect(terminalJobs.list({
+      sessionId: "session-1",
+      includeFinished: true,
+    })).resolves.toEqual([
+      expect.objectContaining({ id: "terminal-1", kind: "terminal" }),
+    ]);
+    await expect(shellJobs.list({
+      sessionId: "session-1",
+      includeFinished: true,
+    })).resolves.toEqual([
+      expect.objectContaining({ id: "shell-1", kind: "shell" }),
+    ]);
+    await expect(terminalJobs.read({
+      sessionId: "session-1",
+      jobId: "shell-1",
+    })).rejects.toThrow("Job not found: shell-1");
+    await expect(shellJobs.read({
+      sessionId: "session-1",
+      jobId: "terminal-1",
+    })).rejects.toThrow("Job not found: terminal-1");
+    await expect(shellJobs.read({
+      sessionId: "session-1",
+      jobId: "task-1",
+    })).rejects.toThrow("Job not found: task-1");
+    await expect(shellJobs.read({
+      sessionId: "session-1",
+      jobId: "framework-shell-1",
+    })).rejects.toThrow("Job not found: framework-shell-1");
+    await expect(shellJobs.read({
+      sessionId: "session-1",
+      jobId: "workflow:workflow-1",
+    })).rejects.toThrow("Job not found: workflow:workflow-1");
+  });
+
+  it("includes a detached process task even when its durable task type is not shell", async () => {
+    const detachedTask: SessionExecutionRecord = {
+      ...task,
+      id: "detached-dream-1",
+      type: "dream",
+      metadata: {
+        executionBackend: "detached_process",
+        runtimeExecutionId: "process-2",
+      },
+    };
+    const { service } = createService(detachedTask);
+
+    await expect(service.createDetachedProcessAgentHost({ id: "session-1" } as any).list({
+      sessionId: "session-1",
+      includeFinished: true,
+    })).resolves.toEqual([
+      expect.objectContaining({ id: "detached-dream-1", kind: "dream" }),
+    ]);
+  });
+
   it("projects owned terminals and durable tasks into one list", async () => {
     const { service } = createService();
     const jobs = await service.list({ sessionId: "session-1" });
@@ -77,7 +171,7 @@ describe("DaemonJobService", () => {
 
   it("does not let an Agent address another session through its host", async () => {
     const { service } = createService();
-    const host = service.createAgentHost({ id: "session-1" } as any);
+    const host = service.createTerminalAgentHost({ id: "session-1" } as any);
     await expect(host.list({ sessionId: "session-2" })).rejects.toThrow("owner session mismatch");
   });
 
@@ -144,14 +238,22 @@ describe("DaemonJobService", () => {
   });
 
   it("lets an inherited root host operate on a descendant's own jobs", async () => {
-    const childTask = { ...task, sessionId: "child-1" };
+    const childTask = {
+      ...task,
+      sessionId: "child-1",
+      type: "shell" as const,
+      metadata: {
+        executionBackend: "detached_process",
+        runtimeExecutionId: "child-process-1",
+      },
+    };
     const { service, store } = createService(childTask);
     store.getSession.mockImplementation((id: string) => {
       if (id === "session-1") return { id, cwd: "/repo" } as any;
       if (id === "child-1") return { id, parentId: "session-1", cwd: "/repo/worktree" } as any;
       return undefined;
     });
-    const host = service.createAgentHost({ id: "session-1" } as any);
+    const host = service.createDetachedProcessAgentHost({ id: "session-1" } as any);
 
     await expect(host.list({ sessionId: "child-1" })).resolves.toContainEqual(
       expect.objectContaining({ id: childTask.id, ownerSession: "child-1" }),
@@ -242,7 +344,7 @@ describe("DaemonJobService", () => {
 });
 
 function createService(
-  projectedTask: SessionExecutionRecord = task,
+  projectedTask: SessionExecutionRecord | SessionExecutionRecord[] = task,
   overrides: {
     processes?: {
       readOutput: ReturnType<typeof vi.fn>;
@@ -257,12 +359,13 @@ function createService(
     workflows?: Record<string, unknown>;
   } = {},
 ) {
+  const projectedTasks = Array.isArray(projectedTask) ? projectedTask : [projectedTask];
   const store = {
     getSession: vi.fn((id: string) => id === "session-1" ? { id, cwd: "/repo" } : undefined),
-    listSessionTasks: vi.fn(() => [projectedTask]),
-    getSessionTask: vi.fn((id: string) => id === projectedTask.id ? projectedTask : undefined),
+    listSessionTasks: vi.fn(() => projectedTasks),
+    getSessionTask: vi.fn((id: string) => projectedTasks.find((candidate) => candidate.id === id)),
     updateSessionTask: vi.fn((_id: string, input: Record<string, unknown>) => ({
-      ...projectedTask,
+      ...projectedTasks[0]!,
       ...input,
     })),
   };
@@ -277,7 +380,7 @@ function createService(
   const manager = overrides.processes ?? {
     readOutput: vi.fn(() => "task output"),
     writeInput: vi.fn(async () => undefined),
-    stopExecution: vi.fn(async () => projectedTask),
+    stopExecution: vi.fn(async () => projectedTasks[0]!),
   };
   const childAgents = overrides.childAgents ?? manager;
   return {

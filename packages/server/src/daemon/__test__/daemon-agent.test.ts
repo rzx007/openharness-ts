@@ -56,15 +56,22 @@ describe("createDaemonAgentLoader", () => {
     const requestPermission = vi.fn();
     const createAgent = vi.fn(async () => agent);
     const createEventSink = vi.fn(() => sink);
-    const jobs = {} as any;
+    const terminal = {} as any;
+    const terminalJobs = {} as any;
     const backgroundShell = { create: vi.fn() } as any;
+    const backgroundShellJobs = {} as any;
+    const schedules = {} as any;
     const loader = createDaemonAgentLoader({
       settings: { model: "default-model" } as any,
       createAgent,
       requestPermission,
+      schedules,
       createEventSink,
-      createJobHost: () => jobs,
-      createBackgroundShellHost: () => backgroundShell,
+      createTerminal: () => ({ value: terminal, jobs: terminalJobs }),
+      createBackgroundShell: () => ({
+        value: backgroundShell,
+        jobs: backgroundShellJobs,
+      }),
     })!;
 
     const loaded = await loader({ session, history: [], parts: [] });
@@ -83,12 +90,17 @@ describe("createDaemonAgentLoader", () => {
       disallowedTools: ["Bash"],
       effort: "high",
       pluginsEnabled: false,
-      hostCapabilities: {
-        permissions: { requestPermission },
-        jobs,
-        backgroundShell,
+      capabilityOverrides: {
+        terminal: { value: terminal, jobs: terminalJobs },
+        backgroundShell: {
+          value: backgroundShell,
+          jobs: backgroundShellJobs,
+        },
+        schedules,
       },
+      effects: { requestPermission },
     });
+    expect(terminalJobs).not.toBe(backgroundShellJobs);
     expect(loadHistory).toHaveBeenCalledWith([]);
     expect(createEventSink).toHaveBeenCalledWith(agent, session);
 

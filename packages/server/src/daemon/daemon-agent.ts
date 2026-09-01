@@ -2,6 +2,7 @@ import {
   createDefaultNodeAgent,
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
+  type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import { join } from "node:path";
 import {
@@ -20,7 +21,6 @@ import type {
   Settings,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
-import type { AgentJobHost } from "@openharness/jobs";
 import { readSessionRuntimeConfig } from "@openharness/protocol";
 import type {
   SessionMessagePartRecord,
@@ -66,13 +66,15 @@ export interface DaemonAgentLoaderOptions {
   createAgent?: CreateDaemonAgent;
   requestPermission?: AgentEffects["requestPermission"];
   schedules?: AgentScheduleEffects;
-  createTerminalHost?(session: SessionRecord): AgentTerminalHost;
-  createJobHost?(session: SessionRecord): AgentJobHost;
-  createBackgroundShellHost?(session: SessionRecord): AgentBackgroundShellHost;
+  createTerminal?(
+    session: SessionRecord,
+  ): ObservableJobProducer<AgentTerminalHost>;
+  createBackgroundShell?(
+    session: SessionRecord,
+  ): ObservableJobProducer<AgentBackgroundShellHost>;
   workflowRepository?: WorkflowRunRepository;
   imageToText?: AgentImageToTextHost;
   attachments?: AgentAttachmentResourceHost;
-  attachmentResourceRoot?(session: SessionRecord): string;
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
    * 要等 Agent 造好才能建（投影要用 agent.id），但 onEvent 在造 Agent 时就得先挂上。
@@ -124,28 +126,24 @@ export function createDaemonAgentLoader(
         status: "denied" as const,
         reason: "Daemon permission host is not configured",
       }));
-    const terminal = options.createTerminalHost?.(session);
-    const jobs = options.createJobHost?.(session);
-    const backgroundShell = options.createBackgroundShellHost?.(session);
-    const attachmentResourceRoot = options.attachmentResourceRoot?.(session);
+    const terminal = options.createTerminal?.(session);
+    const backgroundShell = options.createBackgroundShell?.(session);
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
       sessionId: session.id,
       ...agentConfigurationFromSession(session, settings),
-      hostCapabilities: {
-        permissions: { requestPermission },
+      capabilityOverrides: {
         ...(options.schedules ? { schedules: options.schedules } : {}),
         ...(terminal ? { terminal } : {}),
-        ...(jobs ? { jobs } : {}),
         ...(backgroundShell ? { backgroundShell } : {}),
         ...(options.workflowRepository
           ? { workflowRepository: options.workflowRepository }
           : {}),
         ...(options.imageToText ? { imageToText: options.imageToText } : {}),
         ...(options.attachments ? { attachments: options.attachments } : {}),
-        ...(attachmentResourceRoot ? { attachmentResourceRoot } : {}),
       },
+      effects: { requestPermission },
       ...(options.createEventSink
         ? {
             // 窗口上的字从这里来：事件 → 投影 → 会话记录 → 推给 UI。
