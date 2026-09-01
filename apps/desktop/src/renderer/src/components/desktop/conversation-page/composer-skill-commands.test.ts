@@ -112,6 +112,18 @@ describe("composer skill commands", () => {
     ])
   })
 
+  it("returns all matching commands without a default limit", () => {
+    const commands = Array.from({ length: 15 }, (_, index) => ({
+      name: `/skill-${index}`,
+      description: `Skill ${index}`,
+      kind: "template" as const,
+      source: "user" as const,
+    }))
+
+    expect(filterSkillCommands(toComposerSkillCommands(commands), "")).toHaveLength(15)
+    expect(filterSkillCommands(toComposerSkillCommands(commands), "", 10)).toHaveLength(10)
+  })
+
   it("writes the selected command back as an editable draft prefix", () => {
     expect(
       draftForSelectedSkillCommand({

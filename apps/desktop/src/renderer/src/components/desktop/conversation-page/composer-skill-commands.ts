@@ -61,7 +61,7 @@ export function getSkillCommandTrigger(draft: string): SkillCommandTrigger | nul
 export function filterSkillCommands(
   commands: readonly ComposerSkillCommand[],
   query: string,
-  limit = 10
+  limit?: number
 ): ComposerSkillCommand[] {
   const normalizedQuery = normalizeSearchText(query)
   const scored = commands
@@ -86,7 +86,8 @@ export function filterSkillCommands(
         left.score - right.score || left.command.label.localeCompare(right.command.label)
     )
 
-  return scored.slice(0, limit).map((entry) => entry.command)
+  const results = scored.map((entry) => entry.command)
+  return limit === undefined ? results : results.slice(0, limit)
 }
 
 export function draftForSelectedSkillCommand(command: ComposerSkillCommand): string {
