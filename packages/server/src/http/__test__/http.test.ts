@@ -30,6 +30,7 @@ import type {
   Message,
 } from "@openharness/core";
 import type {
+  AgentCapabilitySnapshot,
   AgentCompactResult,
   AgentInspection,
   AgentRememberResult,
@@ -192,8 +193,9 @@ function adaptTestAgentFactory(
                     eventContext,
                   );
                   const requestPermission =
-                    context.options.hostCapabilities.permissions
-                      .requestPermission;
+                    context.options.effects?.requestPermission;
+                  if (!requestPermission)
+                    throw new Error("Permission effect is not configured");
                   const decision = await requestPermission(request, {
                     agentId: context.session.id,
                     sessionId: context.session.id,
@@ -325,6 +327,7 @@ function adaptTestAgentFactory(
         history = [];
       },
       setModel: () => {},
+      setCompactAttachmentsProvider: () => {},
       compact: async (): Promise<AgentCompactResult> => {
         if (state !== "idle") throw new Error(`Agent is ${state}`);
         state = "maintaining";
@@ -358,12 +361,22 @@ function adaptTestAgentFactory(
       },
       getUsage: () =>
         program.getUsage?.() ?? { inputTokens: 0, outputTokens: 0 },
+      getCapabilities: () =>
+        program.inspect?.().capabilities ?? disabledCapabilities(),
       inspect: () =>
         program.inspect?.() ?? {
           model: context.session.model,
           tools: [],
           hooks: [],
           mcpServers: [],
+          childBudget: {
+            maxDepth: 4,
+            maxActiveChildren: 4,
+            maxTotalChildren: 16,
+            activeChildren: 0,
+            totalChildren: 0,
+          },
+          capabilities: disabledCapabilities(),
         },
       close: () => {
         if (closePromise) return closePromise;
@@ -376,6 +389,20 @@ function adaptTestAgentFactory(
         return closePromise;
       },
     };
+  };
+}
+
+function disabledCapabilities(): AgentCapabilitySnapshot {
+  return {
+    terminal: { status: "disabled" },
+    backgroundShell: { status: "disabled" },
+    jobs: { status: "disabled" },
+    attachments: { status: "disabled" },
+    memory: { status: "disabled" },
+    childEnvironment: { status: "disabled" },
+    workflowRepository: { status: "disabled" },
+    imageToText: { status: "disabled" },
+    schedules: { status: "disabled" },
   };
 }
 
