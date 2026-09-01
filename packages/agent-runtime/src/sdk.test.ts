@@ -17,6 +17,77 @@ import { describe, expect, it, vi } from "vitest";
 import { createDefaultNodeAgent } from "./index.js";
 
 describe("programmatic agent SDK", () => {
+  it("creates managed memory by default without exposing managed paths to the model", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-default-memory-"));
+    const requests: Array<Parameters<StreamingMessageClient["streamMessage"]>[0]> = [];
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        requests.push(params);
+        yield { type: "text_delta" as const, delta: "memory available" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      client,
+      settings: testSettingsWithDefaultMemory(),
+    });
+
+    try {
+      expect(agent.getCapabilities().memory).toEqual({
+        status: "available",
+        source: "default",
+      });
+      expect(agent.inspect().tools.map((tool) => tool.name)).toContain("Remember");
+
+      await expect(agent.runMessage("use the managed memory tools")).resolves.toMatchObject({
+        output: "memory available",
+      });
+      const rememberTool = requests[0]?.tools?.find((tool) => tool.name === "Remember");
+      const serializedTool = JSON.stringify(rememberTool);
+      expect(rememberTool).toBeDefined();
+      expect(serializedTool).not.toContain("USER.md");
+      expect(serializedTool).not.toContain(".openharness");
+      expect(serializedTool).not.toContain(cwd);
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("gives settings and capability override memory disables identical behavior", async () => {
+    const settingsCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-settings-memory-disabled-"));
+    const overrideCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-override-memory-disabled-"));
+    const settingsDisabled = await createDefaultNodeAgent({
+      cwd: settingsCwd,
+      settings: testSettings(),
+    });
+    const overrideDisabled = await createDefaultNodeAgent({
+      cwd: overrideCwd,
+      capabilityOverrides: { memory: false },
+      settings: testSettingsWithDefaultMemory(),
+    });
+
+    try {
+      expect(settingsDisabled.getCapabilities().memory).toEqual({ status: "disabled" });
+      expect(overrideDisabled.getCapabilities().memory).toEqual({ status: "disabled" });
+      expect(settingsDisabled.getCapabilities()).toEqual(overrideDisabled.getCapabilities());
+
+      for (const agent of [settingsDisabled, overrideDisabled]) {
+        expect(agent.inspect().tools.map((tool) => tool.name)).not.toContain("Remember");
+        await expect(agent.remember()).resolves.toMatchObject({
+          skipped: true,
+          reason: "memory is disabled",
+        });
+      }
+    } finally {
+      await settingsDisabled.close();
+      await overrideDisabled.close();
+      rmSync(settingsCwd, { recursive: true, force: true });
+      rmSync(overrideCwd, { recursive: true, force: true });
+    }
+  });
+
   it("keeps disabled long-running capabilities out of diagnostics, tools, and the model prompt", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-disabled-capabilities-"));
     const requests: Array<Parameters<StreamingMessageClient["streamMessage"]>[0]> = [];
@@ -699,5 +770,15 @@ function testSettings(): Settings {
     permission: { mode: "full_auto" },
     sandbox: { enabled: false },
     memory: { enabled: false },
+  };
+}
+
+function testSettingsWithDefaultMemory(): Settings {
+  return {
+    apiFormat: "anthropic",
+    model: "sdk-capability-test-model",
+    maxTurns: 3,
+    permission: { mode: "full_auto" },
+    sandbox: { enabled: false },
   };
 }

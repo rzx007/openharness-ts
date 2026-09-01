@@ -99,4 +99,42 @@ describe("extractMemories", () => {
     });
     expect(streamCalls).toBe(0);
   });
+
+  it("skips model streaming when the run already used the managed Remember tool", async () => {
+    const cwd = resolve("project");
+    const memoryDir = join(cwd, ".openharness", "memory");
+    const remembered: Message[] = [
+      messages[0]!,
+      {
+        type: "assistant",
+        content: "saved through the managed tool",
+        toolUses: [
+          {
+            type: "tool_use",
+            id: "remember-project-fact",
+            name: "Remember",
+            input: { scope: "project", content: "Build commands use pnpm." },
+          },
+        ],
+      },
+    ];
+    let streamCalls = 0;
+
+    const result = await extractMemories({
+      apiClient: fakeClient('{"memories":[]}', () => streamCalls++),
+      model: "test-model",
+      messages: remembered,
+      manager: new MemoryManager(100),
+      memoryDir,
+      cwd,
+    });
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "main conversation already wrote memory",
+      writtenIds: [],
+      titles: [],
+    });
+    expect(streamCalls).toBe(0);
+  });
 });

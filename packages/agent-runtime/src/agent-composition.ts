@@ -228,10 +228,12 @@ export async function composeOpenHarnessAgent(
     );
 
     const memoryRuntime = capabilityValue(memory);
-    runtime.toolRegistry.register(createRememberTool({
-      appendUserProfile: appendUserProfileUpdate,
-      projectMemory: memoryRuntime?.manager,
-    }));
+    if (memoryRuntime) {
+      runtime.toolRegistry.register(createRememberTool({
+        appendUserProfile: appendUserProfileUpdate,
+        projectMemory: memoryRuntime.manager,
+      }));
+    }
     runtime.queryEngine.setMemoryRetriever(
       memoryRuntime ? (userInput) => memoryRuntime.retrieve(userInput) : undefined,
     );

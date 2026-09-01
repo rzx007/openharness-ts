@@ -118,6 +118,7 @@ function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): b
   for (const message of messages) {
     if (message.type !== "assistant") continue;
     for (const toolUse of message.toolUses ?? []) {
+      if (toolUse.name === "Remember") return true;
       const input = toolUse.input as Record<string, unknown>;
       if (isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)) {
         return true;
