@@ -8,6 +8,8 @@ import {
   selectWritableMemoryExtractionRecords,
 } from "@openharness/memory";
 
+import type { FrameworkAgentRunToolActivity } from "./framework-agent-run.js";
+
 export interface AgentRememberResult {
   skipped: boolean;
   reason?: string;
@@ -23,7 +25,7 @@ export interface AgentMemoryRuntime {
     messages: Message[],
     apiClient: StreamingMessageClient,
     model: string,
-    completedRunMessages?: Message[],
+    completedRunToolActivity?: FrameworkAgentRunToolActivity,
   ): Promise<AgentRememberResult>;
 }
 
@@ -42,7 +44,7 @@ export async function createAgentMemoryRuntime(
       if (selected.ids.length > 0) await manager.markMemoryUsed(selected.ids);
       return selected.text || null;
     },
-    async remember(messages, apiClient, model, completedRunMessages) {
+    async remember(messages, apiClient, model, completedRunToolActivity) {
       return await extractMemories({
         apiClient,
         model,
@@ -50,7 +52,7 @@ export async function createAgentMemoryRuntime(
         manager,
         memoryDir: directory,
         cwd,
-        completedRunMessages,
+        completedRunToolActivity,
       });
     },
   };
@@ -63,13 +65,14 @@ export async function extractMemories(options: {
   manager: MemoryManager;
   memoryDir: string;
   cwd: string;
-  completedRunMessages?: Message[];
+  completedRunToolActivity?: FrameworkAgentRunToolActivity;
 }): Promise<AgentRememberResult> {
   if (options.messages.length < 2) {
     return { skipped: true, reason: "not enough messages", writtenIds: [], titles: [] };
   }
   if (hasMemoryWrites(
-    options.completedRunMessages ?? currentRunMessages(options.messages),
+    options.completedRunToolActivity ??
+      toolActivityFromMessages(currentRunMessages(options.messages)),
     options.memoryDir,
     options.cwd,
   )) {
@@ -125,25 +128,51 @@ export async function extractMemories(options: {
     : { skipped: true, reason: "no durable memories proposed", writtenIds: [], titles: [] };
 }
 
-function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): boolean {
+function hasMemoryWrites(
+  activity: FrameworkAgentRunToolActivity,
+  memoryDir: string,
+  cwd: string,
+): boolean {
   const memoryWriteIds = new Set<string>();
-  for (const message of messages) {
-    if (message.type !== "assistant") continue;
-    for (const toolUse of message.toolUses ?? []) {
-      const input = toolUse.input as Record<string, unknown>;
-      if (
-        toolUse.name === "Remember" ||
-        isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)
-      ) {
-        memoryWriteIds.add(toolUse.id);
-      }
+  for (const toolUse of activity.toolUses) {
+    const input = toolUse.input as Record<string, unknown>;
+    if (
+      toolUse.name === "Remember" ||
+      isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)
+    ) {
+      memoryWriteIds.add(toolUse.id);
     }
   }
-  return messages.some((message) =>
-    message.type === "tool_result" &&
-    message.isError !== true &&
-    memoryWriteIds.has(message.toolUseId)
+  return activity.toolResults.some(
+    (result) =>
+      result.isError !== true && memoryWriteIds.has(result.toolUseId),
   );
+}
+
+function toolActivityFromMessages(
+  messages: Message[],
+): FrameworkAgentRunToolActivity {
+  const activity: FrameworkAgentRunToolActivity = {
+    toolUses: [],
+    toolResults: [],
+  };
+  for (const message of messages) {
+    if (message.type === "assistant") {
+      for (const toolUse of message.toolUses ?? []) {
+        activity.toolUses.push({
+          id: toolUse.id,
+          name: toolUse.name,
+          input: toolUse.input,
+        });
+      }
+    } else if (message.type === "tool_result") {
+      activity.toolResults.push({
+        toolUseId: message.toolUseId,
+        isError: message.isError,
+      });
+    }
+  }
+  return activity;
 }
 
 function currentRunMessages(messages: Message[]): Message[] {

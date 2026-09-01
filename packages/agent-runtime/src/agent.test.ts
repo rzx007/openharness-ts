@@ -317,6 +317,15 @@ describe("createDefaultNodeAgent", () => {
     });
 
     try {
+      agent.loadHistory([
+        { type: "user", content: "old run" },
+        { type: "assistant", content: "old answer" },
+      ]);
+      const runtime = (agent as any).runtime;
+      runtime.queryEngine.compactService.autoCompact = async (
+        history: Array<{ type: string }>,
+      ) => history.filter((message) => message.type === "user").slice(-1);
+
       const firstRun = agent.submitMessage("remember before steering");
       const steer = firstRun.steer({
         id: "memory-steer",
@@ -327,7 +336,14 @@ describe("createDefaultNodeAgent", () => {
       await expect(firstRun.result).resolves.toMatchObject({
         output: "steered run complete",
       });
-      const runtime = (agent as any).runtime;
+      expect(agent.getHistory()).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "assistant",
+          toolUses: expect.arrayContaining([
+            expect.objectContaining({ name: "Remember" }),
+          ]),
+        }),
+      ]));
       runtime.queryEngine.compact = async () => {
         runtime.queryEngine.loadMessages([
           { type: "user", content: "compacted current history" },
@@ -363,6 +379,85 @@ describe("createDefaultNodeAgent", () => {
       await agent.close();
     }
   });
+
+  it.each(["failure", "cancellation"] as const)(
+    "does not keep successful tool activity from a run ending in %s",
+    async (ending) => {
+      const cwd = mkdtempSync(join(tmpdir(), `openharness-agent-memory-${ending}-`));
+      tempDirs.push(cwd);
+      let conversationTurns = 0;
+      let extractionCalls = 0;
+      let markSecondTurnStarted!: () => void;
+      const secondTurnStarted = new Promise<void>((resolve) => {
+        markSecondTurnStarted = resolve;
+      });
+      const client: StreamingMessageClient = {
+        async *streamMessage(params) {
+          if (params.tools?.length === 0) {
+            extractionCalls++;
+            yield { type: "text_delta" as const, delta: '{"memories":[]}' };
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+            return;
+          }
+
+          conversationTurns++;
+          if (conversationTurns === 1) {
+            yield {
+              type: "tool_use_start" as const,
+              toolUse: {
+                type: "tool_use" as const,
+                id: `remember-before-${ending}`,
+                name: "Remember",
+                input: {
+                  scope: "project",
+                  content: "Build commands use pnpm.",
+                },
+              },
+            };
+            yield { type: "complete" as const, stopReason: "tool_use" as const };
+            return;
+          }
+
+          markSecondTurnStarted();
+          if (ending === "failure") throw new Error("provider failed after Remember");
+          await new Promise<never>((_resolve, reject) => {
+            const signal = params.abortSignal;
+            if (signal?.aborted) {
+              reject(signal.reason);
+              return;
+            }
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        },
+      };
+      const agent = await createDefaultNodeAgent({
+        cwd,
+        client,
+        settings: {
+          apiFormat: "anthropic",
+          model: "memory-failed-run-test-model",
+          maxTurns: 3,
+          permission: { mode: "full_auto" },
+          sandbox: { enabled: false },
+        },
+      });
+
+      try {
+        const run = agent.submitMessage(`remember before ${ending}`);
+        await secondTurnStarted;
+        if (ending === "cancellation") await run.interrupt("cancel after Remember");
+        await expect(run.result).rejects.toBeDefined();
+
+        await expect(agent.remember()).resolves.toMatchObject({
+          skipped: true,
+          reason: "no durable memories proposed",
+        });
+        expect(extractionCalls).toBe(1);
+      } finally {
+        await agent.close();
+      }
+    },
+  );
 
   it("serializes runs, maintenance, context mutation, and close through one lifecycle", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
