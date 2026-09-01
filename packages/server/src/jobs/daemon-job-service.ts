@@ -40,7 +40,7 @@ interface JobSessionStore {
 }
 
 interface JobExecutionRuntime {
-  readOutput(executionId: string): string;
+  readOutput(executionId: string, maxBytes?: number): string;
   writeInput(executionId: string, data: string): Promise<void>;
   stopExecution(executionId: string): Promise<unknown>;
 }
@@ -271,7 +271,13 @@ export class DaemonJobService {
 
   private readTaskOutput(task: SessionExecutionRecord): string {
     try {
-      return this.runtimeFor(task).readOutput(runtimeExecutionId(task));
+      // Match LocalJobHost: read the full on-disk log, then let limitOutput
+      // apply maxChars and set truncated honestly. The runtime default cap
+      // (12k) would otherwise hide truncation from JobRead callers.
+      return this.runtimeFor(task).readOutput(
+        runtimeExecutionId(task),
+        Number.MAX_SAFE_INTEGER,
+      );
     } catch {
       return task.output ?? "";
     }
