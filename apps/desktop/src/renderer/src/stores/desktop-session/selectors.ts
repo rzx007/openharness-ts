@@ -1,5 +1,5 @@
 import { createEmptySessionRuntime } from "./operation-state"
-import { projectFromSession } from "./helpers"
+import { projectFromSession, outsideProjectDraftWorkspace } from "./helpers"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
 import type {
   DesktopOperation,
@@ -10,6 +10,8 @@ import type {
 
 const emptySessionRuntime = createEmptySessionRuntime()
 const outsideWorkspaceProjects = new WeakMap<DesktopSessionRecord, DesktopProject>()
+let cachedOutsideDraftRoot: string | null = null
+let cachedOutsideDraftWorkspace: DesktopProject | null = null
 const permissionReplyStatesByOperations = new WeakMap<
   Record<string, DesktopOperation>,
   Record<string, PermissionReplyState>
@@ -75,7 +77,36 @@ export function selectActiveWorkspaceProject(state: DesktopSessionState): Deskto
     outsideWorkspaceProjects.set(activeSession, workspace)
     return workspace
   }
-  return state.selectedProject
+  if (state.selectedProject) return state.selectedProject
+  if (state.workspaceMode === "outside_project" && state.outsideProjectWorkspaceRoot.trim()) {
+    return getOutsideProjectDraftWorkspace(state.outsideProjectWorkspaceRoot)
+  }
+  return null
+}
+
+function getOutsideProjectDraftWorkspace(root: string): DesktopProject {
+  if (cachedOutsideDraftRoot === root && cachedOutsideDraftWorkspace) {
+    return cachedOutsideDraftWorkspace
+  }
+  cachedOutsideDraftRoot = root
+  cachedOutsideDraftWorkspace = outsideProjectDraftWorkspace(root)
+  return cachedOutsideDraftWorkspace
+}
+
+/** slash 命令目录使用的 cwd：有会话时用会话 cwd，否则回退到项目路径或项目外托管根目录。 */
+export function selectCommandCatalogCwd(state: DesktopSessionState): string | null {
+  if (state.activeSessionId) {
+    const session =
+      state.sessionView?.session.id === state.activeSessionId
+        ? state.sessionView.session
+        : state.sessions.find((item) => item.id === state.activeSessionId)
+    if (session?.cwd) return session.cwd
+  }
+  if (state.selectedProject) return state.selectedProject.path
+  if (state.workspaceMode === "outside_project" && state.outsideProjectWorkspaceRoot.trim()) {
+    return state.outsideProjectWorkspaceRoot
+  }
+  return null
 }
 
 export function selectActiveSessionRuntime(state: DesktopSessionState): DesktopSessionRuntime {

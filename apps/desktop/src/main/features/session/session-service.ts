@@ -147,6 +147,7 @@ export class DesktopSessionService {
         isPackaged: app.isPackaged,
         forceDisable: process.env.OPENHARNESS_DESKTOP_ATTACHMENTS === "0",
       }),
+      outsideProjectWorkspaceRoot: buildOutsideProjectRoot(app.getPath("documents")),
     }
   }
 

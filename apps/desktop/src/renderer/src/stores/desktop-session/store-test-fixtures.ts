@@ -42,6 +42,7 @@ export const refreshedBootstrap: DesktopBootstrapData = {
     uploadModes: [],
     limits: null,
   },
+  outsideProjectWorkspaceRoot: "C:\\Users\\tester\\Documents\\OpenHarness",
 }
 
 const initialState = useDesktopSessionStore.getState()

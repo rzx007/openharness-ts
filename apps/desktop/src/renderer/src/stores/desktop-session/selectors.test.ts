@@ -5,6 +5,7 @@ import {
   selectActiveSessionOpening,
   selectActiveSessionPermissionReplies,
   selectActiveWorkspaceProject,
+  selectCommandCatalogCwd,
   selectPermissionReplyError,
   selectPermissionReplyPending,
   selectActiveSessionPromptSubmissions,
@@ -85,6 +86,60 @@ describe("desktop session selectors", () => {
       available: true,
     })
     expect(selectActiveWorkspaceProject(state)).toBe(workspace)
+  })
+
+  it("provides the outside-project draft workspace before a session exists", () => {
+    const state = stateWith({
+      workspaceMode: "outside_project",
+      selectedProject: null,
+      outsideProjectWorkspaceRoot: "C:\\Users\\tester\\Documents\\OpenHarness",
+    })
+
+    expect(selectActiveWorkspaceProject(state)).toEqual({
+      id: "outside-project-draft",
+      name: "OpenHarness",
+      path: "C:\\Users\\tester\\Documents\\OpenHarness",
+      lastOpenedAt: 0,
+      available: true,
+    })
+    expect(selectActiveWorkspaceProject(state)).toBe(selectActiveWorkspaceProject(state))
+    expect(selectCommandCatalogCwd(state)).toBe("C:\\Users\\tester\\Documents\\OpenHarness")
+  })
+
+  it("uses session cwd for slash commands when a conversation is open", () => {
+    const session = {
+      id: "session-a",
+      cwd: "D:\\repo",
+      title: "test",
+      model: "test-model",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const state = stateWith({
+      activeSessionId: session.id,
+      selectedProject: {
+        id: "project-a",
+        name: "repo",
+        path: "D:\\other-repo",
+        lastOpenedAt: 1,
+        available: true,
+      },
+      sessionView: {
+        cursor: 0,
+        syncStatus: "connected" as const,
+        session,
+        inputs: [],
+        messages: [],
+        parts: [],
+        runs: [],
+        tasks: [],
+        permissions: [],
+      },
+    })
+
+    expect(selectCommandCatalogCwd(state)).toBe("D:\\repo")
   })
 
   it("selects sending only from the requested session", () => {

@@ -202,6 +202,7 @@ export interface DesktopSessionState
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
   workspaceMode: DesktopWorkspaceMode
+  outsideProjectWorkspaceRoot: string
   selectedProject: DesktopProject | null
   selectedProjectGit: boolean
   selectedProjectGitCheckedAt: number | null
