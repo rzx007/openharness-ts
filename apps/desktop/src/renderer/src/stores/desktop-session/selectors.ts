@@ -1,4 +1,6 @@
 import { createEmptySessionRuntime } from "./operation-state"
+import { projectFromSession } from "./helpers"
+import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
 import type {
   DesktopOperation,
   DesktopOperationKind,
@@ -7,6 +9,7 @@ import type {
 } from "./types"
 
 const emptySessionRuntime = createEmptySessionRuntime()
+const outsideWorkspaceProjects = new WeakMap<DesktopSessionRecord, DesktopProject>()
 const permissionReplyStatesByOperations = new WeakMap<
   Record<string, DesktopOperation>,
   Record<string, PermissionReplyState>
@@ -56,6 +59,23 @@ export function selectActiveSessionId(
   state: DesktopSessionState
 ): DesktopSessionState["activeSessionId"] {
   return state.activeSessionId
+}
+
+/** 右侧工具使用的实际工作目录；项目外会话使用它自己的托管 xN 目录。 */
+export function selectActiveWorkspaceProject(state: DesktopSessionState): DesktopProject | null {
+  const activeSession = state.activeSessionId
+    ? state.sessionView?.session.id === state.activeSessionId
+      ? state.sessionView.session
+      : state.sessions.find((session) => session.id === state.activeSessionId)
+    : null
+  if (activeSession?.workspaceMode === "outside_project") {
+    const cached = outsideWorkspaceProjects.get(activeSession)
+    if (cached) return cached
+    const workspace = projectFromSession(activeSession)
+    outsideWorkspaceProjects.set(activeSession, workspace)
+    return workspace
+  }
+  return state.selectedProject
 }
 
 export function selectActiveSessionRuntime(state: DesktopSessionState): DesktopSessionRuntime {

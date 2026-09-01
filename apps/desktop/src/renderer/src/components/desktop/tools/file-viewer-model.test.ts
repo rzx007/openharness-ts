@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest"
 
-import { shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
+import { isHtmlPath, shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
+
+describe("isHtmlPath", () => {
+  it("recognizes HTML and HTM extensions without case sensitivity", () => {
+    expect(isHtmlPath("site/index.html")).toBe(true)
+    expect(isHtmlPath("site/legacy.HTM")).toBe(true)
+  })
+
+  it("rejects non-HTML files", () => {
+    expect(isHtmlPath("site/index.ts")).toBe(false)
+  })
+})
 
 describe("shouldOfferHtmlBrowserOpen", () => {
   it("offers browser rendering only when HTML exceeds 5000 lines", () => {

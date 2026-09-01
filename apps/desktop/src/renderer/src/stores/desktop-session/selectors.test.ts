@@ -4,6 +4,7 @@ import { createEmptySessionRuntime } from "./operation-state"
 import {
   selectActiveSessionOpening,
   selectActiveSessionPermissionReplies,
+  selectActiveWorkspaceProject,
   selectPermissionReplyError,
   selectPermissionReplyPending,
   selectActiveSessionPromptSubmissions,
@@ -56,6 +57,36 @@ function stateWith(overrides: Partial<DesktopSessionState>): DesktopSessionState
 }
 
 describe("desktop session selectors", () => {
+  it("provides the active outside-project workspace to right-panel tools", () => {
+    const session = {
+      id: "outside-session",
+      projectId: "managed-workspace-project",
+      workspaceMode: "outside_project" as const,
+      cwd: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-09-01\\x1",
+      title: "项目外会话",
+      model: "test-model",
+      status: "idle" as const,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const state = stateWith({
+      activeSessionId: session.id,
+      selectedProject: null,
+      sessions: [session],
+      sessionView: null,
+    })
+    const workspace = selectActiveWorkspaceProject(state)
+    expect(workspace).toEqual({
+      id: "managed-workspace-project",
+      name: "x1",
+      path: "C:\\Users\\tester\\Documents\\OpenHarness\\2026-09-01\\x1",
+      lastOpenedAt: 2,
+      available: true,
+    })
+    expect(selectActiveWorkspaceProject(state)).toBe(workspace)
+  })
+
   it("selects sending only from the requested session", () => {
     const state = stateWithPendingOperation("session-a", "send-prompt")
 

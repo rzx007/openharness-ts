@@ -8,6 +8,7 @@ import {
   FileCode2,
   FilePlus2,
   FolderOpen,
+  Globe2,
   PanelRight,
   PanelRightClose,
   RefreshCw,
@@ -35,12 +36,16 @@ import {
   type FileViewMode,
   type FileViewerTab,
 } from "@renderer/components/desktop/tools/file-viewer"
+import { isHtmlPath } from "@renderer/components/desktop/tools/file-viewer-model"
 import { isMarkdownPath } from "@renderer/components/desktop/tools/file-icons"
 import { Button } from "@renderer/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@renderer/components/ui/input-group"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
 import { Spinner } from "@renderer/components/ui/spinner"
-import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import {
+  selectActiveWorkspaceProject,
+  useDesktopSessionStore,
+} from "@renderer/stores/desktop-session-store"
 import type {
   WorkspaceFileEntry,
   WorkspaceListFilesResult,
@@ -48,7 +53,8 @@ import type {
 } from "@shared/workspace-types"
 
 type LoadState = "idle" | "loading" | "ready" | "error"
-type FileTreeAction = "reveal" | "copy-relative" | "copy-absolute" | "add-to-chat"
+type FileTreeAction =
+  "reveal" | "open-html-in-browser" | "copy-relative" | "copy-absolute" | "add-to-chat"
 
 const fileTreeDefaultWidth = 300
 const fileTreeMinimumWidth = 220
@@ -81,7 +87,7 @@ export function FilesTool({
   openRequest,
   onOpenHtmlInBrowser,
 }: FilesToolProps): React.JSX.Element {
-  const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
+  const selectedProject = useDesktopSessionStore(selectActiveWorkspaceProject)
   const [loadState, setLoadState] = useState<LoadState>("idle")
   const [error, setError] = useState<string | null>(null)
   const [listing, setListing] = useState<WorkspaceListFilesResult | null>(null)
@@ -433,6 +439,7 @@ export function FilesTool({
                 paths={treePaths}
                 selectedPath={activePath}
                 onSelect={(path) => void openFile(path)}
+                onOpenHtmlInBrowser={onOpenHtmlInBrowser}
                 onActionError={(actionError) => setError(errorMessage(actionError))}
               />
             </div>
@@ -491,12 +498,14 @@ function ProjectFileTree({
   paths,
   selectedPath,
   onSelect,
+  onOpenHtmlInBrowser,
   onActionError,
 }: {
   rootPath: string
   paths: string[]
   selectedPath: string | null
   onSelect: (path: string) => void
+  onOpenHtmlInBrowser: (projectPath: string, relativePath: string, name: string) => void
   onActionError: (error: unknown) => void
 }): React.JSX.Element {
   const preparedInput = useMemo(
@@ -567,6 +576,13 @@ function ProjectFileTree({
     try {
       if (action === "reveal") {
         await window.desktop.workspace.revealPath({ rootPath, path: item.path })
+        return
+      }
+
+      if (action === "open-html-in-browser") {
+        if (item.kind === "file" && isHtmlPath(item.path)) {
+          onOpenHtmlInBrowser(rootPath, item.path, item.name)
+        }
         return
       }
 
@@ -652,7 +668,7 @@ function FileTreeContextMenu({
   onActionError: (error: unknown) => void
 }): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement | null>(null)
-  const [position, setPosition] = useState(() => clampFileTreeMenuPosition(anchorRect, 256, 280))
+  const [position, setPosition] = useState(() => clampFileTreeMenuPosition(anchorRect, 256, 320))
 
   useLayoutEffect(() => {
     const place = (): void => {
@@ -684,6 +700,12 @@ function FileTreeContextMenu({
       <FileTreeMenuButton icon={FolderOpen} onClick={() => onAction("reveal")}>
         在 File Explorer 中打开
       </FileTreeMenuButton>
+
+      {item.kind === "file" && isHtmlPath(item.path) ? (
+        <FileTreeMenuButton icon={Globe2} onClick={() => onAction("open-html-in-browser")}>
+          在内置浏览器打开
+        </FileTreeMenuButton>
+      ) : null}
 
       <OpenWithSubmenu
         path={item.path}

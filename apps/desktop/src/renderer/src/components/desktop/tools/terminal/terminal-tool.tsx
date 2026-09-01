@@ -18,7 +18,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
-import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import {
+  selectActiveWorkspaceProject,
+  useDesktopSessionStore,
+} from "@renderer/stores/desktop-session-store"
 import type {
   DesktopTerminalCreateInput,
   DesktopTerminalEvent,
@@ -106,7 +109,7 @@ export function TerminalTool({
   onActiveTerminalChangeRef.current = onActiveTerminalChange
   onCommandSettledRef.current = onCommandSettled
 
-  const selectedProject = useDesktopSessionStore((state) => state.selectedProject)
+  const selectedProject = useDesktopSessionStore(selectActiveWorkspaceProject)
   const rebindProject = useDesktopSessionStore((state) => state.rebindProject)
   const [records, setRecords] = useState<DesktopTerminalRecord[]>([])
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null)

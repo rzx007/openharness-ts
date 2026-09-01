@@ -20,7 +20,10 @@ import type {
   TerminalSessionTabInfo,
 } from "@renderer/components/desktop/tools/terminal/terminal-tool"
 import { cn } from "@renderer/lib/utils"
-import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
+import {
+  selectActiveWorkspaceProject,
+  useDesktopSessionStore,
+} from "@renderer/stores/desktop-session-store"
 import {
   readPersistedUtilityFileTabs,
   writePersistedUtilityFileTabs,
@@ -98,12 +101,11 @@ export function UtilityPanel({
   const [persistedFileTabs, setPersistedFileTabs] = useState<PersistedFileTabsByScope>(
     readPersistedUtilityFileTabs
   )
-  const selectedProjectPath = useDesktopSessionStore((state) => state.selectedProject?.path)
+  const workspaceProject = useDesktopSessionStore(selectActiveWorkspaceProject)
+  const selectedProjectPath = workspaceProject?.path
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const selectedProjectGit = useDesktopSessionStore((state) => state.selectedProjectGit)
-  const selectedProjectAvailable = useDesktopSessionStore(
-    (state) => state.selectedProject?.available ?? false
-  )
+  const selectedProjectAvailable = workspaceProject?.available ?? false
   const availableTools = selectedProjectGit
     ? utilityToolOrder
     : utilityToolOrder.filter((tool) => tool !== "review")
