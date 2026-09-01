@@ -13,6 +13,12 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 记忆积久变乱？      →  /dream 梦境整合         定期维护
 ```
 
+## 运行时所有权
+
+`agent-runtime` 在组装 `DefaultNodeAgent` 时创建并持有 `AgentMemoryRuntime`；Host 不传入记忆目录或 Memory store。user/project 的 Markdown 记忆位置仍由现有 settings 与路径解析逻辑决定，运行时只按这些既有规则读取、检索和写入。
+
+这与 session_memory 是两条独立链路：前者是跨会话的受管 Markdown 记忆，后者是 compact 时使用的会话 checkpoint。session_memory 不替代长期 Memory，也不把 Host 的附件能力当成 Memory 的所有者。
+
 ---
 
 ## 一图看清四层
@@ -123,7 +129,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 > **当前实现状态：✅ 已完整接线。**
 >
 > - 写入：daemon root Run 成功收尾后，从 durable transcript 自动写（可用 `memory.sessionMemoryEnabled=false` 关闭）
-> - 读回：`/compact` 和 autocompact 触发时，通过 `setAttachmentsProvider` 读取 checkpoint，注入摘要 prompt 的 `## Session Memory Checkpoint` 段落
+> - 读回：`/compact` 和 autocompact 触发时，通过 `setCompactContextProvider` 读取 checkpoint，注入摘要 prompt 的 `## Session Memory Checkpoint` 段落
 
 ---
 
@@ -260,7 +266,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 | **目录**  | `~/.openharness-ts/data/session-memory/<项目>-<hash>/` | daemon SQLite |
 | **内容**  | goal + 消息摘要（12k 上限）                               | 完整 durable Session、Input、Run、Message 和 Part |
 | **用途**  | 给 compact 提供连续性                                   | 多端恢复、审计和运行状态 |
-| **由谁读** | compact 边界（attachmentsProvider 注入）                | daemon Application 和共享 client |
+| **由谁读** | compact 边界（`setCompactContextProvider` 注入）        | daemon Application 和共享 client |
 
 
 项目级旧 Session JSON 不参与 daemon 主线，也不再由 CLI 每轮额外写一份。多端恢复只使用 daemon SQLite、snapshot 和 SSE。历史设计见 [session-storage-design.md](./session-storage-design.md)。
@@ -275,7 +281,7 @@ OpenHarness 的"记忆"不是单一模块，而是**四层互补体系**。每�
 | tool_outputs inline/preview 截断 | ✅                    | applyToolOutputBudget 在 query-engine.ts，写入 messages 前截断    |
 | tool_outputs microCompact 接入   | ✅                    | MCP 工具已纳入 microcompactable，同内置工具一起按 keepRecent 清理          |
 | session_memory 每轮写入            | ✅ daemon 所有产品入口 | root Run 成功后执行，受 `memory.enabled` 与 `memory.sessionMemoryEnabled` 控制 |
-| session_memory compact 读回      | ✅                    | compact 时经 attachmentsProvider 注入摘要 prompt                 |
+| session_memory compact 读回      | ✅                    | compact 时经 `setCompactContextProvider` 注入摘要 prompt         |
 | personalization 抽取             | ✅                    | 10 个正则，root Run 成功后自动；`/remember` 也触发 |
 | `/remember` 手动提取               | ✅                    | LLM 提取，签名去重                                                |
 | `/remember` 按轮自动               | ✅                    | 默认开启；每轮结束 best-effort 提取，可用 `memory.autoExtractEnabled=false` 关闭 |

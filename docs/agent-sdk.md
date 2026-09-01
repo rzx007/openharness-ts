@@ -49,13 +49,11 @@ const agent = await createDefaultNodeAgent({
   provider: "codex",
   maxTurns: 20,
   hostToolCeiling: ["Read", "Glob", "Grep"],
-  hostCapabilities: {
-    permissions: {
-      requestPermission: async (request, context) => {
-        return { status: "denied", reason: `Not allowed: ${request.toolName}` };
-      },
-    },
+  capabilityOverrides: {
+    terminal: { value: terminal, jobs: terminalJobs },
+    backgroundShell: { value: backgroundShell, jobs: shellJobs },
   },
+  effects: { requestPermission },
   onEvent: async (event) => {
     await durableEventSink.apply(event);
   },
@@ -70,7 +68,8 @@ const agent = await createDefaultNodeAgent({
 | `client` | programmatic embedding、自定义 provider 或测试用消息客户端 |
 | `systemPrompt` / `maxTurns` / `effort` / `fastMode` | 执行行为覆盖 |
 | `hostToolCeiling` / `roleAllowedTools` / `disallowedTools` | 工具范围，见下一节 |
-| `hostCapabilities` | 宿主明确提供的 Permission、Jobs、Terminal、Schedules、child environment 和 Workflow repository |
+| `capabilityOverrides` | 逐项替换或关闭默认能力；Terminal、后台 Shell 等 producer 使用 `{ value, jobs }` bundle |
+| `effects` | 宿主交互副作用；目前 `requestPermission` 是可选 permission effect |
 | `onEvent` | 有序、可靠、可等待的 host sink；失败会终止当前 operation |
 | `extensions` / `mcpServers` | OpenHarness extension 与 MCP 增量配置 |
 | `childBudget` | 整棵 child 树的深度、活动数和累计创建数限制 |
@@ -103,11 +102,15 @@ await createDefaultNodeAgent({
 
 这个 Agent 可以派出 Worker，但 Worker 仍然只能在 `Read` / `Agent` / `JobWait` 这个上限内活动，不能因为内置 worker 写了 `tools: ["*"]` 就拿到 `Bash` / `Edit` / `Write`。
 
-## 默认 Node 宿主能力
+## 默认 Node 能力与 Host 覆盖
 
-完全不传 `hostCapabilities` 时，`createDefaultNodeAgent()` 提供适合本机独立运行的默认组合：权限默认拒绝，Jobs 使用本地实现，child environment 使用默认 Git/worktree 策略。显式传入 `hostCapabilities` 后，只使用调用方交进来的能力；其中 `permissions` 必填，其他能力缺失就不可用，不会从旧的顶层字段寻找备用值。
+`createDefaultNodeAgent()` 是开箱即用的 Node 入口：未覆盖时会提供本地 Terminal、Jobs、后台 Shell、Git/worktree child environment、Workflow repository 和 Memory；没有 `effects.requestPermission` 时权限会安全拒绝。Attachments 与 Schedules 没有可用的本地默认值，未由 Host 覆盖时状态就是 `unavailable`，相应工具不会注册。
 
-Kernel 入口更严格：它不会创建本地 Jobs、默认 child environment 或其他 Node 能力，所有能力都由调用方明确传入。
+`capabilityOverrides` 按能力独立解析：不传表示使用该能力的默认值，传入 `false` 表示关闭，传入对象表示使用 Host 覆盖。因此只替换 Terminal 不会关掉本地后台 Shell 或 Memory。`terminal` 与 `backgroundShell` 必须同时提供它们创建 Job 所需的 `jobs` producer；这样 `Job*` 工具才能观察与控制这些 Job。
+
+Host 覆盖是**借用对象**，不是由 Agent 接管的资源：它们必须能覆盖 root session 的整棵 child session tree，且由 Host 自己在合适的生命周期释放。`agent.close()` 只清理 runtime 自己创建的默认资源；不会调用 Host Terminal、后台 Shell 或其 Jobs 的释放逻辑。
+
+Kernel 入口保持可嵌入：它不会创建本地 Terminal、Jobs、child environment 或其他 Node 默认能力，调用方必须明确提供运行时与所需能力。
 
 ## Event 与 Effect
 
