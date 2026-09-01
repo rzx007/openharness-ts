@@ -1,267 +1,186 @@
 # Agent Runtime 默认能力与 Host 扩展设计
 
-> 状态：已完成设计讨论，等待书面规格审查。本文只定义架构与迁移边界，不包含实现。
+> 状态：已按架构审核意见修订，等待书面规格复审。本文定义目标架构和迁移边界，不包含实现。
 
-## 背景
+## 1. 背景
 
-OpenHarness 现有 Terminal、后台 Shell、Jobs、附件、长期记忆、Workflow、Schedules 等功能本身已经比较完整，但组装方式不够自洽：多项基础能力依赖 Host 注入，只要 Host 没有提供，Agent 就会失去对应能力。
+OpenHarness 已经具备 Terminal、后台 Shell、Jobs、附件、长期记忆、Workflow、Schedules 等能力，但这些能力目前主要由 Host 注入。结果是：同一个 Agent 在 daemon 中功能完整，换成 CLI、SDK 或测试调用后，只要 Host 没有完成同样的接线，能力就会缺失。
 
-当前最明显的问题是，`composeOpenHarnessAgent()` 只在完全没有 `hostCapabilities` 对象时创建本地 Jobs 和 Background Shell。Host 即使只想接管权限或 Terminal，也可能意外关闭无关的本地默认能力。与此同时，工具注册根据一组 capability boolean 判断，真正的实现又在后续通过 `QueryEngine.set*()` 接入，两条链可能发生漂移。
+问题不在这些功能本身，而在默认装配的责任放错了位置：
 
-长期记忆也暴露了同一个所有权问题：读取记忆、选择相关内容、注入模型上下文和提供 `Remember` 是 Agent 自身行为；Markdown 写到哪里、是否提供管理 UI、是否跨设备同步才是可替换的存储和业务能力。不能为了让 daemon 管理记忆，就让 daemon 成为 Agent 拥有记忆的前提。
+- `AgentKernel` 应保持轻量、可移植，只负责模型循环、工具执行、权限结果和运行状态。
+- `DefaultNodeAgent` 应提供 Node 环境下完整且一致的默认装配。
+- Host 应只覆盖本地默认无法满足的部分，例如 daemon 的持久任务、会话附件、权限 UI 和长期调度。
 
-本设计的核心目标是：
+现有 `hostCapabilities` 还有一个具体缺陷：代码会根据“是否存在整个 Host 对象”决定是否创建部分本地能力。Host 只接管一项能力，也可能意外关闭其他默认能力。
 
-> `DefaultNodeAgent` 是完整、开箱即用的 Node Agent；Host 可以逐项替换、包装或明确关闭能力，但不负责从零拼装 Agent。
+本设计的目标是：
 
-## 设计目标
+> `DefaultNodeAgent` 自洽、开箱即用；Host 逐项替换、增强或关闭能力；`AgentKernel` 不绑定 Node 终端、进程和本机持久化。
 
-1. `createDefaultNodeAgent({ cwd })` 在没有 daemon 或其他 Host 能力注入时，默认拥有本地工作所需的基础能力。
-2. `AgentKernel` 保持跨平台，不直接绑定 Node PTY、子进程或本机文件系统。
-3. Host 覆盖一项能力时，不影响其他未提及能力。
-4. 工具、执行实现、系统提示词、compact 上下文和能力报告使用同一份最终能力结果。
-5. Agent 行为与底层实现分离：Feature 决定 Agent 怎样使用能力，Capability 实现负责操作外部资源。
-6. 长期记忆继续使用 OpenHarness 的 `Remember` 语义和现有 Markdown 格式，模型不接触受管记忆路径。
-7. 子 Agent 继承覆盖意图和工具上限，不直接共享父 Agent 的本地默认实例。
-8. Host-owned 资源不由 Agent 释放，runtime-owned 资源可靠、幂等地清理。
-9. 不保留旧 `hostCapabilities` 双轨兼容。
+## 2. 设计目标
 
-## 非目标
+1. `createDefaultNodeAgent({ cwd })` 不依赖 daemon 即可获得 Node 环境中能够成立的默认能力。
+2. Host 覆盖一项能力时，不影响其他未指定能力。
+3. 工具注册、运行实现、提示词、compact 上下文和能力诊断使用同一份解析结果。
+4. Terminal、后台 Shell、子 Agent 和 Workflow 产生的长任务都能通过统一 Jobs 工具观察和控制。
+5. 长期记忆继续由 agent-runtime 读取、注入和写入，沿用现有 managed `Remember` 与 Markdown 数据。
+6. 默认资源由 Agent 释放，Host 传入的资源由 Host 释放。
+7. 子 Agent 的默认本地资源相互隔离；Host 覆盖必须明确支持整个会话树。
+8. 一次性迁移，不保留旧 `hostCapabilities` 双轨兼容。
+
+## 3. 非目标
 
 本次不做：
 
-- 不恢复此前实验分支上的 `ContextPersistenceService`。
-- 不把长期记忆写入 SQLite。
-- 不修改现有持久记忆 Markdown schema 和目录结构。
-- 不增加记忆管理 UI、跨设备同步或组织级记忆。
-- 不重新实现 managed `Remember`；它是本设计直接复用的现有基础。
-- 不把 Terminal、Jobs、Attachments 和 Memory 统一成一个巨型 Backend。
-- 不建立公开的通用 Feature 插件框架。
-- 不增加不耐久的进程内 Schedule 默认实现。
-- 不增加 OCR 默认实现。
-- 不改变模型、MCP、Plugin 的产品语义。
+- 不恢复 `ContextPersistenceService`，也不把记忆改存 SQLite。
+- 不设计新的 `AgentMemoryStore`、通用 Context Service 或通用 Backend。
+- 不建立公开或内部的通用 Feature 插件框架。
+- 不为 standalone Agent 伪造附件入库、附件目录、OCR 或持久 Schedule 服务。
+- 不改变现有长期记忆 Markdown 格式和目录规则。
+- 不重写 Terminal、Workflow、Child Agent 或 managed `Remember` 的业务语义。
+- 不改变 Plugin、MCP、模型和 Schedule 产品语义。
 
-## 外部方案参考
-
-Deep Agents 的做法提供了三个有用参照：
-
-- 构造函数先安装完整的默认 middleware，再允许调用方按名称替换或追加行为。
-- Memory middleware 负责读取并注入记忆，Backend 决定内容来自线程状态、本地文件还是远程 Store。
-- Node 与 browser 使用不同入口；Node-only 的本地文件和 Shell 实现不进入 browser 入口。
-
-OpenHarness 吸收“默认完整组装、行为与存储分离、逐项覆盖”的原则，但不照搬统一文件 Backend，也不让模型用通用 `edit_file` 修改长期记忆。
-
-参考：
-
-- <https://docs.langchain.com/oss/javascript/deepagents/memory>
-- <https://docs.langchain.com/oss/javascript/deepagents/backends>
-- <https://github.com/langchain-ai/deepagentsjs/blob/main/libs/deepagents/src/agent.ts>
-- <https://github.com/langchain-ai/deepagentsjs/blob/main/libs/deepagents/src/middleware/memory.ts>
-- <https://github.com/langchain-ai/deepagentsjs/blob/main/libs/deepagents/src/middleware/utils.ts>
-
-## 总体架构
+## 4. 总体边界
 
 ```text
-Host：daemon / desktop / CLI / SDK 调用方
-  只提供能力覆盖、权限交互、业务管理和 UI
-                    │
-                    │ capabilityOverrides / effects
-                    ▼
+daemon / desktop / CLI / SDK
+  提供 overrides、会话级附件、权限交互、持久调度和业务 UI
+                         │
+                         ▼
 DefaultNodeAgent
-  创建默认 Node 能力工厂
-  逐项应用覆盖或禁用
-  得到 ResolvedAgentCapabilities
-  安装 Agent Features
-                    │
-                    ▼
-Agent Features
-  Memory / Terminal / Jobs / Background Shell
-  Attachments / Workflow / Skills / Child Agent / Context
-  决定 Agent 如何理解和使用能力
-                    │
-                    ▼
+  读取 Settings
+  创建 Node 默认实现
+  应用逐项 override / false
+  组合最终 Job 控制面
+  接入工具、提示词、compact 和 cleanup
+                         │
+                         ▼
 AgentKernel
-  模型循环、工具执行、权限判断、事件、中断和状态
-  不创建 Node 进程、PTY 或本机持久化
+  模型循环、工具调用、权限结果、事件、中断、会话状态
 ```
 
-### 所有权规则
+这里没有独立的“Agent Feature 层”。Memory、Terminal、Workflow 等名称只是能力领域，不对应 `FeatureRegistry`、生命周期接口或插件协议。
 
-- Kernel 拥有运行机制。
-- Feature 拥有 Agent 行为。
-- Capability 实现拥有外部资源操作。
-- `DefaultNodeAgent` 拥有默认组装。
-- Host 只拥有覆盖、权限交互和业务增强。
+agent-runtime 内可以使用普通、明确的装配函数，例如：
 
-### 包级职责
-
-```text
-packages/core
-  跨平台能力协议、事件、Kernel 所需基础类型
-
-packages/agent-runtime
-  AgentKernel
-  Capability Resolver
-  内部 Feature 安装函数
-  DefaultNodeAgent 组装入口
-  Node 默认能力适配层
-
-packages/terminal
-  可移植 Terminal 协议
-
-packages/terminal-node
-  LocalTerminalProvider 等 Node Terminal 实现
-
-packages/jobs
-  可移植 Job 协议
-
-packages/tools
-  Feature 使用的模型工具和 LocalAgentJobHost
-
-packages/config / packages/core 现有配置模块
-  配置目录与受管路径解析
-
-packages/server / apps/daemon
-  daemon 能力实现、覆盖接线、持久任务、权限 UI 和业务管理
+```ts
+setupMemory(...);
+setupTerminal(...);
+setupJobs(...);
+setupWorkflow(...);
+setupCompactContext(...);
 ```
 
-默认 Markdown 记忆实现先留在 agent-runtime 现有边界内，不为了形式统一提前拆新包。
+这些函数只减少组装文件体积，不形成新的扩展系统。Host 的扩展入口只有本文明确列出的 override、effect 和会话数据 provider。
 
-## Kernel 与 DefaultNodeAgent 的边界
+## 5. Kernel 与 DefaultNodeAgent
 
-### AgentKernel
+### 5.1 AgentKernel
 
 Kernel 负责：
 
 - 模型与工具调用循环。
 - Run 状态、事件、中断和取消。
-- 权限判断结果的执行。
-- 接收已经解析完成的能力和工具。
-- Feature 所需的稳定运行入口。
+- 执行已经得出的权限决定。
+- 接收已经解析完成的工具和能力实现。
 
 Kernel 不负责：
 
-- 寻找 Host 或本机默认能力。
-- 创建 PTY、Node 子进程或本地存储。
-- 推断某个 Host 没传的能力是否应当存在。
+- 探测本机是否有 PTY、Shell 或存储目录。
+- 创建 Node 子进程、本机 Repository 或 Markdown 记忆运行时。
+- 根据 Host 是否存在推断默认能力。
+- 管理 daemon 的附件、任务和调度状态。
 
-直接使用低层 Kernel 时，调用方可以显式组装受限或测试运行时。完整默认体验定义在 `DefaultNodeAgent`。
+直接使用 Kernel 的调用方自行提供完整依赖，适合测试、浏览器和受限嵌入场景。
 
-### DefaultNodeAgent
+### 5.2 DefaultNodeAgent
 
 `DefaultNodeAgent` 是普通 Node 调用方的主要入口，负责：
 
-1. 读取 cwd、session、Settings 和本机配置。
-2. 发现 Skills、Plugins、MCP 和 Agent 定义。
-3. 创建默认 Node capability factories。
-4. 逐项应用 capability overrides。
-5. 安装默认 Agent Features。
-6. 管理 runtime-owned 资源。
-7. 返回已经能工作的 Agent。
+1. 读取 cwd、Settings、Session 和本机配置。
+2. 创建现有 `AgentMemoryRuntime`、Child Manager、Workflow Repository 等默认对象。
+3. 应用逐项 override 或显式关闭。
+4. 把所有长任务来源组合成一个最终 `AgentJobHost`。
+5. 将最终实现同时接到工具、QueryEngine、提示词和 compact。
+6. 登记并释放由 runtime 创建的资源。
 
-## 公开 API
+## 6. 公开配置模型
 
-旧的 `hostCapabilities` 替换为 `capabilityOverrides`。新名称明确表示调用方只提交差异，而不是 Agent 的完整能力清单。
+旧 `hostCapabilities` 改为 `capabilityOverrides`。三态规则为：
+
+| 值 | 含义 |
+|---|---|
+| 未传或 `undefined` | 使用该运行环境的默认行为 |
+| 实现对象 | 使用 Host 提供的实现 |
+| `false` | 明确关闭该能力 |
+
+`false` 是编程接口唯一的显式关闭值。Settings 中已有的 enable/disable 开关在装配入口归一化为同一结果；`disallowedTools` 只隐藏工具，不改变底层能力状态。
+
+目标接口如下：
 
 ```ts
 type CapabilityOverride<T> = T | false;
 
+interface ObservableJobProducer<T> {
+  value: T;
+  jobs: AgentJobHost;
+}
+
 interface AgentCapabilityOverrides {
-  terminal?: CapabilityOverride<AgentTerminalHost>;
-  jobs?: CapabilityOverride<AgentJobHost>;
-  backgroundShell?: CapabilityOverride<AgentBackgroundShellHost>;
+  terminal?: CapabilityOverride<ObservableJobProducer<AgentTerminalHost>>;
+  backgroundShell?: CapabilityOverride<
+    ObservableJobProducer<AgentBackgroundShellHost>
+  >;
+  jobs?: false;
   attachments?: CapabilityOverride<AgentAttachmentResourceHost>;
-  memory?: CapabilityOverride<AgentMemoryStore>;
+  memory?: false;
   childEnvironment?: CapabilityOverride<AgentChildEnvironmentProvider>;
   workflowRepository?: CapabilityOverride<WorkflowRunRepository>;
   imageToText?: CapabilityOverride<AgentImageToTextHost>;
   schedules?: CapabilityOverride<AgentScheduleEffects>;
 }
 
-interface AgentEffectOverrides {
-  requestPermission?: AgentEffects["requestPermission"];
+interface AgentEffects {
+  requestPermission?: RequestPermission;
 }
 ```
 
-用法：
+这里有两个有意为之的限制：
 
-```ts
-const agent = await createDefaultNodeAgent({
-  cwd,
-  capabilityOverrides: {
-    terminal: daemonTerminal,
-    jobs: daemonJobs,
-    attachments: false,
-    memory: daemonMemoryStore,
-  },
-  effects: {
-    requestPermission: daemonPermissionPrompt,
-  },
-});
-```
+- Memory 第一阶段只允许使用现有 agent-runtime 默认实现或 `false`，不接受新的存储接口。
+- Jobs 是其他能力共同产生的控制面，不接受一个对象直接替换整个最终 Jobs；Host 的 Job 来源随 Terminal 或后台 Shell override 一起提供。
 
-### 三态覆盖规则
+同一个 Host `AgentJobHost` 可以被多个 producer bundle 引用。装配时按对象身份去重，只加入最终 Jobs 一次。
 
-| 输入 | 结果 |
-|---|---|
-| 未提供或 `undefined` | 使用 `DefaultNodeAgent` 的默认实现 |
-| 具体实现对象 | 使用调用方实现 |
-| `false` | 明确关闭，不创建默认实现 |
+### 6.1 为什么 Job producer 必须携带 Jobs
 
-增加一个 override 不能改变其他未提及能力。
+`AgentTerminalHost.open()` 和后台 Shell 会返回 Job ID，但观察、输入、等待和取消通过 `AgentJobHost` 完成。只替换 producer、不替换观察来源，会产生“任务启动成功，但 Agent 再也看不到它”的半能力。
 
-## 默认能力工厂
+因此 Host Terminal 和 Host Background Shell 必须以 `{ value, jobs }` 成对传入。类型结构直接表达这个契约，不依靠文档约定或运行时猜测。
 
-默认实现按需创建，不先创建所有对象再覆盖：
+### 6.2 `jobs: false`
 
-```ts
-interface DefaultNodeCapabilityFactories {
-  terminal(): Promise<AgentTerminalHost>;
-  jobs(): Promise<AgentJobHost>;
-  backgroundShell(): Promise<AgentBackgroundShellHost>;
-  attachments(): Promise<AgentAttachmentResourceHost>;
-  memory(): Promise<AgentMemoryStore>;
-  childEnvironment(): Promise<AgentChildEnvironmentProvider>;
-  workflowRepository(): Promise<WorkflowRunRepository>;
-}
-```
+Jobs 被明确关闭时，所有会产生可持续 Job ID 的能力也必须显式关闭，包括 Terminal、后台 Shell、Child Agent 和 Workflow。否则组装直接报配置错误，不静默产生不可观察的任务。
 
-如果 override 是对象或 `false`，对应默认 factory 不执行。
+正常情况下没有必要单独关闭 Jobs；调用方通常通过工具白名单限制角色能否使用 Job 工具。`jobs: false` 只服务于需要彻底禁止后台任务的受限运行时。
 
-Jobs 和 Background Shell 可以共享一个带缓存的 `LocalAgentJobHost`。共享实现不改变它们在 Agent 层的不同语义。同一 runtime-owned 实例只登记和执行一次 cleanup。
+## 7. 能力解析结果
 
-默认能力存在创建顺序依赖：`LocalAgentJobHost` 需要 `AgentChildManager`，而 Child Manager 先需要 `childEnvironment`。组装采用两个明确阶段，不引入通用依赖注入容器：
-
-```text
-阶段一：解析 childEnvironment，创建 AgentChildManager
-阶段二：解析 Jobs、Background Shell 和其他能力，安装 Features
-```
-
-## 最终能力结果
+内部保留一份轻量、只读的最终结果：
 
 ```ts
 type ResolvedCapability<T> =
-  | {
-      status: "available";
-      implementation: T;
-      source: "default" | "override";
-      owner: "runtime" | "host";
-    }
-  | {
-      status: "disabled";
-      reason: "explicitly-disabled";
-    }
-  | {
-      status: "unavailable";
-      reason: string;
-    };
+  | { status: "available"; value: T; source: "default" | "override" }
+  | { status: "disabled" }
+  | { status: "unavailable"; reason: string };
 
 interface ResolvedAgentCapabilities {
   terminal: ResolvedCapability<AgentTerminalHost>;
-  jobs: ResolvedCapability<AgentJobHost>;
   backgroundShell: ResolvedCapability<AgentBackgroundShellHost>;
+  jobs: ResolvedCapability<AgentJobHost>;
   attachments: ResolvedCapability<AgentAttachmentResourceHost>;
-  memory: ResolvedCapability<AgentMemoryStore>;
+  memory: ResolvedCapability<AgentMemoryRuntime>;
   childEnvironment: ResolvedCapability<AgentChildEnvironmentProvider>;
   workflowRepository: ResolvedCapability<WorkflowRunRepository>;
   imageToText: ResolvedCapability<AgentImageToTextHost>;
@@ -269,302 +188,275 @@ interface ResolvedAgentCapabilities {
 }
 ```
 
-`disabled` 表示调用方有意关闭；`unavailable` 表示这个发行环境没有提供可选实现。承诺存在或明确覆盖的能力初始化失败时，Agent 创建直接失败，不保留长期 `failed` 状态。
+这不是服务定位器，也不暴露实现对象给 UI。它只在装配期和 Agent 内部使用；公开的 `agent.getCapabilities()` 返回去除 `value` 的诊断快照。
 
-工具注册、`QueryEngine` 接线、系统提示词、Feature 安装、compact 内容、子 Agent 组装和诊断全部读取这份结果。删除为了工具注册单独生成的 capability boolean 投影。
+不新增 `agent.capabilities.resolved` 事件。当前没有动态消费者需要这个事件，调用方在创建完成后查询一次即可。
 
-## 默认能力清单
+## 8. 默认能力清单
 
-| 能力 | DefaultNodeAgent 默认行为 | 分类 |
+| 能力 | `DefaultNodeAgent` 默认行为 | 结果 |
 |---|---|---|
-| Files | 现有工作区文件工具 | 基础 |
-| Terminal | 基于 `@openharness/terminal-node` 的本地实现 | 基础 |
-| Jobs | 本地 Job Host | 基础 |
-| Background Shell | 与本地 Job Host 共享底层实现 | 基础 |
-| Attachments | 本地附件资源实现 | 基础 |
-| Memory | 现有 managed Remember + Markdown 记忆 | 基础 |
-| Child Environment | 默认 Node 子 Agent 环境 | 基础 |
-| Workflow | Agent Workflow + 本地文件 Repository | 基础 |
-| Skills | 现有本地发现和按需加载 | 基础行为 |
-| Image to Text | 没有 Provider 时 unavailable | 可选增强 |
-| Schedules | 没有持久调度器时 unavailable | 可选增强 |
+| Files | 现有工作区文件工具 | available |
+| Terminal | `LocalTerminalProvider` + Job 适配 | available |
+| Background Shell | 现有 `LocalAgentJobHost` | available |
+| Jobs | 聚合本地 Terminal、Shell、Child 和 Workflow 来源 | available |
+| Memory | 现有 `createAgentMemoryRuntime()` + managed `Remember` | available，受 Settings 控制 |
+| Child Environment | 现有默认 Node 子 Agent 环境 | available |
+| Workflow | `FileWorkflowRunRepository({ cwd })` | available |
+| Skills | 现有本地发现和原生 Skill 加载 | available |
+| Attachments | 无 standalone 入库和会话目录 | unavailable |
+| Image to Text | 没有 Provider | unavailable |
+| Schedules | 没有持久调度器 | unavailable |
 
-## Agent Feature 接线
+“开箱即用”指 standalone 环境能够诚实提供的能力，而不是为所有 daemon 业务能力制造空实现。附件必须先有会话授权、asset ID、MIME 和内容入库；Schedules 必须在进程退出后仍可唤醒任务。两者没有对应基础设施时应明确 unavailable。
 
-第一版不发布通用 Feature 插件协议，只在 agent-runtime 内使用明确安装函数：
+## 9. Jobs 是统一控制面
 
-```ts
-installMemoryFeature(context);
-installTerminalFeature(context);
-installJobsFeature(context);
-installBackgroundShellFeature(context);
-installAttachmentsFeature(context);
-installWorkflowFeature(context);
-installScheduleFeature(context);
-installImageToTextFeature(context);
-installChildAgentFeature(context);
+### 9.1 Job 来源
+
+最终 `AgentJobHost` 由一个具体的组合器产生，来源包括：
+
+```text
+LocalTerminalProvider 的 Terminal Job 适配 ──┐
+LocalAgentJobHost 的后台进程 ────────────────┤
+AgentChildManager 的子 Agent ────────────────┼─→ CompositeAgentJobHost
+WorkflowRunRepository 的 Workflow Run ──────┤
+Host producer bundle 携带的 Job Host ───────┘
 ```
 
-内部安装上下文提供：
+`CompositeAgentJobHost` 是解决现有长任务控制问题的具体组件，不是通用依赖注入容器。它只实现 `AgentJobHost`：
 
-- 最终能力结果。
-- Runtime / QueryEngine。
-- Tool 注册。
-- Prompt section 注册。
-- Compact contributor 注册。
-- Cleanup 注册。
+- `list` 合并各来源，并按来源身份与 Job ID 去重。
+- `read`、`wait`、`send`、`cancel` 根据 Job ID 所属来源路由。
+- 新创建的本地 Job 在创建时登记来源。
+- 对重启后恢复或 Host 已存在的 Job，组合器通过各来源的 `list/read` 建立归属。
+- 多个来源声称拥有同一个 Job ID 时，返回明确冲突错误，不随机选择。
 
-每个 Feature 集中处理自己的工具、实际实现、提示词和上下文贡献。例如 Terminal 只有在能力为 available 时，同时注册工具、接入实现并增加提示词。不存在工具和实现分别判断的路径。
+每个来源必须只投影自己对应 producer 创建的 Job。daemon 当前的 `DaemonJobService` 同时汇总 Terminal、session task 和 Workflow；迁移后要在对 Agent 的适配层拆成不重叠的来源：Terminal bundle 只提供 Terminal Jobs，后台 Shell bundle 只提供它创建的 detached process Jobs，Child 和 Workflow 继续由各自 resolved 本地来源提供。daemon 内部仍可复用同一个 service 和 store，不要求拆掉业务服务，只需收窄交给组合器的投影视图。
 
-## 权限模型
+### 9.2 LocalAgentJobHost 调整
 
-`requestPermission` 不再是创建 Agent 的必填 Host capability，而是可选交互 Effect。
+当前 `LocalAgentJobHost` 在构造函数中自行创建 `FileWorkflowRunRepository`。这会导致 Workflow 工具关闭或替换 Repository 后，Jobs 仍然通过另一份隐式 Repository 暴露 Workflow。
+
+目标构造方式改为显式注入：
+
+```ts
+new LocalAgentJobHost({
+  cwd,
+  sessionId,
+  childManager,
+  workflowRepository, // undefined 表示没有 Workflow Job 来源
+});
+```
+
+同一份 resolved `workflowRepository` 同时交给 Workflow 工具和 `LocalAgentJobHost`。`workflowRepository: false` 时，两边同时消失。
+
+### 9.3 Terminal 闭环
+
+`LocalTerminalProvider` 已有 create/write/resize/read/wait/signal/kill/list/subscribe/dispose 能力，但 `AgentTerminalHost` 只暴露打开入口。默认 Terminal 适配必须同时提供：
+
+- `AgentTerminalHost`：供 Terminal 工具创建会话。
+- `AgentJobHost` 来源：把 Terminal 会话映射到 list/read/wait/send/cancel。
+- cleanup：关闭 provider 创建的本地资源。
+
+这三部分来自同一个 provider，不重复实现 PTY。
+
+## 10. Memory
+
+Memory 保持现有 `AgentMemoryRuntime`：
+
+```ts
+interface AgentMemoryRuntime {
+  manager: MemoryManager;
+  directory: string;
+  retrieve(...): Promise<...>;
+  remember(...): Promise<...>;
+}
+```
+
+agent-runtime 继续负责：
+
+- 创建 `AgentMemoryRuntime`。
+- 检索相关记忆并临时注入模型上下文。
+- 注册 managed `Remember`。
+- user scope 通过现有受管入口更新 `USER.md`。
+- project scope 通过现有 `MemoryManager` 写项目 Markdown。
+- Run 后执行现有自动提取，并避免与主动 Remember 重复。
+- 阻止通用 Write/Edit 修改受管记忆路径。
+
+第一阶段不允许 Host 替换 Memory。原因是现有 user scope、project scope、检索、Remember 和自动提取并不是一个简单 Store；贸然抽一个 `AgentMemoryStore` 会把已经存在的语义拆坏，或重新创造重型 Context Service。
+
+若未来确实需要远程 Memory，单独设计最小持久化协议，并先明确 user/project scope、并发更新和路径不可见性。它不属于本次装配重构。
+
+长期 Memory 与 Session Memory 继续分离：
+
+- 长期 Memory 跨会话保存稳定偏好、事实和项目知识。
+- Session Memory 是 compact checkpoint，保存当前目标、进度和下一步。
+
+## 11. Compact 上下文
+
+不建立通用 contributor registry。agent-runtime 直接组合当前已有的两个来源：
+
+```ts
+runtime.queryEngine.setCompactContextProvider(async () => ({
+  attachmentCatalog: await attachmentCatalogProvider?.(),
+  sessionMemory: await sessionMemoryProvider?.(),
+}));
+```
+
+目标 API 将当前含义过窄的 `setAttachmentsProvider` / `CompactAttachmentsProvider` 一次性改名为 `setCompactContextProvider` / `CompactContextProvider`。
+
+daemon 在创建 Agent 时分别传入：
+
+- 会话附件目录 provider。
+- Session Memory checkpoint provider。
+
+两者由 agent-runtime 汇总后只接一次 QueryEngine。这样附件接线被替换时不会漏掉 Session Memory，也不需要引入任意扩展点。
+
+## 12. Attachments
+
+现有 `AgentAttachmentResourceHost` 只负责按 `assetId` 读取文本；它不负责：
+
+- 接收和保存上传文件。
+- 生成 asset ID。
+- 建立 session 与附件的授权关系。
+- 构造附件目录。
+- MIME 检测、转换和就绪状态。
+
+这些能力目前属于 daemon 的会话与附件应用服务。因此：
+
+- standalone 默认 Attachments 为 unavailable，不注册附件读取工具，也不宣称具有附件能力。
+- daemon 继续通过 override 提供 `AgentAttachmentResourceHost`，并通过独立 provider 提供 compact 目录。
+- `attachmentResourceRoot` 暂时保留为 sandbox 的只读挂载配置；它不是 `AgentAttachmentResourceHost` 的替代品。
+- 将来若要 standalone 附件能力，应另行设计完整的 intake bundle，而不是只创建一个目录读取器。
+
+## 13. Workflow 与 Schedules
+
+### 13.1 Workflow
+
+Workflow 是 standalone 默认能力。`DefaultNodeAgent` 默认创建一份 `FileWorkflowRunRepository({ cwd })`，并将同一个实例交给：
+
+- Workflow 工具和执行逻辑。
+- `LocalAgentJobHost` 的 Workflow Job 来源。
+
+Host 可以覆盖 Repository。`workflowRepository: false` 同时关闭 Workflow 工具和 Workflow Job 来源，不存在第二份隐式 Repository。
+
+### 13.2 Schedules
+
+Schedules 从 `AgentEffects.schedules` 移到 `capabilityOverrides.schedules`。现有 Schedule 工具和业务语义不变。
+
+standalone 默认 unavailable，因为 `setTimeout()` 不能满足进程退出后继续调度的契约。daemon 或未来的常驻本地 scheduler 显式提供实现。
+
+## 14. 权限
+
+`requestPermission` 是可选交互 effect，不是 Agent 能否创建的前提：
 
 ```text
 PermissionChecker → allow
-  直接执行，不依赖 Host
+  直接执行
 
 PermissionChecker → deny
   直接拒绝
 
 PermissionChecker → ask，存在 requestPermission
-  交给 Host/CLI UI 确认
+  请求 Host / CLI 用户确认
 
 PermissionChecker → ask，不存在 requestPermission
-  安全拒绝，并说明当前没有交互审批器
-
-permissionMode = full_auto
-  按现有显式授权语义执行
+  安全拒绝，并说明没有可用审批器
 ```
 
-权限拒绝是单次操作结果，不会把能力标记成 unavailable。
+权限拒绝是单次操作结果，不改变 capability 状态。`full_auto` 沿用现有显式授权语义，本次不重新定义。
 
-## 长期记忆
+## 15. 子 Agent
 
-长期记忆采用 OpenHarness 自己的专用语义：
+子 Agent 遵循两条规则：
+
+1. runtime 默认能力按子 Agent 的 cwd/session 重新创建，不共享父 Agent 的本地 Terminal、Job Host 或 cleanup。
+2. Host override 对象原样传给子 Agent，并被视为“整个 root session tree 可用”的借用对象。
+
+因此 Host 提供的 Terminal、Job、附件、Schedule 等实现必须能根据调用上下文处理父会话及其后代。daemon 现有 Job Host 已按 session tree 路由，属于符合契约的实现。
+
+第一阶段不增加 override factory。当前没有必须为每个子 Agent创建独立 Host 对象的真实调用方；如果以后出现，再增加明确的 child-aware factory，而不是现在提前建立通用工厂系统。
+
+最终工具集合仍为：
 
 ```text
-MemoryFeature
-  读取和检索相关记忆
-  注入当前模型上下文
-  注册 managed Remember
-  执行现有 Run 后自动提取
-  处理记忆 Feature 生命周期
-
-AgentMemoryStore / 现有 AgentMemoryRuntime
-  使用现有 Markdown 数据和路径解析
+能力可用
+  ∩ Host tool ceiling
+  ∩ Agent role allowed tools
+  - disallowed tools
 ```
 
-本次保持以下现有行为：
+工具不可见不等于能力被关闭。
 
-- user scope 通过受管入口更新配置目录的 `USER.md`。
-- project scope 通过现有 `MemoryManager` 写当前项目 Markdown 记忆。
-- 通用 Write/Edit 不能修改受管记忆路径。
-- Run 已主动 Remember 时，自动提取不重复写入。
-- 相关记忆按用户输入检索并临时注入，不写进消息历史。
-- 模型不知道受管记忆的真实路径，也不负责选择 Write/Edit。
+## 16. 生命周期
 
-Memory Feature 属于 agent-runtime。daemon 可以覆盖底层 Store 或增加 UI，但不接管记忆读取、注入和 Remember 语义。
-
-### 长期记忆与 Session Memory
-
-二者必须保持分离：
-
-- 长期记忆跨会话，保存稳定偏好、事实和项目知识。
-- Session Memory 是当前会话的 compact checkpoint，保存当前目标、下一步和近期工作状态。
-
-Markdown Memory Store 不负责 compact checkpoint；daemon 的 session checkpoint 也不接管长期偏好。
-
-## Compact 上下文贡献者
-
-当前 compact 最终仍可接收一个附件对象，但对象不再要求由某一个 Host provider 同时理解所有字段。agent-runtime 内聚合多个 Feature contributor：
-
-```text
-AttachmentsFeature ───────┐
-SessionContextFeature ────┼─→ CompactContext
-未来其他 Feature ─────────┘
-```
-
-示意：
+不依赖各协议拥有统一 `dispose()`。默认工厂返回值与清理动作：
 
 ```ts
-addCompactContributor("attachments", async () => ({
-  attachmentCatalog: await buildAttachmentCatalog(),
-}));
-
-addCompactContributor("session-memory", async () => ({
-  sessionMemory: await readSessionCheckpoint(),
-}));
-```
-
-daemon 替换附件实现时，只影响 Attachments Feature；Session Memory contributor 继续由 agent-runtime 安装，避免再次出现附件 provider 漏传 checkpoint 的接线问题。
-
-## Workflow
-
-Workflow 是 Agent 基础能力，不是纯 Host 能力。它分成：
-
-```text
-WorkflowFeature
-  DAG 验证、模板、执行计划、子 Agent worker、重试
-  history、timeline、resume、reconcile
-
-WorkflowRunRepository
-  保存和读取 Workflow Run 快照与事件
-```
-
-`DefaultNodeAgent` 默认使用现有 `FileWorkflowRunRepository({ cwd })`，安装现有 Workflow 工具。工具参数和运行语义不因本设计改变。
-
-daemon 只需覆盖 Repository：
-
-```ts
-capabilityOverrides: {
-  workflowRepository: daemonWorkflowRepository,
+interface CreatedCapability<T> {
+  value: T;
+  cleanup?: () => Promise<void> | void;
+  cleanupIdentity?: object;
 }
 ```
 
-`workflowRepository: false` 明确关闭 Workflow Feature。第一阶段不把 API 扩展成可替换整个 Workflow Engine。
+规则：
 
-## Schedules
+- runtime 创建对象后立即把 cleanup 压入清理栈。
+- Host override 是借用对象，不登记 cleanup。
+- 共享底层资源使用相同 `cleanupIdentity`，只登记一次。
+- 初始化失败时按创建逆序执行 cleanup，然后抛出原始错误。
+- `agent.close()` 按逆序执行剩余 cleanup，并保持幂等。
+- 一项 cleanup 失败不阻止后续 cleanup；错误汇总到最终 close/assembly 错误中。
 
-Schedules 工具和任务语义保持不变，但接线从 `AgentEffects.schedules` 移到 capability：
+不新增通用生命周期接口，也不要求修改所有 capability 协议。
 
-```text
-capabilityOverrides.schedules
-  → ResolvedAgentCapabilities.schedules
-  → ScheduleFeature
-  → 注册并接入现有 schedule 工具
-```
+## 17. 错误和诊断
 
-Schedule 是有持久状态的长期服务，不是一次性 UI Effect。
+基础默认能力或明确 override 初始化失败时，Agent 创建失败；Image to Text、Attachments、Schedules 没有实现时记录为 unavailable。
 
-普通 `DefaultNodeAgent` 不提供基于 `setTimeout()` 的伪持久调度器。进程退出后不能继续唤醒任务的实现不符合 Schedule 契约。因此 standalone 默认 unavailable，daemon 或未来常驻本地 scheduler 可以提供 override。
+组装错误使用现有 Error 体系和 `cause`，消息必须包含：
 
-## Attachments、Terminal、Jobs 与 Background Shell
+- 失败阶段，例如 settings、capability、tools、compact 或 session。
+- 能力名称。
+- 可执行的处理建议：修复默认环境、提供 override，或明确传 `false`。
+- cleanup 失败摘要（如果存在）。
 
-### Attachments
+不新增 `AgentAssemblyError` 类，除非实现时发现多个调用方确实需要稳定地按错误类型分支。
 
-Attachments Feature 负责工具、模型上下文、compact 目录和实现接线；`AgentAttachmentResourceHost` 只负责解析资源、读取内容、返回 MIME 元数据和执行路径边界。
-
-没有附件目录是正常状态；附件根配置非法属于初始化错误；读取某个不存在附件是单次工具错误。
-
-### Terminal 与 Jobs
-
-仓库已有 `@openharness/terminal-node` 的 `LocalTerminalProvider`。默认 Node 能力适配它，不重新实现 PTY。
-
-由于 Terminal 的观察和控制使用 Agent Job 工具，本地默认适配还必须把 Terminal 会话投影到 Job list/read/wait/send/cancel。它复用现有协议和 provider，不创建新的 Terminal 子系统。
-
-Jobs 与 Background Shell 可以共享 LocalAgentJobHost，但仍由不同 Feature 提供不同工具语义。
-
-## 子 Agent 继承
-
-子 Agent 继承的是原始覆盖意图和工具限制，不是父 Agent 的 resolved default 实例：
-
-| 父级来源 | 子 Agent 行为 |
-|---|---|
-| 父级使用默认实现 | 按子 Agent cwd/session 创建自己的默认实现 |
-| 父级使用 Host override | 继续借用相同 Host override |
-| 父级显式 `false` | 同样 disabled |
-| 父级环境 unavailable | 子 Agent 重新解析，不继承失败结果 |
-
-这样可以避免子 Agent 复用父 Terminal session、父 JobHost 或释放父资源。
-
-最终工具集合仍满足：
-
-```text
-实际能力可用
-  ∩ Host Tool Ceiling
-  ∩ Agent Role Allowed Tools
-  - Disallowed Tools
-```
-
-能力 available 不表示所有角色都能看见对应工具。
-
-## 错误与降级
-
-### 必须创建成功
-
-- Settings、模型客户端、Kernel、Tool Registry、Session 等结构依赖。
-- 未显式关闭的 DefaultNodeAgent 基础能力。
-- 调用方明确提供的 override 及对应 Feature。
-
-这些初始化失败时，组装终止并清理已创建资源。
-
-### 可以 unavailable
-
-- 没有默认 Provider 的 Image to Text。
-- 没有持久调度器的 Schedules。
-
-### 单次工具错误
-
-命令非零退出、附件不存在、Job 启动失败、记忆被安全规则拒绝或权限拒绝，不改变 capability status。工具返回结构化错误，能力仍为 available。
-
-### 组装错误
-
-统一错误至少包含：
-
-- stage：settings、capability-resolution、feature-installation、extension-setup、mcp-connection 或 session-creation。
-- capability / feature 名称。
-- 原始 cause。
-- cleanup errors。
-
-错误消息同时告诉调用方可以修复环境、提供 override，或者用 `false` 明确禁用。
-
-## 生命周期
-
-- runtime 创建的能力标记 `owner: runtime`，由 Agent 清理。
-- override 标记 `owner: host`，Agent 不调用其 dispose。
-- 共享实例只清理一次。
-- 清理按成功创建的逆序执行。
-- 一项清理失败不阻止其他清理。
-- 原始创建错误保持主错误，清理错误附加汇总。
-- `agent.close()` 幂等。
-
-Feature 安装是事务性的：任一必需 Feature 安装失败，不返回半组装 Agent。
-
-## 能力诊断
-
-Agent 提供只读能力快照，例如：
-
-```ts
-agent.getCapabilities();
-```
+`agent.getCapabilities()` 返回不含实现对象和路径的快照：
 
 ```ts
 {
   terminal: { status: "available", source: "default" },
-  jobs: { status: "available", source: "override" },
-  attachments: { status: "disabled" },
-  schedules: {
-    status: "unavailable",
-    reason: "No persistent scheduler configured",
-  },
+  jobs: { status: "available", source: "default" },
+  attachments: { status: "unavailable", reason: "No attachment intake configured" },
+  schedules: { status: "unavailable", reason: "No persistent scheduler configured" },
 }
 ```
 
-同时发送 `agent.capabilities.resolved` 事件，供 daemon、CLI 和测试诊断。
+诊断不得暴露记忆目录、附件根目录、环境变量、凭据或实现对象。
 
-诊断不得暴露实现对象、记忆路径、附件根目录、环境变量、API key 或其他敏感配置。
+## 18. Plugin 与 MCP
 
-## Plugin 与 MCP
+Plugin 和 MCP 继续是额外工具来源，不进入 `ResolvedAgentCapabilities`。
 
-Plugin 和 MCP 是额外工具来源，不进入基础 `ResolvedAgentCapabilities`。
-
-建议组装顺序：
+装配顺序保持具体：
 
 ```text
-安装内置 Features
-  → 安装发现到的 Plugins
-  → 连接和注册 MCP Tools
-  → 应用最终工具白名单、黑名单和角色上限
+解析默认能力和 overrides
+  → 接入内置工具与上下文
+  → 安装 Plugins
+  → 连接 MCP tools
+  → 应用 tool ceiling、角色限制和 disallowedTools
 ```
 
-Plugin 若要替换内置能力，必须走明确 capability override 或未来的 Feature 替换接口，不能通过同名工具暗中覆盖。
+Plugin 或 MCP 不能通过同名工具暗中替换内置能力。真正的替换必须走明确 override；本次不增加 Feature replacement API。
 
-本次不改变现有 Plugin/MCP 的失败策略，只把错误标记在正确组装阶段。
+## 19. API 迁移
 
-## API 迁移
-
-旧 API：
+旧形式：
 
 ```ts
 createDefaultNodeAgent({
@@ -572,128 +464,135 @@ createDefaultNodeAgent({
     permissions: { requestPermission },
     terminal,
     jobs,
+    backgroundShell,
     schedules,
   },
 });
 ```
 
-新 API：
+目标形式：
 
 ```ts
 createDefaultNodeAgent({
   capabilityOverrides: {
-    terminal,
-    jobs,
+    terminal: { value: terminal, jobs },
+    backgroundShell: { value: backgroundShell, jobs },
     schedules,
   },
   effects: {
     requestPermission,
   },
+  compactContext: {
+    attachmentCatalog: buildAttachmentCatalog,
+    sessionMemory: readSessionMemoryCheckpoint,
+  },
+  attachmentResourceRoot,
 });
 ```
 
-在 monorepo 内一次性迁移 agent-runtime、SDK、daemon/server、CLI、测试、示例和文档。删除：
+monorepo 内一次性迁移 agent-runtime、server/daemon、desktop、CLI、SDK、测试和文档，并删除：
 
-- `AgentHostCapabilities`。
-- `hostCapabilities` 配置项。
-- “Host 对象存在就关闭默认能力”的判断。
-- 工具注册使用的 capability boolean 投影。
+- `AgentHostCapabilities` 与 `hostCapabilities`。
+- “只要 Host 对象存在就不创建本地默认能力”的条件。
+- 工具注册专用的 capability boolean 投影。
 - `AgentEffects.schedules`。
+- `setAttachmentsProvider` 旧命名。
 
-不保留旧 API 适配层，changelog 明确记录不兼容变更。
+不保留兼容适配层。
 
-## 测试契约
+## 20. 实施阶段
 
-### Capability Resolver
+整体方向是一份长期设计，但实现拆成三个可以独立验证的阶段。每阶段完成后必须通过现有 daemon 回归测试再进入下一阶段。
 
-- undefined 使用默认 factory。
-- 对象使用 override 且不调用默认 factory。
-- false 标记 disabled 且不调用默认 factory。
-- 可选能力无实现时 unavailable。
-- 基础默认创建失败和 override 安装失败都产生组装错误。
-- 只覆盖 Terminal 时，Jobs、Background Shell、Memory、Attachments 和 Workflow 仍为 default available。
+### 阶段一：装配入口、权限和基础默认值
 
-### 惰性创建与共享资源
+- 引入 `capabilityOverrides` 三态解析，移除 `hostCapabilities`。
+- 把 `requestPermission` 改为可选 effect，把 Schedules 移到 capability override。
+- 归一化 Settings 开关、`false` 和工具可见性。
+- 保持现有本地 Background Shell/Jobs 行为，修复“部分 Host 注入关闭所有默认值”。
+- 引入 `CompositeAgentJobHost`，让现有本地来源与 Host producer bundle 可以同时工作。
+- 将 daemon 的聚合 Job Host 适配为不重叠的 Terminal、后台 Shell 等来源。
+- 提供 `getCapabilities()` 诊断。
 
-- 覆盖或关闭的能力不创建默认对象。
-- Jobs 与 Background Shell 同时默认时只创建一个 LocalAgentJobHost。
-- 两者都被覆盖时不创建 LocalAgentJobHost。
+验收重点：无 Host 的 Files、Background Shell、Jobs 可用；单项 override 不影响其他默认能力；ask 无回调时安全拒绝。
 
-### Feature 一致性
+### 阶段二：Memory、Workflow、compact 和子 Agent 契约
 
-每项 capability 为 available、disabled、unavailable 时，工具、QueryEngine 实现和提示词状态一致，不存在半接线。
+- Memory 收回 agent-runtime 默认装配，只支持默认或 `false`。
+- Workflow Repository 只创建一次并显式注入 `LocalAgentJobHost`。
+- 直接组合 attachment catalog 与 Session Memory，改名 compact provider。
+- Attachments standalone 明确 unavailable，保留 `attachmentResourceRoot`。
+- 固化 Host override 对整个 session tree 可用的契约。
 
-### 无 Host 集成
+验收重点：Remember 和自动提取不回归；compact 同时包含附件目录与 Session Memory；关闭 Workflow 后 Jobs 不再看到 Workflow Run。
 
-不传 Host、Terminal、Jobs、Attachments、Memory 和权限回调时，DefaultNodeAgent 的 Files、Terminal、Jobs、Background Shell、Attachments、Memory、Child Environment 和 Workflow 可用。
+### 阶段三：Terminal 与统一 Jobs 控制面
 
-使用 fake model client，不依赖真实模型网络。
+- 用现有 `LocalTerminalProvider` 创建默认 Terminal bundle。
+- 实现 Terminal 到 `AgentJobHost` 的适配。
+- 将本地 Terminal 来源接入阶段一已经建立的 Jobs 组合器。
+- 补齐资源 cleanup 与 Terminal/Job 联合测试。
 
-### Terminal/Job 联合契约
+验收重点：standalone 能打开 Terminal，并通过 Job list/read/send/wait/cancel 完整控制；混合使用 Host producer 与本地 producer 时路由正确。
 
-- 打开本地 Terminal。
-- Job list 能看见 Terminal。
-- Job read/send/wait/cancel 可工作。
-- Agent 关闭时进程正确回收。
+## 21. 测试契约
 
-### 权限
+### 21.1 覆盖与默认值
 
-- allow 无 Host 也执行。
-- deny 直接拒绝。
-- ask 有回调时遵循批准或拒绝。
-- ask 无回调时安全拒绝并说明原因。
-- full_auto 沿用现有显式授权。
-- 权限拒绝不改变能力状态。
+- `undefined` 使用默认实现。
+- 对象使用 override，不创建对应默认对象。
+- `false` 不创建默认对象并标记 disabled。
+- 覆盖 Terminal 不改变 Memory、Workflow、Child Environment 等无关能力。
+- Attachments、Schedules、Image to Text 在没有实现时为 unavailable，不注册对应工具。
 
-### Memory
+### 21.2 Jobs 联合契约
 
-- 自动检索和注入相关记忆。
-- managed Remember 按 user/project scope 写现有 Markdown 存储。
-- 模型输入和工具参数不包含受管真实路径。
-- Run 内已 Remember 时不重复自动提取。
-- `memory: false` 时不读写、不注册工具。
-- Host Memory Store 只替换存储，不改变 Feature 行为。
+- 默认 Terminal 创建的会话可被 Job list/read/send/wait/cancel 操作。
+- 默认后台 Shell、子 Agent 和 Workflow 出现在同一 Job 列表。
+- Host Terminal/Background Shell 的 Job Host 被加入组合器且按身份去重。
+- 本地与 Host 使用相同 Job ID 时返回冲突错误。
+- `jobs: false` 与仍启用的 Job producer 同时出现时，组装失败。
+
+### 21.3 Memory
+
+- 检索结果注入当前上下文但不写入消息历史。
+- managed Remember 按 user/project scope 写现有 Markdown。
 - 通用 Write/Edit 继续拒绝受管记忆路径。
+- Run 已主动 Remember 时不重复自动提取。
+- Settings 禁用或 `memory: false` 时不检索、不写入、不注册 Remember。
 
-### Compact
+### 21.4 Workflow 与 compact
 
-- attachment catalog 和 session memory contributor 同时进入 compact。
-- daemon 只替换附件时，session memory 仍被注入。
+- Workflow 工具和 Jobs 使用同一 Repository。
+- `workflowRepository: false` 同时移除工具和 Job 来源。
+- compact 同时获得 attachment catalog 和 Session Memory。
+- daemon 只替换附件实现时，Session Memory 仍被注入。
 
-### 子 Agent
+### 21.5 子 Agent 与生命周期
 
-- 默认能力按子 cwd/session 重新创建。
-- Host override 被借用但不由子 Agent 释放。
-- false 继续传播。
-- tool ceiling 和 role restrictions 仍生效。
+- 默认本地能力按子 cwd/session 新建。
+- Host override 可用于 root session 和后代，且不由任何 Agent 释放。
+- runtime cleanup 逆序、去重且幂等。
+- 中途初始化失败会清理已经创建的资源。
+- cleanup 失败不掩盖原始组装错误。
 
-### Workflow 与 Schedules
+### 21.6 回归
 
-- 无 Host 时 Workflow 使用 FileWorkflowRunRepository，可 run/history/timeline/resume/reconcile。
-- daemon Repository override 保持现有 Workflow 行为。
-- `workflowRepository: false` 隐藏 Workflow Feature。
-- standalone Schedules 为 unavailable 且不暴露工具。
-- daemon Schedule override 安装现有 Schedule 工具。
+- daemon 现有 Terminal、Jobs、附件、Session、Schedules 和事件流通过。
+- CLI、SDK 不传 Host 时使用默认能力。
+- Plugin/MCP 工具发现和最终工具限制保持现有语义。
 
-### 生命周期与 daemon
+## 22. 完成标准
 
-- runtime-owned 逆序且一次性释放。
-- host-owned 不释放。
-- 安装失败完成回滚。
-- daemon 现有 Terminal、Jobs、Attachments、Session 和事件流回归通过。
-- daemon 只覆盖一项能力时，其他能力仍回退默认实现。
-
-## 完成标准
-
-1. 无 Host 时 DefaultNodeAgent 的基础能力集成测试通过。
-2. 覆盖一项能力不会移除其他默认能力。
-3. `false` 是唯一显式关闭方式。
-4. 权限回调不再是创建 Agent 的必填项。
-5. 工具、实现、提示词和上下文使用同一份 resolved capabilities。
-6. Memory 由 agent-runtime 主导，模型不接触受管记忆路径。
-7. Workflow 默认可用，Schedules 在没有持久调度器时明确 unavailable。
-8. compact 独立聚合 attachment catalog 与 session memory。
-9. 子 Agent 创建自己的默认资源，只继承覆盖意图。
-10. Host-owned 资源不会被 Agent 释放。
-11. daemon 现有功能保持通过。
-12. 旧 `hostCapabilities` 与 `AgentEffects.schedules` 完全移除，不保留双轨。
+1. `DefaultNodeAgent` 在 Node 环境中不依赖 daemon 即可使用 Files、Terminal、Background Shell、Jobs、Memory、Child Agent 和 Workflow。
+2. standalone 不虚报 Attachments、Schedules 和 Image to Text。
+3. Host 单项 override 不关闭无关默认能力。
+4. 每个产生 Job ID 的能力都有可用的 Job 观察与控制来源。
+5. Workflow 工具与 Jobs 不会使用两份 Repository。
+6. Memory 沿用现有运行时和 Markdown，不引入新的存储抽象。
+7. compact 同时读取附件目录和 Session Memory checkpoint。
+8. 子 Agent 默认资源隔离，Host override 明确支持会话树。
+9. runtime-owned 资源可靠清理，Host-owned 资源不被 Agent 释放。
+10. 工具、实现、提示词、compact 和诊断均来自同一份解析结果。
+11. 旧 `hostCapabilities`、`AgentEffects.schedules` 和 `setAttachmentsProvider` 不再保留双轨。
+12. 三个实施阶段分别通过测试和 daemon 回归后再继续。
