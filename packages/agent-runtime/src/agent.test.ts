@@ -200,12 +200,12 @@ describe("createDefaultNodeAgent", () => {
     expect(runtimeClose).toHaveBeenCalledOnce();
   });
 
-  it("rolls back an owned default terminal after later initialization fails", async () => {
+  it("rolls back an owned default terminal after MCP initialization fails", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
-    const setupError = new Error("extension setup failed");
-    const capabilityCleanupError = new Error("terminal cleanup failed");
-    const cleanup = vi.fn(async () => { throw capabilityCleanupError; });
+    const connectionError = new Error("MCP initialization failed");
+    const cleanup = vi.fn(async () => {});
+    vi.spyOn(McpClientManager.prototype, "connectAll").mockRejectedValueOnce(connectionError);
     vi.spyOn(defaultNodeTerminal, "createDefaultNodeTerminal").mockResolvedValueOnce({
       value: {
         value: {
@@ -229,14 +229,10 @@ describe("createDefaultNodeAgent", () => {
         permission: { mode: "default" },
         sandbox: { enabled: false },
       },
-      extensions: [{ setup: () => { throw setupError; } }],
+      mcpServers: { failing: { type: "stdio", command: "not-started" } },
     }).catch((error) => error);
 
-    expect(failure).toBeInstanceOf(AggregateError);
-    expect((failure as AggregateError).errors).toEqual([
-      setupError,
-      capabilityCleanupError,
-    ]);
+    expect(failure).toBe(connectionError);
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
@@ -299,6 +295,49 @@ describe("createDefaultNodeAgent", () => {
     await agent.close();
     await agent.close();
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("borrows a Host terminal without calling its cleanup hooks", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-host-terminal-"));
+    tempDirs.push(cwd);
+    const createLocalTerminal = vi.spyOn(
+      defaultNodeTerminal,
+      "createDefaultNodeTerminal",
+    );
+    const dispose = vi.fn(async () => {});
+    const cleanup = vi.fn(async () => {});
+    const terminalOverride = {
+      value: {
+        async open() { throw new Error("not used"); },
+        dispose,
+      },
+      jobs: {} as never,
+      cleanup,
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      capabilityOverrides: { terminal: terminalOverride },
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "claude-test",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      },
+    });
+
+    await agent.close();
+    await agent.close();
+
+    expect(agent.getCapabilities().terminal).toEqual({
+      status: "available",
+      source: "override",
+    });
+    expect(dispose).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(createLocalTerminal).not.toHaveBeenCalled();
   });
 
   it("rejects an accepted steer when the run fails before a turn boundary", async () => {
@@ -635,9 +674,19 @@ describe("createDefaultNodeAgent", () => {
     expect(agent.state).toBe("closed");
   });
 
-  it("still closes runtime resources when owned capability cleanup fails", async () => {
+  it("still closes children, events, and runtime when default terminal cleanup fails", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-"));
     tempDirs.push(cwd);
+    const capabilityError = new Error("terminal cleanup failed");
+    const terminalCleanup = vi.fn(async () => { throw capabilityError; });
+    vi.spyOn(defaultNodeTerminal, "createDefaultNodeTerminal").mockResolvedValueOnce({
+      value: {
+        value: { async open() { throw new Error("not used"); } },
+        jobs: {} as never,
+      },
+      cleanup: terminalCleanup,
+      cleanupIdentity: {},
+    });
     const agent = await createDefaultNodeAgent({
       cwd,
       settings: {
@@ -650,14 +699,13 @@ describe("createDefaultNodeAgent", () => {
         memory: { enabled: false },
       },
     });
-    const capabilityError = new Error("capability cleanup failed");
-    const closeOwnedCapabilities = vi.fn(async () => { throw capabilityError; });
-    (agent as any).closeOwnedCapabilities = closeOwnedCapabilities;
+    const childClose = vi.spyOn((agent as any).childManager, "closeAll");
     const eventDrain = vi.spyOn((agent as any).eventBus, "drain");
     const runtimeClose = vi.spyOn((agent as any).runtime, "close");
 
     await expect(agent.close()).rejects.toBe(capabilityError);
-    expect(closeOwnedCapabilities).toHaveBeenCalledOnce();
+    expect(terminalCleanup).toHaveBeenCalledOnce();
+    expect(childClose).toHaveBeenCalledOnce();
     expect(eventDrain).toHaveBeenCalledOnce();
     expect(runtimeClose).toHaveBeenCalledOnce();
     expect(agent.state).toBe("closed");

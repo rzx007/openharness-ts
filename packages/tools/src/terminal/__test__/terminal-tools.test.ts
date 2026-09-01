@@ -1,4 +1,5 @@
 import type { ToolContext } from "@openharness/core";
+import type { AgentJobHost, JobSnapshot } from "@openharness/jobs";
 import type {
   AgentTerminalHost,
   TerminalSessionInfo,
@@ -8,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   terminalOpenTool,
 } from "../terminal-tools.js";
+import { jobCancelTool, jobSendTool } from "../../job/job-tools.js";
 
 const terminal: TerminalSessionInfo = {
   id: "terminal-1",
@@ -62,7 +64,45 @@ describe("persistent terminal tools", () => {
     expect(result.isError).toBe(true);
     expect(open).not.toHaveBeenCalled();
   });
+
+  it("returns the exact terminal id consumed by Job send and cancel", async () => {
+    const open = vi.fn(async () => terminal);
+    const send = vi.fn(async () => {});
+    const cancel = vi.fn(async () => ({ ...terminalJob, status: "stopping" as const }));
+    const context = {
+      ...createContext({ open }),
+      jobs: createJobs({ send, cancel }),
+    };
+
+    const opened = parseResult(await terminalOpenTool.execute({}, context));
+    const openedTerminal = opened.terminal as { id: string };
+    await jobSendTool.execute({ jobId: openedTerminal.id, data: "hello\n" }, context);
+    await jobCancelTool.execute({ jobId: openedTerminal.id, reason: "done" }, context);
+
+    expect(openedTerminal.id).toBe("terminal-1");
+    expect(send).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      jobId: "terminal-1",
+      data: "hello\n",
+    });
+    expect(cancel).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      jobId: "terminal-1",
+      reason: "done",
+    });
+  });
 });
+
+const terminalJob: JobSnapshot = {
+  id: terminal.id,
+  kind: "terminal",
+  ownerSession: "session-1",
+  status: "running",
+  capabilities: { read: true, wait: true, send: true, cancel: true },
+  cwd: terminal.cwd,
+  startedAt: Date.parse(terminal.createdAt),
+  updatedAt: Date.parse(terminal.createdAt),
+};
 
 function createContext(overrides: Partial<AgentTerminalHost>): ToolContext {
   return {
@@ -75,6 +115,23 @@ function createContext(overrides: Partial<AgentTerminalHost>): ToolContext {
 function createHost(overrides: Partial<AgentTerminalHost>): AgentTerminalHost {
   return {
     open: async () => terminal,
+    ...overrides,
+  };
+}
+
+function createJobs(overrides: Partial<AgentJobHost>): AgentJobHost {
+  return {
+    list: async () => [terminalJob],
+    read: async () => ({ text: "", cursor: 0, truncated: false, snapshot: terminalJob }),
+    wait: async () => ({
+      text: "",
+      cursor: 0,
+      truncated: false,
+      snapshot: terminalJob,
+      timedOut: false,
+    }),
+    send: async () => {},
+    cancel: async () => terminalJob,
     ...overrides,
   };
 }

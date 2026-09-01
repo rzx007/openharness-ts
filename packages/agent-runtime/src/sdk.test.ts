@@ -17,6 +17,211 @@ import { describe, expect, it, vi } from "vitest";
 import { createDefaultNodeAgent } from "./index.js";
 
 describe("programmatic agent SDK", () => {
+  it("runs a real Node REPL through Terminal and the shared Jobs control plane", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-real-terminal-"));
+    let waitPayload: Record<string, any> | undefined;
+    let readPayload: Record<string, any> | undefined;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (!hasToolResult(params.messages, "real-terminal-open")) {
+          yield toolUse("real-terminal-open", "TerminalOpen", {
+            name: "node-repl",
+            shell: process.execPath,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const jobId = terminalIdFromResult(params.messages, "real-terminal-open");
+        if (!hasToolResult(params.messages, "real-terminal-send")) {
+          yield toolUse("real-terminal-send", "JobSend", {
+            jobId,
+            data: "process.stdout.write('terminal-ok'); process.exit(0)\n",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "real-terminal-wait")) {
+          yield toolUse("real-terminal-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 5,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "real-terminal-read")) {
+          waitPayload = toolResultPayload(params.messages, "real-terminal-wait");
+          yield toolUse("real-terminal-read", "JobRead", { jobId });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        readPayload = toolResultPayload(params.messages, "real-terminal-read");
+        yield { type: "text_delta" as const, delta: "real terminal complete" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      sessionId: "real-terminal-session",
+      client,
+      settings: { ...testSettings(), maxTurns: 8 },
+    });
+
+    try {
+      await expect(agent.runMessage("exercise the real terminal")).resolves.toMatchObject({
+        output: "real terminal complete",
+      });
+      expect(waitPayload).toMatchObject({
+        results: [{ timedOut: false, snapshot: { status: "completed" } }],
+      });
+      expect(JSON.stringify(waitPayload)).toContain("terminal-ok");
+      expect(readPayload).toMatchObject({
+        snapshot: { status: "completed" },
+      });
+      expect(JSON.stringify(readPayload)).toContain("terminal-ok");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 15_000);
+
+  it("sends interactive stdin to a real Node REPL before closing it", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-real-stdin-"));
+    let runningWaitPayload: Record<string, any> | undefined;
+    let readPayload: Record<string, any> | undefined;
+    let finishedWaitPayload: Record<string, any> | undefined;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (!hasToolResult(params.messages, "stdin-terminal-open")) {
+          yield toolUse("stdin-terminal-open", "TerminalOpen", { shell: process.execPath });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const jobId = terminalIdFromResult(params.messages, "stdin-terminal-open");
+        if (!hasToolResult(params.messages, "stdin-terminal-send")) {
+          yield toolUse("stdin-terminal-send", "JobSend", {
+            jobId,
+            data: "process.stdout.write('stdin-echo:' + 'hello')\n",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-running-wait")) {
+          yield toolUse("stdin-terminal-running-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 0.25,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-read")) {
+          runningWaitPayload = toolResultPayload(params.messages, "stdin-terminal-running-wait");
+          yield toolUse("stdin-terminal-read", "JobRead", { jobId });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-exit")) {
+          readPayload = toolResultPayload(params.messages, "stdin-terminal-read");
+          yield toolUse("stdin-terminal-exit", "JobSend", {
+            jobId,
+            data: "process.exit(0)\n",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-finished-wait")) {
+          yield toolUse("stdin-terminal-finished-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 5,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        finishedWaitPayload = toolResultPayload(params.messages, "stdin-terminal-finished-wait");
+        yield { type: "text_delta" as const, delta: "interactive terminal complete" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      sessionId: "stdin-terminal-session",
+      client,
+      settings: { ...testSettings(), maxTurns: 10 },
+    });
+
+    try {
+      await expect(agent.runMessage("exercise interactive stdin")).resolves.toMatchObject({
+        output: "interactive terminal complete",
+      });
+      expect(runningWaitPayload).toMatchObject({
+        results: [{ timedOut: true, snapshot: { status: "running" } }],
+      });
+      expect(JSON.stringify(readPayload)).toContain("stdin-echo:hello");
+      expect(finishedWaitPayload).toMatchObject({
+        results: [{ timedOut: false, snapshot: { status: "completed" } }],
+      });
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 15_000);
+
+  it("cancels a real Node REPL as a killed Terminal Job", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-real-cancel-"));
+    let cancelPayload: Record<string, any> | undefined;
+    let waitPayload: Record<string, any> | undefined;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (!hasToolResult(params.messages, "cancel-terminal-open")) {
+          yield toolUse("cancel-terminal-open", "TerminalOpen", { shell: process.execPath });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const jobId = terminalIdFromResult(params.messages, "cancel-terminal-open");
+        if (!hasToolResult(params.messages, "cancel-terminal-cancel")) {
+          yield toolUse("cancel-terminal-cancel", "JobCancel", {
+            jobId,
+            reason: "integration test complete",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "cancel-terminal-wait")) {
+          cancelPayload = toolResultPayload(params.messages, "cancel-terminal-cancel");
+          yield toolUse("cancel-terminal-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 5,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        waitPayload = toolResultPayload(params.messages, "cancel-terminal-wait");
+        yield { type: "text_delta" as const, delta: "cancelled terminal complete" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      sessionId: "cancel-terminal-session",
+      client,
+      settings: { ...testSettings(), maxTurns: 7 },
+    });
+
+    try {
+      await expect(agent.runMessage("cancel the real terminal")).resolves.toMatchObject({
+        output: "cancelled terminal complete",
+      });
+      expect(cancelPayload).toMatchObject({
+        snapshot: { status: "stopping", capabilities: { send: false, cancel: false } },
+      });
+      expect(waitPayload).toMatchObject({
+        results: [{ timedOut: false, snapshot: { status: "killed" } }],
+      });
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 15_000);
+
   it("installs the complete standalone Node capability set without a Host", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-default-capabilities-"));
     const agent = await createDefaultNodeAgent({
@@ -808,6 +1013,43 @@ function toolResultText(
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");
+}
+
+function hasToolResult(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): boolean {
+  return messages.some((message) =>
+    message.type === "tool_result" && message.toolUseId === toolUseId
+  );
+}
+
+function toolResultPayload(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): Record<string, any> {
+  const text = toolResultText(messages, toolUseId);
+  if (!text) throw new Error(`Missing tool result: ${toolUseId}`);
+  return JSON.parse(text) as Record<string, any>;
+}
+
+function terminalIdFromResult(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): string {
+  const payload = toolResultPayload(messages, toolUseId);
+  const terminal = payload.terminal as { id?: unknown } | undefined;
+  if (typeof terminal?.id !== "string") {
+    throw new Error(`Terminal tool did not return an id: ${JSON.stringify(payload)}`);
+  }
+  return terminal.id;
+}
+
+function toolUse(id: string, name: string, input: Record<string, unknown>) {
+  return {
+    type: "tool_use_start" as const,
+    toolUse: { type: "tool_use" as const, id, name, input },
+  };
 }
 
 function testSettings(): Settings {

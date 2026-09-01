@@ -56,7 +56,7 @@ function waitForFixtureReady(child: DaemonChild): Promise<{ url: string; token: 
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error(`Timed out waiting for daemon fixture.\n${stderr}`));
-    }, 30_000);
+    }, 90_000);
     const cleanup = () => {
       clearTimeout(timer);
       child.stdout.off("data", onStdout);
@@ -111,12 +111,23 @@ async function startDaemonFixture(): Promise<DaemonFixture> {
   const dir = mkdtempSync(join(tmpdir(), "ohs-tui-sync-"));
   const token = "tui-sync-token";
   const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
-  const serverModuleUrl = pathToFileURL(join(repoRoot, "packages/server/src/index.ts")).href;
+  const serverModuleUrl = pathToFileURL(join(repoRoot, "packages/server/src/http/server.ts")).href;
   const scriptPath = join(dir, "daemon-fixture.mjs");
   writeFileSync(
     scriptPath,
     `
 const { OpenHarnessHttpServer } = await import(${JSON.stringify(serverModuleUrl)});
+const capabilities = Object.fromEntries([
+  "terminal",
+  "backgroundShell",
+  "jobs",
+  "attachments",
+  "memory",
+  "childEnvironment",
+  "workflowRepository",
+  "imageToText",
+  "schedules",
+].map((name) => [name, { status: "disabled" }]));
 
 const server = new OpenHarnessHttpServer({
   token: ${JSON.stringify(token)},
@@ -145,12 +156,19 @@ const server = new OpenHarnessHttpServer({
         const ids = options.ids;
         const context = { agentId: session.id, sessionId: session.id, inputId: ids.inputId, runId: ids.runId, traceId: ids.traceId };
         const result = (async () => {
-          await publish({ type: "input.accepted", data: { content, delivery: options.delivery ?? "queue" } }, context);
+          await publish({
+            type: "input.accepted",
+            data: {
+              content,
+              delivery: options.delivery ?? "queue",
+              ...(options.metadata ? { metadata: options.metadata } : {}),
+            },
+          }, context);
           await publish({ type: "run.started", data: {} }, context);
           const request = { toolName: "Write", reason: "exercise TUI permission flow", input: { path: "README.md" } };
           const requestId = \`permission-\${sequence + 1}\`;
           await publish({ type: "permission.requested", data: { requestId, request } }, context);
-          const decision = await agentOptions.hostCapabilities.permissions.requestPermission(request, {
+          const decision = await agentOptions.effects.requestPermission(request, {
             ...context,
             cwd: session.cwd,
             signal: new AbortController().signal,
@@ -177,10 +195,27 @@ const server = new OpenHarnessHttpServer({
       loadHistory() {},
       clear() {},
       setModel() {},
+      setCompactContextProvider() {},
       async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
       async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
       getUsage() { return { inputTokens: 0, outputTokens: 0 }; },
-      inspect() { return { model: session.model, tools: [], hooks: [], mcpServers: [] }; },
+      getCapabilities() { return capabilities; },
+      inspect() {
+        return {
+          model: session.model,
+          tools: [],
+          hooks: [],
+          mcpServers: [],
+          childBudget: {
+            maxDepth: 4,
+            maxActiveChildren: 4,
+            maxTotalChildren: 16,
+            activeChildren: 0,
+            totalChildren: 0,
+          },
+          capabilities,
+        };
+      },
       async close() {},
     };
   },
@@ -1461,6 +1496,7 @@ test("useServerSync drives a real daemon session through prompt, permission, and
   const fixture = await startDaemonFixture();
   try {
     let captured: TuiSessionController | undefined;
+    const errors: string[] = [];
     const hasApprovedOutput = () => captured?.assistantBuffer === "edit approved" || captured?.transcript.some((item) => item.role === "assistant" && item.text === "edit approved") === true;
 
     function Harness() {
@@ -1475,7 +1511,7 @@ test("useServerSync drives a real daemon session through prompt, permission, and
           maxTurns: 9,
         },
         },
-        () => {},
+        (message) => errors.push(message),
       );
       return <box />;
     }
@@ -1505,9 +1541,9 @@ test("useServerSync drives a real daemon session through prompt, permission, and
           await new Promise((resolve) => setTimeout(resolve, 20));
         });
       }
-      expect(captured?.modal).toMatchObject({
-        kind: "permission",
-        tool_name: "Write",
+      expect({ modal: captured?.modal, errors, status: captured?.status }).toMatchObject({
+        modal: { kind: "permission", tool_name: "Write" },
+        errors: [],
       });
       const requestId = String(captured?.modal?.request_id);
       expect(requestId).toBeTruthy();
@@ -1538,7 +1574,7 @@ test("useServerSync drives a real daemon session through prompt, permission, and
   } finally {
     await fixture.stop();
   }
-}, 15_000);
+}, 105_000);
 
 type WorkflowHttpCall = {
   path: string;

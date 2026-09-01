@@ -114,6 +114,40 @@ describe("createDaemonAgentLoader", () => {
     expect(sink).toHaveBeenCalledWith(event);
   });
 
+  it("passes the daemon Terminal override without falling back to a local factory", async () => {
+    const terminal = {} as any;
+    const terminalJobs = {} as any;
+    const createLocalTerminal = vi.fn(() => {
+      throw new Error("daemon must not create a local Terminal provider");
+    });
+    const agent = {
+      loadHistory: vi.fn(),
+      close: vi.fn(async () => {}),
+      getCapabilities: () => ({ terminal: { status: "available", source: "override" } }),
+    } as any;
+    const createAgent = vi.fn(async ({ options }) => {
+      if (!options.capabilityOverrides?.terminal) createLocalTerminal();
+      return agent;
+    });
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model" } as any,
+      createAgent,
+      createTerminal: () => ({ value: terminal, jobs: terminalJobs }),
+    })!;
+
+    const loaded = await loader({ session, history: [], parts: [] });
+
+    expect(createLocalTerminal).not.toHaveBeenCalled();
+    expect(createAgent.mock.calls[0]![0].options.capabilityOverrides?.terminal).toEqual({
+      value: terminal,
+      jobs: terminalJobs,
+    });
+    expect(loaded.getCapabilities().terminal).toEqual({
+      status: "available",
+      source: "override",
+    });
+  });
+
   it("loads Agent settings for the durable session cwd", async () => {
     const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
     const createAgent = vi.fn(async () => agent);
