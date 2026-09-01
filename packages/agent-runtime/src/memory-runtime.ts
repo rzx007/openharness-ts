@@ -115,17 +115,32 @@ export async function extractMemories(options: {
 }
 
 function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): boolean {
-  for (const message of messages) {
+  const runMessages = currentRunMessages(messages);
+  const memoryWriteIds = new Set<string>();
+  for (const message of runMessages) {
     if (message.type !== "assistant") continue;
     for (const toolUse of message.toolUses ?? []) {
-      if (toolUse.name === "Remember") return true;
       const input = toolUse.input as Record<string, unknown>;
-      if (isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)) {
-        return true;
+      if (
+        toolUse.name === "Remember" ||
+        isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)
+      ) {
+        memoryWriteIds.add(toolUse.id);
       }
     }
   }
-  return false;
+  return runMessages.some((message) =>
+    message.type === "tool_result" &&
+    message.isError !== true &&
+    memoryWriteIds.has(message.toolUseId)
+  );
+}
+
+function currentRunMessages(messages: Message[]): Message[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index]?.type === "user") return messages.slice(index);
+  }
+  return messages;
 }
 
 function summarizeMessage(message: Message): string {
