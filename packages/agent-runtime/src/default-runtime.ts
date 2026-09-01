@@ -139,14 +139,23 @@ export async function createOpenHarnessRuntime(
   const terminal = availableValue(options.capabilities?.terminal);
   const jobs = availableValue(options.capabilities?.jobs);
   const backgroundShell = availableValue(options.capabilities?.backgroundShell);
+  const childEnvironment = availableValue(options.capabilities?.childEnvironment);
   const workflowRepository = availableValue(options.capabilities?.workflowRepository);
   const imageToText = availableValue(options.capabilities?.imageToText);
   const attachments = availableValue(options.capabilities?.attachments);
   const schedules = availableValue(options.capabilities?.schedules);
+  const includeBackgroundShell = options.capabilities === undefined
+    ? undefined
+    : backgroundShell !== undefined && jobs !== undefined;
+  const includeDelegation = options.capabilities === undefined
+    ? undefined
+    : childEnvironment !== undefined && jobs !== undefined;
   const baseToolRegistry = createDefaultToolRegistry({
     schedules: schedules !== undefined,
     terminal: terminal !== undefined,
     jobs: jobs !== undefined,
+    backgroundShell: includeBackgroundShell,
+    childEnvironment: includeDelegation,
     agentDefinitions: options.agentDefinitions,
     workflowRepository,
     imageToText: imageToText !== undefined,
@@ -213,6 +222,8 @@ export async function createOpenHarnessRuntime(
       fastMode: configuration.fastMode ?? settings.fastMode,
       effort: configuration.effort ?? settings.effort,
       passes: settings.passes,
+      includeBackgroundShell,
+      includeDelegation,
       skillsList: options.skillRegistry?.modelVisibleList(),
     }));
 

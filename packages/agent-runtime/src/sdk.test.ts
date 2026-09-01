@@ -13,6 +13,67 @@ import { describe, expect, it, vi } from "vitest";
 import { createDefaultNodeAgent } from "./index.js";
 
 describe("programmatic agent SDK", () => {
+  it("keeps disabled long-running capabilities out of diagnostics, tools, and the model prompt", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-disabled-capabilities-"));
+    const requests: Array<Parameters<StreamingMessageClient["streamMessage"]>[0]> = [];
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        requests.push(params);
+        yield { type: "text_delta" as const, delta: "restricted runtime" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      client,
+      capabilityOverrides: {
+        jobs: false,
+        terminal: false,
+        backgroundShell: false,
+        childEnvironment: false,
+        workflowRepository: false,
+      },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        jobs: { status: "disabled" },
+        terminal: { status: "disabled" },
+        backgroundShell: { status: "disabled" },
+        childEnvironment: { status: "disabled" },
+        workflowRepository: { status: "disabled" },
+      });
+      const installedTools = agent.inspect().tools.map((tool) => tool.name);
+      const disabledToolNames = [
+        "Agent",
+        "BackgroundShellCreate",
+        "JobList",
+        "JobRead",
+        "JobWait",
+        "JobSend",
+        "JobCancel",
+        "TerminalOpen",
+        "Workflow",
+      ];
+      expect(installedTools.filter((name) => disabledToolNames.includes(name))).toEqual([]);
+
+      await expect(agent.runMessage("describe the restricted runtime")).resolves.toMatchObject({
+        output: "restricted runtime",
+      });
+      const request = requests[0];
+      const requestToolNames = request?.tools?.map((tool) => tool.name) ?? [];
+      expect(requestToolNames.filter((name) => disabledToolNames.includes(name))).toEqual([]);
+      expect(request?.system).not.toContain("BackgroundShellCreate");
+      expect(request?.system).not.toContain("JobWait");
+      expect(request?.system).not.toContain("JobRead");
+      expect(request?.system).not.toContain("# Delegation And Subagents");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("overrides attachments without disabling default background shell and jobs", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-capabilities-"));
     const attachmentHost = {
