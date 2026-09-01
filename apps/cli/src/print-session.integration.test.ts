@@ -135,7 +135,7 @@ function testAgent(
       loadHistory: () => {},
       clear: () => {},
       setModel: () => {},
-      setCompactAttachmentsProvider: () => {},
+      setCompactContextProvider: () => {},
       async compact() { return { history: [], beforeMessageCount: 0, afterMessageCount: 0 }; },
       async remember() { return { skipped: true, writtenIds: [], titles: [] }; },
       getUsage: () => ({ inputTokens: 0, outputTokens: 0 }),

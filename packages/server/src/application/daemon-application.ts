@@ -383,19 +383,17 @@ export class DaemonApplication implements DurableAgentApplication {
       this.agentPool = new AgentPool({
         store,
         loadAgent,
-        compactAttachments: (sessionId) => {
+        attachmentCatalog: (sessionId) =>
+          buildCompactAttachmentCatalog(store, sessionId),
+        sessionMemory: (sessionId) => {
           const session = store.getSession(sessionId);
-          const sessionMemory = session
+          return session
             ? sessionMemoryToCompactText(
                 getSessionMemoryContent(
                   getSessionMemoryPath(session.cwd, sessionId),
                 ),
               )
             : "";
-          return {
-            ...(sessionMemory ? { sessionMemory } : {}),
-            attachmentCatalog: buildCompactAttachmentCatalog(store, sessionId),
-          };
         },
         isSessionExternallyOwned: (sessionId) =>
           this.liveChildren.has(sessionId),

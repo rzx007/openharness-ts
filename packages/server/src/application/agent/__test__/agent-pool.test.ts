@@ -18,7 +18,7 @@ function createAgent(close = vi.fn(async () => {})) {
     state: "idle",
     children: { list: () => [] },
     loadHistory: vi.fn(),
-    setCompactAttachmentsProvider: vi.fn(),
+    setCompactContextProvider: vi.fn(),
     close,
   } as any;
 }
@@ -36,37 +36,61 @@ function createContext(factory = vi.fn(async () => createAgent())) {
 }
 
 describe("AgentPool", () => {
-  it("binds a fresh session attachment catalog to automatic and manual compaction", async () => {
+  it("combines the attachment catalog and session memory for the same session", async () => {
     const agent = createAgent();
-    const compactAttachments = vi.fn(async () => ({
-      attachmentCatalog: { entries: [], omittedCount: 0 },
+    const attachmentCatalog = vi.fn(async () => ({
+      entries: [],
+      omittedCount: 0,
     }));
+    const sessionMemory = vi.fn(async () => "goal: finish phase two");
     const pool = new AgentPool({
       ...createContext(vi.fn(async () => agent)),
-      compactAttachments,
+      attachmentCatalog,
+      sessionMemory,
     } as any);
 
     await pool.acquireSession("s1");
 
-    expect(agent.setCompactAttachmentsProvider).toHaveBeenCalledOnce();
-    const provider = agent.setCompactAttachmentsProvider.mock.calls[0]![0];
+    expect(agent.setCompactContextProvider).toHaveBeenCalledOnce();
+    const provider = agent.setCompactContextProvider.mock.calls[0]![0];
     await expect(provider()).resolves.toEqual({
       attachmentCatalog: { entries: [], omittedCount: 0 },
+      sessionMemory: "goal: finish phase two",
     });
-    expect(compactAttachments).toHaveBeenCalledWith("s1");
+    expect(attachmentCatalog).toHaveBeenCalledWith("s1");
+    expect(sessionMemory).toHaveBeenCalledWith("s1");
   });
 
-  it("keeps legacy injected agents usable when compact attachment binding is unavailable", async () => {
+  it.each([
+    {
+      name: "attachment catalog",
+      sources: {
+        attachmentCatalog: async () => ({ entries: [], omittedCount: 2 }),
+      },
+      expected: {
+        attachmentCatalog: { entries: [], omittedCount: 2 },
+      },
+    },
+    {
+      name: "session memory",
+      sources: {
+        sessionMemory: async () => "next: verify compact wiring",
+      },
+      expected: {
+        sessionMemory: "next: verify compact wiring",
+      },
+    },
+  ])("keeps the $name source usable on its own", async ({ sources, expected }) => {
     const agent = createAgent();
-    delete agent.setCompactAttachmentsProvider;
     const pool = new AgentPool({
       ...createContext(vi.fn(async () => agent)),
-      compactAttachments: vi.fn(async () => ({
-        attachmentCatalog: { entries: [], omittedCount: 0 },
-      })),
+      ...sources,
     } as any);
 
-    await expect(pool.acquireSession("s1")).resolves.toBe(agent);
+    await pool.acquireSession("s1");
+
+    const provider = agent.setCompactContextProvider.mock.calls[0]![0];
+    await expect(provider()).resolves.toEqual(expected);
   });
 
   it("does not create a second agent for a framework-owned live child session", async () => {

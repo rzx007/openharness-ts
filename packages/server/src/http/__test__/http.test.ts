@@ -327,7 +327,7 @@ function adaptTestAgentFactory(
         history = [];
       },
       setModel: () => {},
-      setCompactAttachmentsProvider: () => {},
+      setCompactContextProvider: () => {},
       compact: async (): Promise<AgentCompactResult> => {
         if (state !== "idle") throw new Error(`Agent is ${state}`);
         state = "maintaining";

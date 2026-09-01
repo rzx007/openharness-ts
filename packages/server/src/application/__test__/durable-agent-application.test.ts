@@ -12,7 +12,7 @@ import type {
   AgentEventInput,
   AgentRunHandle,
   AgentRunResult,
-  CompactAttachmentsProvider,
+  CompactContextProvider,
   Message,
 } from "@openharness/core";
 import type { AgentJobHost } from "@openharness/jobs";
@@ -116,7 +116,7 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
       history = [];
     },
     setModel: () => {},
-    setCompactAttachmentsProvider: () => {},
+    setCompactContextProvider: () => {},
     compact: async () => ({
       history,
       beforeMessageCount: history.length,
@@ -133,12 +133,12 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
-  it("把成功 Run 写入的 session checkpoint 提供给 compact", async () => {
+  it("把附件目录和成功 Run 写入的 session checkpoint 一起提供给 compact", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-session-memory-"));
     const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
     process.env.OPENHARNESS_CONFIG_DIR = join(dir, "config");
     const store = new SessionStore({ path: join(dir, "store.db") });
-    let compactAttachmentsProvider: CompactAttachmentsProvider | undefined;
+    let compactContextProvider: CompactContextProvider | undefined;
     const application = new DaemonApplication({
       store,
       settings: {
@@ -154,8 +154,8 @@ describe("DaemonApplication", () => {
       },
       createAgent: async (context) => ({
         ...(await createEchoAgent(context)),
-        setCompactAttachmentsProvider: (provider) => {
-          compactAttachmentsProvider = provider;
+        setCompactContextProvider: (provider) => {
+          compactContextProvider = provider;
         },
       }),
       log: () => {},
@@ -170,12 +170,36 @@ describe("DaemonApplication", () => {
       const admission = await application.sessions.admitPrompt(session.id, {
         content: "preserve this checkpoint detail",
       });
-      await application.sessions.awaitRun(session.id, admission.run!.id);
+      await expect(
+        application.sessions.awaitRun(session.id, admission.run!.id),
+      ).resolves.toMatchObject({ status: "completed" });
+      const attachment = await application.attachments.import({
+        displayName: "phase-two-notes.txt",
+        declaredMediaType: "text/plain",
+        content: new Blob(["attachment checkpoint detail"]).stream(),
+      });
+      store.admitPrompt({
+        id: "attachment-catalog-input",
+        sessionId: session.id,
+        content: "",
+        attachments: [{ assetId: attachment.id, intent: "tool_resource" }],
+      });
 
-      expect(compactAttachmentsProvider).toBeDefined();
-      const compactAttachments = await compactAttachmentsProvider!();
-      expect(compactAttachments).toMatchObject({
+      expect(compactContextProvider).toBeDefined();
+      const compactContext = await compactContextProvider!();
+      expect(compactContext).toMatchObject({
         sessionMemory: expect.stringContaining("preserve this checkpoint detail"),
+        attachmentCatalog: {
+          entries: [
+            expect.objectContaining({
+              assetId: attachment.id,
+              displayName: "phase-two-notes.txt",
+              access: "read_text",
+              status: "available",
+            }),
+          ],
+          omittedCount: 0,
+        },
       });
     } finally {
       await application.close().catch(() => {});
