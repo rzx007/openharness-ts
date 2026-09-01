@@ -342,6 +342,8 @@ export class DaemonApplication implements DurableAgentApplication {
           store,
           attachments: this.attachments,
         }),
+        attachmentResourceRoot: (session) =>
+          this.attachmentResources.prepareSessionSync(session.id),
         requestPermission: async (request, context) => {
           // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
           return await this.permissions.ask({

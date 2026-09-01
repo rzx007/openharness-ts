@@ -6,6 +6,79 @@ import { AgentChildManager, AgentChildRegistry } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
 
 describe("AgentChildManager", () => {
+  it("lends the original host overrides and effects to a child session without cleaning them up", async () => {
+    const readText = vi.fn(async (_input, context) => ({
+      text: context.sessionId,
+      offset: 0,
+      nextOffset: 0,
+      done: true,
+    }));
+    const hostCleanup = vi.fn(async () => {});
+    const attachments = { readText, close: hostCleanup };
+    const producerCleanup = vi.fn(async () => {});
+    const terminal = { open: vi.fn(), close: producerCleanup };
+    const terminalJobs = {};
+    const capabilityOverrides = {
+      attachments,
+      terminal: { value: terminal, jobs: terminalJobs },
+    } as any;
+    const effects = { requestPermission: vi.fn() } as any;
+    const createAgent = vi.fn(async (options) => ({
+      ...fakeAgent(vi.fn()),
+      submitMessage: vi.fn((_content, submitOptions) => {
+        void options.capabilityOverrides.attachments.readText(
+          { assetId: "asset-1" },
+          { sessionId: options.sessionId },
+        );
+        const run = completedRun("done");
+        return {
+          ...run,
+          id: submitOptions.ids.runId,
+          inputId: submitOptions.ids.inputId,
+          sessionId: options.sessionId,
+          started: Promise.resolve({
+            sessionId: options.sessionId,
+            inputId: submitOptions.ids.inputId,
+            runId: submitOptions.ids.runId,
+          }),
+        };
+      }),
+    }));
+    const manager = new AgentChildManager({
+      settings: {} as any,
+      configuration: {},
+      capabilityOverrides,
+      effects,
+      cwd: "/repo",
+      eventBus: new AgentEventBus(),
+      environment: { acquire: async (input) => ({ cwd: input.cwd, release: async () => {} }) },
+      createAgent,
+    });
+
+    const invocation = await manager.createController(parentScope()).spawnChildAgent({
+      description: "Borrow host overrides",
+      prompt: "read the attachment",
+      agent: "worker",
+      cwd: "/repo/child",
+      sessionId: "child-session-borrowed-host",
+    });
+    await invocation.result;
+
+    const childOptions = createAgent.mock.calls[0]?.[0];
+    expect(childOptions.capabilityOverrides).toBe(capabilityOverrides);
+    expect(childOptions.effects).toBe(effects);
+    expect(childOptions.capabilityOverrides.attachments).toBe(attachments);
+    expect(childOptions.capabilityOverrides.terminal).toBe(capabilityOverrides.terminal);
+    expect(readText).toHaveBeenCalledWith(
+      { assetId: "asset-1" },
+      { sessionId: "child-session-borrowed-host" },
+    );
+
+    await manager.closeAll();
+    expect(hostCleanup).not.toHaveBeenCalled();
+    expect(producerCleanup).not.toHaveBeenCalled();
+  });
+
   it("inherits root configuration unless the child explicitly overrides it", async () => {
     const createAgent = vi.fn(async () => fakeAgent(vi.fn(() => completedRun("done"))));
     const manager = createManager(

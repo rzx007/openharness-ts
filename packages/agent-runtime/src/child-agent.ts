@@ -306,6 +306,9 @@ export class AgentChildManager implements AgentChildDirectory {
         effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
           ? input.effort
           : this.options.configuration.effort,
+        // Host overrides/effects are borrowed unchanged by the whole root session
+        // tree. Resolved defaults are deliberately not propagated: the child
+        // composition rebuilds Memory, Workflow and Jobs for its cwd/session.
         capabilityOverrides: this.options.capabilityOverrides,
         effects: this.options.effects,
       }, {

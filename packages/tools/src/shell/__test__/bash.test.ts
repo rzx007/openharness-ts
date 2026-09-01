@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   bashTool,
+  createBashTool,
   decodeShellChunk,
   formatOutput,
   looksLikeUtf16Le,
 } from "../bash.js";
+import type { ShellExecSpec } from "../types.js";
 
 describe("bashTool", () => {
   it("captures stdout", async () => {
@@ -26,10 +28,27 @@ describe("bashTool", () => {
   });
 
   it("returns partial output after a timeout", async () => {
-    // Emit a line immediately, then sleep well past the timeout. The tool must
-    // kill the process AND surface the line that was already produced.
-    const result = await bashTool.execute!(
-      { command: "echo partial-marker; sleep 5", timeout: 500 },
+    const tool = createBashTool({
+      async resolve() {
+        return {
+          timeoutMs: 500,
+          maxOutputChars: 12_000,
+          hostShell: { kind: "posix-sh" },
+          runner: { mode: "host", fallbackToHost: false },
+        } as ShellExecSpec;
+      },
+      async run() {
+        return {
+          status: "timed_out",
+          failureKind: "timeout",
+          output: "partial-marker",
+          outputTruncated: false,
+          exitCode: null,
+        };
+      },
+    });
+    const result = await tool.execute!(
+      { command: "ignored", timeout: 500 },
       { cwd: process.cwd() }
     );
     const text = (result.content[0] as any).text as string;
@@ -37,7 +56,7 @@ describe("bashTool", () => {
     expect(text).toContain("timed out");
     expect(text).toContain("Partial output");
     expect(text).toContain("partial-marker");
-  }, 10_000);
+  });
 
   it("truncates large output at ~12000 chars", () => {
     const text = formatOutput("a".repeat(20_000));

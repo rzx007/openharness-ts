@@ -159,6 +159,24 @@ describe("DefaultShellExecutor.run", () => {
     expect(result.output.length).toBe(33);
   });
 
+  it("retains output produced before a timeout", async () => {
+    const executor = processExecutor(
+      "process.stdout.write('partial-marker'); setTimeout(() => {}, 5_000)",
+    );
+    const spec = await executor.resolve({
+      command: "ignored",
+      timeoutMs: 500,
+    }, { cwd: process.cwd() });
+
+    const result = await executor.run(spec);
+
+    expect(result).toMatchObject({
+      status: "timed_out",
+      failureKind: "timeout",
+      output: "partial-marker",
+    });
+  });
+
   it("does not start a process when already interrupted", async () => {
     const createProcess = vi.fn();
     const executor = new DefaultShellExecutor({

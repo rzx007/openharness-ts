@@ -11,3 +11,5 @@ Task 2: complete (Memory remains agent-runtime-owned; default creation, equivale
 Task 2 fix round 1: complete (duplicate suppression now requires a current-run managed write with a matching successful tool result)
 Task 2 fix round 2: complete (completed framework runs now provide an explicit message snapshot across steering, compaction, and history replacement)
 Task 2 fix round 3: complete (framework runs now record successful tool activity independently of auto-compacted history; failed and cancelled runs leave no success fact)
+Task 5: complete (standalone attachment states, sandbox-only resource root, and child session-tree Host borrowing verified)
+Phase 2: accepted (core/tools/agent-runtime/server suites, full type checks, docs, and boundary grep checklist verified)

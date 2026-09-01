@@ -1,4 +1,20 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+const startSandboxRuntime = vi.hoisted(() => vi.fn(async () => ({
+  status: {
+    state: "off" as const,
+    enabled: false,
+    active: false,
+    backend: "docker" as const,
+  },
+  stop: vi.fn(async () => {}),
+  stopSync: vi.fn(),
+})));
+
+vi.mock("@openharness/sandbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@openharness/sandbox")>()),
+  startSandboxRuntime,
+}));
 import {
   createOpenHarnessRuntime,
   resolveAutoApproveTools,
@@ -129,6 +145,32 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
+  it("mounts attachmentResourceRoot read-only without treating it as an attachment API", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+      },
+      attachmentResourceRoot: "D:/session-attachments",
+    });
+
+    try {
+      expect(startSandboxRuntime).toHaveBeenLastCalledWith(expect.objectContaining({
+        managedReadOnlyMounts: [{
+          source: "D:/session-attachments",
+          target: "/mnt/openharness-attachments",
+        }],
+      }));
+      expect(runtime.toolRegistry.get("ReadAttachment")).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("rejects removed lifecycle names with the Jobs replacement", async () => {
     await expect(createOpenHarnessRuntime({
       settings: {

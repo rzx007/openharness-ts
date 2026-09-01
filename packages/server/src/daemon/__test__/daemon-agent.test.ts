@@ -61,6 +61,7 @@ describe("createDaemonAgentLoader", () => {
     const backgroundShell = { create: vi.fn() } as any;
     const backgroundShellJobs = {} as any;
     const schedules = {} as any;
+    const attachments = { readText: vi.fn() } as any;
     const loader = createDaemonAgentLoader({
       settings: { model: "default-model" } as any,
       createAgent,
@@ -72,6 +73,8 @@ describe("createDaemonAgentLoader", () => {
         value: backgroundShell,
         jobs: backgroundShellJobs,
       }),
+      attachments,
+      attachmentResourceRoot: (durableSession) => `/resources/${durableSession.id}`,
     })!;
 
     const loaded = await loader({ session, history: [], parts: [] });
@@ -97,8 +100,10 @@ describe("createDaemonAgentLoader", () => {
           jobs: backgroundShellJobs,
         },
         schedules,
+        attachments,
       },
       effects: { requestPermission },
+      attachmentResourceRoot: "/resources/session-1",
     });
     expect(terminalJobs).not.toBe(backgroundShellJobs);
     expect(loadHistory).toHaveBeenCalledWith([]);

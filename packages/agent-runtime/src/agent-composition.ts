@@ -57,6 +57,7 @@ interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
   childIdleTtlMs?: number;
   capabilityOverrides?: AgentCapabilityOverrides;
   effects?: AgentEffectOverrides;
+  attachmentResourceRoot?: string;
 }
 
 export interface AgentIdentity {
@@ -164,7 +165,7 @@ export async function composeOpenHarnessAgent(
   );
   const attachments = resolveOptionalOverride(
     overrides.attachments,
-    "Default Node runtime does not provide attachments",
+    "No attachment intake configured",
   );
   const imageToText = resolveOptionalOverride(
     overrides.imageToText,
@@ -193,6 +194,7 @@ export async function composeOpenHarnessAgent(
     sessionId,
     configuration: options,
     capabilities,
+    attachmentResourceRoot: options.attachmentResourceRoot,
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
   });

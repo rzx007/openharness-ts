@@ -72,6 +72,7 @@ interface OpenHarnessRuntimeOptions {
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
   capabilities?: ResolvedAgentCapabilities;
+  attachmentResourceRoot?: string;
 }
 
 /**
@@ -248,7 +249,7 @@ export async function createOpenHarnessRuntime(
   queryEngine.setJobs(jobs);
   queryEngine.setBackgroundShell(backgroundShell);
   queryEngine.setImageToText(imageToText);
-  queryEngine.setAttachments(attachments);
+  if (attachments) queryEngine.setAttachments(attachments);
   queryEngine.setSchedules(schedules);
 
   const bundle = new RuntimeBuilder()
@@ -264,6 +265,7 @@ export async function createOpenHarnessRuntime(
     cwd,
     options.sandboxReporter,
     options.sessionId,
+    options.attachmentResourceRoot,
   );
   return bundle;
 }
@@ -347,12 +349,21 @@ async function attachSandboxRuntime(
   cwd: string,
   reporter?: SandboxRuntimeReporter,
   sessionId?: string,
+  attachmentResourceRoot?: string,
 ): Promise<void> {
   const sandboxRuntime = await startSandboxRuntime({
     settings: bundle.settings,
     cwd,
     sessionId,
     reporter,
+    ...(attachmentResourceRoot
+      ? {
+          managedReadOnlyMounts: [{
+            source: attachmentResourceRoot,
+            target: "/mnt/openharness-attachments",
+          }],
+        }
+      : {}),
   });
   bundle.sandboxStatus = sandboxRuntime.status;
 
