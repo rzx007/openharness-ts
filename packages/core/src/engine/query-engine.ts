@@ -41,6 +41,10 @@ import { validateToolInput } from "./tool-input-schema";
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
 const DEFAULT_TOOL_TIMEOUT_MS = 300_000;
+const RECOVERY_TOOL_TURNS = 2;
+const MAX_FAILED_CALLS_PER_TOOL = 3;
+const RECOVERY_FINALIZATION_PROMPT =
+  "Stop using tools for this response. Explain the blocker, summarize what was attempted, and state what input or external change is needed to continue.";
 
 // ---------------------------------------------------------------------------
 // Tool output budget — mirrors packages/services/src/tool-outputs.ts
@@ -323,11 +327,16 @@ export class QueryEngine implements IQueryEngine {
     const turnSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
 
     let turnCount = 0;
+    const failedUnsafeCalls = new Set<string>();
+    const failedCallsByTool = new Map<string, number>();
+    const blockedTools = new Set<string>();
+    let recoveryToolTurnsRemaining: number | null = null;
+    let forceFinalResponse = false;
 
     // 执行会话开始时的钩子函数
     await this.hookExecutor.execute("session_start", {});
 
-    while (turnCount < this.maxTurns) {
+    while (turnCount < this.maxTurns || forceFinalResponse) {
       // 自动压缩消息历史以控制上下文长度
       try {
         this.messages = await this.compactService.autoCompact(
@@ -341,14 +350,24 @@ export class QueryEngine implements IQueryEngine {
       }
       this.messages = sanitizeMessageHistory(this.messages);
 
-      const tools = this.visibleToolRegistry().getAll();
+      const forcedFinalTurn = forceFinalResponse;
+      const visibleTools = this.visibleToolRegistry().getAll();
+      const tools = forcedFinalTurn
+        ? []
+        : visibleTools.filter((tool) => !blockedTools.has(tool.name));
+      const finalizing = forcedFinalTurn
+        || (blockedTools.size > 0 && tools.length === 0);
+      const system = finalizing
+        ? appendSystemGuidance(turnSystemPrompt, RECOVERY_FINALIZATION_PROMPT)
+        : turnSystemPrompt;
       const stream = this.apiClient.streamMessage({
         model: this.model,
         messages: this.messages,
-        system: turnSystemPrompt,
+        system,
         tools: tools.length > 0 ? tools : undefined,
         abortSignal: options.signal,
       });
+      forceFinalResponse = false;
 
       let assistantText = "";
       let assistantPhase: import("../types/messages").AssistantMessagePhase | undefined;
@@ -391,12 +410,34 @@ export class QueryEngine implements IQueryEngine {
 
       if (toolUses.length > 0) {
         // 执行所有请求的工具调用，并将结果作为工具结果消息加入历史记录
+        const recoveringAtTurnStart = recoveryToolTurnsRemaining !== null;
         const results = await this.executeTools(
           toolUses,
           options.signal,
           options.execution,
+          failedUnsafeCalls,
+          blockedTools,
         );
-        for (const result of results) {
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i]!;
+          const toolUse = toolUses[i]!;
+          const tool = this.visibleToolRegistry().get(toolUse.name);
+          if (result.isError && (!tool || tool.safeToRetry !== true)) {
+            failedUnsafeCalls.add(toolCallSignature(toolUse));
+          }
+          const recoveryGuard = result.metadata?.recoveryGuard;
+          if (recoveryGuard) {
+            recoveryToolTurnsRemaining ??= RECOVERY_TOOL_TURNS;
+          } else if (result.isError) {
+            const failures = (failedCallsByTool.get(toolUse.name) ?? 0) + 1;
+            failedCallsByTool.set(toolUse.name, failures);
+            if (failures >= MAX_FAILED_CALLS_PER_TOOL) {
+              blockedTools.add(toolUse.name);
+              recoveryToolTurnsRemaining ??= RECOVERY_TOOL_TURNS;
+            }
+          } else {
+            failedCallsByTool.delete(toolUse.name);
+          }
           this.messages.push({
             type: "tool_result",
             toolUseId: result.toolUseId,
@@ -405,8 +446,22 @@ export class QueryEngine implements IQueryEngine {
           });
           yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
         }
+        if (recoveringAtTurnStart && recoveryToolTurnsRemaining !== null) {
+          recoveryToolTurnsRemaining--;
+          if (recoveryToolTurnsRemaining <= 0) {
+            forceFinalResponse = true;
+          }
+        }
         turnCount++;
         if (turnCount >= this.maxTurns) {
+          if (
+            !forcedFinalTurn
+            && (recoveryToolTurnsRemaining !== null || blockedTools.size > 0)
+          ) {
+            options.execution?.closeSteering();
+            forceFinalResponse = true;
+            continue;
+          }
           options.execution?.closeSteering();
           throw new MaxTurnsExceeded(this.maxTurns);
         }
@@ -509,6 +564,8 @@ export class QueryEngine implements IQueryEngine {
     toolUses: ToolUseBlock[],
     signal?: AbortSignal,
     execution?: AgentExecutionContext,
+    failedUnsafeCalls?: ReadonlySet<string>,
+    blockedTools?: ReadonlySet<string>,
   ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = new Array(toolUses.length);
     const readyForPermission: {
@@ -520,6 +577,40 @@ export class QueryEngine implements IQueryEngine {
 
     for (let i = 0; i < toolUses.length; i++) {
       const toolUse = toolUses[i]!;
+
+      if (blockedTools?.has(toolUse.name)) {
+        results[i] = {
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
+          content: [
+            {
+              type: "text" as const,
+              text: "Tool is unavailable for the rest of this response after repeated failures. Choose another approach or explain the blocker.",
+            },
+          ],
+          isError: true,
+          failureKind: "policy",
+          metadata: { recoveryGuard: "tool_failure_limit" },
+        };
+        continue;
+      }
+
+      if (failedUnsafeCalls?.has(toolCallSignature(toolUse))) {
+        results[i] = {
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
+          content: [
+            {
+              type: "text" as const,
+              text: "Tool call already failed with the same input. Do not repeat it unless the input or underlying condition changes; choose another approach or explain the blocker.",
+            },
+          ],
+          isError: true,
+          failureKind: "policy",
+          metadata: { recoveryGuard: "repeated_failed_call" },
+        };
+        continue;
+      }
 
       const tool = toolRegistry.get(toolUse.name);
       if (!tool) {
@@ -858,6 +949,32 @@ export class QueryEngine implements IQueryEngine {
       inspect: (name) => registry.inspect(name),
     };
   }
+}
+
+function toolCallSignature(toolUse: ToolUseBlock): string {
+  return `${toolUse.name}:${stableJson(toolUse.input)}`;
+}
+
+function appendSystemGuidance(
+  systemPrompt: string | undefined,
+  guidance: string,
+): string {
+  return systemPrompt?.trim()
+    ? `${systemPrompt}\n\n${guidance}`
+    : guidance;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? String(value);
 }
 
 function toolDescriptor(tool: ToolDefinition): ToolDescriptor {

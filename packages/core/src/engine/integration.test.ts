@@ -508,6 +508,185 @@ describe("Integration: Full Agent Loop", () => {
     expect(toolEnd.result.content[0].text).toContain("boom");
   });
 
+  it("does not execute the same unsafe failed tool call twice", async () => {
+    const registry = new ToolRegistry();
+    let executions = 0;
+    registry.register({
+      name: "Generate",
+      description: "generates an artifact",
+      inputSchema: { type: "object", properties: { prompt: { type: "string" } } },
+      execute: async () => {
+        executions++;
+        return {
+          content: [{ type: "text" as const, text: "provider unavailable" }],
+          isError: true,
+          failureKind: "provider",
+        };
+      },
+    });
+
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu1", name: "Generate", input: { prompt: "scene" } },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        {
+          type: "tool_use_start",
+          toolUse: { type: "tool_use", id: "tu2", name: "Generate", input: { prompt: "scene" } },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "I cannot continue without the provider." },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks(), { maxTurns: 2 });
+    const events: StreamEvent[] = [];
+    for await (const event of engine.submitMessage("generate a scene")) events.push(event);
+
+    expect(executions).toBe(1);
+    const toolEnds = events.filter((event) => event.type === "tool_use_end") as any[];
+    expect(toolEnds).toHaveLength(2);
+    expect(toolEnds[1].result.isError).toBe(true);
+    expect(toolEnds[1].result.content[0].text).toContain("already failed with the same input");
+  });
+
+  it("stops tool recovery after two further tool turns without progress", async () => {
+    const registry = new ToolRegistry();
+    let generateExecutions = 0;
+    let searchExecutions = 0;
+    registry.register({
+      name: "Generate",
+      description: "generates an artifact",
+      inputSchema: { type: "object", properties: { prompt: { type: "string" } } },
+      execute: async () => {
+        generateExecutions++;
+        return {
+          content: [{ type: "text" as const, text: "provider unavailable" }],
+          isError: true,
+          failureKind: "provider",
+        };
+      },
+    });
+    registry.register({
+      name: "Search",
+      description: "searches for troubleshooting information",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+      execute: async () => {
+        searchExecutions++;
+        return { content: [{ type: "text" as const, text: "no new evidence" }] };
+      },
+    });
+
+    const requests: any[] = [];
+    let callCount = 0;
+    const client = {
+      streamMessage: async function* (params: any) {
+        requests.push(params);
+        const currentCall = callCount++;
+        if (!params.tools) {
+          yield { type: "text_delta", delta: "The provider is unavailable, so I stopped retrying." };
+          yield { type: "complete", stopReason: "end_turn" };
+          return;
+        }
+        if (currentCall < 2) {
+          yield {
+            type: "tool_use_start",
+            toolUse: {
+              type: "tool_use",
+              id: `generate-${currentCall}`,
+              name: "Generate",
+              input: { prompt: "scene" },
+            },
+          };
+        } else {
+          yield {
+            type: "tool_use_start",
+            toolUse: {
+              type: "tool_use",
+              id: `search-${currentCall}`,
+              name: "Search",
+              input: { query: `attempt-${currentCall}` },
+            },
+          };
+        }
+        yield { type: "complete", stopReason: "tool_use" };
+      },
+    };
+
+    const engine = new QueryEngine(client as any, registry, allowAll(), noopHooks(), { maxTurns: 4 });
+    const events: StreamEvent[] = [];
+    for await (const event of engine.submitMessage("generate a scene")) events.push(event);
+
+    expect(generateExecutions).toBe(1);
+    expect(searchExecutions).toBe(2);
+    expect(requests).toHaveLength(5);
+    expect(requests.at(-1).tools).toBeUndefined();
+    expect(requests.at(-1).system).toContain("Stop using tools");
+    expect(events.some((event: any) =>
+      event.type === "text_delta" && event.delta.includes("stopped retrying"),
+    )).toBe(true);
+  });
+
+  it("blocks a tool after three failed calls even when the input changes", async () => {
+    const registry = new ToolRegistry();
+    let executions = 0;
+    registry.register({
+      name: "Generate",
+      description: "generates an artifact",
+      inputSchema: { type: "object", properties: { prompt: { type: "string" } } },
+      safeToRetry: true,
+      execute: async () => {
+        executions++;
+        return {
+          content: [{ type: "text" as const, text: "provider unavailable" }],
+          isError: true,
+          failureKind: "provider",
+        };
+      },
+    });
+
+    const requests: any[] = [];
+    let callCount = 0;
+    const client = {
+      streamMessage: async function* (params: any) {
+        requests.push(params);
+        const currentCall = callCount++;
+        if (!params.tools) {
+          yield { type: "text_delta", delta: "Generation remains unavailable." };
+          yield { type: "complete", stopReason: "end_turn" };
+          return;
+        }
+        yield {
+          type: "tool_use_start",
+          toolUse: {
+            type: "tool_use",
+            id: `generate-${currentCall}`,
+            name: "Generate",
+            input: { prompt: `scene-${currentCall}` },
+          },
+        };
+        yield { type: "complete", stopReason: "tool_use" };
+      },
+    };
+
+    const engine = new QueryEngine(client as any, registry, allowAll(), noopHooks(), { maxTurns: 3 });
+    for await (const _event of engine.submitMessage("generate a scene")) {
+      // Consume the stream.
+    }
+
+    expect(executions).toBe(3);
+    expect(requests).toHaveLength(4);
+    expect(requests.at(-1).tools).toBeUndefined();
+    expect(requests.at(-1).system).toContain("Stop using tools");
+  });
+
   it("injects tool and run abort signals into tool context", async () => {
     const registry = new ToolRegistry();
     let sawAbortSignal = false;

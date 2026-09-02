@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDaemonImageGenerationTool } from "../daemon-image-generation-tool.js";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 const settings = {
   model: "chat-model",
@@ -27,7 +30,10 @@ function captureFetch() {
 }
 
 describe("daemon ImageGeneration tool", () => {
-  it("sends Agnes text-to-image fields and uses ToolContext credentials", async () => {
+  it("uses dedicated Agnes environment configuration instead of chat settings", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubEnv("AGNES_IMAGE_BASE_URL", "https://agnes-images.example");
+    vi.stubEnv("AGNES_IMAGE_MODEL", "agnes-image-test-model");
     const requests = captureFetch();
 
     await createDaemonImageGenerationTool().execute(
@@ -36,10 +42,10 @@ describe("daemon ImageGeneration tool", () => {
     );
 
     expect(requests).toEqual([{
-      url: "https://images.example/v1/images/generations",
-      authorization: "Bearer test-key",
+      url: "https://agnes-images.example/v1/images/generations",
+      authorization: "Bearer agnes-test-key",
       body: {
-        model: "agnes-image-2.5-flash",
+        model: "agnes-image-test-model",
         prompt: "a quiet terminal",
         size: "1K",
         ratio: "1:1",
@@ -49,14 +55,13 @@ describe("daemon ImageGeneration tool", () => {
   });
 
   it("does not duplicate /v1 when baseUrl already includes it", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubEnv("AGNES_IMAGE_BASE_URL", "https://api.agnes-ai.cn/v1");
     const requests = captureFetch();
 
     await createDaemonImageGenerationTool().execute(
       { prompt: "a quiet terminal", size: "2K", ratio: "16:9" },
-      {
-        cwd: "C:/work",
-        settings: { ...settings, baseUrl: "https://api.agnes-ai.cn/v1" },
-      } as any,
+      { cwd: "C:/work", settings } as any,
     );
 
     expect(requests[0]?.url).toBe("https://api.agnes-ai.cn/v1/images/generations");
@@ -67,6 +72,7 @@ describe("daemon ImageGeneration tool", () => {
   });
 
   it("puts reference images and img2img output format under extra_body", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
     const requests = captureFetch();
 
     await createDaemonImageGenerationTool().execute(
@@ -91,14 +97,64 @@ describe("daemon ImageGeneration tool", () => {
   });
 
   it("rejects a missing API key without calling the provider", async () => {
+    vi.stubEnv("AGNES_API_KEY", "");
     const requests = captureFetch();
 
     const result = await createDaemonImageGenerationTool().execute(
       { prompt: "a quiet terminal" },
-      { cwd: "C:/work", settings: { ...settings, apiKey: "" } } as any,
+      { cwd: "C:/work", settings } as any,
     );
 
     expect(requests).toEqual([]);
     expect(result).toMatchObject({ isError: true, failureKind: "policy" });
+  });
+
+  it.each([401, 403])("identifies HTTP %s as rejected Agnes credentials", async (status) => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { message: "credential rejected" } }),
+      { status },
+    )));
+
+    const result = await createDaemonImageGenerationTool().execute(
+      { prompt: "a quiet terminal" },
+      { cwd: "C:/work", settings } as any,
+    );
+
+    expect(result).toMatchObject({ isError: true, failureKind: "provider" });
+    expect(result.content[0]?.text).toContain(`credentials rejected (HTTP ${status})`);
+  });
+
+  it("reports rate limiting and the provider retry delay", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { message: "4K tier allows 1 request per minute" } }),
+      { status: 429, headers: { "Retry-After": "60" } },
+    )));
+
+    const result = await createDaemonImageGenerationTool().execute(
+      { prompt: "a quiet terminal", size: "4K" },
+      { cwd: "C:/work", settings } as any,
+    );
+
+    expect(result).toMatchObject({ isError: true, failureKind: "provider" });
+    expect(result.content[0]?.text).toContain("rate limited (HTTP 429)");
+    expect(result.content[0]?.text).toContain("Retry after 60 seconds");
+  });
+
+  it("returns a redacted fetch failure instead of hiding its cause", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("TLS failure while using agnes-test-key");
+    }));
+
+    const result = await createDaemonImageGenerationTool().execute(
+      { prompt: "a quiet terminal" },
+      { cwd: "C:/work", settings } as any,
+    );
+
+    expect(result).toMatchObject({ isError: true, failureKind: "provider" });
+    expect(result.content[0]?.text).toContain("Error: TLS failure while using [redacted]");
+    expect(result.content[0]?.text).not.toContain("agnes-test-key");
   });
 });

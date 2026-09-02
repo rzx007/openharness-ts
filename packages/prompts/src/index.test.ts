@@ -140,6 +140,15 @@ describe("background shell guidance", () => {
   });
 });
 
+describe("tool recovery guidance", () => {
+  it("requires changed evidence for retries and a bounded recovery", () => {
+    const prompt = getInvariantGuidance();
+    expect(prompt).toContain("new evidence, changed input, or a transient failure");
+    expect(prompt).toContain("After two distinct recovery approaches fail");
+    expect(prompt).toContain("stop using tools and explain the blocker");
+  });
+});
+
 describe("CLAUDE.md upward traversal", () => {
   let root: string;
   let parent: string;

@@ -51,20 +51,20 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
       if ("error" in ratio) return policyError(ratio.error);
       const images = readImages(input.images);
       if ("error" in images) return policyError(images.error);
-      const model = optionalString(input.model) ?? DEFAULT_MODEL;
-      const settings = context.settings;
-      if (!settings) {
-        return policyError("ImageGeneration is unavailable because runtime settings are missing.");
-      }
-      // const apiKey = settings.apiKey?.trim() ?? "";
-      const apiKey = "sk-jrLJzC241o89j3E39NUBpO2Go5eXgCzz8xzBL41G4leG7jDF";
+      const model = optionalString(input.model) ??
+        optionalString(process.env.AGNES_IMAGE_MODEL) ??
+        DEFAULT_MODEL;
+      const apiKey = process.env.AGNES_API_KEY?.trim() ?? "";
       if (!apiKey) {
-        return policyError("ImageGeneration is unavailable because no API key is configured.");
+        return policyError(
+          "ImageGeneration is unavailable because AGNES_API_KEY is not configured.",
+        );
       }
+      const baseUrl = optionalString(process.env.AGNES_IMAGE_BASE_URL) ?? DEFAULT_BASE_URL;
 
       const generationAbortScope = createToolAbortScope(context.abortSignal, 180_000);
       try {
-        const response = await fetch(imagesGenerationsUrl(settings.baseUrl ?? DEFAULT_BASE_URL), {
+        const response = await fetch(imagesGenerationsUrl(baseUrl), {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify(buildAgnesRequest({
@@ -79,7 +79,14 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
         if (!response.ok) {
           const body = redactProviderBody(await response.text(), apiKey);
           return {
-            content: [{ type: "text", text: `ImageGeneration provider error ${response.status}: ${body}` }],
+            content: [{
+              type: "text",
+              text: providerFailureText(
+                response.status,
+                body,
+                response.headers.get("retry-after"),
+              ),
+            }],
             isError: true,
             failureKind: "provider",
           };
@@ -120,12 +127,15 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
         let text = savedPaths.map((path, index) => `Image ${index + 1}: ${path}`).join("\n");
         if (revisedPrompt) text += `\nRevised prompt: ${revisedPrompt}`;
         return { content: [{ type: "text", text }] };
-      } catch {
+      } catch (error) {
         const interrupted = context.abortSignal?.aborted === true;
+        const detail = redactProviderBody(formatThrownError(error), apiKey);
         return {
           content: [{
             type: "text",
-            text: interrupted ? "ImageGeneration interrupted" : "ImageGeneration request failed",
+            text: interrupted
+              ? `ImageGeneration interrupted: ${detail}`
+              : `ImageGeneration request failed: ${detail}`,
           }],
           isError: true,
           failureKind: interrupted ? "interrupted" : "provider",
@@ -210,4 +220,24 @@ function policyError(text: string) {
 function redactProviderBody(body: string, apiKey: string): string {
   const redacted = apiKey ? body.split(apiKey).join("[redacted]") : body;
   return redacted.slice(0, 1_000);
+}
+
+function providerFailureText(status: number, body: string, retryAfter: string | null): string {
+  if (status === 401 || status === 403) {
+    return `ImageGeneration credentials rejected (HTTP ${status}): ${body}`;
+  }
+  if (status === 429) {
+    const retry = retryAfter?.trim()
+      ? ` Retry after ${retryAfter.trim()} seconds; do not retry before then.`
+      : " Wait before retrying; do not retry immediately.";
+    return `ImageGeneration rate limited (HTTP 429).${retry} ${body}`;
+  }
+  return `ImageGeneration provider error ${status}: ${body}`;
+}
+
+function formatThrownError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name || "Error"}: ${error.message || "No error message"}`;
+  }
+  return `Unknown error: ${String(error)}`;
 }
