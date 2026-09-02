@@ -2,7 +2,7 @@
 
 ## 1. 状态
 
-- 状态：待用户审核
+- 状态：已批准，待实现
 - 日期：2026-09-02
 - 范围：`@openharness/core`、`@openharness/tools`、`@openharness/agent-runtime`、`@openharness/server`
 - 前置设计：`2026-09-02-agent-tool-override-design.md`
@@ -104,7 +104,7 @@ ImageToText({
 
 要求 `image_path` 和 `image_url` 恰好提供一个。`prompt` 缺省为详细描述图片，可用于图片描述或文字提取。该 Tool：
 
-- 使用 `ToolContext.settings` 中当前 Agent 的模型、`visionModel`、API 格式、地址和凭据；
+- 使用 `ToolContext.settings` 中当前 Agent 的模型、API 格式、地址和凭据；当前 Settings 已没有单独的 `visionModel`，不重新引入该配置；
 - 本地图片按受支持媒体类型编码为模型图片输入；
 - URL 只作为模型图片输入，不经过附件存储；
 - 使用 Tool 调用的 `abortSignal` 和 60 秒内部超时；
