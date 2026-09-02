@@ -109,7 +109,7 @@ await createDefaultNodeAgent({
 
 `capabilityOverrides` 按能力独立解析：不传表示使用该能力的默认值，传入 `false` 表示关闭。只有 `terminal`、`backgroundShell`、`childEnvironment`、`workflowRepository` 和 `schedules` 接受 Host 对象作为 override；其中 `terminal` 与 `backgroundShell` 必须使用 `{ value, jobs }` bundle，让 `Job*` 工具能观察与控制它们创建的 Job。`jobs` 与 `memory` 不接受 Host 对象，分别只能设为 `false` 来关闭本地 Jobs 或受管 Memory。
 
-附件不是 Agent Capability。默认 `Read` 只读本地路径，默认 Agent 也不承诺图生文或文生图。daemon 作为第一方 Agent 创建者，通过 `toolOverrides` 把 `Read` 扩展为“本地路径 + 当前会话授权附件”，并按实际服务配置通过 `tools` 注册 `ImageToText` 和 `ImageGeneration`。`ImageToText` 在 daemon 中支持普通路径、图片 URL 和授权后的 `attachment_id`；附件分支会把 Child session 解析到 Root session 后再校验引用。
+附件不是 Agent Capability。默认 `Read` 只读本地路径，默认 Agent 也不承诺图生文或文生图。`@openharness/tools` 不定义或导出 `ImageToText`、`ImageGeneration`。daemon 作为第一方 Agent 创建者，通过 `toolOverrides` 把 `Read` 扩展为“本地路径 + 当前会话授权附件”，并在 server 内完整定义两个视觉 Tool。`createDaemonAgentLoader` 只调用统一的 `tools({ session, settings })` 获取当前会话的普通工具，不认识任何具体工具名称。daemon 的 `ImageToText` 支持普通路径、图片 URL 和授权后的 `attachment_id`；附件分支会把 Child session 解析到 Root session 后再校验引用。
 
 内部的 `trustedToolOverrides` 只用于第一方 composition root 明确信任自己构造的覆盖，让 daemon 的 `Read` 保留原内置 `Read` 的权限分类。名称必须同时存在于 `toolOverrides`，且目标必须是默认 builtin；普通 `toolOverrides` 默认不继承信任。Extension、Plugin 和 MCP 没有设置或追加可信名称的入口。
 

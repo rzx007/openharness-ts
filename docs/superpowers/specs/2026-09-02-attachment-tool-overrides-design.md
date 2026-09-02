@@ -36,8 +36,8 @@ DefaultNodeAgent
 Daemon
   ├─ 管理附件上传、存储、授权和生命周期
   ├─ 用附件版 Read 覆盖默认 Read
-  ├─ 按服务配置注册 ImageToText
-  └─ 按服务配置注册 ImageGeneration
+  ├─ 完整定义 ImageToText / ImageGeneration
+  └─ 通过统一的 tools(context) 返回固定工具和动态工具
 ```
 
 核心规则：
@@ -46,7 +46,7 @@ Daemon
 2. Agent Runtime 不保留旧接口，也不同时支持 Capability 和 Tool override 两条注入路径。
 3. 默认 `Read` 独立可用；默认 Registry 不提供图生文或文生图 Tool。
 4. daemon 覆盖的是完整 `ToolDefinition`，执行仍经过 QueryEngine 的权限、Hook、超时、取消、审计和结果规范化。
-5. `@openharness/tools` 可以保留可复用的视觉 Tool 定义，但只有 daemon 决定是否注册；定义存在不等于默认 Agent 拥有该能力。
+5. `@openharness/tools` 不定义或导出视觉 Tool；`ImageToText` 和 `ImageGeneration` 的完整定义属于 daemon/server。
 6. 附件目录不再隐式挂载给 Agent shell。
 7. compact 只接受通用补充章节；附件 Catalog 的类型、构建、限额和文案全部由 server 负责。
 
@@ -90,42 +90,41 @@ Read({
 
 独立 Agent 收到 `attachment://...` 时，按无效或不存在的本地路径返回稳定错误。只有 daemon 覆盖后的 `Read` 才承诺支持该协议。
 
-### 6.2 视觉 Tool 不进入默认 Registry
+### 6.2 视觉 Tool 不属于默认 Agent 或 `@openharness/tools`
 
-`ImageToText` 的可复用定义支持视觉模型输入：
+daemon 的完整 `ImageToText` 定义支持三种输入：
 
 ```ts
 ImageToText({
+  attachment_id?: string,
   image_path?: string,
   image_url?: string,
   prompt?: string,
 })
 ```
 
-要求 `image_path` 和 `image_url` 恰好提供一个。`prompt` 缺省为详细描述图片，可用于图片描述或文字提取。该定义：
+要求 `attachment_id`、`image_path` 和 `image_url` 恰好提供一个。附件输入只做本地 OCR，不能与 `prompt` 组合；路径或 URL 输入可以通过 `prompt` 指定视觉模型任务。该定义：
 
+- 对 `attachment_id` 先执行 Child → Root 授权解析，再调用 daemon 本地 OCR；
 - 使用 `ToolContext.settings` 中当前 Agent 的模型、API 格式、地址和凭据；当前 Settings 已没有单独的 `visionModel`，不重新引入该配置；
 - 本地图片按受支持媒体类型编码为模型图片输入；
 - URL 只作为模型图片输入，不经过附件存储；
 - 使用 Tool 调用的 `abortSignal` 和 60 秒内部超时；
-- 不接受 `attachment_id`；
 - 不调用 `AgentImageToTextHost`；
-- 不进入默认 Registry，只能由 daemon 或其他第一方 Agent 组装者通过 `tools` 显式注册。
+- 不进入默认 Registry，也不从 `@openharness/tools` 导出。
 
-`ImageGeneration` 同样从默认 Registry 移除。其可复用定义仍由 `@openharness/tools` 导出，但只有 daemon 在图像生成服务配置有效时才注册。这里不要求机械复制旧实现；实现应复用当前 `ToolContext.settings`，避免再次维护进程级 Settings 缓存，错误响应不得返回 API key，Provider 响应正文需要安全截断。
+`ImageGeneration` 同样由 daemon/server 完整定义。loader 不读取图片生成专用 Settings 字段，也不根据某个 URL 字段决定它是否存在；工具可以使用 HTTP、本地程序、固定路径或其他 daemon 自己选择的实现。错误响应不得返回 API key，Provider 响应正文需要安全截断。
 
 ## 7. daemon Tool 装配
 
-daemon 在创建 Agent 时覆盖 `Read`，并通过普通 `tools` 注册视觉 Tool：
+daemon 在创建 Agent 时覆盖 `Read`，并通过唯一的 `tools(context)` 入口注册普通 Tool：
 
 ```ts
-createDefaultNodeAgent({
-  tools: [
-    createAttachmentImageToTextTool({
-      defaultTool: imageToTextTool,
-      attachmentOcr,
-    }),
-    imageGenerationTool,
+createDaemonAgentLoader({
+  tools: async ({ session, settings }) => [
+    daemonImageToTextTool,
+    daemonImageGenerationTool,
+    ...await dynamicToolRegistry.resolve({ session, settings }),
   ],
   toolOverrides: [
     createAttachmentReadTool({ defaultTool: fileReadTool, attachmentReader }),
@@ -134,7 +133,7 @@ createDefaultNodeAgent({
 });
 ```
 
-`Read` 的 `defaultTool` 是明确导入的内置定义。附件版 `ImageToText` 可以组合明确导入的通用视觉定义，但它作为 daemon 普通 Tool 注册，不是对默认 Registry 的覆盖。daemon 根据实际服务配置过滤 `tools`：缺少 OCR/视觉读取服务时不注册 `ImageToText`，缺少图片生成服务时不注册 `ImageGeneration`，不安装调用必然失败的空壳 Tool。
+`Read` 的 `defaultTool` 是从 `@openharness/tools` 明确导入的内置定义。daemon 的 `ImageToText` 没有 `defaultTool`：附件、本地路径和 URL 三条分支都在 server 实现。固定工具和动态工具从同一个 `tools(context)` 返回；loader 只提供当前 session 和最终 Settings，不解释工具名称或注册条件。
 
 `trustedToolOverrides` 是第一方 Agent 创建者的显式信任声明：指定的覆盖 Tool 保留被替换内置 Tool 的权限分类。名称必须同时存在于 `toolOverrides`，而且被替换目标必须是 builtin；否则 Agent 创建失败。Extension、Plugin 和 MCP 不能设置或继承这项声明。daemon 只信任自己构造的 `Read` 覆盖，不信任第三方 Tool。
 
@@ -296,13 +295,17 @@ daemon 同时创建一个 `AttachmentAuthorizationSessionResolver`，供两个 T
 
 ```ts
 {
-  tools: [attachmentImageToTextTool, imageGenerationTool],
+  tools: async ({ session, settings }) => [
+    daemonImageToTextTool,
+    daemonImageGenerationTool,
+    ...await dynamicToolRegistry.resolve({ session, settings }),
+  ],
   toolOverrides: [attachmentReadTool],
   trustedToolOverrides: ["Read"],
 }
 ```
 
-如果 daemon 没有配置图像读取/OCR 服务，仍安装附件版 `Read`，但不注册 `ImageToText`。如果图片生成服务未配置，则不注册 `ImageGeneration`。这使最终工具清单与真实能力一致。
+daemon 自己决定 `tools(context)` 返回哪些固定或动态工具。loader 不读取视觉工具的配置字段，也不对 `ImageToText` 或 `ImageGeneration` 做特殊判断。
 
 ## 10. 附件路由与 compact
 
@@ -431,10 +434,7 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 - `Read` 的描述和 Schema 不再宣称支持 `attachment://`。
 - `Read` 不调用任何附件 Host。
 - 默认 Registry 不包含 `ImageToText` 或 `ImageGeneration`。
-- `ImageToText` 要求 `image_path` / `image_url` 二选一。
-- `ImageToText` 支持 prompt、取消、超时和两类 API 格式。
-- `ImageToText` 不接受 `attachment_id`。
-- 视觉配置错误和 Provider 错误安全返回。
+- 包入口不导出 `ImageToText` 或 `ImageGeneration`，源码目录中也不保留两者的 Tool 定义。
 
 ### 13.2 `@openharness/core` 与 `@openharness/agent-runtime`
 
@@ -456,8 +456,8 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 
 - 附件版 `Read` 对普通路径委托默认 Tool。
 - 附件版 `Read` 严格解析 URI、传递分页参数并校验 session。
-- daemon 版 `ImageToText` 对普通路径/URL委托可复用视觉 Tool 定义。
-- 附件版 `ImageToText` 对 `attachment_id` 调用本地 OCR。
+- daemon 版 `ImageToText` 在 server 内直接处理普通路径、URL 和授权附件，不委托 `@openharness/tools`。
+- daemon 版 `ImageToText` 对 `attachment_id` 调用本地 OCR。
 - `attachment_id` 与其他来源或 prompt 同时出现时拒绝。
 - 两个附件 Tool 都验证普通 Root session 可以访问自己的附件。
 - 两个附件 Tool 都验证存活 Child 和嵌套 Child 解析到同一个 Root，并可访问 Root 附件。
@@ -467,7 +467,7 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 - reader 和 OCR service 都拒绝缺少 `authorizationSessionId` 的 asset-only 访问；类型层面不提供这种调用签名。
 - 图片 OCR 在调用 processor 前完成 session 引用校验，不能只凭 assetId 识别图片。
 - 附件不存在和取消请求都返回正确错误。
-- daemon 创建 Agent 时覆盖 `Read`，并按服务配置注册 `ImageToText` / `ImageGeneration`。
+- daemon 创建 Agent 时覆盖 `Read`，并通过唯一的 `tools(context)` 注册固定和动态 Tool。
 - 路由只在附件 OCR 覆盖真实可用且 Tool 可见时生成提示。
 - server 负责附件 Catalog 的条目、预览和总长度限制，并产出通用 compact 章节。
 - compact 后的 server 附件章节仍能触发覆盖 Tool。
@@ -483,10 +483,10 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 ## 14. 实施分段
 
 1. 用失败测试锁定默认 `Read`、默认 Registry 无视觉 Tool 和无附件 Capability 的目标契约。
-2. 恢复纯本地 `Read`，保留可复用视觉 Tool 定义，但从默认 Registry 移除 `ImageToText` / `ImageGeneration`。
+2. 恢复纯本地 `Read`，并从 `@openharness/tools` 完整移除 `ImageToText` / `ImageGeneration` 定义和导出。
 3. 增加并测试第一方 `trustedToolOverrides`，保持默认拒绝继承、daemon `Read` 显式信任和原有 cwd 权限边界。
 4. 删除 core、QueryEngine、Agent Runtime 中的附件/OCR Capability 接口和 `attachmentResourceRoot`。
-5. 在 server 中实现共享的 Child → Root 授权会话解析器和两个附件 Tool 工厂，并迁移 daemon 装配。
+5. 在 server 中实现共享的 Child → Root 授权会话解析器、附件 `Read` 覆盖和完整视觉 Tool，并迁移 daemon 装配。
 6. 将附件 Catalog 类型和格式化迁到 server，compact 改为通用补充章节，再调整路由与集成测试。
 7. 更新架构文档，运行全量验证并分批提交。
 
@@ -495,7 +495,7 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 ## 15. 验收标准
 
 1. `createDefaultNodeAgent({ cwd })` 不依赖附件 Host，始终提供通用 `Read`，且默认不提供 `ImageToText` / `ImageGeneration`。
-2. core、tools、agent-runtime 的公共类型中不存在附件或本地 OCR Host。
+2. core、tools、agent-runtime 的公共类型中不存在附件或本地 OCR Host，`@openharness/tools` 也不定义或导出视觉 Tool。
 3. Agent 配置和 inspect 中不存在 `attachments`、`imageToText`、`attachmentResourceRoot`。
 4. daemon 中的文本附件仍可通过 `Read(attachment://...)` 分页读取。
 5. daemon 中的图片附件仍可通过 `ImageToText(attachment_id)` 做现有本地 OCR。
@@ -518,11 +518,11 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 客户端上传附件
   -> daemon 保存附件并建立 session 关系
   -> daemon 把附件引用放进消息或 compact Catalog
-  -> daemon 按配置向模型提供 Read / ImageToText / ImageGeneration
+  -> daemon 通过 tools(context) 向模型提供 ImageToText / ImageGeneration 和其他动态 Tool
   -> QueryEngine 执行最终同名 Tool
   -> daemon 覆盖 Tool 识别附件输入并校验 session
   -> 附件服务返回文本片段或本地 OCR 结果
-  -> 普通图片输入委托可复用视觉 Tool 定义
+  -> daemon 视觉 Tool 直接处理普通图片路径或 URL
   -> ToolResult 回到模型
 ```
 

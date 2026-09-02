@@ -1,5 +1,7 @@
 # 附件能力退出 Agent Runtime 实现计划
 
+> **后续修订：** 本计划已经完成，但其中“`@openharness/tools` 保留可复用视觉 Tool”和“按图片服务配置注册”的实现结论已被 [Daemon 视觉工具所有权实现计划](./2026-09-02-daemon-visual-tools-ownership.md) 取代。当前边界是：视觉 Tool 完整属于 daemon/server，loader 通过唯一的 `tools(context)` 入口取得固定和动态工具。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 让默认 `Read` 独立可用，把附件文本读取、本地 OCR、图生文、文生图、Child → Root 授权和附件 compact 文案收回 daemon 装配，并让默认 Agent 不注册任何视觉 Tool。
