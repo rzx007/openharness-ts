@@ -414,8 +414,10 @@ function FontSizeControl({
 }
 
 function ResetAppearanceDialog({ onReset }: { onReset: () => boolean }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>
         <RotateCcw data-icon="inline-start" />
         恢复默认
@@ -429,7 +431,13 @@ function ResetAppearanceDialog({ onReset }: { onReset: () => boolean }): React.J
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={onReset}>确认恢复</AlertDialogAction>
+          <AlertDialogAction
+            onClick={() => {
+              if (onReset()) setOpen(false)
+            }}
+          >
+            确认恢复
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

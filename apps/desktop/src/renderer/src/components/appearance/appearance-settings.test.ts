@@ -122,8 +122,9 @@ describe("AppearanceSettings", () => {
     const confirm = Array.from(document.body.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "确认恢复"
     )
-    act(() => confirm?.click())
+    await act(async () => confirm?.click())
     expect(resetAppearance).toHaveBeenCalledTimes(1)
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
   })
 
   it("renders an inline alert when automatic saving fails", async () => {
@@ -143,6 +144,9 @@ describe("AppearanceSettings", () => {
 
   it("clamps number inputs and commits the reduced-motion preference", async () => {
     await renderSettings()
+
+    const uiSizeSlider = container.querySelector('[data-slot="slider"][aria-label="界面字号"]')
+    expect(uiSizeSlider?.querySelectorAll('[data-slot="slider-thumb"]')).toHaveLength(1)
 
     const sizeInput = container.querySelector<HTMLInputElement>('[aria-label="界面字号数值"]')
     expect(sizeInput).not.toBeNull()
