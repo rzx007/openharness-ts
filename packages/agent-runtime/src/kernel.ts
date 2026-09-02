@@ -163,8 +163,6 @@ async function createAgentKernelInternal(
     runtime.queryEngine.setTerminal(capabilityValue(options.capabilities.terminal));
     runtime.queryEngine.setJobs(capabilityValue(options.capabilities.jobs));
     runtime.queryEngine.setBackgroundShell(capabilityValue(options.capabilities.backgroundShell));
-    runtime.queryEngine.setImageToText(capabilityValue(options.capabilities.imageToText));
-    runtime.queryEngine.setAttachments(capabilityValue(options.capabilities.attachments));
     runtime.queryEngine.setSchedules(capabilityValue(options.capabilities.schedules));
     const session = createAgentSession({
       queryEngine: runtime.queryEngine,

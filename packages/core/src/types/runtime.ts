@@ -1,8 +1,6 @@
 import type { StreamingMessageClient } from "./client";
 import type {
   AgentBackgroundShellHost,
-  AgentImageToTextHost,
-  AgentAttachmentResourceHost,
   McpAuthHost,
   ToolRegistry,
 } from "./tools";
@@ -398,8 +396,6 @@ export interface QueryEngine {
   setTerminal(terminal: AgentTerminalHost | undefined): void;
   setJobs(jobs: AgentJobHost | undefined): void;
   setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void;
-  setImageToText(imageToText: AgentImageToTextHost | undefined): void;
-  setAttachments(attachments: AgentAttachmentResourceHost | undefined): void;
   setSchedules(schedules: AgentScheduleEffects | undefined): void;
 }
 

@@ -77,7 +77,6 @@ interface OpenHarnessRuntimeOptions {
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
   capabilities?: ResolvedAgentCapabilities;
-  attachmentResourceRoot?: string;
 }
 
 /**
@@ -153,8 +152,6 @@ export async function createOpenHarnessRuntime(
   const backgroundShell = availableValue(options.capabilities?.backgroundShell);
   const childEnvironment = availableValue(options.capabilities?.childEnvironment);
   const workflowRepository = availableValue(options.capabilities?.workflowRepository);
-  const imageToText = availableValue(options.capabilities?.imageToText);
-  const attachments = availableValue(options.capabilities?.attachments);
   const schedules = availableValue(options.capabilities?.schedules);
   const includeBackgroundShell = options.capabilities === undefined
     ? undefined
@@ -272,8 +269,6 @@ export async function createOpenHarnessRuntime(
   queryEngine.setTerminal(terminal);
   queryEngine.setJobs(jobs);
   queryEngine.setBackgroundShell(backgroundShell);
-  queryEngine.setImageToText(imageToText);
-  if (attachments) queryEngine.setAttachments(attachments);
   queryEngine.setSchedules(schedules);
 
   const bundle = new RuntimeBuilder()
@@ -289,7 +284,6 @@ export async function createOpenHarnessRuntime(
     cwd,
     options.sandboxReporter,
     options.sessionId,
-    options.attachmentResourceRoot,
   );
   return bundle;
 }
@@ -458,21 +452,12 @@ async function attachSandboxRuntime(
   cwd: string,
   reporter?: SandboxRuntimeReporter,
   sessionId?: string,
-  attachmentResourceRoot?: string,
 ): Promise<void> {
   const sandboxRuntime = await startSandboxRuntime({
     settings: bundle.settings,
     cwd,
     sessionId,
     reporter,
-    ...(attachmentResourceRoot
-      ? {
-          managedReadOnlyMounts: [{
-            source: attachmentResourceRoot,
-            target: "/mnt/openharness-attachments",
-          }],
-        }
-      : {}),
   });
   bundle.sandboxStatus = sandboxRuntime.status;
 

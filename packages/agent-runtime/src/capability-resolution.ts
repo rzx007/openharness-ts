@@ -1,7 +1,5 @@
 import type {
-  AgentAttachmentResourceHost,
   AgentBackgroundShellHost,
-  AgentImageToTextHost,
   AgentScheduleEffects,
 } from "@openharness/core";
 import type { WorkflowRunRepository } from "@openharness/coordinator";
@@ -24,11 +22,9 @@ export interface ResolvedAgentCapabilities {
   terminal: ResolvedCapability<AgentTerminalHost>;
   backgroundShell: ResolvedCapability<AgentBackgroundShellHost>;
   jobs: ResolvedCapability<AgentJobHost>;
-  attachments: ResolvedCapability<AgentAttachmentResourceHost>;
   memory: ResolvedCapability<AgentMemoryRuntime>;
   childEnvironment: ResolvedCapability<AgentChildEnvironmentProvider>;
   workflowRepository: ResolvedCapability<WorkflowRunRepository>;
-  imageToText: ResolvedCapability<AgentImageToTextHost>;
   schedules: ResolvedCapability<AgentScheduleEffects>;
 }
 
@@ -86,11 +82,9 @@ export function toAgentCapabilitySnapshot(
     terminal: toCapabilitySnapshot(capabilities.terminal),
     backgroundShell: toCapabilitySnapshot(capabilities.backgroundShell),
     jobs: toCapabilitySnapshot(capabilities.jobs),
-    attachments: toCapabilitySnapshot(capabilities.attachments),
     memory: toCapabilitySnapshot(capabilities.memory),
     childEnvironment: toCapabilitySnapshot(capabilities.childEnvironment),
     workflowRepository: toCapabilitySnapshot(capabilities.workflowRepository),
-    imageToText: toCapabilitySnapshot(capabilities.imageToText),
     schedules: toCapabilitySnapshot(capabilities.schedules),
   };
 }

@@ -76,11 +76,9 @@ describe("resolveCapability", () => {
       terminal: available,
       backgroundShell: available,
       jobs: available,
-      attachments: unavailableCapability("No attachments"),
       memory: disabledCapability(),
       childEnvironment: available,
       workflowRepository: available,
-      imageToText: unavailableCapability("No image to text"),
       schedules: unavailableCapability("No schedules"),
     });
 
@@ -88,11 +86,9 @@ describe("resolveCapability", () => {
       terminal: { status: "available", source: "default" },
       backgroundShell: { status: "available", source: "default" },
       jobs: { status: "available", source: "default" },
-      attachments: { status: "unavailable", reason: "No attachments" },
       memory: { status: "disabled" },
       childEnvironment: { status: "available", source: "default" },
       workflowRepository: { status: "available", source: "default" },
-      imageToText: { status: "unavailable", reason: "No image to text" },
       schedules: { status: "unavailable", reason: "No schedules" },
     });
   });

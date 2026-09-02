@@ -16,8 +16,6 @@ import type {
   QueryEngineOptions,
   MemoryRetriever,
   AgentBackgroundShellHost,
-  AgentImageToTextHost,
-  AgentAttachmentResourceHost,
   AgentScheduleEffects,
   McpAuthHost,
 } from "../index";
@@ -200,8 +198,6 @@ export class QueryEngine implements IQueryEngine {
   private terminal: AgentTerminalHost | undefined;
   private jobs: AgentJobHost | undefined;
   private backgroundShell: AgentBackgroundShellHost | undefined;
-  private imageToText: AgentImageToTextHost | undefined;
-  private attachments: AgentAttachmentResourceHost | undefined;
   private schedules: AgentScheduleEffects | undefined;
   private cwd: string;
   private sessionId: string | undefined;
@@ -270,14 +266,6 @@ export class QueryEngine implements IQueryEngine {
 
   setBackgroundShell(backgroundShell: AgentBackgroundShellHost | undefined): void {
     this.backgroundShell = backgroundShell;
-  }
-
-  setImageToText(imageToText: AgentImageToTextHost | undefined): void {
-    this.imageToText = imageToText;
-  }
-
-  setAttachments(attachments: AgentAttachmentResourceHost | undefined): void {
-    this.attachments = attachments;
   }
 
   setSchedules(schedules: AgentScheduleEffects | undefined): void {
@@ -706,8 +694,6 @@ export class QueryEngine implements IQueryEngine {
             terminal: this.terminal,
             jobs: this.jobs,
             backgroundShell: this.backgroundShell,
-            imageToText: this.imageToText,
-            attachments: this.attachments,
             schedules: this.schedules,
             agent: execution,
           };

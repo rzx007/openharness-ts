@@ -1,8 +1,6 @@
 import type {
   AgentChildBudget,
   AgentBackgroundShellHost,
-  AgentImageToTextHost,
-  AgentAttachmentResourceHost,
   AgentEffects,
   AgentScheduleEffects,
   PermissionMode,
@@ -28,11 +26,9 @@ export interface AgentCapabilityOverrides {
     ObservableJobProducer<AgentBackgroundShellHost>
   >;
   jobs?: false;
-  attachments?: CapabilityOverride<AgentAttachmentResourceHost>;
   memory?: false;
   childEnvironment?: CapabilityOverride<AgentChildEnvironmentProvider>;
   workflowRepository?: CapabilityOverride<WorkflowRunRepository>;
-  imageToText?: CapabilityOverride<AgentImageToTextHost>;
   schedules?: CapabilityOverride<AgentScheduleEffects>;
 }
 

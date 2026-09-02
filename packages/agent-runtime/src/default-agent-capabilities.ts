@@ -158,17 +158,9 @@ export async function resolveDefaultAgentCapabilities(
     terminal,
     backgroundShell,
     jobs,
-    attachments: resolveOptionalOverride(
-      overrides.attachments,
-      "No attachment intake configured",
-    ),
     memory,
     childEnvironment,
     workflowRepository,
-    imageToText: resolveOptionalOverride(
-      overrides.imageToText,
-      "Default Node runtime does not provide image to text",
-    ),
     schedules: resolveOptionalOverride(
       overrides.schedules,
       "Default Node runtime does not provide schedules",

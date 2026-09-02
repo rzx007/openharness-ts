@@ -397,11 +397,9 @@ function disabledCapabilities(): AgentCapabilitySnapshot {
     terminal: { status: "disabled" },
     backgroundShell: { status: "disabled" },
     jobs: { status: "disabled" },
-    attachments: { status: "disabled" },
     memory: { status: "disabled" },
     childEnvironment: { status: "disabled" },
     workflowRepository: { status: "disabled" },
-    imageToText: { status: "disabled" },
     schedules: { status: "disabled" },
   };
 }

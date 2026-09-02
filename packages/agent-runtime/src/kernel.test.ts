@@ -103,11 +103,9 @@ function unavailableCapabilities(): ResolvedAgentCapabilities {
     terminal: unavailableCapability("Kernel host did not provide terminal"),
     backgroundShell: unavailableCapability("Kernel host did not provide background shell"),
     jobs: unavailableCapability("Kernel host did not provide jobs"),
-    attachments: unavailableCapability("Kernel host did not provide attachments"),
     memory: unavailableCapability("Kernel host did not provide memory"),
     childEnvironment: unavailableCapability("Kernel host did not provide child environment"),
     workflowRepository: unavailableCapability("Kernel host did not provide workflow repository"),
-    imageToText: unavailableCapability("Kernel host did not provide image to text"),
     schedules: unavailableCapability("Kernel host did not provide schedules"),
   };
 }

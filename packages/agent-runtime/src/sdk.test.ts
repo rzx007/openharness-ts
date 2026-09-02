@@ -296,7 +296,6 @@ describe("programmatic agent SDK", () => {
         jobs: { status: "available", source: "default" },
         memory: { status: "available", source: "default" },
         workflowRepository: { status: "available", source: "default" },
-        attachments: { status: "unavailable" },
         schedules: { status: "unavailable" },
       });
       expect(agent.inspect().tools.map((tool) => tool.name)).toEqual(
@@ -434,73 +433,6 @@ describe("programmatic agent SDK", () => {
       expect(request?.system).not.toContain("JobWait");
       expect(request?.system).not.toContain("JobRead");
       expect(request?.system).not.toContain("# Delegation And Subagents");
-    } finally {
-      await agent.close();
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  it("reports standalone attachments as unavailable, false as disabled, and an object as an override", async () => {
-    const unavailableCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-attachments-unavailable-"));
-    const disabledCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-attachments-disabled-"));
-    const overrideCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-attachments-override-"));
-    const attachmentHost = {
-      async readText() {
-        return { text: "attachment", offset: 0, nextOffset: 10, done: true };
-      },
-    };
-    const unavailableAgent = await createDefaultNodeAgent({
-      cwd: unavailableCwd,
-      settings: testSettings(),
-    });
-    const disabledAgent = await createDefaultNodeAgent({
-      cwd: disabledCwd,
-      capabilityOverrides: { attachments: false },
-      settings: testSettings(),
-    });
-    const overrideAgent = await createDefaultNodeAgent({
-      cwd: overrideCwd,
-      capabilityOverrides: { attachments: attachmentHost },
-      settings: testSettings(),
-    });
-
-    try {
-      expect(unavailableAgent.getCapabilities().attachments).toEqual({
-        status: "unavailable",
-        reason: "No attachment intake configured",
-      });
-      expect(disabledAgent.getCapabilities().attachments).toEqual({ status: "disabled" });
-      expect(overrideAgent.getCapabilities()).toMatchObject({
-        attachments: { status: "available", source: "override" },
-        backgroundShell: { status: "available", source: "default" },
-        jobs: { status: "available", source: "default" },
-      });
-      expect(unavailableAgent.inspect().tools.map((tool) => tool.name)).not.toContain("ReadAttachment");
-      expect(disabledAgent.inspect().tools.map((tool) => tool.name)).not.toContain("ReadAttachment");
-    } finally {
-      await unavailableAgent.close();
-      await disabledAgent.close();
-      await overrideAgent.close();
-      rmSync(unavailableCwd, { recursive: true, force: true });
-      rmSync(disabledCwd, { recursive: true, force: true });
-      rmSync(overrideCwd, { recursive: true, force: true });
-    }
-  });
-
-  it("disables image to text without disabling the default workflow", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-workflow-capability-"));
-    const agent = await createDefaultNodeAgent({
-      cwd,
-      capabilityOverrides: { imageToText: false },
-      settings: testSettings(),
-    });
-
-    try {
-      expect(agent.getCapabilities()).toMatchObject({
-        imageToText: { status: "disabled" },
-        workflowRepository: { status: "available", source: "default" },
-      });
-      expect(agent.inspect().tools.map((tool) => tool.name)).toContain("Workflow");
     } finally {
       await agent.close();
       rmSync(cwd, { recursive: true, force: true });

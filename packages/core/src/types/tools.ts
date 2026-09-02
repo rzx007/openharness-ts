@@ -35,49 +35,6 @@ export interface AgentBackgroundShellHost {
   }>;
 }
 
-export type AgentImageToTextInput =
-  | { attachmentId: string }
-  | { imagePath: string }
-  | { imageUrl: string };
-
-export interface AgentImageToTextResult {
-  status: "completed" | "no_text_detected";
-  text: string;
-  assetId: string;
-  representationId: string;
-  processor: "light-ocr";
-  processorVersion: string;
-  cached: boolean;
-  lineCount: number;
-  durationMs: number;
-}
-
-/** Host-owned local OCR boundary. The tool never calls a vision model itself. */
-export interface AgentImageToTextHost {
-  recognize(
-    input: AgentImageToTextInput,
-    context: { cwd: string; sessionId?: string; signal?: AbortSignal },
-  ): Promise<AgentImageToTextResult>;
-}
-
-export interface AgentAttachmentTextSlice {
-  displayName: string;
-  mediaType: string;
-  encoding: "utf-8" | "utf-16le" | "utf-16be";
-  content: string;
-  startLine: number;
-  endLine: number;
-  hasMore: boolean;
-}
-
-/** Host-owned access to immutable text attachments referenced by the current session. */
-export interface AgentAttachmentResourceHost {
-  readText(
-    input: { assetId: string; offset: number; limit: number },
-    context: { sessionId?: string; signal?: AbortSignal },
-  ): Promise<AgentAttachmentTextSlice>;
-}
-
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
@@ -103,10 +60,6 @@ export interface ToolContext {
   jobs?: AgentJobHost;
   /** Host-owned creator for detached shell jobs. */
   backgroundShell?: AgentBackgroundShellHost;
-  /** Host-owned local OCR capability. Omitted when OCR is unavailable. */
-  imageToText?: AgentImageToTextHost;
-  /** Session-authorized immutable text attachment access. */
-  attachments?: AgentAttachmentResourceHost;
   /** Host-owned persistent scheduler. Omitted when durable schedules are unavailable. */
   schedules?: AgentScheduleEffects;
   agent?: AgentExecutionContext;

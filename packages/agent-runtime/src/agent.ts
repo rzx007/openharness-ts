@@ -68,8 +68,6 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   capabilityOverrides?: AgentCapabilityOverrides;
   /** 宿主交互副作用；未提供审批器时 ask 会安全拒绝。 */
   effects?: AgentEffectOverrides;
-  /** Stable root-session attachment directory mounted read-only in Docker. */
-  attachmentResourceRoot?: string;
 }
 
 export interface OpenHarnessAgentSubmitOptions {

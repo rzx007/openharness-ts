@@ -215,11 +215,9 @@ describe("createOpenHarnessRuntime tool visibility", () => {
         jobs: { status: "disabled" },
         terminal: { status: "disabled" },
         backgroundShell: { status: "disabled" },
-        attachments: { status: "disabled" },
         memory: { status: "disabled" },
         childEnvironment: { status: "disabled" },
         workflowRepository: { status: "disabled" },
-        imageToText: { status: "disabled" },
         schedules: { status: "disabled" },
       },
     });
@@ -348,32 +346,6 @@ describe("createOpenHarnessRuntime tool visibility", () => {
         toolOverrides: [testTool("BusinessSearch")],
       },
     })).rejects.toThrow(/both tools and toolOverrides/i);
-  });
-
-  it("mounts attachmentResourceRoot read-only without treating it as an attachment API", async () => {
-    const runtime = await createOpenHarnessRuntime({
-      settings: BASE_SETTINGS,
-      configuration: {
-        client: {
-          async *streamMessage() {
-            yield { type: "complete" as const, stopReason: "end_turn" as const };
-          },
-        },
-      },
-      attachmentResourceRoot: "D:/session-attachments",
-    });
-
-    try {
-      expect(startSandboxRuntime).toHaveBeenLastCalledWith(expect.objectContaining({
-        managedReadOnlyMounts: [{
-          source: "D:/session-attachments",
-          target: "/mnt/openharness-attachments",
-        }],
-      }));
-      expect(runtime.toolRegistry.get("ReadAttachment")).toBeUndefined();
-    } finally {
-      await runtime.close();
-    }
   });
 
   it("rejects removed lifecycle names with the Jobs replacement", async () => {

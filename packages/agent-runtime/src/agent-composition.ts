@@ -44,7 +44,6 @@ interface AgentCompositionOptions extends OpenHarnessAgentConfiguration {
   childIdleTtlMs?: number;
   capabilityOverrides?: AgentCapabilityOverrides;
   effects?: AgentEffectOverrides;
-  attachmentResourceRoot?: string;
 }
 
 export interface AgentIdentity {
@@ -132,7 +131,6 @@ async function composeOpenHarnessAgentInternal(
     sessionId,
     configuration: options,
     capabilities: environment.capabilities,
-    attachmentResourceRoot: options.attachmentResourceRoot,
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
   });
