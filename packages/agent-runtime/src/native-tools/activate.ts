@@ -82,7 +82,7 @@ export async function activateNativePluginTools(
             ...(toolContext.sessionId ? { sessionId: toolContext.sessionId } : {}),
           }, toolContext.abortSignal),
         ),
-      });
+      }, { kind: "plugin", id: plugin.manifest.id });
       toolNames.push(definition.name);
     }
     runtimeStatus.update({ state: "active", toolNames: [...toolNames] });

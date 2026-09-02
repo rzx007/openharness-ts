@@ -42,7 +42,10 @@ export function createMcpAuthHost(options: CreateMcpAuthHostOptions): McpAuthHos
       const connection = await options.mcpManager.reconnect(input.serverName, nextConfig);
       for (const tool of options.mcpManager.getAsToolDefinitions()) {
         if (tool.name.startsWith(`mcp__${input.serverName}__`)) {
-          options.toolRegistry.register(tool);
+          options.toolRegistry.register(tool, {
+            kind: "mcp",
+            id: input.serverName,
+          });
         }
       }
 
@@ -71,7 +74,14 @@ function assertMcpToolUnregisterAvailable(toolRegistry: IToolRegistry, serverNam
 function unregisterMcpServerTools(toolRegistry: IToolRegistry, serverName: string): void {
   const prefix = `mcp__${serverName}__`;
   for (const tool of toolRegistry.getAll()) {
-    if (tool.name.startsWith(prefix)) toolRegistry.unregister?.(tool.name);
+    const source = toolRegistry.inspect(tool.name)?.source;
+    if (
+      tool.name.startsWith(prefix) &&
+      source?.kind === "mcp" &&
+      source.id === serverName
+    ) {
+      toolRegistry.unregister?.(tool.name);
+    }
   }
 }
 

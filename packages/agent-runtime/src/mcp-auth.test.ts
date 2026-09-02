@@ -100,7 +100,7 @@ describe("createMcpAuthHost", () => {
       description: "old",
       inputSchema: {},
       execute: vi.fn(),
-    });
+    }, { kind: "mcp", id: "remote" });
     const host = createMcpAuthHost({
       settings,
       mcpManager: manager,
@@ -123,6 +123,10 @@ describe("createMcpAuthHost", () => {
       headers: { Authorization: "Bearer tok" },
     });
     expect(registry.has("mcp__remote__query")).toBe(true);
+    expect(registry.inspect("mcp__remote__query")).toEqual({
+      name: "mcp__remote__query",
+      source: { kind: "mcp", id: "remote" },
+    });
     expect(registry.has("mcp__remote__old")).toBe(false);
     expect(registry.has("mcp__other__query")).toBe(false);
   });
@@ -146,7 +150,7 @@ describe("createMcpAuthHost", () => {
       description: "old",
       inputSchema: {},
       execute: vi.fn(),
-    });
+    }, { kind: "mcp", id: "remote" });
     const host = createMcpAuthHost({
       settings,
       mcpManager: manager,
@@ -160,5 +164,39 @@ describe("createMcpAuthHost", () => {
       value: "tok",
     })).rejects.toThrow("reconnect failed: 401 Unauthorized");
     expect(registry.has("mcp__remote__old")).toBe(false);
+  });
+
+  it("does not remove or replace a caller tool that resembles an MCP tool", async () => {
+    const settings: Settings = {
+      ...baseSettings,
+      mcpServers: { remote: { type: "http", url: "https://mcp.example" } },
+    };
+    const callerTool = {
+      name: "mcp__remote__query",
+      description: "caller-owned",
+      inputSchema: {},
+      execute: vi.fn(),
+    };
+    const manager = {
+      getConnection: vi.fn(),
+      reconnect: vi.fn(async () => ({ status: "connected" })),
+      getAsToolDefinitions: vi.fn(() => [{ ...callerTool, description: "mcp" }]),
+    } as unknown as McpClientManager;
+    const registry = new ToolRegistry();
+    registry.register(callerTool, { kind: "agent" });
+    const host = createMcpAuthHost({
+      settings,
+      mcpManager: manager,
+      toolRegistry: registry,
+      persistSettings: async () => {},
+    });
+
+    await expect(host.configure({
+      serverName: "remote",
+      mode: "bearer",
+      value: "tok",
+    })).rejects.toMatchObject({ code: "tool_already_registered" });
+    expect(registry.get("mcp__remote__query")).toBe(callerTool);
+    expect(registry.inspect("mcp__remote__query")?.source).toEqual({ kind: "agent" });
   });
 });

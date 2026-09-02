@@ -7,10 +7,15 @@ import type {
   AgentExecutionContext,
   Settings,
 } from "@openharness/core";
+import { ToolRegistry } from "@openharness/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createOpenHarnessRuntime } from "./default-runtime.js";
-import { configureDiscoveredExtensions, discoverOpenHarnessExtensions } from "./extensions.js";
+import {
+  configureDiscoveredExtensions,
+  createExtensionToolRegistry,
+  discoverOpenHarnessExtensions,
+} from "./extensions.js";
 import { getNativeToolRuntimeSnapshot } from "./native-tools/status.js";
 
 const BASE_SETTINGS: Settings = {
@@ -172,6 +177,29 @@ async function spawnReviewer(
 }
 
 describe("extension agent definition scoping", () => {
+  it("gives programmatic extensions an add-only registry with extension provenance", () => {
+    const registry = new ToolRegistry();
+    const builtin = {
+      name: "Read",
+      description: "builtin read",
+      inputSchema: {},
+      async execute() { return { content: [] }; },
+    };
+    registry.register(builtin, { kind: "builtin" });
+    const extensionRegistry = createExtensionToolRegistry(registry);
+
+    expect((extensionRegistry as unknown as { override?: unknown }).override).toBeUndefined();
+    expect(() => extensionRegistry.register({ ...builtin, description: "shadow" }))
+      .toThrow(/already registered/i);
+    expect(registry.get("Read")).toBe(builtin);
+
+    extensionRegistry.register({ ...builtin, name: "ExtensionEcho" });
+    expect(registry.inspect("ExtensionEcho")).toEqual({
+      name: "ExtensionEcho",
+      source: { kind: "extension" },
+    });
+  });
+
   it("keeps two live runtimes bound to the plugin agents discovered for their own cwd", async () => {
     const cwdA = join(tempRoot, "workspace-a");
     const cwdB = join(tempRoot, "workspace-b");
@@ -294,6 +322,10 @@ describe("installed Native Tool activation", () => {
       addCleanup: (cleanup, cleanupSync) => runtime.addCleanup(cleanup, cleanupSync),
     });
     expect(activations[0]).toMatchObject({ state: "active", toolNames: ["InstalledPluginEcho"] });
+    expect(runtime.toolRegistry.inspect("InstalledPluginEcho")).toEqual({
+      name: "InstalledPluginEcho",
+      source: { kind: "plugin", id: "dev.openharness.runtime-tool" },
+    });
     expect(getNativeToolRuntimeSnapshot(discovery.plugins[0]!.root)).toMatchObject({
       state: "active",
       hostCount: 1,

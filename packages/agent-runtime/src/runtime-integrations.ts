@@ -6,7 +6,10 @@ import type {
   OpenHarnessAgentExtension,
   OpenHarnessExtensionDiscovery,
 } from "./extensions.js";
-import { configureDiscoveredExtensions } from "./extensions.js";
+import {
+  configureDiscoveredExtensions,
+  createExtensionToolRegistry,
+} from "./extensions.js";
 import type { AgentMemoryRuntime } from "./memory-runtime.js";
 import { createMcpAuthHost } from "./mcp-auth.js";
 import { createRememberTool } from "./remember-tool.js";
@@ -35,13 +38,22 @@ export async function installRuntimeIntegrations(
     addCleanup: (cleanup, cleanupSync) => runtime.addCleanup(cleanup, cleanupSync),
   });
   for (const extension of options.extensions ?? []) {
-    await extension.setup({
-      cwd: options.cwd,
-      settings: options.settings,
-      skillRegistry: options.discovery.skillRegistry,
-      toolRegistry: runtime.toolRegistry,
-      hookExecutor: runtime.hookExecutor,
-    });
+    const registeredNames: string[] = [];
+    try {
+      await extension.setup({
+        cwd: options.cwd,
+        settings: options.settings,
+        skillRegistry: options.discovery.skillRegistry,
+        toolRegistry: createExtensionToolRegistry(
+          runtime.toolRegistry,
+          registeredNames,
+        ),
+        hookExecutor: runtime.hookExecutor,
+      });
+    } catch (error) {
+      for (const name of registeredNames) runtime.toolRegistry.unregister?.(name);
+      throw error;
+    }
   }
 
   const mcpManager = new McpClientManager({
@@ -54,8 +66,21 @@ export async function installRuntimeIntegrations(
   if (Object.keys(mcpServers).length > 0) {
     await mcpManager.connectAll(mcpServers);
   }
-  for (const tool of mcpManager.getAsToolDefinitions()) {
-    runtime.toolRegistry.register(tool);
+  const registeredMcpToolNames: string[] = [];
+  try {
+    for (const tool of mcpManager.getAsToolDefinitions()) {
+      const serverName = readMcpServerName(tool.name);
+      runtime.toolRegistry.register(tool, {
+        kind: "mcp",
+        ...(serverName ? { id: serverName } : {}),
+      });
+      registeredMcpToolNames.push(tool.name);
+    }
+  } catch (error) {
+    for (const name of registeredMcpToolNames) {
+      runtime.toolRegistry.unregister?.(name);
+    }
+    throw error;
   }
   runtime.queryEngine.setMcpManager(mcpManager);
   runtime.queryEngine.setMcpAuth(
@@ -70,7 +95,7 @@ export async function installRuntimeIntegrations(
     runtime.toolRegistry.register(createRememberTool({
       appendUserProfile: appendUserProfileUpdate,
       projectMemory: memory.manager,
-    }));
+    }), { kind: "runtime", id: "memory" });
   }
   runtime.queryEngine.setMemoryRetriever(
     memory
@@ -79,4 +104,8 @@ export async function installRuntimeIntegrations(
   );
 
   return () => mcpManager.getConnections();
+}
+
+function readMcpServerName(toolName: string): string | undefined {
+  return /^mcp__(.+?)__/.exec(toolName)?.[1];
 }

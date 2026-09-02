@@ -1,5 +1,11 @@
 import type { AgentDefinition } from "@openharness/coordinator";
-import type { IHookExecutor, McpServerConfig, Settings, IToolRegistry } from "@openharness/core";
+import type {
+  IHookExecutor,
+  McpServerConfig,
+  Settings,
+  IToolRegistry,
+  ToolDefinition,
+} from "@openharness/core";
 import { getSkillsDir } from "@openharness/core";
 import {
   discoverInstalledNativePlugins,
@@ -11,11 +17,18 @@ import {
 import { SkillLoader, SkillRegistry, findProjectSkillDirs } from "@openharness/skills";
 import { activateNativePluginTools, type NativeToolActivationResult } from "./native-tools/activate.js";
 
+export interface ExtensionToolRegistry {
+  register(tool: ToolDefinition): void;
+  get(name: string): ToolDefinition | undefined;
+  getAll(): ToolDefinition[];
+  has(name: string): boolean;
+}
+
 export interface OpenHarnessExtensionContext {
   cwd: string;
   settings: Settings;
   skillRegistry: SkillRegistry;
-  toolRegistry: IToolRegistry;
+  toolRegistry: ExtensionToolRegistry;
   hookExecutor: IHookExecutor;
 }
 export interface OpenHarnessAgentExtension { setup(context: OpenHarnessExtensionContext): Promise<void> | void; }
@@ -79,7 +92,10 @@ export async function discoverOpenHarnessExtensions(
 
 export async function configureDiscoveredExtensions(
   discovery: OpenHarnessExtensionDiscovery,
-  context: Pick<OpenHarnessExtensionContext, "cwd" | "toolRegistry" | "hookExecutor"> & {
+  context: {
+    cwd: string;
+    toolRegistry: IToolRegistry;
+    hookExecutor: IHookExecutor;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
   },
 ): Promise<NativeToolActivationResult[]> {
@@ -98,4 +114,20 @@ export async function configureDiscoveredExtensions(
     }
   }
   return toolActivations;
+}
+
+/** Add-only view exposed to programmatic extensions. */
+export function createExtensionToolRegistry(
+  registry: IToolRegistry,
+  registeredNames?: string[],
+): ExtensionToolRegistry {
+  return {
+    register(tool) {
+      registry.register(tool, { kind: "extension" });
+      registeredNames?.push(tool.name);
+    },
+    get: (name) => registry.get(name),
+    getAll: () => registry.getAll(),
+    has: (name) => registry.has(name),
+  };
 }
