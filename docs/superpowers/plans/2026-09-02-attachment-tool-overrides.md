@@ -2,9 +2,9 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 让默认 `Read` 和 `ImageToText` 独立可用，把附件文本读取、本地 OCR、Child → Root 授权和附件 compact 文案收回 server，并由 daemon 通过可信的第一方 Tool 覆盖接入。
+**目标：** 让默认 `Read` 独立可用，把附件文本读取、本地 OCR、图生文、文生图、Child → Root 授权和附件 compact 文案收回 daemon 装配，并让默认 Agent 不注册任何视觉 Tool。
 
-**架构：** `@openharness/tools` 只提供本地文件读取和视觉模型图片理解；`@openharness/core` 与 `@openharness/agent-runtime` 不再包含附件 Host、附件 Catalog 或附件目录挂载。daemon 构造两个完整的覆盖 Tool，共享 server 内部的授权会话解析器，并用 `trustedToolOverrides: ["Read"]` 保留第一方 `Read` 的内置权限分类。
+**架构：** `@openharness/tools` 保留本地文件读取和可复用视觉 Tool 定义，但默认 Registry 只注册非视觉基础 Tool。`@openharness/core` 与 `@openharness/agent-runtime` 不再包含附件 Host、附件 Catalog、视觉服务装配或附件目录挂载。daemon 通过 `tools` 按配置注册 `ImageToText` / `ImageGeneration`，通过 `toolOverrides` 覆盖 `Read`，并用 `trustedToolOverrides: ["Read"]` 保留第一方 `Read` 的内置权限分类。
 
 **技术栈：** TypeScript、Vitest、pnpm workspace、Turbo、OpenHarness ToolRegistry/QueryEngine、SessionStore、LocalOcrService。
 
@@ -17,7 +17,7 @@
 ### `@openharness/agent-runtime`
 
 - 修改 `packages/agent-runtime/src/agent-options.ts`：声明 `trustedToolOverrides`，删除附件/OCR Capability override。
-- 修改 `packages/agent-runtime/src/default-runtime.ts`：校验第一方可信覆盖，恢复可信 builtin 权限分类；默认注册 `ImageToText`；删除附件 Host 和附件目录挂载接线。
+- 修改 `packages/agent-runtime/src/default-runtime.ts`：校验第一方可信覆盖，恢复可信 builtin 权限分类；删除附件 Host、视觉 Capability 和附件目录挂载接线。
 - 修改 `packages/agent-runtime/src/default-runtime.test.ts`：锁定可信/不可信覆盖和 cwd 权限边界。
 - 修改 `packages/agent-runtime/src/child-agent-options.ts` 与 `child-agent-options.test.ts`：Root 的可信覆盖只读继承给 Child。
 - 修改 `packages/agent-runtime/src/capability-resolution.ts`、`capability-resolution.test.ts`、`default-agent-capabilities.ts`：删除 `attachments`、`imageToText` 能力快照与解析。
@@ -38,20 +38,21 @@
 
 - 修改 `packages/tools/src/file/read.ts` 与测试：恢复纯本地文件/目录读取。
 - 删除 `packages/tools/src/file/attachment-uri.ts`：附件 URI 解析迁到 server。
-- 修改 `packages/tools/src/media/image-to-text.ts` 与测试：恢复 `image_path` / `image_url` / `prompt` 视觉模型工具，使用 `ToolContext.settings.model`，不恢复已删除的 `visionModel`。
-- 修改 `packages/tools/src/registry.ts` 与测试：默认始终注册 `ImageToText`，删除 `imageToText` 开关。
+- 修改 `packages/tools/src/media/image-to-text.ts` 与测试：恢复可复用的 `image_path` / `image_url` / `prompt` 视觉模型工具，使用 `ToolContext.settings.model`，不恢复已删除的 `visionModel`。
+- 修改 `packages/tools/src/media/image-generation.ts` 与测试：让可复用文生图定义使用调用上下文配置并安全处理错误。
+- 修改 `packages/tools/src/registry.ts` 与测试：删除 `imageToText` 开关，默认不注册 `ImageToText` 或 `ImageGeneration`。
 
 ### `@openharness/server`
 
 - 创建 `packages/server/src/application/attachment-tools/attachment-access.ts`：server 私有类型、Child → Root 解析器、文本/OCR 的 session 引用授权边界。
 - 创建 `packages/server/src/application/attachment-tools/attachment-uri.ts`：严格解析 `attachment://<assetId>/<displayName>`。
 - 创建 `packages/server/src/application/attachment-tools/attachment-read-tool.ts`：覆盖 `Read`，附件 URI 走 server reader，普通路径委托默认 `fileReadTool`。
-- 创建 `packages/server/src/application/attachment-tools/attachment-image-to-text-tool.ts`：覆盖 `ImageToText`，`attachment_id` 走本地 OCR，路径/URL 委托默认 `imageToTextTool`。
+- 创建 `packages/server/src/application/attachment-tools/attachment-image-to-text-tool.ts`：作为 daemon 普通 Tool 注册；`attachment_id` 走本地 OCR，路径/URL 委托可复用 `imageToTextTool`。
 - 创建对应 `__test__` 文件：分别验证路由、参数、Root/Child/嵌套 Child、关闭 Child 和跨 session 拒绝。
 - 删除 `packages/server/src/application/attachment-resource/agent-attachment-resource-host.ts` 及测试。
 - 删除 `packages/server/src/application/attachment-processing/agent-image-to-text-host.ts` 及测试。
-- 修改 `packages/server/src/daemon/daemon-agent.ts` 与测试：通过 `toolOverrides` 和 `trustedToolOverrides` 装配，不再注入附件 Capability 或目录。
-- 修改 `packages/server/src/application/daemon-application.ts`：创建授权解析器和两个覆盖 Tool；向路由显式声明附件 OCR 是否安装。
+- 修改 `packages/server/src/daemon/daemon-agent.ts` 与测试：通过 `tools`、`toolOverrides` 和 `trustedToolOverrides` 装配，不再注入附件 Capability、视觉 Capability 或目录。
+- 修改 `packages/server/src/application/daemon-application.ts`：创建授权解析器，按服务配置注册 `ImageToText` / `ImageGeneration`，覆盖 `Read`，并向路由显式声明附件 OCR 是否安装。
 - 修改 `packages/server/src/application/session/session-run-executor.ts` 与测试：不再读取 `inspection.capabilities.imageToText`。
 - 修改 `packages/server/src/application/attachment-routing/attachment-routing-types.ts`、`attachment-capability-router.ts` 与测试：将 `imageToTextHostAvailable` 改为 `attachmentOcrAvailable`。
 - 修改 `packages/server/src/application/attachment-resource/compact-attachment-catalog.ts` 与测试：改为构造通用 compact 章节，并承担附件专属限额和文案。
@@ -223,7 +224,7 @@ git commit -m "feat(agent-runtime): trust first-party tool overrides"
 
 ---
 
-### 任务 2：恢复独立的默认 `Read` 和 `ImageToText`
+### 任务 2：恢复纯本地 `Read` 并从默认 Registry 移除视觉 Tool
 
 **文件：**
 
@@ -233,6 +234,8 @@ git commit -m "feat(agent-runtime): trust first-party tool overrides"
 - 修改：`packages/tools/src/file/index.ts`（仅当它导出了附件 URI helper）
 - 修改：`packages/tools/src/media/image-to-text.ts`
 - 修改：`packages/tools/src/media/__test__/image-to-text.test.ts`
+- 修改：`packages/tools/src/media/image-generation.ts`
+- 创建：`packages/tools/src/media/__test__/image-generation.test.ts`
 - 修改：`packages/tools/src/registry.ts`
 - 修改：`packages/tools/src/__test__/registry.test.ts`
 
@@ -334,7 +337,7 @@ const prompt = parsed.prompt ?? "Describe this image in detail.";
 
 本地文件只接受 `jpg/jpeg/png/gif/webp`，读取后按 API 格式构造 Data URL 或 Anthropic base64 source；URL 必须是 HTTP(S)。OpenAI-compatible 请求发送到 `${baseUrl}/v1/chat/completions`，Anthropic 请求发送到 `${baseUrl}/v1/messages`。使用 `createToolAbortScope(context.abortSignal, 60_000)`；返回错误时只保留状态码和安全截断后的正文，不拼接 headers 或 API key。
 
-- [ ] **步骤 5：让默认 Registry 始终包含 `ImageToText`**
+- [ ] **步骤 5：让默认 Registry 不包含视觉 Tool**
 
 删除 `createDefaultToolRegistry()` options 中的：
 
@@ -342,15 +345,13 @@ const prompt = parsed.prompt ?? "Describe this image in detail.";
 imageToText?: boolean;
 ```
 
-将条件注册改为：
+删除默认注册 `imageToTextTool` 和 `imageGenerationTool`。更新 registry 测试，断言默认名称集合不包含 `ImageToText` 或 `ImageGeneration`；视觉定义仍从 `@openharness/tools` 导出，供 daemon 显式装配。
 
-```ts
-registerBuiltin(imageToTextTool);
-```
+- [ ] **步骤 6：用失败测试锁定文生图上下文配置和安全错误**
 
-更新 registry 测试，默认名称集合直接包含 `ImageToText`，并相应调整工具总数。
+为 `imageGenerationTool` 增加测试，断言它使用 `ToolContext.settings`，不读取进程级 settings 缓存；取消信号能中止请求；Provider 错误正文被截断且不泄漏 API key。先运行该测试并确认当前全局缓存实现导致失败，再做最小修改。
 
-- [ ] **步骤 6：运行 Tools 全包测试和类型检查**
+- [ ] **步骤 7：运行 Tools 全包测试和类型检查**
 
 ```bash
 pnpm --filter @openharness/tools test
@@ -359,13 +360,13 @@ pnpm --filter @openharness/tools check-types
 
 预期：全部 PASS；搜索生产代码时，`packages/tools/src` 中不存在 `context.attachments`、`context.imageToText` 或 `attachment_id`。
 
-- [ ] **步骤 7：提交默认 Tool 恢复**
+- [ ] **步骤 8：提交默认 Tool 边界调整**
 
 ```bash
-git add -- packages/tools/src/file/read.ts packages/tools/src/file/__test__/read.test.ts packages/tools/src/file/attachment-uri.ts packages/tools/src/media/image-to-text.ts packages/tools/src/media/__test__/image-to-text.test.ts packages/tools/src/registry.ts packages/tools/src/__test__/registry.test.ts
+git add -- packages/tools/src/file/read.ts packages/tools/src/file/__test__/read.test.ts packages/tools/src/file/attachment-uri.ts packages/tools/src/media/image-to-text.ts packages/tools/src/media/__test__/image-to-text.test.ts packages/tools/src/media/image-generation.ts packages/tools/src/media/__test__/image-generation.test.ts packages/tools/src/registry.ts packages/tools/src/__test__/registry.test.ts
 git diff --cached --check
 git diff --cached --stat
-git commit -m "feat(tools): restore standalone read and image tools"
+git commit -m "refactor(tools): keep visual tools out of default registry"
 ```
 
 ---
@@ -506,7 +507,7 @@ return await options.defaultTool.execute(input, context);
 
 附件路径执行 server parser、resolver 和 reader，并沿用当前带行号及 `has_more` 的结果格式。
 
-- [ ] **步骤 7：先写并实现附件版 `ImageToText` Tool**
+- [ ] **步骤 7：先写并实现 daemon 版 `ImageToText` Tool**
 
 Schema 用 `oneOf` 表达：
 
@@ -515,7 +516,7 @@ Schema 用 `oneOf` 表达：
 // 或 image_path/image_url 二选一，prompt 可选
 ```
 
-`attachment_id` 与 `image_path`、`image_url`、`prompt` 同时出现时返回命令错误。附件分支断言 resolver 收到实际 Child sessionId、OCR service 收到 Root sessionId；普通路径/URL完整委托默认 Tool。OCR 输出保留不可信内容边界和 `attachmentOcr` metadata。
+`attachment_id` 与 `image_path`、`image_url`、`prompt` 同时出现时返回命令错误。附件分支断言 resolver 收到实际 Child sessionId、OCR service 收到 Root sessionId；普通路径/URL完整委托明确传入的可复用视觉 Tool 定义。OCR 输出保留不可信内容边界和 `attachmentOcr` metadata。该 Tool 后续通过 daemon 的普通 `tools` 注册，不使用 `toolOverrides`。
 
 - [ ] **步骤 8：运行 server 新模块测试和类型检查**
 
@@ -560,8 +561,10 @@ git commit -m "feat(server): add session-authorized attachment tools"
 在 `daemon-agent.test.ts` 将旧 Host 断言替换成：
 
 ```ts
+expect(capturedOptions.tools?.map((tool) => tool.name))
+  .toEqual(["ImageToText", "ImageGeneration"]);
 expect(capturedOptions.toolOverrides?.map((tool) => tool.name))
-  .toEqual(["Read", "ImageToText"]);
+  .toEqual(["Read"]);
 expect(capturedOptions.trustedToolOverrides).toEqual(["Read"]);
 expect(capturedOptions.capabilityOverrides).not.toHaveProperty("attachments");
 expect(capturedOptions.capabilityOverrides).not.toHaveProperty("imageToText");
@@ -575,11 +578,12 @@ expect(capturedOptions).not.toHaveProperty("attachmentResourceRoot");
 `DaemonAgentLoaderOptions` 增加：
 
 ```ts
+tools?: ToolDefinition[];
 toolOverrides?: ToolDefinition[];
 trustedToolOverrides?: string[];
 ```
 
-删除 `imageToText`、`attachments`、`attachmentResourceRoot`。构造 `OpenHarnessAgentOptions` 时直接传递两个 Tool 字段，不放进 `capabilityOverrides`。
+删除 `imageToText`、`attachments`、`attachmentResourceRoot`。构造 `OpenHarnessAgentOptions` 时直接传递 `tools`、`toolOverrides`、`trustedToolOverrides`，不放进 `capabilityOverrides`。
 
 - [ ] **步骤 3：在 DaemonApplication 创建共享服务和覆盖 Tool**
 
@@ -600,20 +604,27 @@ const attachmentOcr = createAttachmentOcrService({
   recognize: (input) => this.localOcr.recognize(input),
 });
 
+tools: [
+  createAttachmentImageToTextTool({
+    defaultTool: imageToTextTool,
+    authorizationSessions,
+    attachmentOcr,
+  }),
+  imageGenerationTool,
+],
 toolOverrides: [
   createAttachmentReadTool({
     defaultTool: fileReadTool,
     authorizationSessions,
     attachmentReader,
   }),
-  createAttachmentImageToTextTool({
-    defaultTool: imageToTextTool,
-    authorizationSessions,
-    attachmentOcr,
-  }),
 ],
 trustedToolOverrides: ["Read"],
 ```
+
+`tools` 必须按实际服务配置构造：图像读取/OCR 服务不可用时不加入 `ImageToText`，图片生成服务不可用时不加入 `ImageGeneration`。
+
+在 daemon 测试中分别覆盖完整配置、仅 OCR、仅图片生成和两者都未配置，断言最终工具清单与服务事实一致。
 
 删除旧 Host 和附件目录准备函数的装配。
 
@@ -936,11 +947,12 @@ git commit -m "refactor(compact): move attachment context to server"
 ```text
 DefaultNodeAgent
   Read(local only)
-  ImageToText(image_path/image_url/prompt)
+  no ImageToText / ImageGeneration
 
 Daemon
   trusted Read override -> attachment text
-  ImageToText override -> attachment local OCR
+  ImageToText tool -> path/URL vision + attachment local OCR
+  ImageGeneration tool -> configured image provider
   supplemental compact section -> attachment resume hints
 ```
 
