@@ -7,16 +7,16 @@ import type {
 import { isAttachmentUri, parseAttachmentUri } from "./attachment-uri.js";
 
 export function createAttachmentReadTool(options: {
-  localReadTool: ToolDefinition;
+  defaultTool: ToolDefinition;
   authorizationSessions: AttachmentAuthorizationSessionResolver;
   attachmentReader: AttachmentTextReader;
 }): ToolDefinition {
   return {
-    ...options.localReadTool,
-    description: `${options.localReadTool.description} Also reads daemon attachment:// resources.`,
+    ...options.defaultTool,
+    description: `${options.defaultTool.description} Also reads daemon attachment:// resources.`,
     async execute(input, context) {
       const path = typeof input.file_path === "string" ? input.file_path : "";
-      if (!isAttachmentUri(path)) return await options.localReadTool.execute(input, context);
+      if (!isAttachmentUri(path)) return await options.defaultTool.execute(input, context);
       try {
         const parsed = parseAttachmentUri(path);
         if (!context.sessionId) throw new Error("attachment_resource_access_denied");

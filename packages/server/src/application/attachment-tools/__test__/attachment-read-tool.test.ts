@@ -10,7 +10,7 @@ describe("attachment Read tool", () => {
       displayName: "notes.txt", mediaType: "text/plain", encoding: "utf-8" as const,
     }));
     const tool = createAttachmentReadTool({
-      localReadTool: { name: "Read", description: "read", inputSchema: {}, execute: defaultExecute },
+      defaultTool: { name: "Read", description: "read", inputSchema: {}, execute: defaultExecute },
       authorizationSessions: { resolve: (id) => id === "child" ? "root" : undefined },
       attachmentReader: { readText },
     });

@@ -16,7 +16,7 @@ describe("daemon ImageToText tool", () => {
       durationMs: 2,
     }));
     const tool = createAttachmentImageToTextTool({
-      pathOrUrlImageTool: { name: "ImageToText", description: "vision", inputSchema: {}, execute: defaultExecute },
+      defaultTool: { name: "ImageToText", description: "vision", inputSchema: {}, execute: defaultExecute },
       authorizationSessions: { resolve: (id) => id === "child" ? "root" : undefined },
       attachmentOcr: { recognize },
     });
@@ -38,7 +38,7 @@ describe("daemon ImageToText tool", () => {
   it("rejects mixed attachment input before OCR", async () => {
     const recognize = vi.fn();
     const tool = createAttachmentImageToTextTool({
-      pathOrUrlImageTool: { name: "ImageToText", description: "vision", inputSchema: {}, execute: vi.fn() },
+      defaultTool: { name: "ImageToText", description: "vision", inputSchema: {}, execute: vi.fn() },
       authorizationSessions: { resolve: () => "root" },
       attachmentOcr: { recognize },
     });
