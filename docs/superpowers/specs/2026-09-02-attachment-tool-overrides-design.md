@@ -1,0 +1,390 @@
+# 附件能力退出 Agent Runtime 设计
+
+## 1. 状态
+
+- 状态：待用户审核
+- 日期：2026-09-02
+- 范围：`@openharness/core`、`@openharness/tools`、`@openharness/agent-runtime`、`@openharness/server`
+- 前置设计：`2026-09-02-agent-tool-override-design.md`
+- 兼容策略：不兼容旧的附件 Capability 注入接口
+
+## 2. 背景
+
+当前 `Read` 和 `ImageToText` 通过 `ToolContext` 读取 Host 注入的附件能力：
+
+```text
+Read -> context.attachments -> AgentAttachmentResourceHost
+ImageToText -> context.imageToText -> AgentImageToTextHost
+```
+
+这条链路能工作，但把 daemon 的附件存储、会话授权和本地 OCR 变成了 Agent Runtime 的公共能力。没有注入这些 Host 的调用方会得到缺失或不可执行的工具，`DefaultNodeAgent` 也因此不再是一个行为自洽的默认 Agent。
+
+显式 `toolOverrides` 已经提供了更合适的扩展边界：默认 Agent 提供普通文件和图片工具；拥有附件业务的 daemon 用完整 Tool 覆盖同名默认 Tool。模型仍然调用 `Read` 和 `ImageToText`，但 Agent Runtime 不再认识附件协议、附件存储或附件 OCR。
+
+本设计取代 `2026-09-02-agent-tool-override-design.md` 中“默认 `Read` 直接支持附件”的临时结论，具体包括该文档的第 14 节、15.5 节、验收标准第 11 项及相关实施描述。Tool 显式覆盖机制本身保持不变。
+
+## 3. 设计结论
+
+采用“默认通用 Tool + daemon 附件 Tool 覆盖”：
+
+```text
+DefaultNodeAgent
+  ├─ Read：只读本地文件和目录
+  ├─ ImageToText：通过视觉模型处理 image_path / image_url
+  └─ 不知道 attachment://、attachment_id、附件存储和本地 OCR
+
+Daemon
+  ├─ 管理附件上传、存储、授权和生命周期
+  ├─ 用附件版 Read 覆盖默认 Read
+  ├─ 用附件版 ImageToText 覆盖默认 ImageToText
+  └─ 普通文件或 URL 请求委托给被覆盖的默认 Tool
+```
+
+核心规则：
+
+1. 附件不是 Agent Capability，而是 daemon 提供的业务资源。
+2. Agent Runtime 不保留旧接口，也不同时支持 Capability 和 Tool override 两条注入路径。
+3. 默认 `Read`、默认 `ImageToText` 独立可用，不依赖 Host 注入。
+4. daemon 覆盖的是完整 `ToolDefinition`，执行仍经过 QueryEngine 的权限、Hook、超时、取消、审计和结果规范化。
+5. daemon 的覆盖工具只在附件输入上接管执行；普通输入委托默认 Tool，避免复制通用逻辑。
+6. 附件目录不再隐式挂载给 Agent shell。
+
+## 4. 目标
+
+1. `DefaultNodeAgent` 在没有 daemon 附件服务时仍拥有可用的 `Read` 和 `ImageToText`。
+2. `@openharness/core`、`@openharness/tools` 和 `@openharness/agent-runtime` 不再导出或传递附件专属 Host。
+3. daemon 继续支持现有客户端附件上传和消息协议。
+4. 文本附件继续通过 `Read({ file_path: "attachment://..." })` 读取。
+5. 当前模型不能直接看图时，图片附件继续通过 `ImageToText({ attachment_id: "..." })` 做本地 OCR。
+6. 附件读取始终在 daemon 中按当前 session 授权，不暴露物理存储路径。
+
+## 5. 非目标
+
+本次不做：
+
+- 通用 `ResourceResolver` 或新的 Capability Provider；
+- Plugin 覆盖内置 Tool 的权限体系；
+- 让 shell 直接操作附件目录；
+- 改变客户端上传接口、附件 metadata 或消息展示；
+- 用视觉模型替换 daemon 现有的附件本地 OCR；
+- 重构所有媒体 Tool 的 Provider 客户端；
+- 为旧的 `capabilityOverrides.attachments`、`capabilityOverrides.imageToText` 或 `attachmentResourceRoot` 提供兼容层。
+
+## 6. 默认 Tool 契约
+
+### 6.1 默认 `Read`
+
+默认 `Read` 恢复为本地文件系统工具：
+
+```ts
+Read({
+  file_path: string,
+  offset?: number,
+  limit?: number,
+})
+```
+
+它支持本地文件、目录、分页、编码识别和现有路径规则。它不识别 `attachment://`，不解析 `assetId`，也不读取 session 状态。
+
+独立 Agent 收到 `attachment://...` 时，按无效或不存在的本地路径返回稳定错误。只有 daemon 覆盖后的 `Read` 才承诺支持该协议。
+
+### 6.2 默认 `ImageToText`
+
+默认 `ImageToText` 恢复为视觉模型工具：
+
+```ts
+ImageToText({
+  image_path?: string,
+  image_url?: string,
+  prompt?: string,
+})
+```
+
+要求 `image_path` 和 `image_url` 恰好提供一个。`prompt` 缺省为详细描述图片，可用于图片描述或文字提取。该 Tool：
+
+- 使用 `ToolContext.settings` 中当前 Agent 的模型、`visionModel`、API 格式、地址和凭据；
+- 本地图片按受支持媒体类型编码为模型图片输入；
+- URL 只作为模型图片输入，不经过附件存储；
+- 使用 Tool 调用的 `abortSignal` 和 60 秒内部超时；
+- 不接受 `attachment_id`；
+- 不调用 `AgentImageToTextHost`；
+- 在默认 Registry 中始终注册，不再由 `imageToText` Capability 是否可用决定。
+
+这里恢复的是旧工具的通用能力边界，不要求机械复制旧实现。实现应复用当前 `ToolContext.settings`，避免再次维护进程级 Settings 缓存；错误响应不得返回 API key，Provider 响应正文需要安全截断。
+
+## 7. daemon 覆盖 Tool
+
+daemon 在创建 Agent 时构造两个 Tool，并通过已有 `toolOverrides` 传入：
+
+```ts
+createDefaultNodeAgent({
+  toolOverrides: [
+    createAttachmentReadTool({ defaultTool: fileReadTool, attachmentReader }),
+    createAttachmentImageToTextTool({
+      defaultTool: imageToTextTool,
+      attachmentOcr,
+    }),
+  ],
+});
+```
+
+`defaultTool` 是明确导入的内置定义。覆盖 Tool 持有它用于委托，但不修改默认 Registry，也不在运行时查找“上一个版本”。
+
+### 7.1 附件版 `Read`
+
+附件版 `Read` 保持默认参数，并扩展 `file_path` 的描述以说明 `attachment://`：
+
+```text
+file_path 以 attachment:// 开头
+  -> 严格解析 assetId 和展示文件名
+  -> 使用 context.sessionId 校验访问范围
+  -> 将 offset / limit 传给 daemon AttachmentTextReader
+  -> 格式化文本片段和分页提示
+
+其他 file_path
+  -> defaultTool.execute(input, context)
+```
+
+附件 URI 的解析和合法性校验从 `@openharness/tools` 迁到 server 附件模块。`offset`、`limit` 和现有最大返回量继续沿用当前行为。
+
+### 7.2 附件版 `ImageToText`
+
+附件版 Schema 接受两类互斥输入：
+
+```ts
+{ attachment_id: string }
+
+// 或
+{
+  image_path?: string,
+  image_url?: string,
+  prompt?: string,
+}
+```
+
+执行规则：
+
+```text
+存在 attachment_id
+  -> 禁止同时提供 image_path、image_url 或 prompt
+  -> 使用 context.sessionId 校验附件访问范围
+  -> 调用 daemon 当前的附件本地 OCR
+  -> 返回带不可信内容边界和 OCR metadata 的 ToolResult
+
+不存在 attachment_id
+  -> defaultTool.execute(input, context)
+```
+
+附件本地 OCR 仍只提取可见文字，不接受描述性 prompt，也不推断非文字内容。普通本地文件和 URL 则由默认视觉模型 Tool 处理，可以接受 prompt。
+
+## 8. 类型与所有权调整
+
+从 `@openharness/core` 删除：
+
+- `AgentAttachmentResourceHost`
+- `AgentAttachmentTextSlice`
+- `AgentImageToTextHost`
+- `AgentImageToTextInput`
+- `AgentImageToTextResult`
+- `ToolContext.attachments`
+- `ToolContext.imageToText`
+- Runtime 接口中的 `setAttachments()`
+- Runtime 接口中的 `setImageToText()`
+
+从 `@openharness/agent-runtime` 删除：
+
+- `AgentCapabilityOverrides.attachments`
+- `AgentCapabilityOverrides.imageToText`
+- `ResolvedAgentCapabilities.attachments`
+- `ResolvedAgentCapabilities.imageToText`
+- 默认 Capability 解析中的对应分支
+- Kernel 与 QueryEngine 的对应接线
+- `attachmentResourceRoot` 配置和附件目录沙箱挂载
+
+从 QueryEngine 删除：
+
+- `attachments`、`imageToText` 状态字段；
+- 两个 setter；
+- 构造 `ToolContext` 时对两个字段的注入。
+
+server 内部保留实现当前业务所需的小接口，例如 `AttachmentTextReader` 和 `AttachmentOcrService`。这些接口使用 server/services 自己的类型，不再从 core 导出，也不再出现在 `agent.inspect().capabilities`。
+
+## 9. daemon 装配
+
+`daemon-application.ts` 继续创建现有附件读取与 OCR 服务，但不再把它们放进 `capabilityOverrides`。它把服务交给两个 server Tool 工厂，再将结果传给 daemon Agent factory。
+
+`daemon-agent.ts` 的输入从：
+
+```ts
+{
+  attachments,
+  imageToText,
+  attachmentResourceRoot,
+}
+```
+
+改为普通 Agent 配置里的：
+
+```ts
+{
+  toolOverrides: [attachmentReadTool, attachmentImageToTextTool],
+}
+```
+
+如果 daemon 没有配置附件 OCR，仍安装附件版 `Read`；`ImageToText` 保持默认视觉工具，不声称支持 `attachment_id`。如果附件 OCR 已配置，则安装附件版 `ImageToText`。这使工具 Schema 与真实能力一致。
+
+## 10. 附件路由与 compact
+
+客户端上传、Catalog 和 compact 中保存的 `attachment://` URI 不变。它们属于 daemon 会话数据，不要求 Agent Runtime 原生理解该 URI。
+
+图片附件路由不再检查：
+
+```ts
+inspection.capabilities.imageToText.status
+```
+
+路由只根据最终可见工具及 daemon 自己是否安装了附件 OCR 覆盖来判断：
+
+```text
+ImageToText 不可见
+  -> 过滤错误
+
+ImageToText 可见但未安装附件 OCR 覆盖
+  -> 不生成 attachment_id 调用提示
+
+ImageToText 可见且已安装附件 OCR 覆盖
+  -> 生成只传 attachment_id 的 OCR 提示
+```
+
+实现中可以把现有 `imageToTextHostAvailable` 改成语义准确的 `attachmentOcrAvailable`，它是 server 路由输入，不是 Agent Capability 快照。
+
+compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText` 读取图片文字。daemon 的默认装配保证这些提示对应最终覆盖工具；独立 Agent 没有 daemon 附件 Catalog，因此不会产生这类附件提示。
+
+## 11. 安全与错误处理
+
+附件版 Tool 必须：
+
+1. 只接受规范化的 `attachment://` 或不透明 `attachment_id`，不接受附件物理路径。
+2. 使用当前 `ToolContext.sessionId` 做访问校验；缺少 session 时拒绝附件访问。
+3. 继续校验附件状态、媒体类型、大小和可用 representation。
+4. 将 `abortSignal` 传到底层读取和 OCR。
+5. 限制单次文本返回量，保留分页信息。
+6. 将附件正文和 OCR 文本标记为不可信数据，防止其被当成系统指令。
+7. 不在 Tool 结果中暴露物理目录、堆栈、凭据或完整 Provider 错误正文。
+
+稳定错误至少覆盖：
+
+- 附件不存在；
+- 当前 session 无权访问；
+- 附件尚未处理完成；
+- 类型不支持；
+- 内容或图片过大；
+- 读取/OCR 超时或被取消；
+- 默认视觉模型配置缺失或 Provider 不支持图片。
+
+错误沿用现有 `ToolResult` 和 `failureKind`，本次不新增一套异常基类。
+
+### 11.1 Tool 权限
+
+根据前置 Tool override 设计，覆盖后的 `Read` 来源是 `agent`，不能因为名称仍叫 `Read` 就继承内置实现的隐式只读信任。否则任何自定义 `Read` 都可以借名称绕过权限检查。
+
+因此本次不新增“可信覆盖”后门，也不由 daemon 自动把整个 `Read` 加入 `autoApproveTools`：后者会同时放行附件读取和任意本地路径读取，授权范围过宽。
+
+实际行为固定为：
+
+- `full_auto` 等原本无需询问的模式继续执行；
+- 用户已有的 deny、allow、path rule 和显式 `autoApproveTools` 继续生效；
+- 默认询问模式下，daemon 覆盖的 `Read` 按覆盖 Tool 请求许可；
+- 附件 Tool 即使获得 Tool 执行许可，仍必须在执行内部做 session 级资源授权。
+
+这会把附件读取从过去依赖 Tool 名称的隐式放行，收紧为显式 Tool 权限加资源权限两层检查。非交互 Schedule 或 Workflow 如果需要读取附件，必须沿用现有机制配置可执行的权限模式；本次不改变调度和工作流本身的 API 或生命周期。
+
+## 12. 生命周期
+
+覆盖 Tool 是普通不可变定义，不拥有需要单独释放的生命周期。附件存储、OCR worker 和缓存仍由 daemon/application 层创建和关闭。Agent Runtime 不释放这些服务。
+
+移除 `attachmentResourceRoot` 后，Agent shell 和 Docker sandbox 不再自动看到附件存储目录。未来若需要 shell 操作附件，应单独设计显式的“导出附件到受控工作目录”工具，不恢复隐式目录挂载。
+
+## 13. 测试范围
+
+### 13.1 `@openharness/tools`
+
+- `Read` 读取普通文件、目录和分页内容。
+- `Read` 的描述和 Schema 不再宣称支持 `attachment://`。
+- `Read` 不调用任何附件 Host。
+- `ImageToText` 始终进入默认 Registry。
+- `ImageToText` 要求 `image_path` / `image_url` 二选一。
+- `ImageToText` 支持 prompt、取消、超时和两类 API 格式。
+- `ImageToText` 不接受 `attachment_id`。
+- 视觉配置错误和 Provider 错误安全返回。
+
+### 13.2 `@openharness/core` 与 `@openharness/agent-runtime`
+
+- `ToolContext` 不再携带附件或 OCR Host。
+- QueryEngine 不再保存或设置附件能力。
+- 默认 Agent 无附件 Host 也注册并运行通用 `Read`、`ImageToText`。
+- Capability 解析和 inspect 快照中不再出现 `attachments`、`imageToText`。
+- Runtime 配置不再接受 `attachmentResourceRoot`，沙箱不再自动挂载附件目录。
+- 现有 `toolOverrides` 仍受 allow/deny、权限、Hook、超时和取消控制。
+
+### 13.3 `@openharness/server`
+
+- 附件版 `Read` 对普通路径委托默认 Tool。
+- 附件版 `Read` 严格解析 URI、传递分页参数并校验 session。
+- 附件版 `ImageToText` 对普通路径/URL 委托默认 Tool。
+- 附件版 `ImageToText` 对 `attachment_id` 调用本地 OCR。
+- `attachment_id` 与其他来源或 prompt 同时出现时拒绝。
+- 跨 session、缺少 session、附件不存在和取消请求都返回正确错误。
+- daemon 创建 Agent 时安装正确的覆盖 Tool。
+- 路由只在附件 OCR 覆盖真实可用且 Tool 可见时生成提示。
+- compact 后的附件提示仍能触发覆盖 Tool。
+
+### 13.4 回归
+
+- Schedules、Workflow、Memory、Terminal、Jobs 和 Background Shell 的 API、装配和生命周期不变。
+- daemon 覆盖的 `Read` 不继承内置 Tool 的隐式只读信任。
+- 全仓类型检查通过。
+- core、tools、agent-runtime、server 测试通过。
+- `git diff --check` 通过。
+
+## 14. 实施分段
+
+1. 用失败测试锁定默认 `Read`、默认 `ImageToText` 和无附件 Capability 的目标契约。
+2. 恢复两个默认 Tool，并让默认 Registry 始终注册 `ImageToText`。
+3. 删除 core、QueryEngine、Agent Runtime 中的附件/OCR Capability 接口和 `attachmentResourceRoot`。
+4. 在 server 中实现两个附件 Tool 工厂并迁移 daemon 装配。
+5. 调整附件路由、compact 相关断言和 server 集成测试。
+6. 更新架构文档，运行全量验证并分批提交。
+
+每一段都先写或调整失败测试，再实现最小改动。提交不夹带工作区中已有的无关变更。
+
+## 15. 验收标准
+
+1. `createDefaultNodeAgent({ cwd })` 不依赖附件 Host，也始终提供通用 `Read` 和 `ImageToText`。
+2. core、tools、agent-runtime 的公共类型中不存在附件或本地 OCR Host。
+3. Agent 配置和 inspect 中不存在 `attachments`、`imageToText`、`attachmentResourceRoot`。
+4. daemon 中的文本附件仍可通过 `Read(attachment://...)` 分页读取。
+5. daemon 中的图片附件仍可通过 `ImageToText(attachment_id)` 做现有本地 OCR。
+6. 普通本地文件和图片 URL 始终由默认 Tool 处理。
+7. 附件访问不能跨 session，也不暴露物理存储路径。
+8. daemon 使用 `toolOverrides` 接入附件，不存在旧 Capability 兼容通道。
+9. 附件目录不再自动挂载到 Agent shell 或 sandbox。
+10. Tool 覆盖不绕过 QueryEngine 的统一执行流程。
+11. Schedules、Workflow、Memory 及其他默认能力的 API、装配和生命周期无变化。
+12. 相关测试、全仓测试、类型检查和 diff 检查全部通过。
+
+## 16. 最终运行模型
+
+```text
+客户端上传附件
+  -> daemon 保存附件并建立 session 关系
+  -> daemon 把附件引用放进消息或 compact Catalog
+  -> 模型调用 Read / ImageToText
+  -> QueryEngine 执行最终同名 Tool
+  -> daemon 覆盖 Tool 识别附件输入并校验 session
+  -> 附件服务返回文本片段或本地 OCR 结果
+  -> 普通输入则委托默认 Tool
+  -> ToolResult 回到模型
+```
+
+最终边界是：Agent Runtime 提供完整的通用 Agent；daemon 通过已有 Tool 覆盖机制增加附件语义。附件功能仍然完整，但不再决定 Agent 本体能否正常工作。
