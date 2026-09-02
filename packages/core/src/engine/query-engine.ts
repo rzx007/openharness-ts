@@ -27,6 +27,7 @@ import type {
   ToolExecutionResult,
   ToolRegistry as IToolRegistry,
   ToolRegistryView,
+  ToolDescriptor,
 } from "../types/tools";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
@@ -862,10 +863,36 @@ export class QueryEngine implements IQueryEngine {
   private visibleToolRegistryView(): ToolRegistryView {
     const registry = this.visibleToolRegistry();
     return {
-      get: (name) => registry.get(name),
-      getAll: () => registry.getAll(),
+      get: (name) => {
+        const tool = registry.get(name);
+        return tool ? toolDescriptor(tool) : undefined;
+      },
+      getAll: () => registry.getAll().map(toolDescriptor),
       has: (name) => registry.has(name),
       inspect: (name) => registry.inspect(name),
     };
   }
+}
+
+function toolDescriptor(tool: ToolDefinition): ToolDescriptor {
+  return Object.freeze({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: deepFrozenCopy(tool.inputSchema),
+    ...(tool.safeToRetry === undefined ? {} : { safeToRetry: tool.safeToRetry }),
+  });
+}
+
+function deepFrozenCopy<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((item) => deepFrozenCopy(item))) as T;
+  }
+  if (value && typeof value === "object") {
+    const copied = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([key, item]) => [key, deepFrozenCopy(item)]),
+    );
+    return Object.freeze(copied) as T;
+  }
+  return value;
 }

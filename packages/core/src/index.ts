@@ -41,6 +41,7 @@ export type {
   AgentAttachmentTextSlice,
   ToolRegistry as IToolRegistry,
   ToolRegistryView,
+  ToolDescriptor,
 } from "./types/tools";
 
 export type {

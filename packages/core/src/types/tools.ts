@@ -141,6 +141,14 @@ export interface ToolDefinition {
   ) => Promise<ToolResult>;
 }
 
+/** Immutable model-visible metadata; deliberately excludes execute(). */
+export interface ToolDescriptor {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Readonly<Record<string, unknown>>;
+  readonly safeToRetry?: boolean;
+}
+
 export interface ToolRegistrationSource {
   readonly kind: "builtin" | "agent" | "extension" | "plugin" | "mcp" | "runtime";
   readonly id?: string;
@@ -153,13 +161,15 @@ export interface RegisteredToolInspection {
 }
 
 export interface ToolRegistryView {
-  get(name: string): ToolDefinition | undefined;
-  getAll(): ToolDefinition[];
+  get(name: string): ToolDescriptor | undefined;
+  getAll(): ToolDescriptor[];
   has(name: string): boolean;
   inspect(name: string): RegisteredToolInspection | undefined;
 }
 
 export interface ToolRegistry extends ToolRegistryView {
+  get(name: string): ToolDefinition | undefined;
+  getAll(): ToolDefinition[];
   register(tool: ToolDefinition, source?: ToolRegistrationSource): void;
   override(tool: ToolDefinition, source: ToolRegistrationSource): void;
   unregister?(name: string): boolean;

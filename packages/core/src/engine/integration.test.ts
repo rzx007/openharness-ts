@@ -227,6 +227,9 @@ describe("Integration: Full Agent Loop", () => {
           type: "text" as const,
           text: JSON.stringify({
             names: context.toolRegistry?.getAll().map((tool) => tool.name) ?? [],
+            exposesExecute: context.toolRegistry?.getAll().some(
+              (tool) => "execute" in tool,
+            ) ?? false,
             mutableMethods: ["register", "override", "unregister"].filter(
               (name) => typeof (context.toolRegistry as any)?.[name] === "function",
             ),
@@ -257,6 +260,7 @@ describe("Integration: Full Agent Loop", () => {
     const toolEnd = events.find((event) => event.type === "tool_use_end") as any;
     expect(JSON.parse(toolEnd.result.content[0].text)).toEqual({
       names: ["SearchProbe"],
+      exposesExecute: false,
       mutableMethods: [],
     });
   });
