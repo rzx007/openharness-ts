@@ -170,7 +170,6 @@ export async function createOpenHarnessRuntime(
     childEnvironment: includeDelegation,
     agentDefinitions: options.agentDefinitions,
     workflowRepository,
-    imageToText: imageToText !== undefined,
   });
   const trustedOverrides = applyConfiguredTools(baseToolRegistry, configuration);
   const trustedBuiltinToolNames = new Set(

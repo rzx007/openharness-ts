@@ -1,81 +1,26 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fileReadTool } from "../read.js";
 
 describe("fileReadTool", () => {
-  it("advertises attachment resources as Read inputs rather than MCP resources", () => {
-    expect(fileReadTool.description).toContain("attachment://");
-    expect(fileReadTool.description).toContain("not ReadMcpResource");
+  it("does not advertise the daemon attachment protocol", () => {
+    expect(fileReadTool.description).not.toContain("attachment://");
     const schema = fileReadTool.inputSchema as {
       properties: { file_path: { description: string } };
     };
-    expect(schema.properties.file_path.description).toContain("attachment://");
+    expect(schema.properties.file_path.description).not.toContain("attachment://");
   });
 
-  it("reads an attachment URI through the session-scoped host", async () => {
-    const readText = vi.fn(async () => ({
-      displayName: "report.log",
-      mediaType: "text/plain",
-      encoding: "utf-8" as const,
-      content: "two\nthree",
-      startLine: 2,
-      endLine: 3,
-      hasMore: true,
-    }));
-
-    const result = await fileReadTool.execute!(
-      { file_path: "attachment://att_123/report.log", offset: 2, limit: 2 },
-      { cwd: "D:/project", sessionId: "session-1", attachments: { readText } },
-    );
-
-    expect(readText).toHaveBeenCalledWith(
-      { assetId: "att_123", offset: 2, limit: 2 },
-      expect.objectContaining({ sessionId: "session-1" }),
-    );
-    expect((result.content[0] as { text: string }).text).toBe(
-      "2: two\n3: three\nhas_more: true",
-    );
-    expect(result.isError).toBeFalsy();
-  });
-
-  it.each([
-    "attachment:///missing.txt",
-    "attachment://user@att_123/report.log",
-    "attachment://att_123:80/report.log",
-    "attachment://att_123/report%2Fsecret.log",
-    "attachment://att_123/report.log?raw=1",
-    "attachment://att_123/report.log#part",
-  ])("rejects malformed attachment URI %s", async (filePath) => {
-    const result = await fileReadTool.execute!({ file_path: filePath }, { cwd: "D:/project" });
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain("Invalid attachment URI");
-  });
-
-  it("returns a stable error when the attachment host is unavailable", async () => {
+  it("treats attachment URIs as invalid local paths", async () => {
     const result = await fileReadTool.execute!(
       { file_path: "attachment://att_123/report.log" },
       { cwd: "D:/project" },
     );
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain(
-      "Attachment resources are unavailable",
-    );
-  });
 
-  it.each([
-    [{ offset: 0 }, "offset"],
-    [{ offset: 1.5 }, "offset"],
-    [{ limit: 0 }, "limit"],
-    [{ limit: 2001 }, "limit"],
-  ])("rejects invalid attachment ranges", async (range, field) => {
-    const result = await fileReadTool.execute!(
-      { file_path: "attachment://att_123/report.log", ...range },
-      { cwd: "D:/project", attachments: { readText: vi.fn() } },
-    );
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain(field);
+    expect((result.content[0] as { text: string }).text).toContain("Error reading file");
   });
 
   it("reads files with line numbers", async () => {

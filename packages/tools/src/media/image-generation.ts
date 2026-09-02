@@ -2,15 +2,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ToolDefinition } from "@openharness/core";
-import { loadSettings, type Settings } from "@openharness/core";
 import { createToolAbortScope } from "../abort.js";
-
-// Cache settings per process; avoids a disk read on every tool invocation.
-let _settingsCache: Settings | undefined;
-async function getCachedSettings(): Promise<Settings> {
-  if (!_settingsCache) _settingsCache = await loadSettings();
-  return _settingsCache;
-}
 
 const IMAGES_DIR = join(homedir(), ".openharness-ts", "images");
 
@@ -54,7 +46,14 @@ export const imageGenerationTool: ToolDefinition = {
     const n = Math.min(Math.max(Math.round((input.n as number | undefined) ?? 1), 1), 4);
     const modelOverride = input.model as string | undefined;
 
-    const settings = await getCachedSettings();
+    const settings = context.settings;
+    if (!settings) {
+      return {
+        content: [{ type: "text", text: "ImageGeneration is unavailable because runtime settings are missing." }],
+        isError: true,
+        failureKind: "policy",
+      };
+    }
     const apiKey = settings.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? "";
     const baseUrl = (settings.imageGenerationBaseUrl ?? settings.baseUrl ?? "https://api.openai.com").replace(/\/$/, "");
     const model = modelOverride ?? "dall-e-3";
@@ -72,10 +71,11 @@ export const imageGenerationTool: ToolDefinition = {
       });
 
       if (!res.ok) {
-        const body = await res.text();
+        const body = redactProviderBody(await res.text(), apiKey);
         return {
           content: [{ type: "text", text: `image_generation API error ${res.status}: ${body}` }],
           isError: true,
+          failureKind: "provider",
         };
       }
 
@@ -124,12 +124,19 @@ export const imageGenerationTool: ToolDefinition = {
 
       return { content: [{ type: "text", text }] };
     } catch (err) {
+      const interrupted = context.abortSignal?.aborted === true;
       return {
-        content: [{ type: "text", text: `image_generation failed: ${(err as Error).message}` }],
+        content: [{ type: "text", text: interrupted ? "image_generation interrupted" : "image_generation request failed" }],
         isError: true,
+        failureKind: interrupted ? "interrupted" : "provider",
       };
     } finally {
       generationAbortScope.dispose();
     }
   },
 };
+
+function redactProviderBody(body: string, apiKey: string): string {
+  const redacted = apiKey ? body.split(apiKey).join("[redacted]") : body;
+  return redacted.slice(0, 1_000);
+}

@@ -14,7 +14,6 @@ import {
   fileWriteTool,
   globTool,
 } from "./file/index.js";
-import { imageGenerationTool, imageToTextTool } from "./media/index.js";
 import {
   askUserTool,
   briefTool,
@@ -59,7 +58,6 @@ export function createDefaultToolRegistry(
     jobs?: boolean;
     backgroundShell?: boolean;
     childEnvironment?: boolean;
-    imageToText?: boolean;
     agentDefinitions?: AgentDefinition[];
     workflowRepository?: WorkflowRunRepository;
   } = {},
@@ -121,8 +119,6 @@ export function createDefaultToolRegistry(
   registerBuiltin(readMcpResourceTool);
   registerBuiltin(mcpAuthTool);
   registerBuiltin(lspTool);
-  if (options.imageToText) registerBuiltin(imageToTextTool);
-  registerBuiltin(imageGenerationTool);
   registerBuiltin(feishuPushTool);
   return registry;
 }

@@ -42,11 +42,9 @@ describe("createDefaultToolRegistry", () => {
     expect(names).toContain("McpAuth");
     expect(names).toContain("Lsp");
     expect(names).not.toContain("ImageToText");
-    expect(createDefaultToolRegistry({ imageToText: true }).getAll().map((tool) => tool.name))
-      .toContain("ImageToText");
-    expect(names).toContain("ImageGeneration");
+    expect(names).not.toContain("ImageGeneration");
     expect(names).toContain("FeishuPush");
-    expect(tools).toHaveLength(32);
+    expect(tools).toHaveLength(31);
     expect(names).not.toEqual(
       expect.arrayContaining([
         "TaskGet",
