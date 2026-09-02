@@ -78,7 +78,7 @@
 - 修改：`packages/agent-runtime/src/child-agent-options.ts`
 - 修改：`packages/agent-runtime/src/child-agent-options.test.ts`
 
-- [ ] **步骤 1：为配置校验写失败测试**
+- [x] **步骤 1：为配置校验写失败测试**
 
 在 `default-runtime.test.ts` 使用已有的 `BASE_SETTINGS` 增加以下断言：
 
@@ -103,7 +103,7 @@ it("rejects a trusted name that is not part of toolOverrides", async () => {
 
 现有装配规则已经保证 `toolOverrides` 只能指向默认 Registry 中存在的 builtin；不要为了构造“不覆盖 builtin”的不可达状态增加测试后门。可信名称只需额外验证它确实属于本次 `toolOverrides`。
 
-- [ ] **步骤 2：运行测试，确认新字段和校验尚不存在**
+- [x] **步骤 2：运行测试，确认新字段和校验尚不存在**
 
 运行：
 
@@ -113,7 +113,7 @@ pnpm --filter @openharness/agent-runtime test -- src/default-runtime.test.ts
 
 预期：FAIL，原因是 `trustedToolOverrides` 尚未进入配置或无对应校验错误。
 
-- [ ] **步骤 3：声明配置并在应用覆盖前验证来源**
+- [x] **步骤 3：声明配置并在应用覆盖前验证来源**
 
 在 `OpenHarnessAgentConfiguration` 增加：
 
@@ -169,7 +169,7 @@ const trustedBuiltinToolNames = new Set(
 
 不要把它加入 `autoApproveTools`；继续交给 `PermissionChecker` 的 cwd 内本地只读规则。
 
-- [ ] **步骤 4：写可信和不可信 `Read` 的权限回归测试**
+- [x] **步骤 4：写可信和不可信 `Read` 的权限回归测试**
 
 使用一个同名 override，分别创建未信任和已信任 runtime：
 
@@ -192,7 +192,7 @@ expect(await trusted.permissionChecker.checkTool("Read", {
 
 同时增加 `attachment://att-1/notes.txt` 的 allow 断言，锁定第一方只读资源 URI 行为；deny/path deny 的现有优先级测试必须继续通过。
 
-- [ ] **步骤 5：让 Child 只读继承 Root 信任声明**
+- [x] **步骤 5：让 Child 只读继承 Root 信任声明**
 
 在 `deriveChildAgentOptions()` 明确复制：
 
@@ -202,7 +202,7 @@ trustedToolOverrides: configuration.trustedToolOverrides,
 
 在 `child-agent-options.test.ts` 的父配置加入 `trustedToolOverrides: ["Read"]`，断言 Child 得到相同数组引用或相同内容；Child 输入结构没有追加可信名称的字段。
 
-- [ ] **步骤 6：运行 Agent Runtime 定向测试**
+- [x] **步骤 6：运行 Agent Runtime 定向测试**
 
 运行：
 
@@ -213,7 +213,7 @@ pnpm --filter @openharness/agent-runtime check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 7：提交可信覆盖能力**
+- [x] **步骤 7：提交可信覆盖能力**
 
 ```bash
 git add -- packages/agent-runtime/src/agent-options.ts packages/agent-runtime/src/default-runtime.ts packages/agent-runtime/src/default-runtime.test.ts packages/agent-runtime/src/child-agent-options.ts packages/agent-runtime/src/child-agent-options.test.ts
@@ -239,7 +239,7 @@ git commit -m "feat(agent-runtime): trust first-party tool overrides"
 - 修改：`packages/tools/src/registry.ts`
 - 修改：`packages/tools/src/__test__/registry.test.ts`
 
-- [ ] **步骤 1：把 `Read` 测试改成纯本地契约并确认失败**
+- [x] **步骤 1：把 `Read` 测试改成纯本地契约并确认失败**
 
 删除测试中对 `context.attachments` 的 stub，加入：
 
@@ -267,7 +267,7 @@ pnpm --filter @openharness/tools test -- src/file/__test__/read.test.ts
 
 预期：FAIL，当前描述仍宣称支持附件，并尝试读取 `context.attachments`。
 
-- [ ] **步骤 2：删除 `Read` 的附件分支**
+- [x] **步骤 2：删除 `Read` 的附件分支**
 
 从 `read.ts` 删除：
 
@@ -278,7 +278,7 @@ pnpm --filter @openharness/tools test -- src/file/__test__/read.test.ts
 
 将描述恢复为只读本地文件和目录。保留现有 `resolveToolPath`、sandbox guard、目录排序、分页和行号逻辑。删除不再使用的 `attachment-uri.ts`；当前 `file/index.ts` 没有导出该 helper，无需修改。
 
-- [ ] **步骤 3：为视觉模型版 `ImageToText` 写失败测试**
+- [x] **步骤 3：为视觉模型版 `ImageToText` 写失败测试**
 
 替换当前 Host OCR 测试，至少覆盖：
 
@@ -314,7 +314,7 @@ pnpm --filter @openharness/tools test -- src/media/__test__/image-to-text.test.t
 
 预期：FAIL，当前 Tool 只接受本地 OCR Host，拒绝 prompt。
 
-- [ ] **步骤 4：实现最小视觉模型 Tool**
+- [x] **步骤 4：实现最小视觉模型 Tool**
 
 输入 Schema 固定为：
 
@@ -337,7 +337,7 @@ const prompt = parsed.prompt ?? "Describe this image in detail.";
 
 本地文件只接受 `jpg/jpeg/png/gif/webp`，读取后按 API 格式构造 Data URL 或 Anthropic base64 source；URL 必须是 HTTP(S)。OpenAI-compatible 请求发送到 `${baseUrl}/v1/chat/completions`，Anthropic 请求发送到 `${baseUrl}/v1/messages`。使用 `createToolAbortScope(context.abortSignal, 60_000)`；返回错误时只保留状态码和安全截断后的正文，不拼接 headers 或 API key。
 
-- [ ] **步骤 5：让默认 Registry 不包含视觉 Tool**
+- [x] **步骤 5：让默认 Registry 不包含视觉 Tool**
 
 删除 `createDefaultToolRegistry()` options 中的：
 
@@ -347,11 +347,11 @@ imageToText?: boolean;
 
 删除默认注册 `imageToTextTool` 和 `imageGenerationTool`。更新 registry 测试，断言默认名称集合不包含 `ImageToText` 或 `ImageGeneration`；视觉定义仍从 `@openharness/tools` 导出，供 daemon 显式装配。
 
-- [ ] **步骤 6：用失败测试锁定文生图上下文配置和安全错误**
+- [x] **步骤 6：用失败测试锁定文生图上下文配置和安全错误**
 
 为 `imageGenerationTool` 增加测试，断言它使用 `ToolContext.settings`，不读取进程级 settings 缓存；取消信号能中止请求；Provider 错误正文被截断且不泄漏 API key。先运行该测试并确认当前全局缓存实现导致失败，再做最小修改。
 
-- [ ] **步骤 7：运行 Tools 全包测试和类型检查**
+- [x] **步骤 7：运行 Tools 全包测试和类型检查**
 
 ```bash
 pnpm --filter @openharness/tools test
@@ -360,7 +360,7 @@ pnpm --filter @openharness/tools check-types
 
 预期：全部 PASS；搜索生产代码时，`packages/tools/src` 中不存在 `context.attachments`、`context.imageToText` 或 `attachment_id`。
 
-- [ ] **步骤 8：提交默认 Tool 边界调整**
+- [x] **步骤 8：提交默认 Tool 边界调整**
 
 ```bash
 git add -- packages/tools/src/file/read.ts packages/tools/src/file/__test__/read.test.ts packages/tools/src/file/attachment-uri.ts packages/tools/src/media/image-to-text.ts packages/tools/src/media/__test__/image-to-text.test.ts packages/tools/src/media/image-generation.ts packages/tools/src/media/__test__/image-generation.test.ts packages/tools/src/registry.ts packages/tools/src/__test__/registry.test.ts
@@ -383,7 +383,7 @@ git commit -m "refactor(tools): keep visual tools out of default registry"
 - 创建：`packages/server/src/application/attachment-tools/__test__/attachment-read-tool.test.ts`
 - 创建：`packages/server/src/application/attachment-tools/__test__/attachment-image-to-text-tool.test.ts`
 
-- [ ] **步骤 1：先写 Child → Root 解析器失败测试**
+- [x] **步骤 1：先写 Child → Root 解析器失败测试**
 
 使用带 `parentId` 的持久 session 和 `LiveChildAgentDirectory` stub 锁定：
 
@@ -405,7 +405,7 @@ pnpm --filter @openharness/server test -- src/application/attachment-tools/__tes
 
 预期：FAIL，模块尚不存在。
 
-- [ ] **步骤 2：实现 server 私有接口和授权解析器**
+- [x] **步骤 2：实现 server 私有接口和授权解析器**
 
 在 `attachment-access.ts` 定义规格中的三个接口：
 
@@ -447,7 +447,7 @@ export interface AttachmentOcrService {
 
 解析实现只允许两类映射：live directory 明确返回 Root；或 Store 中 `parentId` 为空的普通 session 返回自身。未知 session和非 live Child 返回 `undefined`。
 
-- [ ] **步骤 3：写 reader 和 OCR service 的 session 引用授权测试**
+- [x] **步骤 3：写 reader 和 OCR service 的 session 引用授权测试**
 
 建立 Root A、Root B、live Child A 和同一个图片/文本 asset，断言：
 
@@ -475,11 +475,11 @@ expect(localOcrRecognize).not.toHaveBeenCalled();
 
 同时覆盖文本类型、图片类型、ready 状态、offset/limit 1..2000 和 AbortSignal。
 
-- [ ] **步骤 4：实现严格附件 URI parser**
+- [x] **步骤 4：实现严格附件 URI parser**
 
 把原 Tools parser 的合法格式迁入 server：assetId 只允许 `[A-Za-z0-9._-]+`，URI 不允许 query、fragment、userinfo、port、解码后的 `/`、`\`、`.` 或 `..`。增加逐项拒绝测试。
 
-- [ ] **步骤 5：先写附件版 `Read` Tool 测试**
+- [x] **步骤 5：先写附件版 `Read` Tool 测试**
 
 测试必须断言普通路径委托原 Tool，附件 URI 先解析执行 session，再向 reader 传授权 Root：
 
@@ -497,7 +497,7 @@ expect(defaultTool.execute).not.toHaveBeenCalled();
 
 缺少 `context.sessionId`、resolver 返回 undefined、非法 URI 和范围错误都返回 `isError: true`，且不调用 reader。
 
-- [ ] **步骤 6：实现附件版 `Read` Tool**
+- [x] **步骤 6：实现附件版 `Read` Tool**
 
 Schema 保持默认字段，但 description 扩展 `attachment://`。普通路径执行：
 
@@ -507,7 +507,7 @@ return await options.defaultTool.execute(input, context);
 
 附件路径执行 server parser、resolver 和 reader，并沿用当前带行号及 `has_more` 的结果格式。
 
-- [ ] **步骤 7：先写并实现 daemon 版 `ImageToText` Tool**
+- [x] **步骤 7：先写并实现 daemon 版 `ImageToText` Tool**
 
 Schema 用 `oneOf` 表达：
 
@@ -518,7 +518,7 @@ Schema 用 `oneOf` 表达：
 
 `attachment_id` 与 `image_path`、`image_url`、`prompt` 同时出现时返回命令错误。附件分支断言 resolver 收到实际 Child sessionId、OCR service 收到 Root sessionId；普通路径/URL完整委托明确传入的可复用视觉 Tool 定义。OCR 输出保留不可信内容边界和 `attachmentOcr` metadata。该 Tool 后续通过 daemon 的普通 `tools` 注册，不使用 `toolOverrides`。
 
-- [ ] **步骤 8：运行 server 新模块测试和类型检查**
+- [x] **步骤 8：运行 server 新模块测试和类型检查**
 
 ```bash
 pnpm --filter @openharness/server test -- src/application/attachment-tools/__test__/attachment-access.test.ts src/application/attachment-tools/__test__/attachment-read-tool.test.ts src/application/attachment-tools/__test__/attachment-image-to-text-tool.test.ts
@@ -527,7 +527,7 @@ pnpm --filter @openharness/server check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 9：提交 server 附件 Tool 基础设施**
+- [x] **步骤 9：提交 server 附件 Tool 基础设施**
 
 ```bash
 git add -- packages/server/src/application/attachment-tools
@@ -556,7 +556,7 @@ git commit -m "feat(server): add session-authorized attachment tools"
 - 删除：`packages/server/src/application/attachment-processing/agent-image-to-text-host.ts`
 - 删除：`packages/server/src/application/attachment-processing/__test__/agent-image-to-text-host.test.ts`
 
-- [ ] **步骤 1：修改 daemon loader 测试，要求普通 Tool 配置接线**
+- [x] **步骤 1：修改 daemon loader 测试，要求普通 Tool 配置接线**
 
 在 `daemon-agent.test.ts` 将旧 Host 断言替换成：
 
@@ -573,7 +573,7 @@ expect(capturedOptions).not.toHaveProperty("attachmentResourceRoot");
 
 运行该文件确认失败。
 
-- [ ] **步骤 2：给 daemon loader 增加第一方 Tool 配置输入**
+- [x] **步骤 2：给 daemon loader 增加第一方 Tool 配置输入**
 
 `DaemonAgentLoaderOptions` 增加：
 
@@ -585,7 +585,7 @@ trustedToolOverrides?: string[];
 
 删除 `imageToText`、`attachments`、`attachmentResourceRoot`。构造 `OpenHarnessAgentOptions` 时直接传递 `tools`、`toolOverrides`、`trustedToolOverrides`，不放进 `capabilityOverrides`。
 
-- [ ] **步骤 3：在 DaemonApplication 创建共享服务和覆盖 Tool**
+- [x] **步骤 3：在 DaemonApplication 创建共享服务和覆盖 Tool**
 
 用同一个 resolver 构造两工具：
 
@@ -628,7 +628,7 @@ trustedToolOverrides: ["Read"],
 
 删除旧 Host 和附件目录准备函数的装配。
 
-- [ ] **步骤 4：把路由能力判断改为 server 事实**
+- [x] **步骤 4：把路由能力判断改为 server 事实**
 
 把 `imageToTextHostAvailable` 和错误码 `attachment_ocr_host_unavailable` 改名为 `attachmentOcrAvailable` / `attachment_ocr_unavailable`。`SessionRunExecutorContext` 增加明确布尔值：
 
@@ -644,7 +644,7 @@ attachmentOcrAvailable: this.context.attachmentOcrAvailable === true,
 
 不再读取 `inspection.capabilities.imageToText`；工具过滤仍由 `availableTools` 判断 `ImageToText` 是否可见。
 
-- [ ] **步骤 5：迁移 durable Child 集成测试**
+- [x] **步骤 5：迁移 durable Child 集成测试**
 
 更新现有真实 Child 测试，不再从 `capabilityOverrides.attachments` 抓 Host。让模型实际调用覆盖后的 `Read`，保留以下断言：
 
@@ -655,7 +655,7 @@ attachmentOcrAvailable: this.context.attachmentOcrAvailable === true,
 
 增加图片等价测试：另一个 Root 的 `attachment_id` 在调用 Local OCR 前失败，并断言 OCR spy 未调用。
 
-- [ ] **步骤 6：删除旧 Host 适配器和测试**
+- [x] **步骤 6：删除旧 Host 适配器和测试**
 
 确认生产引用已清零后删除四个旧文件。执行：
 
@@ -665,7 +665,7 @@ rg -n "AgentAttachmentResourceHost|AgentImageToTextHost|createAgentAttachmentRes
 
 预期：无结果。
 
-- [ ] **步骤 7：运行 server 定向与全包测试**
+- [x] **步骤 7：运行 server 定向与全包测试**
 
 ```bash
 pnpm --filter @openharness/server test -- src/daemon/__test__/daemon-agent.test.ts src/application/session/__test__/session-run-executor.test.ts src/application/attachment-routing/__test__/attachment-capability-router.test.ts src/application/__test__/durable-agent-application.test.ts
@@ -675,7 +675,7 @@ pnpm --filter @openharness/server check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 8：提交 daemon 迁移**
+- [x] **步骤 8：提交 daemon 迁移**
 
 ```bash
 git add -- packages/server/src/daemon/daemon-agent.ts packages/server/src/daemon/__test__/daemon-agent.test.ts packages/server/src/application/daemon-application.ts packages/server/src/application/session/session-run-executor.ts packages/server/src/application/session/__test__/session-run-executor.test.ts packages/server/src/application/attachment-routing packages/server/src/application/__test__/durable-agent-application.test.ts packages/server/src/application/attachment-resource/agent-attachment-resource-host.ts packages/server/src/application/attachment-resource/__test__/agent-attachment-resource-host.test.ts packages/server/src/application/attachment-processing/agent-image-to-text-host.ts packages/server/src/application/attachment-processing/__test__/agent-image-to-text-host.test.ts
@@ -707,7 +707,7 @@ git commit -m "feat(server): install attachment-aware tool overrides"
 - 修改：`packages/agent-runtime/src/agent-composition.ts`
 - 修改：`packages/agent-runtime/src/child-agent.test.ts`
 
-- [ ] **步骤 1：先把类型/快照测试改成目标形状**
+- [x] **步骤 1：先把类型/快照测试改成目标形状**
 
 在 `capability-resolution.test.ts` 删除附件和 imageToText fixture，断言快照只包含：
 
@@ -732,7 +732,7 @@ expect(context).not.toHaveProperty("imageToText");
 
 运行 core 与 agent-runtime 定向测试，确认旧字段仍存在导致失败。
 
-- [ ] **步骤 2：删除 core 公共 Host 类型和 QueryEngine 接线**
+- [x] **步骤 2：删除 core 公共 Host 类型和 QueryEngine 接线**
 
 从 `types/tools.ts` 删除：
 
@@ -748,11 +748,11 @@ ToolContext.attachments
 
 从 runtime interface、QueryEngine 字段/setter/context 构造和 `core/index.ts` 导出中同步删除。
 
-- [ ] **步骤 3：删除 Agent Capability 解析和 Kernel 接线**
+- [x] **步骤 3：删除 Agent Capability 解析和 Kernel 接线**
 
 从 `AgentCapabilityOverrides`、`ResolvedAgentCapabilities`、snapshot、default resolver 和 Kernel 删除两个能力。更新 `child-agent.test.ts`：不再测试借用 attachment Host；改为断言 `toolOverrides`、`trustedToolOverrides` 和 effects 向 Child 继承，而 Host cleanup 不涉及 ToolDefinition。
 
-- [ ] **步骤 4：删除附件目录配置和 sandbox mount**
+- [x] **步骤 4：删除附件目录配置和 sandbox mount**
 
 删除：
 
@@ -766,7 +766,7 @@ managedReadOnlyMounts 中的附件 mount
 
 删除 `default-runtime.test.ts` 中只验证该 mount 的测试。保留正常 sandbox 启停测试。
 
-- [ ] **步骤 5：确认生产代码没有 Agent 附件能力残留**
+- [x] **步骤 5：确认生产代码没有 Agent 附件能力残留**
 
 ```bash
 rg -n "AgentAttachmentResourceHost|AgentImageToTextHost|setAttachments|setImageToText|attachmentResourceRoot|capabilities\.attachments|capabilities\.imageToText" packages/core/src packages/agent-runtime/src packages/server/src
@@ -774,7 +774,7 @@ rg -n "AgentAttachmentResourceHost|AgentImageToTextHost|setAttachments|setImageT
 
 预期：无结果。注意协议层 `features.attachments` 是客户端上传能力，不属于本次删除目标，不要删除。
 
-- [ ] **步骤 6：运行 core 与 agent-runtime 全包验证**
+- [x] **步骤 6：运行 core 与 agent-runtime 全包验证**
 
 ```bash
 pnpm --filter @openharness/core test
@@ -786,7 +786,7 @@ pnpm --filter @openharness/server check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 7：提交 Capability 清理**
+- [x] **步骤 7：提交 Capability 清理**
 
 ```bash
 git add -- packages/core/src/types/tools.ts packages/core/src/types/runtime.ts packages/core/src/engine/query-engine.ts packages/core/src/engine/integration.test.ts packages/core/src/index.ts packages/agent-runtime/src/agent-options.ts packages/agent-runtime/src/capability-resolution.ts packages/agent-runtime/src/capability-resolution.test.ts packages/agent-runtime/src/default-agent-capabilities.ts packages/agent-runtime/src/kernel.ts packages/agent-runtime/src/kernel.test.ts packages/agent-runtime/src/default-runtime.ts packages/agent-runtime/src/default-runtime.test.ts packages/agent-runtime/src/agent.ts packages/agent-runtime/src/agent-composition.ts packages/agent-runtime/src/child-agent.test.ts
@@ -815,7 +815,7 @@ git commit -m "refactor(agent-runtime): remove attachment capabilities"
 - 修改：`packages/server/src/application/daemon-application.ts`
 - 修改：`packages/server/src/application/__test__/durable-agent-application.test.ts`
 
-- [ ] **步骤 1：写 core 通用章节失败测试**
+- [x] **步骤 1：写 core 通用章节失败测试**
 
 将 attachment Catalog fixture 替换为：
 
@@ -832,7 +832,7 @@ supplementalSections: [
 
 增加限额测试：9 节只保留前 8 节；heading 的 CR/LF 折叠为空格并截到 120 字符；单节截到 16,000；总计截到 32,000；空 heading/content 跳过。
 
-- [ ] **步骤 2：实现 `CompactContextSection` 和通用格式化**
+- [x] **步骤 2：实现 `CompactContextSection` 和通用格式化**
 
 删除 `CompactAttachmentCatalog`、`CompactAttachmentCatalogEntry`、`attachmentCatalog` 字段和 `formatAttachmentCatalog()`。增加：
 
@@ -857,7 +857,7 @@ export interface CompactContext {
 
 合并外部 context 时使用 `external.supplementalSections ?? context.supplementalSections`。
 
-- [ ] **步骤 3：更新 agent-runtime provider**
+- [x] **步骤 3：更新 agent-runtime provider**
 
 `CompactContextSources` 改为：
 
@@ -870,7 +870,7 @@ export interface CompactContextSources {
 
 测试同时、单独和 undefined 三种来源，不再导入 core 附件类型。
 
-- [ ] **步骤 4：把 server Catalog formatter 变成章节 builder**
+- [x] **步骤 4：把 server Catalog formatter 变成章节 builder**
 
 保留附件专属的 20 条、每个 preview 1,000 字符、Catalog 总计 12,000 字符限制，但返回：
 
@@ -886,7 +886,7 @@ buildCompactAttachmentSection(store, sessionId, options)
 
 该 server 函数负责生成 `Conversation Attachments` heading、`attachment://`、`Read` / `ImageToText` 提示、不可信 preview 边界和 omitted 计数。没有条目时返回 `undefined`。
 
-- [ ] **步骤 5：更新 AgentPool 与 daemon provider**
+- [x] **步骤 5：更新 AgentPool 与 daemon provider**
 
 `AgentPoolContext` 将 `attachmentCatalog` 改为：
 
@@ -898,7 +898,7 @@ supplementalSections?(
 
 daemon provider 调用 server builder，并把有值的单节包装成数组。与 `sessionMemory` 同时回传，验证 compact prompt 同时包含附件章节和 checkpoint。
 
-- [ ] **步骤 6：运行三包定向测试**
+- [x] **步骤 6：运行三包定向测试**
 
 ```bash
 pnpm --filter @openharness/core test -- src/engine/compact-service-advanced.test.ts
@@ -911,7 +911,7 @@ pnpm --filter @openharness/server check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 7：确认 core/agent-runtime 不含附件 compact 类型**
+- [x] **步骤 7：确认 core/agent-runtime 不含附件 compact 类型**
 
 ```bash
 rg -n "CompactAttachmentCatalog|attachmentCatalog|Conversation Attachments|attachment://" packages/core/src packages/agent-runtime/src
@@ -919,7 +919,7 @@ rg -n "CompactAttachmentCatalog|attachmentCatalog|Conversation Attachments|attac
 
 预期：无结果；附件文案只存在于 server。
 
-- [ ] **步骤 8：提交 compact 边界迁移**
+- [x] **步骤 8：提交 compact 边界迁移**
 
 ```bash
 git add -- packages/core/src/engine/compact-service.ts packages/core/src/engine/compact-service-advanced.test.ts packages/core/src/index.ts packages/agent-runtime/src/compact-context.ts packages/agent-runtime/src/compact-context.test.ts packages/server/src/application/attachment-resource/compact-attachment-catalog.ts packages/server/src/application/attachment-resource/__test__/compact-attachment-catalog.test.ts packages/server/src/application/agent/agent-pool.ts packages/server/src/application/agent/__test__/agent-pool.test.ts packages/server/src/application/daemon-application.ts packages/server/src/application/__test__/durable-agent-application.test.ts
@@ -940,7 +940,7 @@ git commit -m "refactor(compact): move attachment context to server"
 - 修改：`docs/superpowers/specs/2026-09-02-attachment-tool-overrides-design.md`
 - 修改：`docs/superpowers/plans/2026-09-02-attachment-tool-overrides.md`（只勾选已完成步骤和记录实际命令）
 
-- [ ] **步骤 1：更新当前架构文档**
+- [x] **步骤 1：更新当前架构文档**
 
 文档必须明确：
 
@@ -958,7 +958,7 @@ Daemon
 
 从 agent SDK/Capability 文档删除 `attachments`、`imageToText` 和 `attachmentResourceRoot`；保留客户端/协议的附件上传能力说明。说明 `trustedToolOverrides` 仅由第一方 Agent 创建者显式使用，第三方集成没有入口。
 
-- [ ] **步骤 2：做残留搜索**
+- [x] **步骤 2：做残留搜索**
 
 ```bash
 rg -n "AgentAttachmentResourceHost|AgentImageToTextHost|setAttachments|setImageToText|attachmentResourceRoot|CompactAttachmentCatalog|attachmentCatalog|imageToTextHostAvailable" packages docs/agent-sdk.md docs/agent-framework-capability-boundary.md docs/compact-service-design.md
@@ -974,7 +974,7 @@ rg -n "context\.attachments|context\.imageToText|capabilities\.attachments|capab
 
 预期：无结果。
 
-- [ ] **步骤 3：运行四个核心包的全包测试**
+- [x] **步骤 3：运行四个核心包的全包测试**
 
 ```bash
 pnpm --filter @openharness/core test
@@ -985,7 +985,7 @@ pnpm --filter @openharness/server test
 
 预期：全部 PASS。Windows 上若出现 node-pty `AttachConsole failed` 噪音，以测试进程退出码和 Vitest 汇总为准，并在交接记录中说明。
 
-- [ ] **步骤 4：运行全仓类型、测试和文档检查**
+- [x] **步骤 4：运行全仓类型、测试和文档检查**
 
 ```bash
 pnpm check-types
@@ -996,7 +996,7 @@ git diff --check
 
 预期：所有命令退出码为 0。若 `pnpm test` 因当前工作区其他任务的未提交代码失败，先用 `git status --short` 和失败文件确认归属；不得修改或回退无关改动。
 
-- [ ] **步骤 5：检查提交范围和实现事实**
+- [x] **步骤 5：检查提交范围和实现事实**
 
 ```bash
 git status --short
@@ -1006,7 +1006,7 @@ git diff HEAD~6..HEAD --stat
 
 确认每个实现提交只包含本计划文件；确认没有意外删除客户端附件、协议 attachment part、上传 API、SessionStore 附件表或 LocalOcrService。
 
-- [ ] **步骤 6：提交文档收口**
+- [x] **步骤 6：提交文档收口**
 
 ```bash
 git add -- docs/agent-sdk.md docs/agent-framework-capability-boundary.md docs/compact-service-design.md docs/superpowers/specs/2026-09-02-attachment-tool-overrides-design.md docs/superpowers/plans/2026-09-02-attachment-tool-overrides.md
@@ -1015,7 +1015,7 @@ git diff --cached --stat
 git commit -m "docs(agent-runtime): document server-owned attachments"
 ```
 
-- [ ] **步骤 7：按 verification-before-completion 做最终证据复核**
+- [x] **步骤 7：按 verification-before-completion 做最终证据复核**
 
 重新运行最后一次会受文档提交影响的轻量验证：
 
@@ -1026,3 +1026,13 @@ git status --short
 ```
 
 最终报告列出：实现提交、四包测试数量、全仓类型检查任务数、全仓测试结果、已保留的无关工作区改动，以及未执行 push。
+
+## 执行记录
+
+- 实现提交：`5ccc8573`、`7cd78810`、`1eac4fde`、`c6a1ed8f`、`4251cccb`、`7f2603b4`；边界文档提交：`1fb7a7c7`。
+- 四个核心包全包测试通过：core 112、tools 191、agent-runtime 162、server 434。
+- `pnpm check-types` 通过：57/57 tasks。
+- `pnpm test` 在全仓高并发运行时退出 1：sandbox 两个 5 秒超时、plugin-converters 一个 20 秒超时，agent-runtime worktree 清理出现超时/临时目录占用；相关包降低并发单独重跑后，plugin-converters 6/6、sandbox 58/58（另 11 skipped）、agent-runtime 162/162 均通过。未修改这些无关测试的超时配置。
+- `pnpm check-docs` 保留既有失败：`docs/contract-test-index.md:55` 指向不存在的 `../tests/browser-client/vite.config.ts`，不属于本计划改动。
+- 残留搜索只命中 daemon 测试对旧字段“不存在”的回归断言，以及协议层合法的客户端附件 capability；生产 core/agent-runtime 没有附件 Host、视觉 Host 或附件 compact 类型。
+- 客户端附件上传、协议 attachment part、上传 API、SessionStore 附件记录、Blob 存储和 `LocalOcrService` 均保留；未执行 push。

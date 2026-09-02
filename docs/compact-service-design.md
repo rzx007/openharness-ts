@@ -163,7 +163,12 @@ interface CompactContext {
   recentFiles?: string[];
   plan?: string;
   workLog?: string;
-  attachmentCatalog?: CompactAttachmentCatalog;
+  supplementalSections?: CompactContextSection[];
+}
+
+interface CompactContextSection {
+  heading: string;
+  content: string;
 }
 
 type CompactContextProvider = () =>
@@ -173,7 +178,9 @@ type CompactContextProvider = () =>
 
 `taskFocus`、`sessionMemory` 和 `plan` 由宿主通过 compact context provider 显式提供；当前 daemon 没有伪造一份 TaskManager 状态。未接 provider 时这些字段为空。
 
-`attachmentCatalog` 只是结构化 compact context 的一个部分：它记录当前会话仍持久引用的附件身份、访问方式和有界 representation 预览，不是独立的附件 provider，也不承载原始附件内容。
+`supplementalSections` 是业务无关的补充章节。core 不解析章节里的附件、工单或其他业务结构，只负责清洗和限额：最多 8 节；heading 折叠换行、去除首尾空白并截到 120 字符；单节 content 最多 16,000 字符；所有补充章节的 content 合计最多 32,000 字符；空 heading 或 content 会被跳过。
+
+当前 daemon 在 server 内生成 `Conversation Attachments` 章节，内容只包含有界的附件身份、访问提示和不可信 representation 预览，再通过 `supplementalSections` 注入。`sessionMemory` 与该章节会由同一个 provider 一起读回，因此 compact 后既保留任务 checkpoint，也保留附件续读线索。
 
 服务自身还会自动派生：
 

@@ -2,7 +2,7 @@
 
 ## 1. 状态
 
-- 状态：已批准，待实现
+- 状态：已实现
 - 日期：2026-09-02
 - 范围：`@openharness/core`、`@openharness/tools`、`@openharness/agent-runtime`、`@openharness/server`
 - 前置设计：`2026-09-02-agent-tool-override-design.md`
@@ -296,7 +296,9 @@ daemon 同时创建一个 `AttachmentAuthorizationSessionResolver`，供两个 T
 
 ```ts
 {
-  toolOverrides: [attachmentReadTool, attachmentImageToTextTool],
+  tools: [attachmentImageToTextTool, imageGenerationTool],
+  toolOverrides: [attachmentReadTool],
+  trustedToolOverrides: ["Read"],
 }
 ```
 

@@ -36,7 +36,7 @@ unsubscribe();
 await agent.close();
 ```
 
-`createDefaultNodeAgent()` 自动加载 settings、provider、credentials、默认 tools、prompt、skills、plugins、MCP、memory 与 sandbox。调用方只覆盖需要改变的部分。旧的 `createOpenHarnessAgent()` 已删除，不提供别名。
+`createDefaultNodeAgent()` 自动加载 settings、provider、credentials、默认 tools、prompt、skills、plugins、MCP、memory 与 sandbox。默认工具包含纯本地文件 `Read`，不包含 `ImageToText` 或 `ImageGeneration`。调用方只覆盖需要改变的部分。旧的 `createOpenHarnessAgent()` 已删除，不提供别名。
 
 ## 创建参数
 
@@ -68,6 +68,7 @@ const agent = await createDefaultNodeAgent({
 | `client` | programmatic embedding、自定义 provider 或测试用消息客户端 |
 | `systemPrompt` / `maxTurns` / `effort` / `fastMode` | 执行行为覆盖 |
 | `hostToolCeiling` / `roleAllowedTools` / `disallowedTools` | 工具范围，见下一节 |
+| `tools` / `toolOverrides` | 增加 Tool，或按精确名称替换默认 Tool；替换仍经过工具范围、权限、Hook、超时和取消流程 |
 | `capabilityOverrides` | 逐项配置默认能力；可接收 Host 对象的能力与只能禁用的 `jobs` / `memory` 见下文 |
 | `effects` | 宿主交互副作用；目前 `requestPermission` 是可选 permission effect |
 | `onEvent` | 有序、可靠、可等待的 host sink；失败会终止当前 operation |
@@ -104,9 +105,13 @@ await createDefaultNodeAgent({
 
 ## 默认 Node 能力与 Host 覆盖
 
-`createDefaultNodeAgent()` 是开箱即用的 Node 入口：未覆盖时会提供本地 Terminal、Jobs、后台 Shell、Git/worktree child environment、Workflow repository 和 Memory；没有 `effects.requestPermission` 时权限会安全拒绝。Attachments 与 Schedules 没有可用的本地默认值，未由 Host 覆盖时状态就是 `unavailable`，相应工具不会注册。
+`createDefaultNodeAgent()` 是开箱即用的 Node 入口：未覆盖时会提供本地 Terminal、Jobs、后台 Shell、Git/worktree child environment、Workflow repository 和 Memory；没有 `effects.requestPermission` 时权限会安全拒绝。Schedules 没有可用的本地默认值，未由 Host 覆盖时状态就是 `unavailable`，相应工具不会注册。
 
-`capabilityOverrides` 按能力独立解析：不传表示使用该能力的默认值，传入 `false` 表示关闭。只有 `terminal`、`backgroundShell`、`attachments`、`childEnvironment`、`workflowRepository`、`imageToText` 和 `schedules` 接受 Host 对象作为 override；其中 `terminal` 与 `backgroundShell` 必须使用 `{ value, jobs }` bundle，让 `Job*` 工具能观察与控制它们创建的 Job。`jobs` 与 `memory` 不接受 Host 对象，分别只能设为 `false` 来关闭本地 Jobs 或受管 Memory。
+`capabilityOverrides` 按能力独立解析：不传表示使用该能力的默认值，传入 `false` 表示关闭。只有 `terminal`、`backgroundShell`、`childEnvironment`、`workflowRepository` 和 `schedules` 接受 Host 对象作为 override；其中 `terminal` 与 `backgroundShell` 必须使用 `{ value, jobs }` bundle，让 `Job*` 工具能观察与控制它们创建的 Job。`jobs` 与 `memory` 不接受 Host 对象，分别只能设为 `false` 来关闭本地 Jobs 或受管 Memory。
+
+附件不是 Agent Capability。默认 `Read` 只读本地路径，默认 Agent 也不承诺图生文或文生图。daemon 作为第一方 Agent 创建者，通过 `toolOverrides` 把 `Read` 扩展为“本地路径 + 当前会话授权附件”，并按实际服务配置通过 `tools` 注册 `ImageToText` 和 `ImageGeneration`。`ImageToText` 在 daemon 中支持普通路径、图片 URL 和授权后的 `attachment_id`；附件分支会把 Child session 解析到 Root session 后再校验引用。
+
+内部的 `trustedToolOverrides` 只用于第一方 composition root 明确信任自己构造的覆盖，让 daemon 的 `Read` 保留原内置 `Read` 的权限分类。名称必须同时存在于 `toolOverrides`，且目标必须是默认 builtin；普通 `toolOverrides` 默认不继承信任。Extension、Plugin 和 MCP 没有设置或追加可信名称的入口。
 
 `jobs: false` 不是独立开关：Terminal、后台 Shell、child environment 与 Workflow repository 都会产生或依赖 Job，因此必须同时写成 `terminal: false`、`backgroundShell: false`、`childEnvironment: false` 和 `workflowRepository: false`。只替换 Terminal 不会关掉本地后台 Shell 或 Memory。
 
