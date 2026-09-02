@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "streamdown/styles.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
 
 @source "../../../../node_modules/streamdown/dist/*.js";
 
