@@ -176,6 +176,4 @@ export interface Settings {
   /** Root-tree child-agent limits. Omitted fields use runtime defaults. */
   childBudget?: Partial<import("./runtime").AgentChildBudget>;
   verbose?: boolean;
-  /** 图像生成端点基础 URL（缺省复用 baseUrl）。 */
-  imageGenerationBaseUrl?: string;
 }

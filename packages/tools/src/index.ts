@@ -54,6 +54,5 @@ export {
   type AgentWorkflowRunnerOptions,
 } from "./agent/index.js";
 export { mcpAuthTool } from "./mcp/index.js";
-export { imageGenerationTool, imageToTextTool } from "./media/index.js";
 export { feishuPushTool } from "./channels/index.js";
 export { LocalAgentJobHost } from "./job/index.js";

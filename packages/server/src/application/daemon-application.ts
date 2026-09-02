@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { AgentBackgroundShellHost, Settings } from "@openharness/core";
-import { fileReadTool, imageGenerationTool, imageToTextTool } from "@openharness/tools";
+import { fileReadTool } from "@openharness/tools";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
@@ -87,7 +87,10 @@ import {
   createAttachmentTextReader,
 } from "./attachment-tools/attachment-access.js";
 import { createAttachmentReadTool } from "./attachment-tools/attachment-read-tool.js";
-import { createAttachmentImageToTextTool } from "./attachment-tools/attachment-image-to-text-tool.js";
+import {
+  createDaemonImageGenerationTool,
+  createDaemonImageToTextTool,
+} from "./visual-tools/index.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -317,6 +320,11 @@ export class DaemonApplication implements DurableAgentApplication {
         store,
         recognize: (input) => this.localOcr.recognize(input),
       });
+      const imageToTextTool = createDaemonImageToTextTool({
+        authorizationSessions: attachmentAuthorizationSessions,
+        attachmentOcr,
+      });
+      const imageGenerationTool = createDaemonImageGenerationTool();
 
       // 每个会话第一次用时，在这里造活 Agent，并接上投影。
       const loadAgent = createDaemonAgentLoader({
@@ -354,14 +362,7 @@ export class DaemonApplication implements DurableAgentApplication {
             jobs: this.jobs.createDetachedProcessAgentHost(session),
           })),
         workflowRepository: this.workflows,
-        tools: [
-          createAttachmentImageToTextTool({
-            defaultTool: imageToTextTool,
-            authorizationSessions: attachmentAuthorizationSessions,
-            attachmentOcr,
-          }),
-        ],
-        imageGenerationTool,
+        tools: async () => [imageToTextTool, imageGenerationTool],
         toolOverrides: [
           createAttachmentReadTool({
             defaultTool: fileReadTool,

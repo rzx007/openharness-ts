@@ -58,6 +58,15 @@ export type LoadDaemonAgent = (
   context: LoadDaemonAgentContext,
 ) => Promise<OpenHarnessAgent>;
 
+export interface ResolveDaemonToolsContext {
+  session: SessionRecord;
+  settings?: Settings;
+}
+
+export type DaemonToolsProvider = (
+  context: ResolveDaemonToolsContext,
+) => Promise<ToolDefinition[]> | ToolDefinition[];
+
 export interface DaemonAgentLoaderOptions {
   settings?: Settings;
   getSettings?: () => Settings;
@@ -72,8 +81,7 @@ export interface DaemonAgentLoaderOptions {
     session: SessionRecord,
   ): ObservableJobProducer<AgentBackgroundShellHost>;
   workflowRepository?: WorkflowRunRepository;
-  tools?: ToolDefinition[];
-  imageGenerationTool?: ToolDefinition;
+  tools?: DaemonToolsProvider;
   toolOverrides?: ToolDefinition[];
   trustedToolOverrides?: string[];
   /**
@@ -129,12 +137,7 @@ export function createDaemonAgentLoader(
       }));
     const terminal = options.createTerminal?.(session);
     const backgroundShell = options.createBackgroundShell?.(session);
-    const tools = [
-      ...(options.tools ?? []),
-      ...(options.imageGenerationTool && settings?.imageGenerationBaseUrl
-        ? [options.imageGenerationTool]
-        : []),
-    ];
+    const tools = (await options.tools?.({ session, settings })) ?? [];
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,

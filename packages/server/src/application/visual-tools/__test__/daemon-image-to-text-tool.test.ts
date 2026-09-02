@@ -3,11 +3,40 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { imageToTextTool } from "../image-to-text.js";
+import { createDaemonImageToTextTool } from "../daemon-image-to-text-tool.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("ImageToText", () => {
+describe("daemon ImageToText tool", () => {
+  it("uses root-authorized local OCR for an attachment", async () => {
+    const recognize = vi.fn(async () => ({
+      status: "completed" as const,
+      text: "invoice 123",
+      representationId: "rep-1",
+      processor: "light-ocr" as const,
+      processorVersion: "1",
+      cached: false,
+      lineCount: 1,
+      durationMs: 2,
+    }));
+    const tool = createDaemonImageToTextTool({
+      authorizationSessions: { resolve: (id) => id === "child" ? "root" : undefined },
+      attachmentOcr: { recognize },
+    });
+
+    const result = await tool.execute(
+      { attachment_id: "att-1" },
+      { cwd: "C:/work", sessionId: "child" },
+    );
+
+    expect(recognize).toHaveBeenCalledWith(expect.objectContaining({
+      authorizationSessionId: "root",
+      assetId: "att-1",
+    }));
+    expect((result.content[0] as { text: string }).text).toContain("invoice 123");
+    expect(result.metadata).toMatchObject({ attachmentOcr: { assetId: "att-1" } });
+  });
+
   it("uses context settings to send a local image to an OpenAI-compatible endpoint", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oh-image-to-text-"));
     const imagePath = join(dir, "invoice.png");
@@ -23,9 +52,10 @@ describe("ImageToText", () => {
         choices: [{ message: { content: "invoice 123" } }],
       }), { status: 200 });
     }));
+    const tool = createTool();
 
     try {
-      const result = await imageToTextTool.execute(
+      const result = await tool.execute(
         { image_path: imagePath, prompt: "Extract every visible word." },
         { cwd: dir, settings: settings("vision-main", "openai") } as any,
       );
@@ -46,29 +76,31 @@ describe("ImageToText", () => {
       return new Response(JSON.stringify({ content: [{ type: "text", text: "a cat" }] }));
     }));
 
-    const result = await imageToTextTool.execute(
+    const result = await createTool().execute(
       { image_url: "https://images.example/cat.png" },
       { cwd: "C:/work", settings: settings("vision-main", "anthropic") } as any,
     );
+
     expect(result.content).toEqual([{ type: "text", text: "a cat" }]);
   });
 
-  it("rejects missing, multiple, attachment, and non-http sources", async () => {
-    for (const input of [
-      {},
-      { image_path: "a.png", image_url: "https://example.com/a.png" },
-      { attachment_id: "att-1" },
-      { image_url: "file:///secret.png" },
-    ]) {
-      await expect(imageToTextTool.execute(input, {
-        cwd: "C:/work",
-        settings: settings("vision-main", "openai"),
-      } as any)).resolves.toMatchObject({ isError: true, failureKind: "command" });
-    }
+  it("rejects mixed attachment input before OCR", async () => {
+    const recognize = vi.fn();
+    const tool = createDaemonImageToTextTool({
+      authorizationSessions: { resolve: () => "root" },
+      attachmentOcr: { recognize },
+    });
+
+    await expect(tool.execute(
+      { attachment_id: "att-1", prompt: "describe" },
+      { cwd: "C:/work", sessionId: "child" },
+    )).resolves.toMatchObject({ isError: true, failureKind: "command" });
+    expect(recognize).not.toHaveBeenCalled();
   });
 
-  it("requires runtime settings and redacts provider failures", async () => {
-    await expect(imageToTextTool.execute(
+  it("requires runtime settings for vision and redacts provider failures", async () => {
+    const tool = createTool();
+    await expect(tool.execute(
       { image_url: "https://images.example/cat.png" },
       { cwd: "C:/work" } as any,
     )).resolves.toMatchObject({ isError: true, failureKind: "policy" });
@@ -77,7 +109,7 @@ describe("ImageToText", () => {
       `secret-key:${"x".repeat(5000)}`,
       { status: 500 },
     )));
-    const result = await imageToTextTool.execute(
+    const result = await tool.execute(
       { image_url: "https://images.example/cat.png" },
       { cwd: "C:/work", settings: { ...settings("vision-main", "openai"), apiKey: "secret-key" } } as any,
     );
@@ -87,6 +119,13 @@ describe("ImageToText", () => {
     expect(text.length).toBeLessThan(1200);
   });
 });
+
+function createTool() {
+  return createDaemonImageToTextTool({
+    authorizationSessions: { resolve: () => undefined },
+    attachmentOcr: { recognize: vi.fn() },
+  });
+}
 
 function settings(model: string, apiFormat: "openai" | "anthropic") {
   return {
