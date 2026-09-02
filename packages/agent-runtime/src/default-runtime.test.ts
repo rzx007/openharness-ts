@@ -258,6 +258,73 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     }
   });
 
+  it("rejects trusted names that are not configured tool overrides", async () => {
+    const client = {
+      async *streamMessage() {
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+
+    await expect(createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client,
+        trustedToolOverrides: ["Read"],
+      },
+    })).rejects.toThrow(/trustedToolOverrides.*Read.*toolOverrides/i);
+
+    await expect(createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client,
+        toolOverrides: [testTool("Read")],
+        trustedToolOverrides: ["Raed"],
+      },
+    })).rejects.toThrow(/trustedToolOverrides.*Raed.*toolOverrides/i);
+  });
+
+  it("only preserves builtin read trust for an explicitly trusted override", async () => {
+    const client = {
+      async *streamMessage() {
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const cwd = "D:/repo";
+    const readOverride = testTool("Read");
+    const untrusted = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      cwd,
+      configuration: { client, toolOverrides: [readOverride] },
+    });
+    const trusted = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      cwd,
+      configuration: {
+        client,
+        toolOverrides: [readOverride],
+        trustedToolOverrides: ["Read"],
+      },
+    });
+
+    try {
+      await expect(untrusted.permissionChecker.checkTool("Read", {
+        file_path: "D:/repo/notes.txt",
+      })).resolves.toMatchObject({ action: "ask" });
+      await expect(trusted.permissionChecker.checkTool("Read", {
+        file_path: "D:/repo/notes.txt",
+      })).resolves.toMatchObject({ action: "allow" });
+      await expect(trusted.permissionChecker.checkTool("Read", {
+        file_path: "D:/secret.txt",
+      })).resolves.toMatchObject({ action: "ask" });
+      await expect(trusted.permissionChecker.checkTool("Read", {
+        file_path: "attachment://att-1/notes.txt",
+      })).resolves.toMatchObject({ action: "allow" });
+    } finally {
+      await untrusted.close();
+      await trusted.close();
+    }
+  });
+
   it("rejects ambiguous additions and invalid overrides before startup", async () => {
     const client = {
       async *streamMessage() {

@@ -66,6 +66,8 @@ export interface OpenHarnessAgentConfiguration {
   tools?: ToolDefinition[];
   /** Complete replacements for existing built-in tools. */
   toolOverrides?: ToolDefinition[];
+  /** First-party replacements that retain the replaced built-in permission classification. */
+  trustedToolOverrides?: string[];
   /** Overrides the root-tree child-agent limits. */
   childBudget?: Partial<AgentChildBudget>;
 }

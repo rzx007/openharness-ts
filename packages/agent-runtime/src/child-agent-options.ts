@@ -42,6 +42,7 @@ export function deriveChildAgentOptions(
       : configuration.effort,
     tools: configuration.tools,
     toolOverrides: configuration.toolOverrides,
+    trustedToolOverrides: configuration.trustedToolOverrides,
     // Host overrides/effects are borrowed unchanged by the whole root session
     // tree. Resolved defaults are deliberately not propagated: the child
     // composition rebuilds Memory, Workflow and Jobs for its cwd/session.

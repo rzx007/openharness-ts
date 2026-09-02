@@ -172,10 +172,13 @@ export async function createOpenHarnessRuntime(
     workflowRepository,
     imageToText: imageToText !== undefined,
   });
-  applyConfiguredTools(baseToolRegistry, configuration);
+  const trustedOverrides = applyConfiguredTools(baseToolRegistry, configuration);
   const trustedBuiltinToolNames = new Set(
     baseToolRegistry.getAll()
-      .filter((tool) => baseToolRegistry.inspect(tool.name)?.source.kind === "builtin")
+      .filter((tool) =>
+        baseToolRegistry.inspect(tool.name)?.source.kind === "builtin" ||
+        trustedOverrides.has(tool.name)
+      )
       .map((tool) => tool.name),
   );
 
@@ -295,11 +298,20 @@ export async function createOpenHarnessRuntime(
 function applyConfiguredTools(
   registry: IToolRegistry,
   configuration: OpenHarnessAgentConfiguration,
-): void {
+): Set<string> {
   const additions = configuration.tools ?? [];
   const overrides = configuration.toolOverrides ?? [];
+  const trustedOverrides = new Set(configuration.trustedToolOverrides ?? []);
   const additionNames = assertUniqueToolNames(additions, "tools");
   const overrideNames = assertUniqueToolNames(overrides, "toolOverrides");
+
+  for (const name of trustedOverrides) {
+    if (!overrideNames.has(name)) {
+      throw new Error(
+        `trustedToolOverrides entry "${name}" must also appear in toolOverrides`,
+      );
+    }
+  }
 
   for (const name of additionNames) {
     if (overrideNames.has(name)) {
@@ -321,10 +333,19 @@ function applyConfiguredTools(
         `Tool override target "${name}" is not registered`,
       );
     }
+    if (
+      trustedOverrides.has(name) &&
+      registry.inspect(name)?.source.kind !== "builtin"
+    ) {
+      throw new Error(
+        `trustedToolOverrides entry "${name}" must replace a builtin Tool`,
+      );
+    }
   }
 
   for (const tool of additions) registry.register(tool, { kind: "agent" });
   for (const tool of overrides) registry.override(tool, { kind: "agent" });
+  return trustedOverrides;
 }
 
 function assertUniqueToolNames(

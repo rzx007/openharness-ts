@@ -33,6 +33,7 @@ describe("deriveChildAgentOptions", () => {
         effort: "high",
         tools: [addedTool],
         toolOverrides: [overriddenTool],
+        trustedToolOverrides: ["Read"],
       },
       settings,
       capabilityOverrides,
@@ -73,6 +74,7 @@ describe("deriveChildAgentOptions", () => {
     expect(options.tools?.[0]).toBe(addedTool);
     expect(options.toolOverrides).toBeDefined();
     expect(options.toolOverrides?.[0]).toBe(overriddenTool);
+    expect(options.trustedToolOverrides).toEqual(["Read"]);
   });
 
   it("inherits parent runtime choices and ignores unsupported child effort values", () => {
