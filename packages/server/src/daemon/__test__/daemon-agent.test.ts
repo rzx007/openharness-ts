@@ -68,6 +68,7 @@ describe("createDaemonAgentLoader", () => {
     const schedules = {} as any;
     const imageToTextTool = { name: "ImageToText", description: "ocr", inputSchema: {}, execute: vi.fn() } as any;
     const imageGenerationTool = { name: "ImageGeneration", description: "generate", inputSchema: {}, execute: vi.fn() } as any;
+    const resolveTools = vi.fn(() => [imageToTextTool, imageGenerationTool]);
     const readOverride = { name: "Read", description: "attachments", inputSchema: {}, execute: vi.fn() } as any;
     const loader = createDaemonAgentLoader({
       settings: { model: "default-model" } as any,
@@ -80,8 +81,7 @@ describe("createDaemonAgentLoader", () => {
         value: backgroundShell,
         jobs: backgroundShellJobs,
       }),
-      tools: [imageToTextTool],
-      imageGenerationTool,
+      resolveTools,
       toolOverrides: [readOverride],
       trustedToolOverrides: ["Read"],
     })!;
@@ -111,14 +111,16 @@ describe("createDaemonAgentLoader", () => {
         schedules,
       },
       effects: { requestPermission },
-      tools: [imageToTextTool],
+      tools: [imageToTextTool, imageGenerationTool],
       toolOverrides: [readOverride],
       trustedToolOverrides: ["Read"],
     });
     expect(context.options).not.toHaveProperty("attachmentResourceRoot");
     expect(context.options.capabilityOverrides).not.toHaveProperty("attachments");
     expect(context.options.capabilityOverrides).not.toHaveProperty("imageToText");
-    expect(context.options.tools).not.toContain(imageGenerationTool);
+    expect(resolveTools).toHaveBeenCalledWith(expect.objectContaining({
+      model: "default-model",
+    }));
     expect(terminalJobs).not.toBe(backgroundShellJobs);
     expect(loadHistory).toHaveBeenCalledWith([]);
     expect(createEventSink).toHaveBeenCalledWith(agent, session);

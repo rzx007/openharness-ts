@@ -578,12 +578,12 @@ expect(capturedOptions).not.toHaveProperty("attachmentResourceRoot");
 `DaemonAgentLoaderOptions` 增加：
 
 ```ts
-tools?: ToolDefinition[];
+resolveTools?: (settings: Settings | undefined) => ToolDefinition[];
 toolOverrides?: ToolDefinition[];
 trustedToolOverrides?: string[];
 ```
 
-删除 `imageToText`、`attachments`、`attachmentResourceRoot`。构造 `OpenHarnessAgentOptions` 时直接传递 `tools`、`toolOverrides`、`trustedToolOverrides`，不放进 `capabilityOverrides`。
+删除视觉专用 loader 插槽、`imageToText`、`attachments`、`attachmentResourceRoot`。loader 调用通用 `resolveTools(settings)` 得到最终 `tools`，再与 `toolOverrides`、`trustedToolOverrides` 一起传给 Agent，不放进 `capabilityOverrides`。
 
 - [x] **步骤 3：在 DaemonApplication 创建共享服务和覆盖 Tool**
 
@@ -604,17 +604,17 @@ const attachmentOcr = createAttachmentOcrService({
   recognize: (input) => this.localOcr.recognize(input),
 });
 
-tools: [
+resolveTools: (settings) => [
   createAttachmentImageToTextTool({
-    defaultTool: imageToTextTool,
+    pathOrUrlImageTool: imageToTextTool,
     authorizationSessions,
     attachmentOcr,
   }),
-  imageGenerationTool,
+  ...(settings?.imageGenerationBaseUrl ? [imageGenerationTool] : []),
 ],
 toolOverrides: [
   createAttachmentReadTool({
-    defaultTool: fileReadTool,
+    localReadTool: fileReadTool,
     authorizationSessions,
     attachmentReader,
   }),
@@ -622,7 +622,7 @@ toolOverrides: [
 trustedToolOverrides: ["Read"],
 ```
 
-`tools` 必须按实际服务配置构造：图像读取/OCR 服务不可用时不加入 `ImageToText`，图片生成服务不可用时不加入 `ImageGeneration`。
+`resolveTools` 由 `DaemonApplication` 实现；loader 本身不知道任何视觉工具名称。图片生成服务不可用时不加入 `ImageGeneration`。
 
 在 daemon 测试中分别覆盖完整配置、仅 OCR、仅图片生成和两者都未配置，断言最终工具清单与服务事实一致。
 

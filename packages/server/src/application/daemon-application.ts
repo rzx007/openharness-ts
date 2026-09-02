@@ -354,17 +354,17 @@ export class DaemonApplication implements DurableAgentApplication {
             jobs: this.jobs.createDetachedProcessAgentHost(session),
           })),
         workflowRepository: this.workflows,
-        tools: [
+        resolveTools: (settings) => [
           createAttachmentImageToTextTool({
-            defaultTool: imageToTextTool,
+            pathOrUrlImageTool: imageToTextTool,
             authorizationSessions: attachmentAuthorizationSessions,
             attachmentOcr,
           }),
+          ...(settings?.imageGenerationBaseUrl ? [imageGenerationTool] : []),
         ],
-        imageGenerationTool,
         toolOverrides: [
           createAttachmentReadTool({
-            defaultTool: fileReadTool,
+            localReadTool: fileReadTool,
             authorizationSessions: attachmentAuthorizationSessions,
             attachmentReader,
           }),

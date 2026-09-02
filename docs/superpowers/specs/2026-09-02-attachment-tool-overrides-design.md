@@ -119,22 +119,22 @@ ImageToText({
 daemon 在创建 Agent 时覆盖 `Read`，并通过普通 `tools` 注册视觉 Tool：
 
 ```ts
-createDefaultNodeAgent({
-  tools: [
+createDaemonAgentLoader({
+  resolveTools: (settings) => [
     createAttachmentImageToTextTool({
-      defaultTool: imageToTextTool,
+      pathOrUrlImageTool: imageToTextTool,
       attachmentOcr,
     }),
-    imageGenerationTool,
+    ...(settings?.imageGenerationBaseUrl ? [imageGenerationTool] : []),
   ],
   toolOverrides: [
-    createAttachmentReadTool({ defaultTool: fileReadTool, attachmentReader }),
+    createAttachmentReadTool({ localReadTool: fileReadTool, attachmentReader }),
   ],
   trustedToolOverrides: ["Read"],
 });
 ```
 
-`Read` 的 `defaultTool` 是明确导入的内置定义。附件版 `ImageToText` 可以组合明确导入的通用视觉定义，但它作为 daemon 普通 Tool 注册，不是对默认 Registry 的覆盖。daemon 根据实际服务配置过滤 `tools`：缺少 OCR/视觉读取服务时不注册 `ImageToText`，缺少图片生成服务时不注册 `ImageGeneration`，不安装调用必然失败的空壳 Tool。
+`createDaemonAgentLoader` 只认识通用的 `resolveTools(settings)`，不知道图生文或文生图。是否加入视觉 Tool 完全由 `DaemonApplication` 决定。`localReadTool` 和 `pathOrUrlImageTool` 是 server 包装器委托的基础实现，不表示它们在默认 Registry 注册。附件版 `ImageToText` 作为 daemon 普通 Tool 注册，不是对默认 Registry 的覆盖。
 
 `trustedToolOverrides` 是第一方 Agent 创建者的显式信任声明：指定的覆盖 Tool 保留被替换内置 Tool 的权限分类。名称必须同时存在于 `toolOverrides`，而且被替换目标必须是 builtin；否则 Agent 创建失败。Extension、Plugin 和 MCP 不能设置或继承这项声明。daemon 只信任自己构造的 `Read` 覆盖，不信任第三方 Tool。
 

@@ -6,13 +6,13 @@ import type {
 } from "./attachment-access.js";
 
 export function createAttachmentImageToTextTool(options: {
-  defaultTool: ToolDefinition;
+  pathOrUrlImageTool: ToolDefinition;
   authorizationSessions: AttachmentAuthorizationSessionResolver;
   attachmentOcr: AttachmentOcrService;
 }): ToolDefinition {
   return {
     name: "ImageToText",
-    description: `${options.defaultTool.description} Also accepts a daemon attachment_id for local OCR.`,
+    description: `${options.pathOrUrlImageTool.description} Also accepts a daemon attachment_id for local OCR.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -24,7 +24,7 @@ export function createAttachmentImageToTextTool(options: {
       additionalProperties: false,
     },
     async execute(input, context) {
-      if (!("attachment_id" in input)) return await options.defaultTool.execute(input, context);
+      if (!("attachment_id" in input)) return await options.pathOrUrlImageTool.execute(input, context);
       if (Object.keys(input).some((key) => key !== "attachment_id")) {
         return commandError("attachment_id cannot be combined with image_path, image_url, or prompt");
       }
