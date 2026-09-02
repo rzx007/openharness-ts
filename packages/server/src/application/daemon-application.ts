@@ -324,7 +324,9 @@ export class DaemonApplication implements DurableAgentApplication {
         authorizationSessions: attachmentAuthorizationSessions,
         attachmentOcr,
       });
-      const imageGenerationTool = createDaemonImageGenerationTool();
+      const imageGenerationTool = createDaemonImageGenerationTool({
+        attachments: this.attachments,
+      });
 
       // 每个会话第一次用时，在这里造活 Agent，并接上投影。
       const loadAgent = createDaemonAgentLoader({

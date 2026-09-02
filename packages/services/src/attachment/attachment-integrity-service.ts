@@ -232,7 +232,7 @@ export class AttachmentIntegrityService {
         continue;
       }
       if (!asset.sha256) { skipped.missingHash++; continue; }
-      if (this.options.store.countInputAttachmentReferences(asset.id) > 0) {
+      if (this.options.store.countAttachmentReferences(asset.id) > 0) {
         skipped.referenced++;
         continue;
       }
@@ -245,7 +245,7 @@ export class AttachmentIntegrityService {
         other.sha256 === asset.sha256 &&
         (
           other.status === "ready" ||
-          this.options.store.countInputAttachmentReferences(other.id) > 0 ||
+          this.options.store.countAttachmentReferences(other.id) > 0 ||
           activeLeases.some((lease) => lease.assetId === other.id)
         )
       );
@@ -287,7 +287,7 @@ export class AttachmentIntegrityService {
     activeLeases: AttachmentLeaseRecord[],
     _timestamp: number,
   ): boolean {
-    return this.options.store.countInputAttachmentReferences(asset.id) === 0 &&
+    return this.options.store.countAttachmentReferences(asset.id) === 0 &&
       !activeLeases.some((lease) => lease.assetId === asset.id);
   }
 

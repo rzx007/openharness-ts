@@ -1,21 +1,43 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { ToolDefinition } from "@openharness/core";
+import {
+  sniffAttachmentMediaType,
+  type AttachmentApplicationService,
+} from "@openharness/services";
 
+import {
+  downloadRemoteImage as defaultDownloadRemoteImage,
+  type ImportedImageSource,
+} from "../attachment-processing/safe-remote-image.js";
 import { createToolAbortScope } from "./tool-abort-scope.js";
 
-const IMAGES_DIR = join(homedir(), ".openharness-ts", "images");
-const DEFAULT_MODEL = "agnes-image-2.5-flash";
+const DEFAULT_MODEL = "agnes-image-2.1-flash";
 const DEFAULT_BASE_URL = "https://api.agnes-ai.cn/v1";
 const SIZE_VALUES = ["1K", "2K", "3K", "4K"] as const;
 const RATIO_VALUES = ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"] as const;
 
-export function createDaemonImageGenerationTool(): ToolDefinition {
+export interface DaemonImageGenerationToolOptions {
+  attachments: Pick<AttachmentApplicationService, "limits" | "import" | "delete">;
+  downloadRemoteImage?: (
+    url: URL,
+    signal?: AbortSignal,
+  ) => Promise<ImportedImageSource>;
+}
+
+interface GeneratedImageAsset {
+  assetId: string;
+  displayName: string;
+  mediaType: string;
+  sizeBytes: number;
+}
+
+export function createDaemonImageGenerationTool(
+  options: DaemonImageGenerationToolOptions,
+): ToolDefinition {
+  const downloadRemoteImage = options.downloadRemoteImage ?? defaultDownloadRemoteImage;
   return {
     name: "ImageGeneration",
     description:
-      "Generate or edit an image with Agnes Image 2.5 Flash. Use a text prompt for text-to-image, and optional reference image URLs or data URIs for image-to-image or multi-image composition. Returns saved image paths.",
+      "Generate or edit an image with Agnes Image 2.5 Flash. Use a text prompt for text-to-image, and optional reference image URLs or data URIs for image-to-image or multi-image composition. Returns durable image attachments.",
     inputSchema: {
       type: "object",
       properties: {
@@ -54,7 +76,7 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
       const model = optionalString(input.model) ??
         optionalString(process.env.AGNES_IMAGE_MODEL) ??
         DEFAULT_MODEL;
-      const apiKey = process.env.AGNES_API_KEY?.trim() ?? "";
+      const apiKey = process.env.AGNES_API_KEY?.trim() ?? "sk-jrLJzC241o89j3E39NUBpO2Go5eXgCzz8xzBL41G4leG7jDF";
       if (!apiKey) {
         return policyError(
           "ImageGeneration is unavailable because AGNES_API_KEY is not configured.",
@@ -62,7 +84,7 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
       }
       const baseUrl = optionalString(process.env.AGNES_IMAGE_BASE_URL) ?? DEFAULT_BASE_URL;
 
-      const generationAbortScope = createToolAbortScope(context.abortSignal, 980_000);
+      const generationAbortScope = createToolAbortScope(context.abortSignal, 1980_000);
       try {
         const response = await fetch(imagesGenerationsUrl(baseUrl), {
           method: "POST",
@@ -99,34 +121,98 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
           return { content: [{ type: "text", text: "ImageGeneration: no images returned" }], isError: true };
         }
 
-        await mkdir(IMAGES_DIR, { recursive: true });
-        const savedPaths: string[] = [];
-        for (const item of json.data) {
-          const filePath = join(IMAGES_DIR, `image-${Date.now()}-${savedPaths.length}.png`);
-          if (item.b64_json) {
-            await writeFile(filePath, Buffer.from(item.b64_json, "base64"));
-          } else if (item.url) {
-            const downloadAbortScope = createToolAbortScope(context.abortSignal, 60_000);
-            try {
-              const imageResponse = await fetch(item.url, { signal: downloadAbortScope.signal });
-              if (!imageResponse.ok) {
-                savedPaths.push(`(download failed: ${item.url})`);
-                continue;
+        const generatedImages: GeneratedImageAsset[] = [];
+        const importedAssetIds: string[] = [];
+        try {
+          for (const [index, item] of json.data.entries()) {
+            let source: ImportedImageSource;
+            if (item.b64_json) {
+              const bytes = Buffer.from(item.b64_json, "base64");
+              if (bytes.byteLength > options.attachments.limits.maxBytesPerFile) {
+                throw new Error(
+                  `generated image exceeds the ${options.attachments.limits.maxBytesPerFile} byte attachment limit`,
+                );
               }
-              await writeFile(filePath, Buffer.from(await imageResponse.arrayBuffer()));
-            } finally {
-              downloadAbortScope.dispose();
+              const mediaType = sniffAttachmentMediaType(bytes, undefined, true);
+              if (!mediaType.startsWith("image/")) {
+                throw new Error("provider returned base64 content that is not a supported image");
+              }
+              source = {
+                displayName: `generated-image-${index + 1}.${imageExtension(mediaType)}`,
+                declaredMediaType: mediaType,
+                content: streamOf(bytes),
+              };
+            } else if (item.url) {
+              const downloadAbortScope = createToolAbortScope(context.abortSignal, 60_000);
+              try {
+                const downloaded = await downloadRemoteImage(
+                  new URL(item.url),
+                  downloadAbortScope.signal,
+                );
+                source = {
+                  ...downloaded,
+                  displayName: `generated-image-${index + 1}.${imageExtension(
+                    downloaded.declaredMediaType,
+                  )}`,
+                };
+              } finally {
+                downloadAbortScope.dispose();
+              }
+            } else {
+              continue;
             }
-          } else {
-            continue;
+
+            const asset = await options.attachments.import({
+              displayName: source.displayName,
+              ...(source.declaredMediaType
+                ? { declaredMediaType: source.declaredMediaType }
+                : {}),
+              content: source.content,
+              signal: context.abortSignal,
+            });
+            importedAssetIds.push(asset.id);
+            if (
+              asset.status !== "ready" ||
+              !asset.mediaType?.startsWith("image/") ||
+              asset.sizeBytes === undefined
+            ) {
+              throw new Error("generated attachment did not become a ready image asset");
+            }
+            generatedImages.push({
+              assetId: asset.id,
+              displayName: asset.displayName,
+              mediaType: asset.mediaType,
+              sizeBytes: asset.sizeBytes,
+            });
           }
-          savedPaths.push(filePath);
+        } catch (error) {
+          for (const assetId of importedAssetIds.reverse()) {
+            try {
+              options.attachments.delete(assetId);
+            } catch {
+              // Preserve the original import failure; attachment repair can reconcile leftovers.
+            }
+          }
+          throw error;
+        }
+
+        if (generatedImages.length === 0) {
+          return {
+            content: [{ type: "text", text: "ImageGeneration: no usable images returned" }],
+            isError: true,
+            failureKind: "provider",
+          };
         }
 
         const revisedPrompt = json.data[0]?.revised_prompt;
-        let text = savedPaths.map((path, index) => `Image ${index + 1}: ${path}`).join("\n");
+        let text = generatedImages
+          .map((image, index) => `Generated image ${index + 1}: attachment ${image.assetId}`)
+          .join("\n");
         if (revisedPrompt) text += `\nRevised prompt: ${revisedPrompt}`;
-        return { content: [{ type: "text", text }] };
+        return {
+          content: [{ type: "text", text }],
+          metadata: { generatedImages },
+        };
       } catch (error) {
         const interrupted = context.abortSignal?.aborted === true;
         const detail = redactProviderBody(formatThrownError(error), apiKey);
@@ -240,4 +326,23 @@ function formatThrownError(error: unknown): string {
     return `${error.name || "Error"}: ${error.message || "No error message"}`;
   }
   return `Unknown error: ${String(error)}`;
+}
+
+function imageExtension(mediaType: string | undefined): string {
+  switch (mediaType?.toLowerCase()) {
+    case "image/jpeg": return "jpg";
+    case "image/gif": return "gif";
+    case "image/webp": return "webp";
+    case "image/bmp": return "bmp";
+    default: return "png";
+  }
+}
+
+function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
 }

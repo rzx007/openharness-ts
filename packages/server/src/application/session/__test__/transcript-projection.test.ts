@@ -242,6 +242,125 @@ describe("SessionTranscriptProjection", () => {
     }));
   });
 
+  it("projects generated image metadata as durable assistant attachments", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
+    projection.projectStreamEvent(state, {
+      type: "tool_use_start",
+      toolUse: { id: "image-1", name: "ImageGeneration", input: { prompt: "a fox" } },
+    });
+
+    projection.projectStreamEvent(state, {
+      type: "tool_use_end",
+      toolUseId: "image-1",
+      result: {
+        content: [{ type: "text", text: "generated" }],
+        metadata: {
+          generatedImages: [
+            {
+              assetId: "att-image-1",
+              displayName: "generated-image-1.png",
+              mediaType: "image/png",
+              sizeBytes: 128,
+            },
+            {
+              assetId: "att-image-2",
+              displayName: "generated-image-2.webp",
+              mediaType: "image/webp",
+              sizeBytes: 256,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(store.upsertMessagePart).toHaveBeenCalledWith({
+      id: "generated-attachment:image-1:0",
+      sessionId: "s1",
+      messageId: "m2",
+      type: "attachment",
+      status: "completed",
+      assetId: "att-image-1",
+      intent: "tool_resource",
+      displayName: "generated-image-1.png",
+      mediaType: "image/png",
+      sizeBytes: 128,
+      metadata: {
+        source: "image_generation",
+        toolUseId: "image-1",
+      },
+    });
+    expect(store.upsertMessagePart).toHaveBeenCalledWith(expect.objectContaining({
+      id: "generated-attachment:image-1:1",
+      assetId: "att-image-2",
+      intent: "tool_resource",
+    }));
+  });
+
+  it("uses stable generated attachment part ids when a tool result is replayed", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
+    projection.projectStreamEvent(state, {
+      type: "tool_use_start",
+      toolUse: { id: "image-replay", name: "ImageGeneration", input: {} },
+    });
+    const event = {
+      type: "tool_use_end" as const,
+      toolUseId: "image-replay",
+      result: {
+        content: [{ type: "text" as const, text: "generated" }],
+        metadata: {
+          generatedImages: [{
+            assetId: "att-replay",
+            displayName: "generated.png",
+            mediaType: "image/png",
+            sizeBytes: 64,
+          }],
+        },
+      },
+    };
+
+    projection.projectStreamEvent(state, event);
+    projection.projectStreamEvent(state, event);
+
+    const attachmentParts = store.upsertMessagePart.mock.calls
+      .map(([part]) => part)
+      .filter((part) => part.type === "attachment");
+    expect(attachmentParts).toHaveLength(2);
+    expect(attachmentParts.map((part) => part.id)).toEqual([
+      "generated-attachment:image-replay:0",
+      "generated-attachment:image-replay:0",
+    ]);
+    expect(attachmentParts.map((part) => part.messageId)).toEqual(["m2", "m2"]);
+  });
+
+  it("ignores malformed generated image metadata", () => {
+    const store = createStore();
+    const projection = new SessionTranscriptProjection(store);
+    const state = projection.beginRun("s1", "i1", "r1", createInput());
+
+    projection.projectStreamEvent(state, {
+      type: "tool_use_end",
+      toolUseId: "image-invalid",
+      result: {
+        content: [{ type: "text", text: "invalid metadata" }],
+        metadata: {
+          generatedImages: [
+            { assetId: "", displayName: "missing-id.png", mediaType: "image/png", sizeBytes: 1 },
+            { assetId: "att-text", displayName: "not-image.txt", mediaType: "text/plain", sizeBytes: 1 },
+            { assetId: "att-size", displayName: "bad-size.png", mediaType: "image/png", sizeBytes: -1 },
+          ],
+        },
+      },
+    });
+
+    expect(store.upsertMessagePart.mock.calls
+      .map(([part]) => part)
+      .filter((part) => part.type === "attachment")).toEqual([]);
+  });
+
   it("closes only running parts owned by the failed run", () => {
     const store = createStore();
     store.listMessages.mockReturnValue([

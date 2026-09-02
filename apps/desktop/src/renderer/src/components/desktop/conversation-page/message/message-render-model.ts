@@ -1,10 +1,37 @@
-import type { DesktopSessionPart } from "@shared/session-types"
+import type {
+  DesktopAttachmentSessionPart,
+  DesktopSessionPart,
+} from "@shared/session-types"
 
 export type AssistantContentUnit =
   | { id: string; type: "markdown"; text: string; phase?: "commentary" | "final_answer" }
   | { id: string; type: "reasoning"; text: string }
   | { id: string; type: "tool"; call: DesktopSessionPart; result?: DesktopSessionPart }
+  | {
+      id: string
+      type: "image_generation"
+      call: DesktopSessionPart
+      hasAttachments: boolean
+    }
+  | { id: string; type: "attachments"; parts: DesktopAttachmentSessionPart[] }
+  | {
+      id: string
+      type: "generated_attachments"
+      parts: DesktopAttachmentSessionPart[]
+      toolUseId: string
+      ratio: ImageGenerationRatio
+    }
   | { id: string; type: "error"; text: string }
+
+export type ImageGenerationRatio =
+  | "1:1"
+  | "3:4"
+  | "4:3"
+  | "16:9"
+  | "9:16"
+  | "2:3"
+  | "3:2"
+  | "21:9"
 
 export type FileReference = { path: string; line?: number }
 
@@ -26,6 +53,18 @@ export function buildAssistantContent(parts: DesktopSessionPart[]): AssistantCon
       .filter((part) => part.type === "tool_result" && part.toolUseId)
       .map((part) => [part.toolUseId as string, part])
   )
+  const imageTools = new Map(
+    parts
+      .filter((part) => part.type === "tool" && part.toolName === "ImageGeneration")
+      .map((part) => [part.toolUseId ?? part.id, part])
+  )
+  const generatedAttachmentToolIds = new Set(
+    parts.flatMap((part) => {
+      if (part.type !== "attachment") return []
+      const toolUseId = generatedAttachmentToolUseId(part)
+      return toolUseId ? [toolUseId] : []
+    })
+  )
 
   for (const part of parts) {
     if (part.type === "tool_result") continue
@@ -42,7 +81,36 @@ export function buildAssistantContent(parts: DesktopSessionPart[]): AssistantCon
       units.push({ id: part.id, type: "reasoning", text: part.text })
       continue
     }
+    if (part.type === "attachment") {
+      const previous = units.at(-1)
+      const toolUseId = generatedAttachmentToolUseId(part)
+      if (toolUseId) {
+        if (previous?.type === "generated_attachments" && previous.toolUseId === toolUseId) {
+          previous.parts.push(part)
+        } else {
+          units.push({
+            id: part.id,
+            type: "generated_attachments",
+            parts: [part],
+            toolUseId,
+            ratio: normalizeImageGenerationRatio(imageTools.get(toolUseId)?.input?.ratio),
+          })
+        }
+      } else if (previous?.type === "attachments") previous.parts.push(part)
+      else units.push({ id: part.id, type: "attachments", parts: [part] })
+      continue
+    }
     if (part.type === "tool") {
+      if (part.toolName === "ImageGeneration") {
+        const toolUseId = part.toolUseId ?? part.id
+        units.push({
+          id: part.id,
+          type: "image_generation",
+          call: part,
+          hasAttachments: generatedAttachmentToolIds.has(toolUseId),
+        })
+        continue
+      }
       units.push({
         id: part.id,
         type: "tool",
@@ -56,6 +124,29 @@ export function buildAssistantContent(parts: DesktopSessionPart[]): AssistantCon
     }
   }
   return units
+}
+
+export function normalizeImageGenerationRatio(value: unknown): ImageGenerationRatio {
+  switch (value) {
+    case "3:4":
+    case "4:3":
+    case "16:9":
+    case "9:16":
+    case "2:3":
+    case "3:2":
+    case "21:9":
+      return value
+    default:
+      return "1:1"
+  }
+}
+
+function generatedAttachmentToolUseId(
+  part: DesktopAttachmentSessionPart
+): string | undefined {
+  if (part.metadata.source !== "image_generation") return undefined
+  const toolUseId = part.metadata.toolUseId
+  return typeof toolUseId === "string" && toolUseId.trim() ? toolUseId : undefined
 }
 
 function assistantPhase(value: unknown): "commentary" | "final_answer" | undefined {

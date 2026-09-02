@@ -558,7 +558,7 @@ export class SessionStore {
     return this.database.transaction(() => {
       const asset = this.getAttachment(assetId, { includeDeleted: true });
       if (asset?.status !== "deleted") return undefined;
-      const references = this.countInputAttachmentReferences(assetId);
+      const references = this.countAttachmentReferences(assetId);
       if (references > 0) return undefined;
       const activeLease = this.database.prepare(
         `SELECT 1 FROM attachment_lease
@@ -635,12 +635,7 @@ export class SessionStore {
     deletedAt = now(),
   ): AttachmentAssetRecord {
     return this.database.transaction(() => {
-      const references = this.database
-        .prepare(
-          "SELECT COUNT(*) AS count FROM session_input_attachment WHERE asset_id = ?",
-        )
-        .get(id) as { count: number };
-      if (references.count > 0) {
+      if (this.countAttachmentReferences(id) > 0) {
         throw new AttachmentError(
           "attachment_in_use",
           "attachment is referenced by a conversation",
@@ -2534,6 +2529,14 @@ export class SessionStore {
     return Object.values(this.state.inputAttachments).filter(
       (reference) => reference.assetId === assetId,
     ).length;
+  }
+
+  countAttachmentReferences(assetId: string): number {
+    const inputReferences = this.countInputAttachmentReferences(assetId);
+    const messageReferences = Object.values(this.state.parts).filter(
+      (part) => part.type === "attachment" && part.assetId === assetId,
+    ).length;
+    return inputReferences + messageReferences;
   }
 
   listInputs(sessionId: string): SessionInputRecord[] {

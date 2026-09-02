@@ -152,6 +152,64 @@ describe("visibleTranscriptParts", () => {
     expect(html).not.toContain("已发送消息")
   })
 
+  it("renders generated image attachments inside assistant messages", () => {
+    const message: DesktopSessionMessage = {
+      id: "assistant-message",
+      sessionId: "session-1",
+      seq: 2,
+      role: "assistant",
+      runId: "run-1",
+      metadata: {},
+      createdAt: 2,
+      updatedAt: 2,
+    }
+    const html = renderToStaticMarkup(
+      createElement(MessageBlock, {
+        message,
+        parts: [{
+          id: "image-1",
+          sessionId: "session-1",
+          messageId: "assistant-message",
+          seq: 0,
+          type: "tool",
+          status: "completed",
+          toolUseId: "image-1",
+          toolName: "ImageGeneration",
+          input: { prompt: "draw", ratio: "1:1" },
+          metadata: {},
+          createdAt: 2,
+          updatedAt: 2,
+        }, {
+          id: "generated-attachment:image-1:0",
+          sessionId: "session-1",
+          messageId: "assistant-message",
+          seq: 1,
+          type: "attachment",
+          status: "completed",
+          assetId: "att-generated",
+          intent: "tool_resource",
+          displayName: "generated-image-1.png",
+          mediaType: "image/png",
+          sizeBytes: 128,
+          metadata: { source: "image_generation", toolUseId: "image-1" },
+          createdAt: 2,
+          updatedAt: 2,
+        }],
+        streaming: false,
+        onOpenFile: () => undefined,
+        canOpenReview: false,
+        onOpenReview: () => undefined,
+        onOpenTerminal: () => undefined,
+      })
+    )
+
+    expect(html).toContain('aria-label="生成的附件"')
+    expect(html).toContain("data-generated-image-gallery")
+    expect(html).toContain("generated-image-1.png")
+    expect(html).toContain('aria-label="打开 generated-image-1.png"')
+    expect(html).toContain('aria-label="另存为 generated-image-1.png"')
+  })
+
   it("removes internal transformation parts from the visible transcript", () => {
     const transformation = {
       id: "transformation-1",

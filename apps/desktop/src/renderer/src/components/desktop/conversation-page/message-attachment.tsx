@@ -10,6 +10,7 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@renderer/components/ui/attachment"
+import { cn } from "@renderer/lib/utils"
 import type {
   DesktopAttachmentSessionPart,
   DesktopTransformationSessionPart,
@@ -29,10 +30,12 @@ export function MessageAttachment({
   part,
   readOnly = false,
   alignMixedAttachmentHeights = false,
+  fill = false,
 }: {
   part: DesktopAttachmentSessionPart
   readOnly?: boolean
   alignMixedAttachmentHeights?: boolean
+  fill?: boolean
 }): React.JSX.Element {
   const previewUrl = useMessageAttachmentPreview(part)
   const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null)
@@ -44,6 +47,7 @@ export function MessageAttachment({
         src={visiblePreviewUrl}
         displayName={part.displayName}
         alignMixedAttachmentHeights={alignMixedAttachmentHeights}
+        fill={fill}
         actionsClassName="pointer-events-none opacity-0 transition-opacity duration-150 group-hover/attachment:pointer-events-auto group-hover/attachment:opacity-100 group-focus-within/attachment:pointer-events-auto group-focus-within/attachment:opacity-100"
         onError={() => setFailedPreviewUrl(visiblePreviewUrl)}
         actions={
@@ -77,7 +81,11 @@ export function MessageAttachment({
       data-display="file-card"
       state="done"
       size="sm"
-      className={`max-w-72 flex-nowrap ${alignMixedAttachmentHeights ? "h-20" : ""}`}
+      className={cn(
+        "flex-nowrap",
+        fill ? "size-full min-w-0" : "max-w-72",
+        alignMixedAttachmentHeights && "h-20"
+      )}
     >
       <AttachmentMedia variant={visiblePreviewUrl ? "image" : "icon"}>
         {visiblePreviewUrl ? (

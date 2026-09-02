@@ -29,6 +29,92 @@ describe("message render model", () => {
     ])
   })
 
+  it("preserves adjacent assistant attachments as one render unit", () => {
+    const first = attachmentPart("part-image-1", "att-image-1", "image/png")
+    const second = attachmentPart("part-image-2", "att-image-2", "image/webp")
+
+    expect(buildAssistantContent([first, second])).toEqual([{
+      id: "part-image-1",
+      type: "attachments",
+      parts: [first, second],
+    }])
+  })
+
+  it("projects ImageGeneration as a dedicated unit instead of a normal tool", () => {
+    const imageTool = imageToolPart({ status: "running", ratio: "16:9" })
+
+    expect(buildAssistantContent([imageTool])).toEqual([{
+      id: "image-tool-1",
+      type: "image_generation",
+      call: imageTool,
+      hasAttachments: false,
+    }])
+  })
+
+  it("links generated attachments to their image tool without changing regular attachments", () => {
+    const imageTool = imageToolPart({ status: "completed", ratio: "3:2" })
+    const generated = {
+      ...attachmentPart("generated-1", "att-generated", "image/png"),
+      metadata: {
+        source: "image_generation",
+        toolUseId: "image-tool-1",
+      },
+    }
+    const regular = attachmentPart("regular-1", "att-regular", "image/png")
+
+    expect(buildAssistantContent([imageTool, generated, regular])).toEqual([
+      {
+        id: "image-tool-1",
+        type: "image_generation",
+        call: imageTool,
+        hasAttachments: true,
+      },
+      {
+        id: "generated-1",
+        type: "generated_attachments",
+        parts: [generated],
+        toolUseId: "image-tool-1",
+        ratio: "3:2",
+      },
+      {
+        id: "regular-1",
+        type: "attachments",
+        parts: [regular],
+      },
+    ])
+  })
+
+  it("keeps generated attachments from separate tool calls in separate groups", () => {
+    const first = {
+      ...attachmentPart("generated-1", "att-1", "image/png"),
+      metadata: { source: "image_generation", toolUseId: "image-tool-1" },
+    }
+    const second = {
+      ...attachmentPart("generated-2", "att-2", "image/png"),
+      metadata: { source: "image_generation", toolUseId: "image-tool-2" },
+    }
+
+    expect(buildAssistantContent([
+      imageToolPart({ id: "image-tool-1", ratio: "not-a-ratio" }),
+      first,
+      imageToolPart({ id: "image-tool-2", ratio: "9:16" }),
+      second,
+    ])).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "generated_attachments",
+        toolUseId: "image-tool-1",
+        ratio: "1:1",
+        parts: [first],
+      }),
+      expect.objectContaining({
+        type: "generated_attachments",
+        toolUseId: "image-tool-2",
+        ratio: "9:16",
+        parts: [second],
+      }),
+    ]))
+  })
+
   it("recognizes project files but rejects web links", () => {
     expect(parseFileReference("apps/desktop/src/App.tsx:42")).toEqual({
       path: "apps/desktop/src/App.tsx",
@@ -138,6 +224,51 @@ function toolPart(toolName: string, input: Record<string, unknown>): DesktopSess
     status: "completed",
     toolName,
     input,
+    metadata: {},
+    createdAt: 1,
+    updatedAt: 1,
+  }
+}
+
+function attachmentPart(
+  id: string,
+  assetId: string,
+  mediaType: string
+): DesktopSessionPart {
+  return {
+    id,
+    sessionId: "session-1",
+    messageId: "message-1",
+    seq: 1,
+    type: "attachment",
+    status: "completed",
+    assetId,
+    intent: "tool_resource",
+    displayName: `${assetId}.png`,
+    mediaType,
+    sizeBytes: 128,
+    metadata: {},
+    createdAt: 1,
+    updatedAt: 1,
+  }
+}
+
+function imageToolPart(options: {
+  id?: string
+  status?: DesktopSessionPart["status"]
+  ratio?: string
+}): DesktopSessionPart {
+  const id = options.id ?? "image-tool-1"
+  return {
+    id,
+    sessionId: "session-1",
+    messageId: "message-1",
+    seq: 1,
+    type: "tool",
+    status: options.status ?? "completed",
+    toolUseId: id,
+    toolName: "ImageGeneration",
+    input: { prompt: "draw a fox", ratio: options.ratio },
     metadata: {},
     createdAt: 1,
     updatedAt: 1,

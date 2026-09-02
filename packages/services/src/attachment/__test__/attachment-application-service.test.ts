@@ -283,6 +283,44 @@ describe("AttachmentApplicationService", () => {
     }
   });
 
+  it("protects assets referenced only by assistant message attachments", async () => {
+    const { store, service } = createHarness({ ids: ["att_generated"] });
+    try {
+      const asset = await service.import({
+        displayName: "generated.png",
+        declaredMediaType: "image/png",
+        content: streamOf([Uint8Array.from([0x89, 0x50, 0x4e, 0x47])]),
+      });
+      store.createSession({ id: "generated-session", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({
+        sessionId: "generated-session",
+        role: "assistant",
+      });
+      store.upsertMessagePart({
+        sessionId: "generated-session",
+        messageId: message.id,
+        type: "attachment",
+        status: "completed",
+        assetId: asset.id,
+        intent: "tool_resource",
+        displayName: asset.displayName,
+        mediaType: asset.mediaType,
+        sizeBytes: asset.sizeBytes,
+      });
+
+      expect(() => service.delete(asset.id)).toThrow(
+        "attachment_in_use: attachment is referenced by a conversation",
+      );
+      store.deleteSessionTree("generated-session");
+      expect(service.delete(asset.id)).toMatchObject({
+        id: "att_generated",
+        status: "deleted",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   it("classifies interrupted imports and removes expired staging on recovery", async () => {
     const { root, store, service } = createHarness({
       now: 10_000,

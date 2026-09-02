@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { Button } from "@renderer/components/ui/button"
+import { AttachmentGroup } from "@renderer/components/ui/attachment"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopSessionPart } from "@shared/session-types"
@@ -25,6 +26,11 @@ import {
 } from "./message-render-model"
 import { createStreamdownComponents } from "./streamdown-components"
 import { streamdownPlugins } from "./streamdown-plugins"
+import { MessageAttachment } from "../message-attachment"
+import {
+  GeneratedImageGallery,
+  ImageGenerationMessage,
+} from "./image-generation-message"
 
 type ChangedFileStats = {
   additions: number
@@ -87,6 +93,40 @@ export function AssistantMessage({
               </summary>
               <p className="mt-2 border-l pl-3.5 leading-6 whitespace-pre-wrap">{unit.text}</p>
             </details>
+          )
+        }
+        if (unit.type === "image_generation") {
+          return (
+            <ImageGenerationMessage
+              key={unit.id}
+              call={unit.call}
+              hasAttachments={unit.hasAttachments}
+              streaming={streaming}
+            />
+          )
+        }
+        if (unit.type === "attachments") {
+          const containsImage = unit.parts.some((part) => part.mediaType.startsWith("image/"))
+          const containsFile = unit.parts.some((part) => !part.mediaType.startsWith("image/"))
+          return (
+            <AttachmentGroup key={unit.id} aria-label="生成的附件" className="max-w-full">
+              {unit.parts.map((part) => (
+                <MessageAttachment
+                  key={part.id}
+                  part={part}
+                  alignMixedAttachmentHeights={containsImage && containsFile}
+                />
+              ))}
+            </AttachmentGroup>
+          )
+        }
+        if (unit.type === "generated_attachments") {
+          return (
+            <GeneratedImageGallery
+              key={unit.id}
+              parts={unit.parts}
+              ratio={unit.ratio}
+            />
           )
         }
         return (

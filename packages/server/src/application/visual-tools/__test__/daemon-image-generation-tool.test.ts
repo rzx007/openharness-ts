@@ -16,6 +16,61 @@ const settings = {
   permission: { mode: "default" as const },
 };
 
+const PNG_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_BASE64 = Buffer.from(PNG_BYTES).toString("base64");
+
+function attachmentHarness(options: { failAt?: number } = {}) {
+  const imports: Array<{
+    displayName: string;
+    declaredMediaType?: string;
+    bytes: Uint8Array;
+  }> = [];
+  const deleted: string[] = [];
+  let attempts = 0;
+  return {
+    imports,
+    deleted,
+    service: {
+      limits: { maxBytesPerFile: 1024 },
+      async import(input: {
+        displayName: string;
+        declaredMediaType?: string;
+        content: ReadableStream<Uint8Array>;
+      }) {
+        attempts += 1;
+        if (attempts === options.failAt) throw new Error("attachment import failed");
+        const bytes = new Uint8Array(await new Response(input.content).arrayBuffer());
+        imports.push({
+          displayName: input.displayName,
+          ...(input.declaredMediaType
+            ? { declaredMediaType: input.declaredMediaType }
+            : {}),
+          bytes,
+        });
+        return {
+          id: `att-generated-${attempts}`,
+          displayName: input.displayName,
+          declaredMediaType: input.declaredMediaType,
+          mediaType: input.declaredMediaType ?? "image/png",
+          sizeBytes: bytes.byteLength,
+          sha256: "a".repeat(64),
+          status: "ready" as const,
+          createdAt: 1,
+          updatedAt: 1,
+        };
+      },
+      delete(id: string) {
+        deleted.push(id);
+        return { id, status: "deleted" as const };
+      },
+    },
+  };
+}
+
+function createTool() {
+  return createDaemonImageGenerationTool({ attachments: attachmentHarness().service as any });
+}
+
 function captureFetch() {
   const requests: Array<{ url: string; body: Record<string, unknown>; authorization: string }> = [];
   vi.stubGlobal("fetch", vi.fn(async (url, init) => {
@@ -36,7 +91,7 @@ describe("daemon ImageGeneration tool", () => {
     vi.stubEnv("AGNES_IMAGE_MODEL", "agnes-image-test-model");
     const requests = captureFetch();
 
-    await createDaemonImageGenerationTool().execute(
+    await createTool().execute(
       { prompt: "a quiet terminal" },
       { cwd: "C:/work", settings } as any,
     );
@@ -59,7 +114,7 @@ describe("daemon ImageGeneration tool", () => {
     vi.stubEnv("AGNES_IMAGE_BASE_URL", "https://api.agnes-ai.cn/v1");
     const requests = captureFetch();
 
-    await createDaemonImageGenerationTool().execute(
+    await createTool().execute(
       { prompt: "a quiet terminal", size: "2K", ratio: "16:9" },
       { cwd: "C:/work", settings } as any,
     );
@@ -75,7 +130,7 @@ describe("daemon ImageGeneration tool", () => {
     vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
     const requests = captureFetch();
 
-    await createDaemonImageGenerationTool().execute(
+    await createTool().execute(
       {
         prompt: "make it cyberpunk",
         images: ["https://example.com/input.png", "data:image/png;base64,abcd"],
@@ -100,7 +155,7 @@ describe("daemon ImageGeneration tool", () => {
     vi.stubEnv("AGNES_API_KEY", "");
     const requests = captureFetch();
 
-    const result = await createDaemonImageGenerationTool().execute(
+    const result = await createTool().execute(
       { prompt: "a quiet terminal" },
       { cwd: "C:/work", settings } as any,
     );
@@ -116,7 +171,7 @@ describe("daemon ImageGeneration tool", () => {
       { status },
     )));
 
-    const result = await createDaemonImageGenerationTool().execute(
+    const result = await createTool().execute(
       { prompt: "a quiet terminal" },
       { cwd: "C:/work", settings } as any,
     );
@@ -132,7 +187,7 @@ describe("daemon ImageGeneration tool", () => {
       { status: 429, headers: { "Retry-After": "60" } },
     )));
 
-    const result = await createDaemonImageGenerationTool().execute(
+    const result = await createTool().execute(
       { prompt: "a quiet terminal", size: "4K" },
       { cwd: "C:/work", settings } as any,
     );
@@ -148,7 +203,7 @@ describe("daemon ImageGeneration tool", () => {
       throw new Error("TLS failure while using agnes-test-key");
     }));
 
-    const result = await createDaemonImageGenerationTool().execute(
+    const result = await createTool().execute(
       { prompt: "a quiet terminal" },
       { cwd: "C:/work", settings } as any,
     );
@@ -156,5 +211,94 @@ describe("daemon ImageGeneration tool", () => {
     expect(result).toMatchObject({ isError: true, failureKind: "provider" });
     expect(result.content[0]?.text).toContain("Error: TLS failure while using [redacted]");
     expect(result.content[0]?.text).not.toContain("agnes-test-key");
+  });
+
+  it("imports base64 output as a durable attachment result", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: [{ b64_json: PNG_BASE64, revised_prompt: "a revised prompt" }],
+    }))));
+    const attachments = attachmentHarness();
+
+    const result = await createDaemonImageGenerationTool({
+      attachments: attachments.service as any,
+    }).execute(
+      { prompt: "a quiet terminal" },
+      { cwd: "C:/work", sessionId: "session-1", toolCallId: "call-1" } as any,
+    );
+
+    expect(attachments.imports).toEqual([{
+      displayName: "generated-image-1.png",
+      declaredMediaType: "image/png",
+      bytes: PNG_BYTES,
+    }]);
+    expect(result.content[0]?.text).toContain("att-generated-1");
+    expect(result.content[0]?.text).not.toMatch(/[A-Z]:[\\/]|\.openharness-ts[\\/]images/i);
+    expect(result.metadata).toEqual({
+      generatedImages: [{
+        assetId: "att-generated-1",
+        displayName: "generated-image-1.png",
+        mediaType: "image/png",
+        sizeBytes: 8,
+      }],
+    });
+  });
+
+  it("downloads URL output through the safe image downloader before importing", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: [{ url: "https://cdn.example/generated.webp" }],
+    }))));
+    const attachments = attachmentHarness();
+    const downloads: string[] = [];
+
+    const result = await createDaemonImageGenerationTool({
+      attachments: attachments.service as any,
+      downloadRemoteImage: async (url) => {
+        downloads.push(url.href);
+        return {
+          displayName: "generated.webp",
+          declaredMediaType: "image/webp",
+          content: new ReadableStream({
+            start(controller) {
+              controller.enqueue(Uint8Array.from([
+                0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50,
+              ]));
+              controller.close();
+            },
+          }),
+        };
+      },
+    }).execute(
+      { prompt: "a quiet terminal" },
+      { cwd: "C:/work" } as any,
+    );
+
+    expect(downloads).toEqual(["https://cdn.example/generated.webp"]);
+    expect(attachments.imports[0]).toMatchObject({
+      displayName: "generated-image-1.webp",
+      declaredMediaType: "image/webp",
+    });
+    expect(result.metadata).toMatchObject({
+      generatedImages: [{ assetId: "att-generated-1", mediaType: "image/webp" }],
+    });
+  });
+
+  it("soft-deletes assets imported before a later image fails", async () => {
+    vi.stubEnv("AGNES_API_KEY", "agnes-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: [{ b64_json: PNG_BASE64 }, { b64_json: PNG_BASE64 }],
+    }))));
+    const attachments = attachmentHarness({ failAt: 2 });
+
+    const result = await createDaemonImageGenerationTool({
+      attachments: attachments.service as any,
+    }).execute(
+      { prompt: "a quiet terminal" },
+      { cwd: "C:/work" } as any,
+    );
+
+    expect(result).toMatchObject({ isError: true, failureKind: "provider" });
+    expect(attachments.deleted).toEqual(["att-generated-1"]);
   });
 });

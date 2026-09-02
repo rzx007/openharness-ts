@@ -77,6 +77,17 @@ describe("MessageAttachment", () => {
     root = createRoot(container)
   })
 
+  it("fills a generated gallery cell without changing the default thumbnail size", async () => {
+    await act(async () => root.render(createElement(MessageAttachment, {
+      part: imagePart("gallery"),
+      fill: true,
+    })))
+
+    const imageAttachment = container.querySelector('[data-display="image-preview"]')
+    expect(imageAttachment?.className).toContain("size-full")
+    expect(imageAttachment?.className).not.toContain("size-24")
+  })
+
   it("aligns message image thumbnails and document cards in a mixed batch", async () => {
     const message: DesktopSessionMessage = {
       id: "message-mixed",

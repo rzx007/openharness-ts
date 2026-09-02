@@ -160,6 +160,41 @@ describe("AttachmentIntegrityService", () => {
     }
   });
 
+  it("does not collect a deleted asset referenced by an assistant attachment part", async () => {
+    const { store, blobs, attachments } = fixture(["att-generated"]);
+    try {
+      const asset = await attachments.import({
+        displayName: "generated.png",
+        declaredMediaType: "image/png",
+        content: content("generated image"),
+      });
+      store.createSession({ id: "s-generated", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({ sessionId: "s-generated", role: "assistant" });
+      store.upsertMessagePart({
+        sessionId: "s-generated",
+        messageId: message.id,
+        type: "attachment",
+        status: "completed",
+        assetId: asset.id,
+        intent: "tool_resource",
+        displayName: asset.displayName,
+        mediaType: asset.mediaType,
+        sizeBytes: asset.sizeBytes,
+      });
+      store.softDeleteAttachment(asset.id, 100);
+      const service = new AttachmentIntegrityService({ store, blobs, now: () => 1_000 });
+
+      await expect(service.gc({ gracePeriodMs: 100 })).resolves.toMatchObject({
+        deletedAssets: 0,
+        deletedBlobs: 0,
+        skipped: { referenced: 1 },
+      });
+      expect(await blobs.inspectBlob(asset.sha256!)).toBeDefined();
+    } finally {
+      store.close();
+    }
+  });
+
   it("audits a blob deletion failure, keeps the tombstone, and retries later", async () => {
     const { store, blobs, attachments } = fixture(["att-retry"]);
     try {

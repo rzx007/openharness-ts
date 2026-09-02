@@ -10,6 +10,7 @@ export function AttachmentImagePreview({
   src,
   displayName,
   alignMixedAttachmentHeights = false,
+  fill = false,
   actions,
   actionsClassName,
   onError,
@@ -17,6 +18,7 @@ export function AttachmentImagePreview({
   src: string
   displayName: string
   alignMixedAttachmentHeights?: boolean
+  fill?: boolean
   actions?: ReactNode
   actionsClassName?: string
   onError: () => void
@@ -27,7 +29,9 @@ export function AttachmentImagePreview({
       state="done"
       aria-label={displayName}
       className={
-        alignMixedAttachmentHeights
+        fill
+          ? "size-full min-w-0 flex-nowrap overflow-hidden border-border/50 bg-muted p-0"
+          : alignMixedAttachmentHeights
           ? "h-20 w-20 min-w-0 flex-nowrap overflow-hidden border-border/50 bg-muted p-0"
           : "size-24 min-w-0 flex-nowrap overflow-hidden border-border/50 bg-muted p-0"
       }
