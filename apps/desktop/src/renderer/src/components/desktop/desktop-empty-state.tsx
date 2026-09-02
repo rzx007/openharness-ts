@@ -32,15 +32,12 @@ export function DesktopEmptyState({
           />
         </EmptyMedia>
         <EmptyTitle
-          className={cn(
-            "font-semibold tracking-normal",
-            size === "sm" ? "text-[15px]" : "text-[17px]"
-          )}
+          className={cn("font-semibold tracking-normal", size === "sm" ? "text-base" : "text-lg")}
         >
           {title}
         </EmptyTitle>
         {description ? (
-          <EmptyDescription className="max-w-72 text-[13px] leading-6">
+          <EmptyDescription className="text-ui-small max-w-72 leading-6">
             {description}
           </EmptyDescription>
         ) : null}

@@ -263,10 +263,10 @@ export function PluginSettings(): React.JSX.Element {
       <section className="flex flex-col gap-4" aria-labelledby="installed-plugin-heading">
         <div className="flex items-center justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <h2 id="installed-plugin-heading" className="text-[15px] font-semibold">
+            <h2 id="installed-plugin-heading" className="text-base font-semibold">
               已安装
             </h2>
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {plugins.length} 个插件 · {plugins.filter((plugin) => plugin.enabled).length} 个已启用
               {attentionCount ? ` · ${attentionCount} 个需要处理` : ""}
             </p>
@@ -296,7 +296,7 @@ export function PluginSettings(): React.JSX.Element {
                   onClick={() => setDetailTarget(plugin)}
                 >
                   <PluginIcon plugin={plugin} />
-                  <span className="w-full truncate text-[11px] text-muted-foreground group-hover:text-foreground">
+                  <span className="text-ui-caption w-full truncate text-muted-foreground group-hover:text-foreground">
                     {pluginDisplayName(plugin)}
                   </span>
                 </TooltipTrigger>

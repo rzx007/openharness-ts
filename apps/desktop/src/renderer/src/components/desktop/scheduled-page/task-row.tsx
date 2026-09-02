@@ -57,7 +57,7 @@ export function TaskRow({
             <div
               className={cn(
                 "truncate font-medium text-sidebar-foreground",
-                compact ? "text-[14px]" : "text-[15px]"
+                compact ? "text-sm" : "text-base"
               )}
             >
               {task.name}
@@ -65,7 +65,7 @@ export function TaskRow({
             <div
               className={cn(
                 "mt-1 flex items-center justify-between gap-4 text-muted-foreground",
-                compact ? "text-[12px]" : "text-[13px]"
+                compact ? "text-xs" : "text-ui-small"
               )}
             >
               <p className="min-w-0 truncate">

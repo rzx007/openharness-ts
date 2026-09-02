@@ -113,12 +113,12 @@ export function OpenWithSubmenu({
               event.preventDefault()
               event.stopPropagation()
             }}
-            className="fixed z-80 w-56 rounded-xl border border-border/55 bg-popover p-1.5 text-[13px] text-popover-foreground shadow-xl shadow-black/12 dark:border-white/8 dark:shadow-black/40"
+            className="text-ui-small fixed z-80 w-56 rounded-xl border border-border/55 bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/12 dark:border-white/8 dark:shadow-black/40"
           >
             {!ready ? (
-              <p className="px-2.5 py-2 text-[12px] text-ui-muted">正在查找打开方式…</p>
+              <p className="px-2.5 py-2 text-xs text-ui-muted">正在查找打开方式…</p>
             ) : openers.length === 0 ? (
-              <p className="px-2.5 py-2 text-[12px] text-ui-muted">未找到可用的打开方式</p>
+              <p className="px-2.5 py-2 text-xs text-ui-muted">未找到可用的打开方式</p>
             ) : (
               openers.map((opener) => (
                 <button

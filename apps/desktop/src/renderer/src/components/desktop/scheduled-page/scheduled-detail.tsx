@@ -36,7 +36,7 @@ export function DetailPanel({
   return (
     <div className="mx-auto w-full">
       <div className="flex items-center justify-between gap-4">
-        <span className="text-[13px] font-medium text-blue-600 dark:text-blue-400">
+        <span className="text-ui-small font-medium text-blue-600 dark:text-blue-400">
           {statusLabel(task.status)}
         </span>
         <div className="flex items-center gap-1">
@@ -54,7 +54,7 @@ export function DetailPanel({
             onClick={onToggle}
             disabled={busy !== null}
             title={task.status === "active" ? "暂停任务" : "继续任务"}
-            className="h-8 rounded-lg px-3 text-[12px]"
+            className="h-8 rounded-lg px-3 text-xs"
           >
             {busy === "toggle" ? (
               <Spinner className="size-3.5" />
@@ -77,7 +77,7 @@ export function DetailPanel({
         </div>
       </div>
 
-      <h2 className="mt-3 truncate text-[16px] font-medium tracking-[-0.01em] text-foreground">
+      <h2 className="mt-3 truncate text-base font-medium tracking-[-0.01em] text-foreground">
         {task.name}
       </h2>
 
@@ -85,7 +85,7 @@ export function DetailPanel({
         className="mt-7 max-h-64.5 rounded-2xl border border-border/70 bg-muted/10"
         viewportClassName="px-4 py-4"
       >
-        <div className="max-w-[76ch] text-[13px] leading-6 whitespace-pre-wrap text-foreground/90">
+        <div className="text-ui-small max-w-[76ch] leading-6 whitespace-pre-wrap text-foreground/90">
           {task.prompt}
         </div>
       </ScrollArea>
@@ -122,12 +122,12 @@ export function DetailPanel({
 
       <section className="mt-12">
         <div className="flex items-center justify-between px-1">
-          <h3 className="text-[13px] font-normal text-muted-foreground/70">运行历史记录</h3>
+          <h3 className="text-ui-small font-normal text-muted-foreground/70">运行历史记录</h3>
           <MoreHorizontal className="size-4 text-muted-foreground/65" aria-hidden="true" />
         </div>
 
         {runs.length === 0 ? (
-          <div className="flex h-20 items-center gap-2 px-2 text-[12px] text-muted-foreground">
+          <div className="flex h-20 items-center gap-2 px-2 text-xs text-muted-foreground">
             <History className="size-4" />
             这个任务还没有运行记录
           </div>
@@ -136,7 +136,7 @@ export function DetailPanel({
             {runs.slice(0, 4).map((run, index) => (
               <article
                 key={run.id}
-                className="flex min-h-10 items-center gap-3 px-2 text-[12px] text-muted-foreground"
+                className="flex min-h-10 items-center gap-3 px-2 text-xs text-muted-foreground"
               >
                 {index === 0 ? (
                   <Circle className="size-2.5 shrink-0 fill-current" strokeWidth={0} />
@@ -173,15 +173,15 @@ function SettingsGroup({
 }): React.JSX.Element {
   return (
     <section className={className}>
-      <h3 className="px-1 text-[13px] font-normal text-muted-foreground/70">{title}</h3>
+      <h3 className="text-ui-small px-1 font-normal text-muted-foreground/70">{title}</h3>
       <dl className="mt-3 overflow-hidden rounded-2xl border border-border/70 bg-background">
         {items.map((item) => (
           <div
             key={item.label}
             className="flex min-h-[50px] items-center justify-between gap-6 border-b border-border/60 px-4 last:border-b-0"
           >
-            <dt className="text-[13px] text-foreground/80">{item.label}</dt>
-            <dd className="min-w-0 truncate text-[13px] font-medium text-foreground">
+            <dt className="text-ui-small text-foreground/80">{item.label}</dt>
+            <dd className="text-ui-small min-w-0 truncate font-medium text-foreground">
               {item.value}
             </dd>
           </div>

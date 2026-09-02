@@ -59,7 +59,7 @@ export function ScheduledHeader({
           <p
             className={cn(
               "text-muted-foreground",
-              compact ? "mt-0.5 text-[13px]" : "mt-2 text-[15px] leading-6"
+              compact ? "text-ui-small mt-0.5" : "mt-2 text-base leading-6"
             )}
           >
             让 ChatGPT 安排任务、设置提醒或监测更新。
@@ -81,7 +81,7 @@ export function ScheduledHeader({
             <Button
               size="sm"
               onClick={onStartConversation}
-              className="h-8 rounded-none! border-0 bg-transparent px-3 text-[12px] font-medium text-background hover:bg-white/10"
+              className="h-8 rounded-none! border-0 bg-transparent px-3 text-xs font-medium text-background hover:bg-white/10"
             >
               创建
             </Button>
@@ -147,14 +147,16 @@ function FilterTabs({
           onClick={() => onChange(value)}
           aria-pressed={filter === value}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "text-ui-small inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             filter === value
               ? "bg-muted font-medium text-foreground"
               : "text-muted-foreground hover:bg-muted/55 hover:text-foreground"
           )}
         >
           <span>{filterTabLabel(value)}</span>
-          <span className="text-[11px] text-muted-foreground tabular-nums">{counts[value]}</span>
+          <span className="text-ui-caption text-muted-foreground tabular-nums">
+            {counts[value]}
+          </span>
         </button>
       ))}
     </div>
@@ -184,7 +186,7 @@ function SearchBar({
         placeholder={placeholder}
         aria-label="搜索任务"
         className={cn(
-          "border-border/70 bg-background pl-10 text-[13px] shadow-none placeholder:text-muted-foreground",
+          "text-ui-small border-border/70 bg-background pl-10 shadow-none placeholder:text-muted-foreground",
           className
         )}
       />

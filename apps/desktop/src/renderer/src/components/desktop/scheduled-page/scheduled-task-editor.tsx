@@ -262,12 +262,12 @@ export function ScheduledTaskEditor({
                       </SelectContent>
                     </Select>
                   ) : (
-                    <p className="text-[12px] leading-5 text-muted-foreground">
+                    <p className="text-xs leading-5 text-muted-foreground">
                       每次运行都会创建一个独立工作目录，不读取任何已添加项目的文件。
                     </p>
                   )}
                   {!standaloneModel ? (
-                    <p role="alert" className="text-[12px] text-destructive">
+                    <p role="alert" className="text-xs text-destructive">
                       没有可用模型，请先在设置中连接模型提供商。
                     </p>
                   ) : null}
@@ -303,7 +303,7 @@ export function ScheduledTaskEditor({
                   </Select>
                 </EditorField>
                 {frequency === "custom" ? (
-                  <p className="self-end pb-2 text-[12px] leading-5 text-muted-foreground">
+                  <p className="self-end pb-2 text-xs leading-5 text-muted-foreground">
                     当前规则由 Agent 创建。选择其他重复方式后可改为常规频率。
                   </p>
                 ) : frequency === "once" ? (
@@ -363,7 +363,7 @@ export function ScheduledTaskEditor({
             </section>
 
             {error ? (
-              <p role="alert" className="text-[12px] text-destructive">
+              <p role="alert" className="text-xs text-destructive">
                 {error}
               </p>
             ) : null}
@@ -399,7 +399,7 @@ function EditorField({
 }): React.JSX.Element {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-[12px] text-foreground/80">
+      <Label htmlFor={htmlFor} className="text-xs text-foreground/80">
         {label}
       </Label>
       {children}
@@ -408,7 +408,7 @@ function EditorField({
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <h3 className="text-[12px] font-medium text-muted-foreground">{children}</h3>
+  return <h3 className="text-xs font-medium text-muted-foreground">{children}</h3>
 }
 
 function ChoiceButton({
@@ -436,8 +436,8 @@ function ChoiceButton({
     >
       <span className="mt-0.5 text-muted-foreground [&_svg]:size-4">{icon}</span>
       <span>
-        <span className="block text-[13px] font-medium">{title}</span>
-        <span className="mt-0.5 block text-[12px] text-muted-foreground">{description}</span>
+        <span className="text-ui-small block font-medium">{title}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
       </span>
     </button>
   )
@@ -460,7 +460,7 @@ function WorkspaceButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-[12px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5",
+        "inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5",
         active
           ? "bg-background font-medium shadow-sm ring-1 ring-border/70"
           : "text-muted-foreground hover:text-foreground"

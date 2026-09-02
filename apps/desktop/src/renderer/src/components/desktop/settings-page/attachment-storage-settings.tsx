@@ -525,7 +525,7 @@ function StorageStat({
         <span>{label}</span>
       </div>
       <p className="mt-2 text-base font-semibold tracking-tight tabular-nums">{value}</p>
-      {detail ? <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p> : null}
+      {detail ? <p className="text-ui-caption mt-1 text-muted-foreground">{detail}</p> : null}
     </div>
   )
 }

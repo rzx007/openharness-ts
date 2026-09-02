@@ -230,7 +230,7 @@ function WorkStyleControl(): React.JSX.Element {
         </SelectContent>
       </Select>
       {error ? (
-        <p role="alert" className="max-w-56 text-right text-[11px] text-destructive">
+        <p role="alert" className="text-ui-caption max-w-56 text-right text-destructive">
           {error}
         </p>
       ) : null}
@@ -298,7 +298,7 @@ function NotificationModeControl(): React.JSX.Element {
         </SelectContent>
       </Select>
       {error ? (
-        <p role="alert" className="max-w-56 text-right text-[11px] text-destructive">
+        <p role="alert" className="text-ui-caption max-w-56 text-right text-destructive">
           {error}
         </p>
       ) : null}

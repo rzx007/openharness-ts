@@ -55,7 +55,7 @@ type TitleBarProps = {
 type InfoDialog = "shortcuts" | "about" | null
 
 const menuTriggerClass =
-  "h-7 rounded px-2.5 text-[13px] text-ui-muted/80 transition-colors hover:bg-black/5 hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none data-popup-open:bg-black/5 data-popup-open:text-ui-foreground"
+  "text-ui-small h-7 rounded px-2.5 text-ui-muted/80 transition-colors hover:bg-black/5 hover:text-ui-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none data-popup-open:bg-black/5 data-popup-open:text-ui-foreground"
 
 export function TitleBar({
   sidebarOpen,
@@ -368,7 +368,7 @@ function ShortcutList({ isMac }: { isMac: boolean }): React.JSX.Element {
       {shortcuts.map(([label, shortcut]) => (
         <div key={label} className="flex items-center justify-between gap-4 py-2.5 text-xs">
           <dt>{label}</dt>
-          <dd className="font-mono text-[11px] text-muted-foreground">{shortcut}</dd>
+          <dd className="text-ui-caption font-mono text-muted-foreground">{shortcut}</dd>
         </div>
       ))}
     </dl>

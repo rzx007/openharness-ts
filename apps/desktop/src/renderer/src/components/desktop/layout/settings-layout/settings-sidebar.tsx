@@ -69,12 +69,12 @@ export function SettingsSidebar({
       </ScrollArea>
 
       <div className="flex items-center gap-2 border-t border-sidebar-border px-2 pt-3">
-        <span className="grid size-7 place-items-center rounded-full bg-amber-400 text-[10px] font-semibold text-amber-950">
+        <span className="text-ui-caption grid size-7 place-items-center rounded-full bg-amber-400 font-semibold text-amber-950">
           OH
         </span>
         <div className="min-w-0">
           <p className="truncate text-xs font-medium">OpenHarness</p>
-          <p className="truncate text-[11px] text-sidebar-muted">本地工作区</p>
+          <p className="text-ui-caption truncate text-sidebar-muted">本地工作区</p>
         </div>
       </div>
     </aside>
@@ -103,7 +103,7 @@ function SettingsNavigationGroup({
             aria-current={selectedSection === itemLabel ? "page" : undefined}
             onClick={() => onSelect(itemLabel)}
             className={cn(
-              "flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              "text-ui-small flex h-8 items-center gap-2.5 rounded-md px-2 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
               selectedSection === itemLabel
                 ? "bg-sidebar-selected font-medium text-sidebar-foreground"
                 : "text-sidebar-foreground/82 hover:bg-sidebar-accent hover:text-sidebar-foreground"

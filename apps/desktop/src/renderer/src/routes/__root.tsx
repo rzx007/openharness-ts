@@ -40,7 +40,7 @@ function DesktopRoutePending(): React.JSX.Element {
           <p className="mt-1 text-xs text-muted-foreground">{daemonStatus.message}</p>
         </div>
         {daemonStatus.detail ? (
-          <p className="max-w-full truncate text-[11px] text-muted-foreground/80">
+          <p className="text-ui-caption max-w-full truncate text-muted-foreground/80">
             {daemonStatus.detail}
           </p>
         ) : null}

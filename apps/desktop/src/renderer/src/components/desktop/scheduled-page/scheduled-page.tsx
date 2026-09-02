@@ -351,7 +351,7 @@ export function ScheduledPage({
                     variant="outline"
                     size="sm"
                     onClick={() => onOpenConversation(selected.sessionId ?? runs[0]?.sessionId)}
-                    className="h-8 rounded-lg px-3 text-[12px]"
+                    className="h-8 rounded-lg px-3 text-xs"
                   >
                     打开聊天
                     <ExternalLink className="size-3.5" />
