@@ -45,7 +45,7 @@
 - 修改：`packages/core/src/engine/index.test.ts`
 - 修改：`packages/core/src/index.ts`
 
-- [ ] **步骤 1：编写失败的 Registry 测试**
+- [x] **步骤 1：编写失败的 Registry 测试**
 
 在 `packages/core/src/engine/index.test.ts` 增加：
 
@@ -77,7 +77,7 @@ it("rejects an override whose target does not exist", () => {
 });
 ```
 
-- [ ] **步骤 2：运行 Core 测试并确认失败**
+- [x] **步骤 2：运行 Core 测试并确认失败**
 
 运行：
 
@@ -87,7 +87,7 @@ pnpm --filter @openharness/core test -- src/engine/index.test.ts
 
 预期：FAIL，原因是 `register()` 仍然隐式覆盖，且 `override()`、`inspect()` 和来源类型不存在。
 
-- [ ] **步骤 3：实现 Registry 类型与严格语义**
+- [x] **步骤 3：实现 Registry 类型与严格语义**
 
 在 `packages/core/src/types/tools.ts` 增加：
 
@@ -134,7 +134,7 @@ export class ToolRegistrationError extends Error {
 
 `register()` 的默认来源为 `{ kind: "runtime" }`，重名抛 `tool_already_registered`；`override()` 要求目标存在并记录被替换来源；`unregister()` 同时删除定义和来源；`get()` / `getAll()` 仍只返回 `ToolDefinition`。
 
-- [ ] **步骤 4：补齐所有 Core Registry 视图的接口实现**
+- [x] **步骤 4：补齐所有 Core Registry 视图的接口实现**
 
 更新 `QueryEngine.visibleToolRegistry()` 返回的包装对象，使它转发：
 
@@ -146,7 +146,7 @@ inspect: (name) => inner.inspect(name),
 
 从 `packages/core/src/index.ts` 导出 `ToolRegistrationError`、`ToolRegistrationSource` 和 `RegisteredToolInspection`。
 
-- [ ] **步骤 5：运行 Core 测试和类型检查**
+- [x] **步骤 5：运行 Core 测试和类型检查**
 
 运行：
 
@@ -157,7 +157,7 @@ pnpm --filter @openharness/core check-types
 
 预期：PASS；现有依赖包可能因尚未补齐来源参数而在后续任务修复，但 Core 自身类型检查通过。
 
-- [ ] **步骤 6：提交 Registry 语义**
+- [x] **步骤 6：提交 Registry 语义**
 
 ```powershell
 git add packages/core/src/types/tools.ts packages/core/src/engine/tool-registry.ts packages/core/src/engine/index.test.ts packages/core/src/engine/query-engine.ts packages/core/src/index.ts
@@ -179,7 +179,7 @@ git commit -m "feat(core): make tool overrides explicit"
 - 修改：`packages/agent-runtime/src/child-agent-options.ts`
 - 修改：`packages/agent-runtime/src/child-agent-options.test.ts`
 
-- [ ] **步骤 1：先写 Agent API 与配置校验失败测试**
+- [x] **步骤 1：先写 Agent API 与配置校验失败测试**
 
 在 `default-runtime.test.ts` 和 `agent.test.ts` 增加：
 
@@ -218,7 +218,7 @@ it.each([
 });
 ```
 
-- [ ] **步骤 2：先写覆盖 Tool 权限降级测试**
+- [x] **步骤 2：先写覆盖 Tool 权限降级测试**
 
 在 `packages/permissions/src/index.test.ts` 增加：
 
@@ -236,7 +236,7 @@ it("does not auto-approve an overridden local read-only tool", async () => {
 
 在 `default-runtime.test.ts` 增加 `autoApproveReadOnly` 测试，断言覆盖后的非本地只读 Tool 不会被隐式加入自动批准列表，但 `settings.permission.autoApproveTools` 或 `configuration.autoApproveTools` 的显式授权仍保留。
 
-- [ ] **步骤 3：运行定向测试并确认失败**
+- [x] **步骤 3：运行定向测试并确认失败**
 
 运行：
 
@@ -247,7 +247,7 @@ pnpm --filter @openharness/agent-runtime test -- src/default-runtime.test.ts src
 
 预期：FAIL，原因是 API、配置校验、来源诊断和权限降级尚未实现。
 
-- [ ] **步骤 4：增加公共配置并原子应用 Tool**
+- [x] **步骤 4：增加公共配置并原子应用 Tool**
 
 在 `OpenHarnessAgentConfiguration` 增加：
 
@@ -265,7 +265,7 @@ toolOverrides?: ToolDefinition[];
 
 配置错误信息必须带稳定原因和 Tool 名称，不允许部分应用后再失败。
 
-- [ ] **步骤 5：实现覆盖来源的权限降级**
+- [x] **步骤 5：实现覆盖来源的权限降级**
 
 给 `PermissionCheckOptions` 增加：
 
@@ -277,7 +277,7 @@ untrustedToolNames?: string[];
 
 将 `resolveAutoApproveTools()` 扩为接收 `implicitlyUntrustedToolNames`。只过滤 `autoApproveReadOnly` 自动注入的名称，不过滤 Settings 或 Agent 配置中的显式 `autoApproveTools`。
 
-- [ ] **步骤 6：扩展 inspect 并传播给子 Agent**
+- [x] **步骤 6：扩展 inspect 并传播给子 Agent**
 
 `agent.inspect()` 对每个可见 Tool 调用 Registry `inspect()`，返回：
 
@@ -291,7 +291,7 @@ untrustedToolNames?: string[];
 
 `deriveChildAgentOptions()` 显式返回父配置中的 `tools` 和 `toolOverrides`；测试使用 `toBe()` 确认数组及 Tool 定义对象保持身份，同时验证子级 role allowlist 和 deny 不变。
 
-- [ ] **步骤 7：运行定向测试**
+- [x] **步骤 7：运行定向测试**
 
 运行：
 
@@ -303,7 +303,7 @@ pnpm --filter @openharness/agent-runtime check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 8：提交 Agent API**
+- [x] **步骤 8：提交 Agent API**
 
 ```powershell
 git add packages/permissions/src/index.ts packages/permissions/src/index.test.ts packages/tools/src/registry.ts packages/agent-runtime/src/agent-options.ts packages/agent-runtime/src/agent-composition.ts packages/agent-runtime/src/default-runtime.ts packages/agent-runtime/src/default-runtime.test.ts packages/agent-runtime/src/agent.ts packages/agent-runtime/src/agent.test.ts packages/agent-runtime/src/child-agent-options.ts packages/agent-runtime/src/child-agent-options.test.ts
@@ -320,7 +320,7 @@ git commit -m "feat(agent-runtime): support explicit tool overrides"
 - 修改：`packages/agent-runtime/src/extensions.test.ts`
 - 修改：`packages/agent-runtime/src/mcp-auth.test.ts`
 
-- [ ] **步骤 1：编写集成来源和冲突测试**
+- [x] **步骤 1：编写集成来源和冲突测试**
 
 增加测试：
 
@@ -343,7 +343,7 @@ it("keeps a caller override when a later integration uses the same name", async 
 
 为 MCP reconnect 增加断言：重新注册的 MCP Tool 来源为 `{ kind: "mcp", id: serverName }`，与现有 Tool 冲突时不会替换现有定义。
 
-- [ ] **步骤 2：运行测试并确认来源断言失败**
+- [x] **步骤 2：运行测试并确认来源断言失败**
 
 运行：
 
@@ -353,7 +353,7 @@ pnpm --filter @openharness/agent-runtime test -- src/extensions.test.ts src/mcp-
 
 预期：冲突因任务 1 的严格 Registry 已经不会覆盖，但来源诊断和受限 Extension 视图尚未满足断言。
 
-- [ ] **步骤 3：为各集成传入准确来源**
+- [x] **步骤 3：为各集成传入准确来源**
 
 固定来源：
 
@@ -373,13 +373,13 @@ pnpm --filter @openharness/agent-runtime test -- src/extensions.test.ts src/mcp-
 
 Extension 上下文暴露一个受限 Registry 包装器：`register()` 强制使用 Extension 来源；`override()` 不暴露给 `OpenHarnessExtensionContext` 的公开类型。Native Plugin 和 MCP 继续使用内部完整 Registry，但只能调用 `register()`。
 
-- [ ] **步骤 4：保证失败回滚不删除原有 Tool**
+- [x] **步骤 4：保证失败回滚不删除原有 Tool**
 
 Extension/Plugin 一轮注册多个 Tool 时只记录本轮成功注册的名称；发生后续冲突时仅注销这些名称。严禁按冲突名称调用 `unregister()`，否则会删除内置或调用方 Tool。
 
 MCP connect/reconnect 遇到冲突时保持当前连接错误策略，同时断言已存在 Tool 定义和来源不变。
 
-- [ ] **步骤 5：运行集成测试与类型检查**
+- [x] **步骤 5：运行集成测试与类型检查**
 
 运行：
 
@@ -390,7 +390,7 @@ pnpm --filter @openharness/agent-runtime check-types
 
 预期：全部 PASS。
 
-- [ ] **步骤 6：提交集成冲突保护**
+- [x] **步骤 6：提交集成冲突保护**
 
 ```powershell
 git add packages/agent-runtime/src/extensions.ts packages/agent-runtime/src/runtime-integrations.ts packages/agent-runtime/src/native-tools/activate.ts packages/agent-runtime/src/mcp-auth.ts packages/agent-runtime/src/extensions.test.ts packages/agent-runtime/src/mcp-auth.test.ts
@@ -405,7 +405,7 @@ git commit -m "fix(agent-runtime): prevent integration tool shadowing"
 - 修改：`packages/server/src/application/attachment-routing/attachment-capability-router.ts`
 - 修改：`packages/server/src/application/attachment-routing/__test__/attachment-capability-router.test.ts`
 
-- [ ] **步骤 1：编写模型可见契约失败测试**
+- [x] **步骤 1：编写模型可见契约失败测试**
 
 在 `read.test.ts` 增加：
 
@@ -425,7 +425,7 @@ expect(block.text).toContain('"file_path":"attachment://large/large.log"');
 expect(block.text).toContain("不要调用 ReadMcpResource");
 ```
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 运行：
 
@@ -436,7 +436,7 @@ pnpm --filter @openharness/server test -- src/application/attachment-routing/__t
 
 预期：FAIL，当前描述只声明绝对本地路径，大文本提示没有完整 Tool 参数示例。
 
-- [ ] **步骤 3：更新 `Read` 和附件提示**
+- [x] **步骤 3：更新 `Read` 和附件提示**
 
 `Read` 描述改为：
 
@@ -461,7 +461,7 @@ description:
 不要调用 ReadMcpResource。
 ```
 
-- [ ] **步骤 4：运行附件定向测试**
+- [x] **步骤 4：运行附件定向测试**
 
 运行：
 
@@ -472,7 +472,7 @@ pnpm --filter @openharness/server test -- src/application/attachment-routing/__t
 
 预期：全部 PASS，并且现有 `AgentAttachmentResourceHost.readText()` 行为测试保持通过。
 
-- [ ] **步骤 5：提交附件契约修正**
+- [x] **步骤 5：提交附件契约修正**
 
 ```powershell
 git add packages/tools/src/file/read.ts packages/tools/src/file/__test__/read.test.ts packages/server/src/application/attachment-routing/attachment-capability-router.ts packages/server/src/application/attachment-routing/__test__/attachment-capability-router.test.ts
@@ -485,7 +485,7 @@ git commit -m "fix(tools): clarify attachment reads"
 - 修改：`docs/superpowers/plans/2026-09-02-agent-tool-overrides.md`（只勾选实际完成步骤）
 - 核对：`docs/superpowers/specs/2026-09-02-agent-tool-override-design.md`
 
-- [ ] **步骤 1：运行受影响包测试**
+- [x] **步骤 1：运行受影响包测试**
 
 ```powershell
 pnpm --filter @openharness/core test
@@ -497,7 +497,7 @@ pnpm --filter @openharness/server test
 
 预期：全部 PASS。Windows `node-pty AttachConsole failed` 的子进程噪音只有在测试退出码为 0 且断言全部通过时才可视为非阻塞信息。
 
-- [ ] **步骤 2：运行全仓类型检查**
+- [x] **步骤 2：运行全仓类型检查**
 
 ```powershell
 pnpm check-types
@@ -505,7 +505,7 @@ pnpm check-types
 
 预期：57 个任务全部成功。
 
-- [ ] **步骤 3：检查差异和工作区边界**
+- [x] **步骤 3：检查差异和工作区边界**
 
 ```powershell
 git diff --check
@@ -515,11 +515,11 @@ git diff --name-only 826dc06c..HEAD
 
 预期：没有空白错误；实现提交不包含用户已有的 `tests/browser-client` 删除；没有生成物或无关文件。
 
-- [ ] **步骤 4：对照规格逐条复核验收标准**
+- [x] **步骤 4：对照规格逐条复核验收标准**
 
 逐项确认：显式新增、显式覆盖、未知目标失败、第三方来源不能覆盖、权限信任降级、子 Agent 继承、inspect 来源、附件 `Read` 提示均有通过的自动化测试。任何未满足项必须在结束前修复，不能只在总结中声明延期。
 
-- [ ] **步骤 5：提交计划完成状态**
+- [x] **步骤 5：提交计划完成状态**
 
 仅在前四步全部通过后勾选本计划实际完成的复选框并提交：
 
