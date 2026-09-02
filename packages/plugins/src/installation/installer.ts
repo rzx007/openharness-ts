@@ -9,7 +9,6 @@ import {
   installedPluginKey,
   updateInstalledPluginStore,
   type InstalledPluginRecord,
-  type PluginScope,
 } from "./store.js";
 
 export function requestedPluginPermissions(manifest: OpenHarnessPluginManifestV1): string[] {
@@ -25,7 +24,7 @@ export function requestedPluginPermissions(manifest: OpenHarnessPluginManifestV1
 
 export interface InstallLocalNativePluginInput {
   sourcePath: string;
-  scope: Exclude<PluginScope, "managed">;
+  scope: "user";
   cwd: string;
   approvedPermissions: string[];
   cacheDir?: string;
@@ -39,6 +38,11 @@ export type InstallLocalNativePluginResult =
   | { status: "blocked" | "invalid"; diagnostics: PluginDiagnostic[] };
 
 export async function installLocalNativePlugin(input: InstallLocalNativePluginInput): Promise<InstallLocalNativePluginResult> {
+  const suppliedScope = (input as { scope?: unknown }).scope;
+  if (suppliedScope !== "user") return { status: "blocked", diagnostics: [{
+    severity: "error", phase: "install", code: "plugin_scope_not_supported",
+    message: `Native Plugins can only be installed for the user; received scope '${String(suppliedScope)}'`,
+  }] };
   const sourcePath = await realpath(resolve(input.sourcePath));
   const validation = await validateNativePlugin(sourcePath);
   if (validation.status === "invalid" || !validation.plugin) return { status: "invalid", diagnostics: validation.diagnostics };
@@ -59,6 +63,7 @@ export async function installLocalNativePlugin(input: InstallLocalNativePluginIn
     try {
       cachePath = await materializePluginCache(
         sourcePath, input.cacheDir ?? getPluginCacheDir(), validation.plugin.manifest.id,
+        validation.plugin.manifest.version,
         digest,
         async (candidatePath) => {
           const candidateValidation = await validateNativePlugin(candidatePath);
@@ -78,10 +83,10 @@ export async function installLocalNativePlugin(input: InstallLocalNativePluginIn
   const metadata = validation.plugin.manifest.metadata;
   const manifestOrigin = metadata?.origin === "converted" ? "converted" : "native";
   const manifestSourceFormat = typeof metadata?.sourceFormat === "string" ? metadata.sourceFormat : undefined;
-  const projectDir = input.scope === "user" ? undefined : resolve(input.cwd);
   const record: InstalledPluginRecord = {
-    id: validation.plugin.manifest.id, scope: input.scope, ...(projectDir ? { projectDir } : {}),
+    id: validation.plugin.manifest.id, scope: input.scope,
     enabled: true, currentVersion: validation.plugin.manifest.version, cachePath,
+    ...(!input.link ? { behaviorDigest: digest } : {}),
     ...(input.link ? { linkedSourcePath: sourcePath } : {}), origin: input.origin ?? manifestOrigin,
     ...((input.sourceFormat ?? manifestSourceFormat) ? { sourceFormat: input.sourceFormat ?? manifestSourceFormat } : {}),
     requestedPermissions: requested, approvedPermissions: approved, installedAt: now, updatedAt: now,

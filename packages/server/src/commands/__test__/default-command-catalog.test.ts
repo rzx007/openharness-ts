@@ -89,7 +89,7 @@ describe("createDefaultCommandCatalog", () => {
       mkdirSync(join(storePath, ".."), { recursive: true });
       let store: { schemaVersion: 1; revision: number; plugins: Record<string, unknown> } = { schemaVersion: 1, revision: 0, plugins: {} };
       try { store = JSON.parse(readFileSync(storePath, "utf8")); } catch {}
-      store.plugins[`project:${cwd}:dev.openharness.${suffix}`] = { id: `dev.openharness.${suffix}`, scope: "project", projectDir: cwd, enabled: true, currentVersion: "1.0.0", cachePath: pluginDir, origin: "native", requestedPermissions: [], approvedPermissions: [], installedAt: "now", updatedAt: "now" };
+      store.plugins[`user::dev.openharness.${suffix}`] = { id: `dev.openharness.${suffix}`, scope: "user", enabled: true, currentVersion: "1.0.0", cachePath: pluginDir, linkedSourcePath: pluginDir, origin: "native", requestedPermissions: [], approvedPermissions: [], installedAt: "now", updatedAt: "now" };
       writeFileSync(storePath, JSON.stringify(store));
     }
 

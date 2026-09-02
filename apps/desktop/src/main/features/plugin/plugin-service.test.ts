@@ -24,7 +24,7 @@ const examplePlugin: PluginInfo = {
   identity: { id: "context7", name: "context7", displayName: "Context7", version: "1.0.0" },
   origin: "converted",
   sourceFormat: "claude-code",
-  scope: "project",
+  scope: "user",
   enabled: true,
   installation: "installed",
   activation: "active",

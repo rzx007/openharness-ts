@@ -69,8 +69,6 @@ type PluginFilter = "all" | "enabled" | "attention"
 
 const scopeLabels: Record<DesktopPluginInfo["scope"], string> = {
   user: "用户",
-  project: "项目",
-  local: "本地链接",
   managed: "托管",
 }
 

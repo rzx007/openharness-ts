@@ -12,7 +12,7 @@ function plugin(partial: Partial<PluginInfo> = {}): PluginInfo {
     },
     origin: "converted",
     sourceFormat: "claude-code",
-    scope: "project",
+    scope: "user",
     enabled: true,
     installation: "installed",
     activation: "active",
@@ -35,7 +35,7 @@ describe("formatPluginList", () => {
     const output = formatPluginList({ plugins: [plugin()], warnings: [] });
     expect(output).toContain("PLUGIN");
     expect(output).toContain("Context7  1.2.3");
-    expect(output).toContain("project  enabled  active");
+    expect(output).toContain("user   enabled  active");
     expect(output).toContain("2/2");
   });
 
@@ -95,5 +95,11 @@ describe("createPluginCommand", () => {
       "--verbose",
       "--json",
     ]);
+  });
+
+  it.each(["install-local", "link", "install"])("keeps %s user-scoped without a scope selector", (name) => {
+    const command = createPluginCommand().commands.find((candidate) => candidate.name() === name);
+
+    expect(command?.options.map((option) => option.long)).not.toContain("--scope");
   });
 });

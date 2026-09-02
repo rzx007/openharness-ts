@@ -21,8 +21,31 @@ describe("installLocalNativePlugin", () => {
     const store = await readInstalledPluginStore(join(root, "installed.json"));
     const record = Object.values(store.plugins)[0];
     expect(record?.id).toBe("dev.openharness.minimal-skill");
-    expect(record?.cachePath).toBe(join(root, "cache", "dev.openharness.minimal-skill", "current"));
-    expect(await readdir(join(root, "cache", "dev.openharness.minimal-skill"))).toEqual(["current"]);
+    expect(record?.cachePath).toBe(join(root, "cache", "dev.openharness.minimal-skill", `1.0.0-${record?.behaviorDigest}`));
+    expect((record as { behaviorDigest?: string } | undefined)?.behaviorDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(await readdir(join(root, "cache", "dev.openharness.minimal-skill"))).toEqual([`1.0.0-${record?.behaviorDigest}`]);
+  });
+
+  it.each(["project", "local"] as const)("rejects the legacy %s installation scope", async (scope) => {
+    const result = await installLocalNativePlugin({
+      sourcePath: fixture,
+      scope,
+      cwd: root,
+      approvedPermissions: [],
+      cacheDir: join(root, "cache"),
+      storePath: join(root, "installed.json"),
+    } as unknown as Parameters<typeof installLocalNativePlugin>[0]);
+
+    expect(result).toEqual({
+      status: "blocked",
+      diagnostics: [{
+        severity: "error",
+        phase: "install",
+        code: "plugin_scope_not_supported",
+        message: `Native Plugins can only be installed for the user; received scope '${scope}'`,
+      }],
+    });
+    expect((await readInstalledPluginStore(join(root, "installed.json"))).plugins).toEqual({});
   });
 
   it("records converted origin from Native manifest metadata without conversion side files", async () => {

@@ -7,7 +7,7 @@ import {
   validateNativePlugin,
 } from "@openharness/plugins";
 import { createBuiltinConverterRegistry } from "@openharness/plugin-converters";
-import { Command, Option } from "commander";
+import { Command } from "commander";
 import { ensureLocalDaemon } from "../ensure-daemon.js";
 
 async function client(): Promise<OpenHarnessClient> {
@@ -144,7 +144,6 @@ export function createPluginCommand(): Command {
   });
   for (const [name, link] of [["install-local", false], ["link", true]] as const) {
     cmd.command(name).argument("<path>")
-      .addOption(new Option("--scope <scope>").choices(["user", "project", "local"]).default("user"))
       .option("--cwd <path>").option("--approve <permission>", "approve a requested permission", collect, [])
       .action(async (path, options) => {
         const sourcePath = resolve(path);
@@ -155,7 +154,7 @@ export function createPluginCommand(): Command {
         const missing = requested.filter((item) => !approved.includes(item));
         if (missing.length) throw new Error(`Explicit approval required: ${missing.join(", ")}`);
         const result = await (await client()).installLocalPlugin({
-          cwd: resolve(options.cwd ?? process.cwd()), sourcePath, scope: options.scope,
+          cwd: resolve(options.cwd ?? process.cwd()), sourcePath, scope: "user",
           approvedPermissions: approved, link,
         });
         console.log(result.message);
@@ -175,7 +174,6 @@ export function createPluginCommand(): Command {
     console.log(JSON.stringify(plugin, null, 2));
   });
   cmd.command("install").argument("<source>").requiredOption("--from <converter>")
-    .addOption(new Option("--scope <scope>").choices(["user", "project", "local"]).default("user"))
     .option("--cwd <path>").option("--approve <item>", "approve conversion item or permission", collect, [])
     .action(async (source, options) => {
       const temporaryRoot = await mkdtemp(join(tmpdir(), "ohs-plugin-import-"));
@@ -191,7 +189,7 @@ export function createPluginCommand(): Command {
         const missing = requested.filter((item) => !(options.approve as string[]).includes(item));
         if (missing.length) throw new Error(`Explicit permission approval required: ${missing.join(", ")}`);
         const result = await (await client()).installLocalPlugin({
-          cwd: resolve(options.cwd ?? process.cwd()), sourcePath: output, scope: options.scope,
+          cwd: resolve(options.cwd ?? process.cwd()), sourcePath: output, scope: "user",
           approvedPermissions: requested,
         });
         console.log(result.message);
