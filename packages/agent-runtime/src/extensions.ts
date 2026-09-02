@@ -11,7 +11,7 @@ import {
   discoverInstalledNativePlugins,
   buildNativePluginCompatibilityEnvironment,
   loadNativePlugin,
-  validateNativePlugin,
+  verifyInstalledNativePlugin,
   type LoadedNativePlugin,
 } from "@openharness/plugins";
 import { SkillLoader, SkillRegistry, findProjectSkillDirs } from "@openharness/skills";
@@ -50,20 +50,15 @@ export async function discoverOpenHarnessExtensions(
   const plugins: LoadedNativePlugin[] = [];
   const warnings: string[] = [];
   const installedPlugins = (settings.plugins?.enabled ?? true) && (options.pluginsEnabled ?? true)
-    ? await discoverInstalledNativePlugins({ cwd })
+    ? await discoverInstalledNativePlugins({ cwd, onWarning: (warning) => warnings.push(warning) })
     : [];
   for (const record of installedPlugins) {
-    const missingPermissions = record.requestedPermissions.filter((permission) => !record.approvedPermissions.includes(permission));
-    if (missingPermissions.length > 0) {
-      warnings.push(`${record.id}: missing approved plugin permissions [${missingPermissions.join(", ")}]; approve the permissions or reinstall the plugin before it can run`);
+    const verified = await verifyInstalledNativePlugin(record);
+    warnings.push(...verified.diagnostics.map((item) => `${record.id}: ${item.message}`));
+    if (verified.status !== "valid") {
       continue;
     }
-    const validation = await validateNativePlugin(record.cachePath);
-    if (!validation.plugin) {
-      warnings.push(...validation.diagnostics.map((item) => `${record.id}: ${item.message}`));
-      continue;
-    }
-    const loaded = await loadNativePlugin(validation.plugin);
+    const loaded = await loadNativePlugin(verified.plugin);
     plugins.push(loaded);
     warnings.push(...loaded.diagnostics.map((item) => `${record.id}: ${item.message}`));
     for (const skill of loaded.components.skills?.value ?? []) skillRegistry.register(skill);

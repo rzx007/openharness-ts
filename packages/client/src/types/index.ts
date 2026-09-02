@@ -441,7 +441,7 @@ export interface PluginInfo {
   identity: { id: string; name: string; version: string; displayName?: string };
   origin: "native" | "converted";
   sourceFormat?: string;
-  scope: "user" | "project" | "local" | "managed";
+  scope: "user" | "managed";
   enabled: boolean;
   installation: "installed" | "missing" | "invalid";
   activation: "inactive" | "active" | "partial" | "reload-required";

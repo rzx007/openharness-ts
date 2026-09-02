@@ -5,7 +5,7 @@ import { CommandRegistry } from "@openharness/commands";
 import { SkillRegistry, SkillLoader, findProjectSkillDirs, type SkillDefinition } from "@openharness/skills";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
 import { resolveToolPath } from "@openharness/tools";
-import { discoverInstalledNativePlugins, loadNativePlugin, validateNativePlugin } from "@openharness/plugins";
+import { discoverInstalledNativePlugins, loadNativePlugin, verifyInstalledNativePlugin } from "@openharness/plugins";
 import { isCoordinatorMode } from "@openharness/coordinator";
 import { resolveBun } from "./resolveBun";
 import { VERSION } from "../version";
@@ -413,13 +413,17 @@ export async function loadSkillsThreeSources(
   skillRegistry.registerBundled();
   const pluginContributions: { plugins: Awaited<ReturnType<typeof loadNativePlugin>>[]; warnings: string[] } = { plugins: [], warnings: [] };
   if (settings && (settings.plugins?.enabled ?? true)) {
-    for (const record of await discoverInstalledNativePlugins({ cwd })) {
-      const validation = await validateNativePlugin(record.cachePath);
-      if (!validation.plugin) {
-        pluginContributions.warnings.push(...validation.diagnostics.map((item) => item.message));
+    const records = await discoverInstalledNativePlugins({
+      cwd,
+      onWarning: (warning) => pluginContributions.warnings.push(warning),
+    });
+    for (const record of records) {
+      const verification = await verifyInstalledNativePlugin(record);
+      if (verification.status !== "valid") {
+        pluginContributions.warnings.push(...verification.diagnostics.map((item) => `${record.id}: ${item.message}`));
         continue;
       }
-      const loaded = await loadNativePlugin(validation.plugin);
+      const loaded = await loadNativePlugin(verification.plugin);
       pluginContributions.plugins.push(loaded);
       pluginContributions.warnings.push(...loaded.diagnostics.map((item) => item.message));
       for (const skill of loaded.components.skills?.value ?? []) skillRegistry.register(skill);

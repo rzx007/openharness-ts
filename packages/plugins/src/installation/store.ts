@@ -11,6 +11,7 @@ export interface InstalledPluginRecord {
   enabled: boolean;
   currentVersion: string;
   cachePath: string;
+  behaviorDigest?: string;
   linkedSourcePath?: string;
   origin: "native" | "converted";
   sourceFormat?: string;
@@ -66,12 +67,17 @@ export async function updateInstalledPluginStore(
   return next;
 }
 
-export async function discoverInstalledNativePlugins(input: { cwd: string; storePath?: string }): Promise<InstalledPluginRecord[]> {
+export async function discoverInstalledNativePlugins(input: {
+  cwd: string;
+  storePath?: string;
+  onWarning?: (warning: string) => void;
+}): Promise<InstalledPluginRecord[]> {
   const store = await readInstalledPluginStore(input.storePath ?? getInstalledPluginStorePath());
-  const cwd = input.cwd.toLowerCase();
   return Object.values(store.plugins).filter((record) => {
-    if (!record.enabled) return false;
-    if (record.scope === "user" || record.scope === "managed") return true;
-    return record.projectDir?.toLowerCase() === cwd;
+    if (record.scope !== "user" && record.scope !== "managed") {
+      input.onWarning?.(`${record.id}: ignored legacy ${record.scope}-scoped installation; reinstall it for the user`);
+      return false;
+    }
+    return record.enabled;
   });
 }

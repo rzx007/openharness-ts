@@ -732,7 +732,7 @@ export class OpenHarnessClient {
   async installLocalPlugin(input: {
     cwd: string;
     sourcePath: string;
-    scope: "user" | "project" | "local";
+    scope: "user";
     approvedPermissions: string[];
     link?: boolean;
   }): Promise<{ message: string }> {

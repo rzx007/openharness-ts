@@ -32,15 +32,15 @@ Skills、Agents、Hooks、MCP 和 Node Tool 已进入加载闭环。Tool 不会�
 
 ```text
 ~/.openharness-ts/plugins/
-├─ cache/<plugin-id>/current/
+├─ cache/<plugin-id>/<version>-<digest>/
 ├─ data/<plugin-id>/
 ├─ sources/
 └─ installed.json
 ```
 
-安装流程先校验源目录，再复制到 `cache/<plugin-id>/` 下的临时候选目录并校验副本，校验成功后替换 `current/`，最后原子更新 `installed.json`。`installed.json` 仍记录 manifest version，但第三方插件缓存目录不按版本保留历史副本；使用新 Installer 成功重装时，会顺带清理旧的 `<version>-<digest>` 目录。权限批准记录保存在 installed record，不会写回 manifest。普通卸载保留 `data/`。
+安装流程先校验源目录，再复制到 `cache/<plugin-id>/` 下的临时候选目录并校验副本，校验成功后原子改名为不可变的 `<version>-<digest>/` 快照，最后更新 `installed.json` 指向该快照。最终快照必须是真实目录，不能是符号链接或 Windows 目录联接。`installed.json` 同时记录 manifest version、内容摘要和权限批准。重装同一 ID 会创建新快照，不会原地替换正在被旧 Runtime 使用的目录；若同摘要快照已经损坏，重装会先隔离损坏目录，再从已验证的原始内容重建。普通卸载保留 `data/`。
 
-Runtime 按当前 cwd 解析 user、managed、project 和 local scope。启停使用稳定插件 ID，不再修改 Settings。
+Native Plugin 只支持用户级安装；当前 cwd 只作为插件运行时的工作目录，不形成独立安装或独立权限批准。旧的 project/local 记录会被忽略并提示重新以 user scope 安装，不能自动扩大成全局授权。Runtime 加载前先确认非 link 缓存根不是符号链接或目录联接，再重新核对实际 manifest 的 ID、版本和权限，并校验内容摘要；任一项与安装记录不一致都会拒绝激活。启停使用稳定插件 ID，不再修改 Settings。
 
 ## 外部转换
 

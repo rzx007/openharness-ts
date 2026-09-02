@@ -194,7 +194,7 @@ export interface PluginInfo {
   identity: { id: string; name: string; version: string; displayName?: string };
   origin: "native" | "converted";
   sourceFormat?: string;
-  scope: "user" | "project" | "local" | "managed";
+  scope: "user" | "managed";
   enabled: boolean;
   installation: "installed" | "missing" | "invalid";
   activation: "inactive" | "active" | "partial" | "reload-required";
@@ -225,7 +225,7 @@ export interface PluginService {
   }):
     | Promise<{ message: string; restartRuntimes?: boolean }>
     | { message: string; restartRuntimes?: boolean };
-  installLocal?(input: { cwd: string; sourcePath: string; scope: "user" | "project" | "local"; approvedPermissions: string[]; link?: boolean }): Promise<{ message: string; restartRuntimes?: boolean }>;
+  installLocal?(input: { cwd: string; sourcePath: string; scope: "user"; approvedPermissions: string[]; link?: boolean }): Promise<{ message: string; restartRuntimes?: boolean }>;
   uninstall?(input: { cwd: string; id: string }): Promise<{ message: string; restartRuntimes?: boolean }>;
 }
 

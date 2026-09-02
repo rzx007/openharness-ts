@@ -3135,6 +3135,42 @@ describe("OpenHarnessHttpServer", () => {
     );
   });
 
+  it("accepts only user-scoped Native Plugin installation requests", async () => {
+    const installLocal = vi.fn(async () => ({ message: "Installed plugin 'demo'." }));
+    await withServer(
+      async ({ baseUrl, token }) => {
+        const projectInstall = await fetch(`${baseUrl}/plugins/install-local`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({
+            cwd: process.cwd(), sourcePath: process.cwd(), scope: "project", approvedPermissions: [],
+          }),
+        });
+        expect(projectInstall.status).toBe(400);
+        expect(installLocal).not.toHaveBeenCalled();
+
+        const userInstall = await fetch(`${baseUrl}/plugins/install-local`, {
+          method: "POST",
+          headers: { ...auth(token), "content-type": "application/json" },
+          body: JSON.stringify({
+            cwd: process.cwd(), sourcePath: process.cwd(), scope: "user", approvedPermissions: [],
+          }),
+        });
+        expect(userInstall.status).toBe(200);
+        expect(installLocal).toHaveBeenCalledWith({
+          cwd: process.cwd(), sourcePath: process.cwd(), scope: "user", approvedPermissions: [], link: false,
+        });
+      },
+      {
+        pluginService: {
+          async list() { return { plugins: [], warnings: [] }; },
+          async setEnabled() { return { message: "unchanged" }; },
+          installLocal,
+        },
+      },
+    );
+  });
+
   it("exposes project/plugin/hooks/git and background-shell resource APIs", async () => {
     await withServer(
       async ({ baseUrl, token }) => {

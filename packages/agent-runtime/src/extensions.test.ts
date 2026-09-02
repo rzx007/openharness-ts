@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,7 @@ import type {
   AgentExecutionContext,
   Settings,
 } from "@openharness/core";
+import { computePluginBehaviorDigest, installLocalNativePlugin } from "@openharness/plugins";
 import { ToolRegistry } from "@openharness/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,9 +62,9 @@ function writeProjectAgentPlugin(cwd: string, suffix: string, model: string): vo
   let store: { schemaVersion: 1; revision: number; plugins: Record<string, unknown> } = { schemaVersion: 1, revision: 0, plugins: {} };
   try { store = JSON.parse(readFileSync(storePath, "utf8")); } catch {}
   store.plugins[`project:${cwd}:dev.openharness.${suffix}`] = {
-    id: `dev.openharness.${suffix}`, scope: "project", projectDir: cwd, enabled: true,
+    id: `dev.openharness.${suffix}`, scope: "user", enabled: true,
     currentVersion: "1.0.0", cachePath: pluginDir, origin: "native", requestedPermissions: [],
-    approvedPermissions: [], installedAt: "now", updatedAt: "now",
+    approvedPermissions: [], linkedSourcePath: pluginDir, installedAt: "now", updatedAt: "now",
   };
   writeFileSync(storePath, JSON.stringify(store));
 }
@@ -93,16 +94,16 @@ function writeProjectToolPlugin(cwd: string): void {
     schemaVersion: 1,
     revision: 1,
     plugins: {
-      [`project:${cwd}:dev.openharness.runtime-tool`]: {
+      "user::dev.openharness.runtime-tool": {
         id: "dev.openharness.runtime-tool",
-        scope: "project",
-        projectDir: cwd,
+        scope: "user",
         enabled: true,
         currentVersion: "1.0.0",
         cachePath: pluginDir,
         origin: "native",
         requestedPermissions: [],
         approvedPermissions: [],
+        linkedSourcePath: pluginDir,
         installedAt: "now",
         updatedAt: "now",
       },
@@ -292,12 +293,168 @@ describe("installed Native Tool activation", () => {
     record.requestedPermissions = ["filesystem:write"];
     record.approvedPermissions = [];
     writeFileSync(storePath, JSON.stringify(store));
+    const manifestPath = join(tempRoot, "cache", "runtime-tool", ".openharness-plugin", "plugin.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.permissions = { filesystem: ["write"] };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
 
     const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
     expect(discovery.plugins).toEqual([]);
     expect(discovery.warnings).toEqual([
       "dev.openharness.runtime-tool: missing approved plugin permissions [filesystem:write]; approve the permissions or reinstall the plugin before it can run",
     ]);
+  });
+
+  it("rejects a linked plugin whose actual manifest requests different permissions", async () => {
+    const cwd = join(tempRoot, "permission-drift-workspace");
+    writeProjectToolPlugin(cwd);
+    const manifestPath = join(tempRoot, "cache", "runtime-tool", ".openharness-plugin", "plugin.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.permissions = { filesystem: ["write"] };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+
+    expect(discovery.plugins).toEqual([]);
+    expect(discovery.warnings).toEqual([
+      "dev.openharness.runtime-tool: actual plugin permissions [filesystem:write] differ from the installed permission request []; reinstall the plugin",
+    ]);
+  });
+
+  it("rejects a copied plugin when its cached content no longer matches the installed digest", async () => {
+    const cwd = join(tempRoot, "digest-drift-workspace");
+    const source = join(tempRoot, "digest-source");
+    mkdirSync(join(source, ".openharness-plugin"), { recursive: true });
+    mkdirSync(join(source, "skills", "digest-skill"), { recursive: true });
+    writeFileSync(join(source, ".openharness-plugin", "plugin.json"), JSON.stringify({
+      schemaVersion: 1,
+      id: "dev.openharness.digest-check",
+      name: "digest-check",
+      version: "1.0.0",
+      components: { skills: ["./skills"] },
+    }));
+    writeFileSync(join(source, "skills", "digest-skill", "SKILL.md"), "---\nname: digest-skill\ndescription: digest fixture\n---\nOriginal.\n");
+    const installed = await installLocalNativePlugin({
+      sourcePath: source,
+      scope: "user",
+      cwd,
+      approvedPermissions: [],
+      cacheDir: join(tempRoot, "config", "plugins", "cache"),
+      storePath: join(tempRoot, "config", "plugins", "installed.json"),
+    });
+    expect(installed.status).toBe("installed");
+    if (installed.status !== "installed") return;
+    expect(installed.record.behaviorDigest).toBe(await computePluginBehaviorDigest(installed.record.cachePath));
+    const trustedDiscovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+    expect(trustedDiscovery.plugins.map((plugin) => plugin.manifest.id)).toEqual(["dev.openharness.digest-check"]);
+    expect(trustedDiscovery.warnings).toEqual([]);
+    writeFileSync(join(installed.record.cachePath, "unexpected.txt"), "changed after installation");
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+
+    expect(discovery.plugins).toEqual([]);
+    expect(discovery.warnings).toEqual([
+      "dev.openharness.digest-check: cached plugin content does not match the installed digest; reinstall the plugin",
+    ]);
+
+    const reinstalled = await installLocalNativePlugin({
+      sourcePath: source,
+      scope: "user",
+      cwd,
+      approvedPermissions: [],
+      cacheDir: join(tempRoot, "config", "plugins", "cache"),
+      storePath: join(tempRoot, "config", "plugins", "installed.json"),
+    });
+    expect(reinstalled.status).toBe("installed");
+
+    const recoveredDiscovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+    expect(recoveredDiscovery.plugins.map((plugin) => plugin.manifest.id)).toEqual(["dev.openharness.digest-check"]);
+    expect(recoveredDiscovery.warnings).toEqual([]);
+  });
+
+  it("rejects a legacy copied user installation that has no trusted digest", async () => {
+    const cwd = join(tempRoot, "legacy-user-workspace");
+    writeProjectToolPlugin(cwd);
+    const storePath = join(tempRoot, "config", "plugins", "installed.json");
+    const store = JSON.parse(readFileSync(storePath, "utf8")) as {
+      plugins: Record<string, { linkedSourcePath?: string }>;
+    };
+    delete Object.values(store.plugins)[0]!.linkedSourcePath;
+    writeFileSync(storePath, JSON.stringify(store));
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+
+    expect(discovery.plugins).toEqual([]);
+    expect(discovery.warnings).toEqual([
+      "dev.openharness.runtime-tool: copied plugin installation has no trusted content digest; reinstall the plugin",
+    ]);
+  });
+
+  it("rejects a copied plugin whose installed snapshot root was replaced by a directory link", async () => {
+    const cwd = join(tempRoot, "linked-snapshot-workspace");
+    const source = join(tempRoot, "linked-snapshot-source");
+    mkdirSync(join(source, ".openharness-plugin"), { recursive: true });
+    mkdirSync(join(source, "skills", "linked-snapshot-skill"), { recursive: true });
+    writeFileSync(join(source, ".openharness-plugin", "plugin.json"), JSON.stringify({
+      schemaVersion: 1,
+      id: "dev.openharness.linked-snapshot",
+      name: "linked-snapshot",
+      version: "1.0.0",
+      components: { skills: ["./skills"] },
+    }));
+    writeFileSync(join(source, "skills", "linked-snapshot-skill", "SKILL.md"), "---\nname: linked-snapshot-skill\ndescription: fixture\n---\nOriginal.\n");
+    const installed = await installLocalNativePlugin({
+      sourcePath: source,
+      scope: "user",
+      cwd,
+      approvedPermissions: [],
+      cacheDir: join(tempRoot, "config", "plugins", "cache"),
+      storePath: join(tempRoot, "config", "plugins", "installed.json"),
+    });
+    expect(installed.status).toBe("installed");
+    if (installed.status !== "installed") return;
+    const external = join(tempRoot, "mutable-external-snapshot");
+    cpSync(installed.record.cachePath, external, { recursive: true });
+    rmSync(installed.record.cachePath, { recursive: true, force: true });
+    symlinkSync(external, installed.record.cachePath, process.platform === "win32" ? "junction" : "dir");
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+
+    expect(discovery.plugins).toEqual([]);
+    expect(discovery.warnings).toEqual([
+      "dev.openharness.linked-snapshot: copied plugin cache snapshot is not a regular directory; reinstall the plugin",
+    ]);
+  });
+
+  it.each([
+    ["id", "dev.openharness.replaced", "1.0.0"],
+    ["version", "dev.openharness.runtime-tool", "2.0.0"],
+  ] as const)("rejects a linked plugin whose manifest %s differs from its installation record", async (_field, id, version) => {
+    const cwd = join(tempRoot, `identity-drift-${_field}`);
+    writeProjectToolPlugin(cwd);
+    const manifestPath = join(tempRoot, "cache", "runtime-tool", ".openharness-plugin", "plugin.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.id = id;
+    manifest.version = version;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+
+    expect(discovery.plugins).toEqual([]);
+    expect(discovery.warnings).toEqual([
+      `dev.openharness.runtime-tool: actual plugin identity ${id}@${version} differs from installed identity dev.openharness.runtime-tool@1.0.0; reinstall the plugin`,
+    ]);
+  });
+
+  it("allows linked plugin code to change when its manifest identity and permissions stay unchanged", async () => {
+    const cwd = join(tempRoot, "linked-code-workspace");
+    writeProjectToolPlugin(cwd);
+    writeFileSync(join(tempRoot, "cache", "runtime-tool", "tools", "extra.txt"), "development change");
+
+    const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
+
+    expect(discovery.plugins.map((plugin) => plugin.manifest.id)).toEqual(["dev.openharness.runtime-tool"]);
+    expect(discovery.warnings).toEqual([]);
   });
 
   it("discovers, invokes, and removes a Tool with its owning runtime", async () => {

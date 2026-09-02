@@ -31,7 +31,7 @@ describe("Native Plugin acceptance", () => {
     expect((await converter.convert({ inspection, plan, output, approvals: [] })).status).toBe("success");
     const validation = await validateNativePlugin(output);
     expect(validation.status).toBe("valid");
-    const installed = await installLocalNativePlugin({ sourcePath: output, scope: "project", cwd: root, approvedPermissions: [] });
+    const installed = await installLocalNativePlugin({ sourcePath: output, scope: "user", cwd: root, approvedPermissions: [] });
     expect(installed.status).toBe("installed");
     if (installed.status !== "installed") return;
     expect(installed.record.origin).toBe("converted");
@@ -42,7 +42,7 @@ describe("Native Plugin acceptance", () => {
       "plugins",
       "cache",
       "converted.claude.mixed-plugin",
-      "current",
+      `2.0.0-${installed.record.behaviorDigest}`,
     ));
     expect((await readdir(installed.record.cachePath)).sort()).toEqual([
       ".openharness-conversion",
