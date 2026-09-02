@@ -151,14 +151,14 @@ export interface CompactCheckpoint {
 }
 
 // ---------------------------------------------------------------------------
-// Compact attachments（B.2）—— 注入摘要 prompt 的结构化上下文
+// Compact context（B.2）—— 注入摘要 prompt 的结构化上下文
 // ---------------------------------------------------------------------------
 
 /**
- * 压缩摘要时附加的结构化上下文（对齐 Python compact attachments）。
+ * 压缩摘要时附加的结构化上下文。
  * 目的：摘要后模型仍能知道「当前任务 / 最近文件 / 计划」，降低断档感。
  */
-export interface CompactAttachments {
+export interface CompactContext {
   /** session_memory checkpoint 内容（帮助压缩后恢复任务状态，由 CLI 读入注入）。 */
   sessionMemory?: string;
   /** 当前正在进行的执行描述（来自具体运行时）。 */
@@ -199,9 +199,16 @@ export interface CompactAttachmentCatalogEntry {
 }
 
 /** 由调用方（QueryEngine / CLI）提供外部上下文的工厂函数。 */
-export type CompactAttachmentsProvider = () =>
-  | CompactAttachments
-  | Promise<CompactAttachments>;
+export type CompactContextProvider = () =>
+  | CompactContext
+  | Promise<CompactContext>;
+
+class CompactContextProviderError extends Error {
+  constructor(cause: unknown) {
+    super("Compact context provider failed", { cause });
+    this.name = "CompactContextProviderError";
+  }
+}
 
 /** 构造 CompactService 的可选配置。 */
 export interface CompactServiceOptions {
@@ -213,8 +220,8 @@ export interface CompactServiceOptions {
   progressCallback?: CompactProgressCallback;
   /** 单图 token 估算覆盖值；默认 DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE。 */
   imageTokenEstimate?: number;
-  /** 外部附件提供者（任务、计划、session memory 等）。 */
-  attachmentsProvider?: CompactAttachmentsProvider;
+  /** 外部上下文提供者（附件目录、任务、计划、session memory 等）。 */
+  contextProvider?: CompactContextProvider;
 }
 
 /** 摘要客户端最小接口：提交一段 prompt，消费流式事件。 */
@@ -323,8 +330,8 @@ export class CompactService {
   private consecutiveFailures = 0;
   /** 本次 / 近期压缩过程中写入的检查点列表。 */
   private checkpoints: CompactCheckpoint[] = [];
-  /** 外部结构化附件提供者。 */
-  private attachmentsProvider: CompactAttachmentsProvider | undefined;
+  /** 外部结构化上下文提供者。 */
+  private contextProvider: CompactContextProvider | undefined;
 
   /**
    * @param maxTokens 上下文上限
@@ -344,7 +351,7 @@ export class CompactService {
     this.progressCallback = options.progressCallback;
     this.imageTokenEstimate =
       options.imageTokenEstimate ?? DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE;
-    this.attachmentsProvider = options.attachmentsProvider;
+    this.contextProvider = options.contextProvider;
   }
 
   /** 替换摘要客户端（例如切换 API provider 时）。 */
@@ -352,13 +359,13 @@ export class CompactService {
     this.client = client;
   }
 
-  /** 注册 / 替换附件提供者（由 QueryEngine 或 CLI 接线后注入运行时上下文）。 */
-  setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void {
-    this.attachmentsProvider = fn;
+  /** 注册 / 替换上下文提供者（由 QueryEngine 或 Host 接线后注入运行时上下文）。 */
+  setCompactContextProvider(fn: CompactContextProvider | undefined): void {
+    this.contextProvider = fn;
   }
 
   // -------------------------------------------------------------------------
-  // Attachments 辅助（B.2）
+  // Compact context 辅助（B.2）
   // -------------------------------------------------------------------------
 
   /**
@@ -407,29 +414,29 @@ export class CompactService {
   }
 
   /**
-   * 把 attachments 拼进 COMPACT_PROMPT。
-   * 无任何附件时直接返回基础 prompt；有附件则包在 <context> 中，
+   * 把 context 拼进 COMPACT_PROMPT。
+   * 无任何附加上下文时直接返回基础 prompt；有上下文则包在 <context> 中，
    * 并提示模型把这些信息写进摘要以便续聊。
    */
-  private buildCompactPrompt(attachments: CompactAttachments): string {
+  private buildCompactPrompt(context: CompactContext): string {
     const sections: string[] = [];
-    if (attachments.sessionMemory) {
-      sections.push(`## Session Memory Checkpoint\n${attachments.sessionMemory}`);
+    if (context.sessionMemory) {
+      sections.push(`## Session Memory Checkpoint\n${context.sessionMemory}`);
     }
-    if (attachments.taskFocus) {
-      sections.push(`## Current Task\n${attachments.taskFocus}`);
+    if (context.taskFocus) {
+      sections.push(`## Current Task\n${context.taskFocus}`);
     }
-    if (attachments.recentFiles?.length) {
-      sections.push(`## Recently Accessed Files\n${attachments.recentFiles.join("\n")}`);
+    if (context.recentFiles?.length) {
+      sections.push(`## Recently Accessed Files\n${context.recentFiles.join("\n")}`);
     }
-    if (attachments.plan) {
-      sections.push(`## Current Plan\n${attachments.plan}`);
+    if (context.plan) {
+      sections.push(`## Current Plan\n${context.plan}`);
     }
-    if (attachments.workLog) {
-      sections.push(`## Work Log\n${attachments.workLog}`);
+    if (context.workLog) {
+      sections.push(`## Work Log\n${context.workLog}`);
     }
     const attachmentCatalog = this.formatAttachmentCatalog(
-      attachments.attachmentCatalog,
+      context.attachmentCatalog,
     );
     if (attachmentCatalog) {
       sections.push(`## Conversation Attachments\n${attachmentCatalog}`);
@@ -559,6 +566,7 @@ export class CompactService {
         return result;
       } catch (err) {
         if (signal?.aborted) throw signal.reason;
+        if (err instanceof CompactContextProviderError) throw err;
         this.consecutiveFailures++;
         await this.emitProgress({
           phase: "compact_failed",
@@ -801,26 +809,31 @@ export class CompactService {
     // 摘要请求里不要带真实图片二进制，替换为占位文本即可。
     let summarizable = this.replaceImagesWithPlaceholders(older);
 
-    // 汇总 attachments：先自动从历史抽取，再与外部 provider 合并（外部优先）。
+    // 汇总 context：先自动从历史抽取，再与外部 provider 合并（外部优先）。
     const autoFiles = this.extractRecentFiles(messages);
     const autoWorkLog = this.deriveWorkLog(messages);
-    let attachments: CompactAttachments = {
+    let context: CompactContext = {
       recentFiles: autoFiles.length > 0 ? autoFiles : undefined,
       workLog: autoWorkLog,
     };
-    if (this.attachmentsProvider) {
-      const external = await this.attachmentsProvider();
-      attachments = {
-        sessionMemory: external.sessionMemory ?? attachments.sessionMemory,
-        taskFocus: external.taskFocus ?? attachments.taskFocus,
-        recentFiles: external.recentFiles ?? attachments.recentFiles,
-        plan: external.plan ?? attachments.plan,
-        workLog: external.workLog ?? attachments.workLog,
+    if (this.contextProvider) {
+      let external: CompactContext;
+      try {
+        external = await this.contextProvider();
+      } catch (cause) {
+        throw new CompactContextProviderError(cause);
+      }
+      context = {
+        sessionMemory: external.sessionMemory ?? context.sessionMemory,
+        taskFocus: external.taskFocus ?? context.taskFocus,
+        recentFiles: external.recentFiles ?? context.recentFiles,
+        plan: external.plan ?? context.plan,
+        workLog: external.workLog ?? context.workLog,
         attachmentCatalog:
-          external.attachmentCatalog ?? attachments.attachmentCatalog,
+          external.attachmentCatalog ?? context.attachmentCatalog,
       };
     }
-    const compactPrompt = this.buildCompactPrompt(attachments);
+    const compactPrompt = this.buildCompactPrompt(context);
 
     let summaryText = "";
     let ptlRetries = 0;

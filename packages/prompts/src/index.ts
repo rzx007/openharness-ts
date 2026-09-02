@@ -30,6 +30,9 @@ export interface EnvironmentInfo {
 
 const DEFAULT_IDENTITY = "You are OpenHarness, an open-source AI coding assistant CLI. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.";
 
+const LONG_RUNNING_SHELL_GUIDANCE =
+  " - Use Bash only for short-lived commands. For long-running shell commands such as dev servers, watchers, installs, builds, migrations, docker compose, or anything likely to keep running, use BackgroundShellCreate, then follow progress with JobWait or JobRead.";
+
 const INVARIANT_GUIDANCE = `IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming.
 
 # System
@@ -52,7 +55,7 @@ Carefully consider the reversibility and blast radius of actions. For hard-to-re
 
 # Using your tools
  - Do NOT use Bash to run commands when a relevant dedicated tool is provided.
- - Use Bash only for short-lived commands. For long-running shell commands such as dev servers, watchers, installs, builds, migrations, docker compose, or anything likely to keep running, use BackgroundShellCreate, then follow progress with JobWait or JobRead.
+${LONG_RUNNING_SHELL_GUIDANCE}
  - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
 
 # Tone and style
@@ -60,6 +63,12 @@ Carefully consider the reversibility and blast radius of actions. For hard-to-re
  - Be concise. Lead with the outcome, not a transcript of your reasoning.
  - When referencing code, include file_path:line_number for easy navigation.
  - If you can say it in one sentence, don't use three.`;
+
+function invariantGuidance(includeBackgroundShell: boolean): string {
+  return includeBackgroundShell
+    ? INVARIANT_GUIDANCE
+    : INVARIANT_GUIDANCE.replace(`${LONG_RUNNING_SHELL_GUIDANCE}\n`, "");
+}
 
 const BASE_SYSTEM_PROMPT = `${DEFAULT_IDENTITY}\n\n${INVARIANT_GUIDANCE}`;
 
@@ -723,6 +732,8 @@ export async function buildRuntimeSystemPrompt(
     memoryContent?: string;
     /** Whether to include the delegation/subagent guidance section. */
     includeDelegation?: boolean;
+    /** Whether to mention background-shell and job tools in invariant guidance. */
+    includeBackgroundShell?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
   } = {}
 ): Promise<string> {
@@ -740,6 +751,7 @@ export async function buildPromptLayers(
     passes?: number;
     memoryContent?: string;
     includeDelegation?: boolean;
+    includeBackgroundShell?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
   } = {}
 ): Promise<PromptLayers> {
@@ -751,7 +763,7 @@ export async function buildPromptLayers(
   const volatile: string[] = [];
 
   stable.push((await loadSoulMd()) ?? DEFAULT_IDENTITY);
-  stable.push(INVARIANT_GUIDANCE);
+  stable.push(invariantGuidance(options.includeBackgroundShell !== false));
 
   stable.push(envSection);
 

@@ -10,7 +10,7 @@ import {
   cancelPersistentWorkflow,
   createWorkflowNotification,
   createWorkflowResultFromSnapshot,
-  FileWorkflowRunRepository,
+  type WorkflowRunRepository,
   type WorkflowRunSnapshot,
 } from "@openharness/coordinator";
 import {
@@ -51,10 +51,20 @@ type LocalJobSource =
   | { kind: "task"; value: DetachedProcessExecution }
   | { kind: "workflow"; value: WorkflowRunSnapshot };
 
+export interface LocalAgentJobHostOptions {
+  cwd: string;
+  sessionId: string;
+  childManager: AgentChildDirectory;
+  workflowRepository?: WorkflowRunRepository;
+}
+
 /** Local Jobs controller used when a runtime has no durable host. */
 export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost {
   private readonly processes: DetachedProcessSupervisor;
-  private readonly workflows: FileWorkflowRunRepository;
+  private readonly cwd: string;
+  private readonly ownerSession: string;
+  private readonly children: AgentChildDirectory;
+  private readonly workflows: WorkflowRunRepository | undefined;
   private readonly childObservations = new Map<string, ChildObservation>();
   private readonly shellRequests = new Map<string, {
     fingerprint: string;
@@ -63,13 +73,15 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
     settledAt?: number;
   }>();
 
-  constructor(
-    private readonly cwd: string,
-    private readonly ownerSession: string,
-    private readonly children: AgentChildDirectory,
-  ) {
-    this.processes = getDetachedProcessSupervisor({ cwd, sessionId: ownerSession });
-    this.workflows = new FileWorkflowRunRepository({ cwd });
+  constructor(options: LocalAgentJobHostOptions) {
+    this.cwd = options.cwd;
+    this.ownerSession = options.sessionId;
+    this.children = options.childManager;
+    this.workflows = options.workflowRepository;
+    this.processes = getDetachedProcessSupervisor({
+      cwd: options.cwd,
+      sessionId: options.sessionId,
+    });
   }
 
   async create(input: Parameters<AgentBackgroundShellHost["create"]>[0]): Promise<{ jobId: string; label: string }> {
@@ -132,8 +144,8 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
     this.assertOwner(input.sessionId);
     for (const child of this.children.list()) this.observeChild(child);
     await Promise.resolve();
-    const workflows = this.workflows.list()
-      .filter((workflow) => workflow.ownerSession === this.ownerSession);
+    const workflows = this.workflows?.list()
+      .filter((workflow) => workflow.ownerSession === this.ownerSession) ?? [];
     return filterJobSnapshots([
       ...[...this.childObservations.values()].map((child) => this.childSnapshot(child)),
       ...this.processes.listExecutions().map((task) => this.taskSnapshot(task)),
@@ -214,12 +226,14 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
     if (source.kind === "task") {
       return this.taskSnapshot(await this.processes.stopExecution(source.value.id));
     }
+    const workflows = this.workflows;
+    if (!workflows) throw new Error(`Job not found: ${input.jobId}`);
     await cancelPersistentWorkflow(source.value, {
-      store: this.workflows,
+      store: workflows,
       reason: input.reason,
       stopTask: async (taskId) => await this.stopWorkflowWorker(taskId, input.reason),
     });
-    return this.workflowSnapshot(this.workflows.load(source.value.runId)!);
+    return this.workflowSnapshot(workflows.load(source.value.runId)!);
   }
 
   /** Stop a Workflow worker whether it is a live child Agent or a detached process. */
@@ -240,7 +254,7 @@ export class LocalAgentJobHost implements AgentJobHost, AgentBackgroundShellHost
     if (observedChild) return { kind: "child", value: observedChild };
     const task = this.processes.getExecution(jobId);
     if (task) return { kind: "task", value: task };
-    const workflow = this.workflows.load(jobId);
+    const workflow = this.workflows?.load(jobId);
     if (workflow?.ownerSession === this.ownerSession) return { kind: "workflow", value: workflow };
     throw new Error(`Job not found: ${jobId}`);
   }

@@ -11,6 +11,7 @@ import {
 export interface AgentAttachmentResourceHostOptions {
   store: SessionStore;
   attachments: AttachmentApplicationService;
+  resolveAuthorizationSessionId?(sessionId: string): string | undefined;
 }
 
 export function createAgentAttachmentResourceHost(
@@ -21,9 +22,11 @@ export function createAgentAttachmentResourceHost(
       context.signal?.throwIfAborted();
       if (!context.sessionId) throw resourceDenied();
       validateRange(input.offset, input.limit);
+      const authorizationSessionId =
+        options.resolveAuthorizationSessionId?.(context.sessionId) ?? context.sessionId;
       const reference = authorizedReference(
         options.store,
-        context.sessionId,
+        authorizationSessionId,
         input.assetId,
       );
       if (!reference) throw resourceDenied();

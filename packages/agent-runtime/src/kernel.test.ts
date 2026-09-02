@@ -7,6 +7,10 @@ import {
   createBasicAgentKernelRuntime,
 } from "./kernel.js";
 import { createInProcessChildEnvironmentProvider } from "./child-environment.js";
+import {
+  unavailableCapability,
+  type ResolvedAgentCapabilities,
+} from "./capability-resolution.js";
 
 const settings: Settings = {
   model: "kernel-test-model",
@@ -18,9 +22,10 @@ const settings: Settings = {
 
 describe("createAgentKernel", () => {
   it("只使用调用方给出的 runtime 和能力，不安装本地 fallback", async () => {
-    const permissions = {
+    const effects = {
       requestPermission: vi.fn(async () => ({ status: "approved" as const })),
     };
+    const capabilities = unavailableCapabilities();
     const createRuntime = vi.fn(async (context) =>
       createBasicAgentKernelRuntime({
         settings: context.settings,
@@ -41,7 +46,8 @@ describe("createAgentKernel", () => {
       settings,
       cwd: "D:/explicit-workspace",
       sessionId: "kernel-session",
-      hostCapabilities: { permissions },
+      capabilities,
+      effects,
       createRuntime,
     });
 
@@ -55,10 +61,15 @@ describe("createAgentKernel", () => {
           cwd: "D:/explicit-workspace",
           sessionId: "kernel-session",
           settings,
-          hostCapabilities: { permissions },
+          capabilities,
         }),
       );
-      expect(agent.inspect().hostCapabilities).toEqual(["permissions"]);
+      expect(agent.getCapabilities()).toEqual(
+        expect.objectContaining({
+          terminal: { status: "unavailable", reason: "Kernel host did not provide terminal" },
+          jobs: { status: "unavailable", reason: "Kernel host did not provide jobs" },
+        }),
+      );
       expect(agent.inspect().tools.map((tool) => tool.name)).not.toContain(
         "JobList",
       );
@@ -86,3 +97,17 @@ describe("createAgentKernel", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+function unavailableCapabilities(): ResolvedAgentCapabilities {
+  return {
+    terminal: unavailableCapability("Kernel host did not provide terminal"),
+    backgroundShell: unavailableCapability("Kernel host did not provide background shell"),
+    jobs: unavailableCapability("Kernel host did not provide jobs"),
+    attachments: unavailableCapability("Kernel host did not provide attachments"),
+    memory: unavailableCapability("Kernel host did not provide memory"),
+    childEnvironment: unavailableCapability("Kernel host did not provide child environment"),
+    workflowRepository: unavailableCapability("Kernel host did not provide workflow repository"),
+    imageToText: unavailableCapability("Kernel host did not provide image to text"),
+    schedules: unavailableCapability("Kernel host did not provide schedules"),
+  };
+}

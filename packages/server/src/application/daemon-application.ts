@@ -7,9 +7,9 @@ import type { AgentBackgroundShellHost, Settings } from "@openharness/core";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
+  type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
-import type { AgentJobHost } from "@openharness/jobs";
 import {
   readSessionRuntimeConfig,
   type AttachmentLimits,
@@ -96,9 +96,12 @@ export interface DaemonApplicationOptions {
   /** Root used for scheduled conversations that intentionally run outside a project. */
   outsideProjectWorkspaceRoot?: string;
   createAgent?: CreateDaemonAgent;
-  createTerminalHost?(session: SessionRecord): AgentTerminalHost;
-  createJobHost?(session: SessionRecord): AgentJobHost;
-  createBackgroundShellHost?(session: SessionRecord): AgentBackgroundShellHost;
+  createTerminal?(
+    session: SessionRecord,
+  ): ObservableJobProducer<AgentTerminalHost>;
+  createBackgroundShell?(
+    session: SessionRecord,
+  ): ObservableJobProducer<AgentBackgroundShellHost>;
   log(event: ObservabilityEvent): void;
   ownerId?: string;
   ownerHeartbeatMs?: number;
@@ -301,31 +304,34 @@ export class DaemonApplication implements DurableAgentApplication {
         getSettings: options.getSettings,
         getSettingsForCwd: options.getSettingsForCwd,
         createAgent: options.createAgent,
-        createTerminalHost:
-          options.createTerminalHost ??
-          ((session) => this.terminals.createAgentHost(session)),
-        createJobHost:
-          options.createJobHost ??
-          ((session) => this.jobs.createAgentHost(session)),
-        createBackgroundShellHost:
-          options.createBackgroundShellHost ??
+        createTerminal:
+          options.createTerminal ??
           ((session) => ({
-            create: async (input) => {
-              const owner = store.getSession(input.sessionId);
-              if (!owner || owner.status === "archived" || !isSessionInTree(store, session.id, owner.id)) {
-                throw new Error("Background shell owner session mismatch.");
-              }
-              if (input.cwd !== owner.cwd) throw new Error("Background shell cwd mismatch.");
-              const { execution } = await this.backgroundShells.create({
-                sessionId: owner.id,
-                requestId: input.requestId,
-                command: input.command,
-                description: input.description,
-                settings: input.settings,
-                origin: "tool",
-              });
-              return { jobId: execution.id, label: execution.description };
+            value: this.terminals.createAgentHost(session),
+            jobs: this.jobs.createTerminalAgentHost(session),
+          })),
+        createBackgroundShell:
+          options.createBackgroundShell ??
+          ((session) => ({
+            value: {
+              create: async (input) => {
+                const owner = store.getSession(input.sessionId);
+                if (!owner || owner.status === "archived" || !isSessionInTree(store, session.id, owner.id)) {
+                  throw new Error("Background shell owner session mismatch.");
+                }
+                if (input.cwd !== owner.cwd) throw new Error("Background shell cwd mismatch.");
+                const { execution } = await this.backgroundShells.create({
+                  sessionId: owner.id,
+                  requestId: input.requestId,
+                  command: input.command,
+                  description: input.description,
+                  settings: input.settings,
+                  origin: "tool",
+                });
+                return { jobId: execution.id, label: execution.description };
+              },
             },
+            jobs: this.jobs.createDetachedProcessAgentHost(session),
           })),
         workflowRepository: this.workflows,
         imageToText: createAgentImageToTextHost({
@@ -335,6 +341,8 @@ export class DaemonApplication implements DurableAgentApplication {
         attachments: createAgentAttachmentResourceHost({
           store,
           attachments: this.attachments,
+          resolveAuthorizationSessionId: (sessionId) =>
+            this.liveChildren.resolveRootSessionId(sessionId) ?? sessionId,
         }),
         attachmentResourceRoot: (session) =>
           this.attachmentResources.prepareSessionSync(session.id),
@@ -379,19 +387,17 @@ export class DaemonApplication implements DurableAgentApplication {
       this.agentPool = new AgentPool({
         store,
         loadAgent,
-        compactAttachments: (sessionId) => {
+        attachmentCatalog: (sessionId) =>
+          buildCompactAttachmentCatalog(store, sessionId),
+        sessionMemory: (sessionId) => {
           const session = store.getSession(sessionId);
-          const sessionMemory = session
+          return session
             ? sessionMemoryToCompactText(
                 getSessionMemoryContent(
                   getSessionMemoryPath(session.cwd, sessionId),
                 ),
               )
             : "";
-          return {
-            ...(sessionMemory ? { sessionMemory } : {}),
-            attachmentCatalog: buildCompactAttachmentCatalog(store, sessionId),
-          };
         },
         isSessionExternallyOwned: (sessionId) =>
           this.liveChildren.has(sessionId),

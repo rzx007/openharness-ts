@@ -40,7 +40,15 @@ interface FrameworkAgentRunOptions {
   externalSignal?: AbortSignal;
   delivery: "queue" | "steer";
   metadata?: Record<string, unknown>;
-  onSettled(): void;
+  onSettled(
+    result: AgentRunResult | undefined,
+    toolActivity: FrameworkAgentRunToolActivity | undefined,
+  ): void;
+}
+
+export interface FrameworkAgentRunToolActivity {
+  toolUses: Array<{ id: string; name: string; input: unknown }>;
+  toolResults: Array<{ toolUseId: string; isError: boolean | undefined }>;
 }
 
 interface PendingSteer {
@@ -60,6 +68,10 @@ export class FrameworkAgentRun implements AgentRunHandle {
   private readonly controller = new AbortController();
   private readonly steered: PendingSteer[] = [];
   private readonly pendingSteers = new Set<PendingSteer>();
+  private readonly toolActivity: FrameworkAgentRunToolActivity = {
+    toolUses: [],
+    toolResults: [],
+  };
   private readonly start = deferred<AgentInputReceipt>();
   private acceptingInput = true;
   private externalAbort?: () => void;
@@ -81,8 +93,13 @@ export class FrameworkAgentRun implements AgentRunHandle {
           once: true,
         });
     }
+    let completedResult: AgentRunResult | undefined;
     this.result = Promise.resolve()
       .then(() => this.execute())
+      .then((result) => {
+        completedResult = result;
+        return result;
+      })
       .finally(() => {
         this.active = false;
         this.acceptingInput = false;
@@ -92,7 +109,10 @@ export class FrameworkAgentRun implements AgentRunHandle {
             this.externalAbort,
           );
         }
-        options.onSettled();
+        options.onSettled(
+          completedResult,
+          completedResult ? this.snapshotToolActivity() : undefined,
+        );
       });
     void this.started.catch(() => {});
     void this.result.catch(() => {});
@@ -259,11 +279,20 @@ export class FrameworkAgentRun implements AgentRunHandle {
         data: { stopReason: event.stopReason },
       });
     } else if (event.type === "tool_use_start") {
+      this.toolActivity.toolUses.push({
+        id: event.toolUse.id,
+        name: event.toolUse.name,
+        input: event.toolUse.input,
+      });
       await this.emit({
         type: "tool.started",
         data: { toolUse: event.toolUse },
       });
     } else if (event.type === "tool_use_end") {
+      this.toolActivity.toolResults.push({
+        toolUseId: event.toolUseId,
+        isError: event.result.isError,
+      });
       await this.emit({
         type: "tool.completed",
         data: { toolUseId: event.toolUseId, result: event.result },
@@ -273,6 +302,15 @@ export class FrameworkAgentRun implements AgentRunHandle {
     } else if (event.type === "error") {
       throw event.error;
     }
+  }
+
+  private snapshotToolActivity(): FrameworkAgentRunToolActivity {
+    return {
+      toolUses: this.toolActivity.toolUses.map((toolUse) => ({ ...toolUse })),
+      toolResults: this.toolActivity.toolResults.map((toolResult) => ({
+        ...toolResult,
+      })),
+    };
   }
 
   private async emit(

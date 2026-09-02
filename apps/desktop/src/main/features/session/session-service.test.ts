@@ -98,7 +98,7 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
       name: "archify",
       commandName: "archify",
       displayName: "archify",
-      source: "user",
+      source: "user" as const,
       invocationSource: "slash" as const,
     }
 

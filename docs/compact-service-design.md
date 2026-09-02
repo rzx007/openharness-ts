@@ -152,21 +152,28 @@ messages
 
 ---
 
-## 连续性附件
+## 连续性上下文
 
-为避免“压缩后忘记当前任务”，`CompactService` 支持 `CompactAttachmentsProvider`。调用方可注入结构化上下文：
+为避免“压缩后忘记当前任务”，当前 Runtime 通过 **compact context provider** 为 `CompactService` 注入结构化的压缩上下文。调用方实现 `CompactContextProvider`，并通过 `setCompactContextProvider()` 注册或替换它：
 
 ```ts
-interface CompactAttachments {
+interface CompactContext {
   sessionMemory?: string;
   taskFocus?: string;
   recentFiles?: string[];
   plan?: string;
   workLog?: string;
+  attachmentCatalog?: CompactAttachmentCatalog;
 }
+
+type CompactContextProvider = () =>
+  | CompactContext
+  | Promise<CompactContext>;
 ```
 
-`taskFocus`、`sessionMemory` 和 `plan` 由宿主通过附件 provider 显式提供；当前 daemon 没有伪造一份 TaskManager 状态。未接 provider 时这些字段为空。
+`taskFocus`、`sessionMemory` 和 `plan` 由宿主通过 compact context provider 显式提供；当前 daemon 没有伪造一份 TaskManager 状态。未接 provider 时这些字段为空。
+
+`attachmentCatalog` 只是结构化 compact context 的一个部分：它记录当前会话仍持久引用的附件身份、访问方式和有界 representation 预览，不是独立的附件 provider，也不承载原始附件内容。
 
 服务自身还会自动派生：
 

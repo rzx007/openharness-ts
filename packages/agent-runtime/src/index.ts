@@ -10,11 +10,29 @@ export {
 export {
   createDefaultNodeAgent,
 } from "./default-agent.js";
-export type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+export {
+  createCompactContextProvider,
+  type CompactContextSources,
+} from "./compact-context.js";
 export type {
-  AgentHostCapabilities,
-  AgentPermissionHost,
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  CapabilityOverride,
+  ObservableJobProducer,
+  OpenHarnessAgentConfiguration,
 } from "./agent-options.js";
+export {
+  assertJobConfiguration,
+  disabledCapability,
+  resolveCapability,
+  toAgentCapabilitySnapshot,
+  toCapabilitySnapshot,
+  unavailableCapability,
+  type AgentCapabilitySnapshot,
+  type CapabilitySnapshot,
+  type ResolvedAgentCapabilities,
+  type ResolvedCapability,
+} from "./capability-resolution.js";
 export {
   createAgentKernel,
   createBasicAgentKernelRuntime,

@@ -51,7 +51,10 @@ flowchart LR
 | settings 和 CredentialStorage | 默认 Node 组装 | 会读取本机和用户目录 |
 | 插件、Skill、MCP、Memory | 默认 Node 组装 | 会发现或连接外部资源 |
 | Sandbox、process exit cleanup、Git worktree | 默认 Node 能力 | 都依赖具体操作系统环境 |
-| Permission、Jobs、Terminal、Schedule | `AgentHostCapabilities` | 宿主明确提供；Kernel 不创建备用实现；默认 Node 入口可安装本机默认能力 |
+| Permission effect | `effects.requestPermission` | 宿主交互副作用；未提供时默认拒绝 |
+| Terminal、后台 Shell | `capabilityOverrides` | 接受 Host `{ value, jobs }` bundle，逐项替换或关闭；Kernel 不创建 Node 备用实现 |
+| Attachments、child environment、Workflow repository、image to text、Schedule | `capabilityOverrides` | 接受 Host 对象，或用 `false` 逐项关闭 |
+| Jobs、Memory | `capabilityOverrides` | 只接受 `false`；不能传入 Host 对象替换 |
 | HTTP、SQLite、SSE、durable Session/Run | Durable Application | 这是多客户端和进程重启后的状态 |
 
 Kernel 的硬规则：
@@ -62,10 +65,10 @@ Kernel 的硬规则：
 - 不启动 Sandbox；
 - 不写 `process.stderr`；
 - 不创建 `LocalAgentJobHost`；
-- child 只能拿到父级同一份 `AgentHostCapabilities`；
+- child 继承 root session tree 的同一份 capability overrides；Host 覆盖必须支持整棵树；
 - 没有显式 child environment 时只沿用 cwd，不查 Git、不建 worktree。
 
-当前实际可注入的能力是 `permissions`、`jobs`、`terminal`、`schedules` 和 `childEnvironment`。Artifact 与更细的 Workspace 操作还没有稳定接口，因此本阶段没有添加两个只占名字、不能工作的空对象；以后出现真实调用方时再加入。
+可传入 Host 对象的 override 是 `terminal`、`backgroundShell`、`attachments`、`childEnvironment`、`workflowRepository`、`imageToText` 和 `schedules`；Terminal 与后台 Shell 都使用 `{ value, jobs }`，确保其 Job 可观察。`jobs` 与 `memory` 只能设为 `false`，分别禁用本地 Jobs 或受管 Memory，不能用 Host 对象替换。若设 `jobs: false`，还必须同时设 `terminal: false`、`backgroundShell: false`、`childEnvironment: false` 和 `workflowRepository: false`，因为这些能力会产生或依赖 Job。权限通过 `effects.requestPermission` 提供。Artifact 与更细的 Workspace 操作还没有稳定接口，因此本阶段没有添加两个只占名字、不能工作的空对象；以后出现真实调用方时再加入。
 
 ## 发布形式
 
@@ -104,8 +107,9 @@ Kernel 负责：
 - settings、凭据、插件、Skill、MCP 和 Memory；
 - Sandbox 和进程退出清理；
 - 选择 Git worktree child environment；
-- 完全未提供 `hostCapabilities` 时，安装“权限默认拒绝 + 本地 Jobs + 默认 child environment”的 Node 组合；
-- 调用方显式提供 `hostCapabilities` 时只使用这些能力，不读取已删除的顶层备用字段。
+- 安装本地 Terminal、Jobs、后台 Shell、Memory、Workflow repository 和默认 child environment；
+- 对每个未覆盖的能力保留它自己的默认值；Attachments 与 Schedules 在没有 Host 覆盖时为 unavailable；
+- 释放 runtime 自己创建的默认资源；Host 覆盖是借用对象，必须支持 root session tree 且始终由 Host 自己释放。
 
 framework 不负责：
 

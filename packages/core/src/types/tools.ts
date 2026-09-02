@@ -1,6 +1,6 @@
 import type { ContentBlock } from "./messages";
 import type { Settings } from "./settings";
-import type { AgentExecutionContext } from "./runtime";
+import type { AgentExecutionContext, AgentScheduleEffects } from "./runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 
@@ -107,6 +107,8 @@ export interface ToolContext {
   imageToText?: AgentImageToTextHost;
   /** Session-authorized immutable text attachment access. */
   attachments?: AgentAttachmentResourceHost;
+  /** Host-owned persistent scheduler. Omitted when durable schedules are unavailable. */
+  schedules?: AgentScheduleEffects;
   agent?: AgentExecutionContext;
 }
 

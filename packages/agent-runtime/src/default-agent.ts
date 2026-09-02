@@ -11,56 +11,79 @@ import {
 } from "./agent-composition.js";
 import { AgentChildRegistry } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
+import {
+  createDefaultNodeTerminal,
+  resolveDefaultNodeTerminal,
+} from "./default-node-terminal.js";
 
 interface InternalAgentOptions {
   eventBus: AgentEventBus;
-  effects: AgentEffects;
   childDirectory: AgentChildRegistry;
   identity?: AgentIdentity;
+}
+
+interface DefaultNodeAgentInternals {
+  createLocalTerminal: typeof createDefaultNodeTerminal;
 }
 
 /** 默认 Node 组装：会读取本机配置、发现扩展，并安装 Node 能力。 */
 export async function createDefaultNodeAgent(
   options: OpenHarnessAgentOptions = {},
 ): Promise<OpenHarnessAgent> {
-  const eventBus = new AgentEventBus(options.onEvent);
-  const capabilities = options.hostCapabilities;
-  const effects: AgentEffects = {
-    requestPermission:
-      capabilities?.permissions.requestPermission ??
-      (async () => ({
-        status: "denied",
-        reason: "No permission effect configured",
-      })),
-    ...(capabilities?.schedules
-      ? { schedules: capabilities.schedules }
-      : {}),
-  };
-  return await createDefaultNodeAgentInternal(options, {
-    eventBus,
-    effects,
-    childDirectory: new AgentChildRegistry(),
+  return await createDefaultNodeAgentWithInternals(options, {
+    createLocalTerminal: createDefaultNodeTerminal,
   });
+}
+
+/** @internal Test seam for verifying host-provided Terminal precedence. */
+export async function createDefaultNodeAgentWithInternals(
+  options: OpenHarnessAgentOptions,
+  internals: DefaultNodeAgentInternals,
+): Promise<OpenHarnessAgent> {
+  const eventBus = new AgentEventBus(options.onEvent);
+  return await createDefaultNodeAgentInternal(
+    options,
+    {
+      eventBus,
+      childDirectory: new AgentChildRegistry(),
+    },
+    internals,
+  );
 }
 
 async function createDefaultNodeAgentInternal(
   options: OpenHarnessAgentOptions,
   internal: InternalAgentOptions,
+  internals: DefaultNodeAgentInternals,
 ): Promise<OpenHarnessAgent> {
+  const effects: AgentEffects = {
+    requestPermission: options.effects?.requestPermission ?? (async () => ({
+      status: "denied",
+      reason: "No permission effect configured",
+    })),
+  };
   const composition = await composeOpenHarnessAgent(options, {
     ...internal,
-    createAgent: (childOptions, identity) =>
-      createDefaultNodeAgentInternal(childOptions, {
-        eventBus: internal.eventBus,
-        effects: internal.effects,
-        childDirectory: internal.childDirectory,
-        identity,
+    resolveDefaultTerminal: ({ override, cwd, sessionId }) =>
+      resolveDefaultNodeTerminal({
+        override,
+        createLocal: () => internals.createLocalTerminal({ cwd, sessionId }),
       }),
+    createAgent: (childOptions, identity) =>
+      createDefaultNodeAgentInternal(
+        childOptions,
+        {
+          eventBus: internal.eventBus,
+          childDirectory: internal.childDirectory,
+          identity,
+        },
+        internals,
+      ),
   });
   return createAssembledAgent({
     ...composition,
     eventBus: internal.eventBus,
-    effects: internal.effects,
+    effects,
     identity: internal.identity,
     childDirectory: internal.childDirectory,
   });

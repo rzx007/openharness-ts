@@ -47,6 +47,26 @@ interface JobExecutionRuntime {
 
 const DEFAULT_OUTPUT_LIMIT = 12_000;
 
+type ResolvedJobSource =
+  | { kind: "terminal"; value: TerminalSessionInfo }
+  | { kind: "task"; value: SessionExecutionRecord }
+  | {
+      kind: "workflow";
+      value: WorkflowRunSnapshot;
+      cwd: string;
+      repository: WorkflowRunRepository;
+    };
+
+interface AgentJobView {
+  includesSnapshot(snapshot: JobSnapshot): boolean;
+  includesSource(source: ResolvedJobSource): boolean;
+}
+
+const TERMINAL_AGENT_VIEW: AgentJobView = {
+  includesSnapshot: (snapshot) => snapshot.kind === "terminal",
+  includesSource: (source) => source.kind === "terminal",
+};
+
 export class DaemonJobService {
   constructor(
     private readonly store: JobSessionStore,
@@ -60,14 +80,63 @@ export class DaemonJobService {
     private readonly workflows: WorkflowRunRepository,
   ) {}
 
-  createAgentHost(session: SessionRecord): AgentJobHost {
+  createTerminalAgentHost(session: SessionRecord): AgentJobHost {
+    return this.createScopedAgentHost(session, TERMINAL_AGENT_VIEW);
+  }
+
+  createDetachedProcessAgentHost(session: SessionRecord): AgentJobHost {
+    return this.createScopedAgentHost(session, {
+      includesSnapshot: (snapshot) => {
+        const task = this.store.getSessionTask(snapshot.id);
+        return task?.sessionId === snapshot.ownerSession &&
+          isDetachedProcessAgentTask(task);
+      },
+      includesSource: (source) =>
+        source.kind === "task" &&
+        isDetachedProcessAgentTask(source.value),
+    });
+  }
+
+  private createScopedAgentHost(
+    session: SessionRecord,
+    view: AgentJobView,
+  ): AgentJobHost {
     return {
-      list: async (input) => await this.list(this.owned(session, input)),
-      read: async (input) => await this.read(this.owned(session, input)),
-      wait: async (input) => await this.wait(this.owned(session, input)),
-      send: async (input) => await this.send(this.owned(session, input)),
-      cancel: async (input) => await this.cancel(this.owned(session, input)),
+      list: async (input) => {
+        const { limit, ...unlimitedInput } = this.owned(session, input);
+        const snapshots = await this.list(unlimitedInput);
+        return filterJobSnapshots(snapshots.filter(view.includesSnapshot), { limit });
+      },
+      read: async (input) => {
+        const owned = this.owned(session, input);
+        await this.assertVisible(owned.sessionId, owned.jobId, view);
+        return await this.read(owned);
+      },
+      wait: async (input) => {
+        const owned = this.owned(session, input);
+        await this.assertVisible(owned.sessionId, owned.jobId, view);
+        return await this.wait(owned);
+      },
+      send: async (input) => {
+        const owned = this.owned(session, input);
+        await this.assertVisible(owned.sessionId, owned.jobId, view);
+        return await this.send(owned);
+      },
+      cancel: async (input) => {
+        const owned = this.owned(session, input);
+        await this.assertVisible(owned.sessionId, owned.jobId, view);
+        return await this.cancel(owned);
+      },
     };
+  }
+
+  private async assertVisible(
+    sessionId: string,
+    jobId: string,
+    view: AgentJobView,
+  ): Promise<void> {
+    const source = await this.resolve(sessionId, jobId);
+    if (!view.includesSource(source)) throw new Error(`Job not found: ${jobId}`);
   }
 
   async list(input: JobListRequest): Promise<JobSnapshot[]> {
@@ -277,11 +346,10 @@ export class DaemonJobService {
     }
   }
 
-  private async resolve(sessionId: string, jobId: string): Promise<
-    | { kind: "terminal"; value: TerminalSessionInfo }
-    | { kind: "task"; value: SessionExecutionRecord }
-    | { kind: "workflow"; value: WorkflowRunSnapshot; cwd: string; repository: WorkflowRunRepository }
-  > {
+  private async resolve(
+    sessionId: string,
+    jobId: string,
+  ): Promise<ResolvedJobSource> {
     this.requireSession(sessionId);
     const terminal = (await this.terminals.list({ sessionId, source: "agent" }))
       .find((candidate) => candidate.id === jobId);
@@ -385,6 +453,18 @@ function executionBackend(task: SessionExecutionRecord): "detached_process" | "c
   if (task.metadata.executionBackend === "child_agent") return "child_agent";
   if (task.metadata.executionBackend === "detached_process") return "detached_process";
   return task.metadata.origin === "child_session" ? "child_agent" : "detached_process";
+}
+
+function isDetachedProcessAgentTask(task: SessionExecutionRecord): boolean {
+  if (
+    task.childSessionId ||
+    task.metadata.executionBackend === "child_agent" ||
+    task.metadata.origin === "child_session"
+  ) {
+    return false;
+  }
+  return task.type === "shell" ||
+    task.metadata.executionBackend === "detached_process";
 }
 
 function formatWorkflowOutput(workflow: WorkflowRunSnapshot): string {

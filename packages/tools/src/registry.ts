@@ -57,6 +57,8 @@ export function createDefaultToolRegistry(
     schedules?: boolean;
     terminal?: boolean;
     jobs?: boolean;
+    backgroundShell?: boolean;
+    childEnvironment?: boolean;
     imageToText?: boolean;
     agentDefinitions?: AgentDefinition[];
     workflowRepository?: WorkflowRunRepository;
@@ -79,17 +81,21 @@ export function createDefaultToolRegistry(
   registry.register(toolSearchTool);
   registry.register(askUserTool);
   registry.register(briefTool);
-  registry.register(backgroundShellCreateTool);
+  if (options.backgroundShell !== false) {
+    registry.register(backgroundShellCreateTool);
+  }
   registry.register(enterPlanModeTool);
   registry.register(exitPlanModeTool);
   registry.register(enterWorktreeTool);
   registry.register(exitWorktreeTool);
   registry.register(notebookEditTool);
-  registry.register(
-    options.agentDefinitions === undefined
-      ? agentTool
-      : createAgentTool({ agentDefinitions: options.agentDefinitions }),
-  );
+  if (options.childEnvironment !== false) {
+    registry.register(
+      options.agentDefinitions === undefined
+        ? agentTool
+        : createAgentTool({ agentDefinitions: options.agentDefinitions }),
+    );
+  }
   if (options.workflowRepository) {
     registry.register(createWorkflowTool({ repository: options.workflowRepository }));
   }

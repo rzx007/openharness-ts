@@ -7,7 +7,7 @@
 permission decision 通过 SDK callback 返回，不是带 resolver 的 event：
 
 ```text
-request/decision : createDefaultNodeAgent({ hostCapabilities: { permissions } })
+request/decision : createDefaultNodeAgent({ effects: { requestPermission } })
 observability    : permission.requested / permission.resolved AgentEvent
 durable UI flow  : daemon StorePermissionBroker
 ```
@@ -18,19 +18,15 @@ framework 等待 decision；event 只描述事实，保持可序列化。
 
 ```ts
 const agent = await createDefaultNodeAgent({
-  hostCapabilities: {
-    permissions: {
-      requestPermission: async (request, scope) => {
-        return terminalPrompt(request, scope.signal)
-          ? { status: "approved" }
-          : { status: "denied" };
-      },
-    },
+  capabilityOverrides: {
+    terminal: { value: terminal, jobs: terminalJobs },
+    backgroundShell: { value: backgroundShell, jobs: shellJobs },
   },
+  effects: { requestPermission },
 });
 ```
 
-未提供 callback 时默认拒绝，不隐式放行。
+`requestPermission` 是可选 effect；未提供时默认拒绝，不隐式放行。上例的 Terminal 与后台 Shell override 是 Host 借用对象，必须可用于 root session tree 的全部 child session，且由 Host 而不是 `agent.close()` 释放。
 
 ## Daemon
 

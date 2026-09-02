@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
-  CompactAttachmentsProvider,
+  CompactContextProvider,
   AgentChildDirectory,
   AgentChildBudgetSnapshot,
   AgentEffects,
@@ -24,15 +24,26 @@ import {
   AgentOperationConflictError,
   type OpenHarnessAgentState,
 } from "./agent-errors.js";
-import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
-import type { AgentHostCapabilities } from "./agent-options.js";
+import type {
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  OpenHarnessAgentConfiguration,
+} from "./agent-options.js";
+import {
+  toAgentCapabilitySnapshot,
+  type AgentCapabilitySnapshot,
+  type ResolvedAgentCapabilities,
+} from "./capability-resolution.js";
 import {
   AgentChildRegistry,
   type AgentChildManager,
 } from "./child-agent.js";
 import { AgentEventBus } from "./event-source.js";
 import type { OpenHarnessAgentExtension } from "./extensions.js";
-import { FrameworkAgentRun } from "./framework-agent-run.js";
+import {
+  FrameworkAgentRun,
+  type FrameworkAgentRunToolActivity,
+} from "./framework-agent-run.js";
 import type {
   AgentMemoryRuntime,
   AgentRememberResult,
@@ -52,8 +63,12 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
   childIdleTtlMs?: number;
   /** Reliable ordered host sink. A rejection fails the active framework operation. */
   onEvent?: AgentEventListener;
-  /** 宿主明确交给 Agent 的能力。未提供时使用默认 Node 组装。 */
-  hostCapabilities?: AgentHostCapabilities;
+  /** 逐项替换或关闭默认能力；未传的项目继续使用各自默认值。 */
+  capabilityOverrides?: AgentCapabilityOverrides;
+  /** 宿主交互副作用；未提供审批器时 ask 会安全拒绝。 */
+  effects?: AgentEffectOverrides;
+  /** Stable root-session attachment directory mounted read-only in Docker. */
+  attachmentResourceRoot?: string;
 }
 
 export interface OpenHarnessAgentSubmitOptions {
@@ -87,8 +102,7 @@ export interface AgentInspection {
   }>;
   sandbox?: NonNullable<RuntimeBundle["sandboxStatus"]>;
   childBudget: AgentChildBudgetSnapshot;
-  /** 当前真正安装的宿主能力，不是配置文件中可能存在的能力。 */
-  hostCapabilities: string[];
+  capabilities: AgentCapabilitySnapshot;
 }
 
 export interface OpenHarnessAgent {
@@ -109,18 +123,20 @@ export interface OpenHarnessAgent {
   loadHistory(messages: Message[]): void;
   clear(): void;
   setModel(model: string): void;
-  setCompactAttachmentsProvider(
-    provider: CompactAttachmentsProvider | undefined,
+  setCompactContextProvider(
+    provider: CompactContextProvider | undefined,
   ): void;
   compact(): Promise<AgentCompactResult>;
   remember(): Promise<AgentRememberResult>;
   getUsage(): UsageSnapshot;
+  getCapabilities(): AgentCapabilitySnapshot;
   inspect(): AgentInspection;
   close(): Promise<void>;
 }
 
 class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   private activeRun?: FrameworkAgentRun;
+  private completedRunToolActivity?: FrameworkAgentRunToolActivity;
   private maintenance?: {
     kind: "compact" | "remember";
     settled: Promise<void>;
@@ -137,8 +153,9 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     private readonly effects: AgentEffects,
     private readonly identity: AgentIdentity | undefined,
     private readonly childManager: AgentChildManager,
+    private readonly closeOwnedCapabilities: () => Promise<void>,
     readonly children: AgentChildDirectory,
-    private readonly installedHostCapabilities: string[],
+    private readonly capabilities: ResolvedAgentCapabilities,
     private model: string,
   ) {}
 
@@ -159,6 +176,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     options: OpenHarnessAgentSubmitOptions = {},
   ): AgentRunHandle {
     this.assertIdle("submit a message");
+    this.completedRunToolActivity = { toolUses: [], toolResults: [] };
     const ids = options.ids ?? {
       inputId: `input_${randomUUID()}`,
       runId: `run_${randomUUID()}`,
@@ -177,8 +195,10 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       externalSignal: options.signal,
       delivery: options.delivery ?? "queue",
       metadata: options.metadata,
-      onSettled: () => {
+      onSettled: (result, toolActivity) => {
         if (this.activeRun !== run) return;
+        if (result && toolActivity)
+          this.completedRunToolActivity = toolActivity;
         this.activeRun = undefined;
         if (this.lifecycleState === "running") this.lifecycleState = "idle";
       },
@@ -202,11 +222,13 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
   loadHistory(messages: Message[]): void {
     this.assertIdle("load history");
     this.runtime.queryEngine.loadMessages(messages);
+    this.completedRunToolActivity = undefined;
   }
 
   clear(): void {
     this.assertIdle("clear history");
     this.session.clear();
+    this.completedRunToolActivity = undefined;
   }
 
   setModel(model: string): void {
@@ -215,11 +237,11 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
     this.runtime.queryEngine.setModel(model);
   }
 
-  setCompactAttachmentsProvider(
-    provider: CompactAttachmentsProvider | undefined,
+  setCompactContextProvider(
+    provider: CompactContextProvider | undefined,
   ): void {
-    this.assertIdle("set compact attachments provider");
-    this.runtime.queryEngine.setAttachmentsProvider(provider);
+    this.assertIdle("set compact context provider");
+    this.runtime.queryEngine.setCompactContextProvider(provider);
   }
 
   compact(): Promise<AgentCompactResult> {
@@ -245,12 +267,17 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         this.getHistory(),
         this.runtime.apiClient,
         this.model,
+        this.completedRunToolActivity,
       );
     });
   }
 
   getUsage(): UsageSnapshot {
     return this.runtime.queryEngine.getTotalUsage();
+  }
+
+  getCapabilities(): AgentCapabilitySnapshot {
+    return toAgentCapabilitySnapshot(this.capabilities);
   }
 
   inspect(): AgentInspection {
@@ -267,7 +294,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       })),
       mcpServers: this.mcpConnections().map(toMcpInspection),
       childBudget: this.childManager.getBudgetSnapshot(),
-      hostCapabilities: [...this.installedHostCapabilities],
+      capabilities: this.getCapabilities(),
       ...(this.runtime.sandboxStatus
         ? { sandbox: this.runtime.sandboxStatus }
         : {}),
@@ -285,6 +312,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
           () => this.activeRun?.interrupt("Agent closed") ?? Promise.resolve(),
           () => this.maintenance?.settled ?? Promise.resolve(),
           () => this.childManager.closeAll(),
+          () => this.closeOwnedCapabilities(),
           () => this.eventBus.drain(),
           () => this.runtime.close(),
         ]) {
@@ -348,8 +376,9 @@ export interface AssembledAgentOptions {
   effects: AgentEffects;
   identity: AgentIdentity | undefined;
   childManager: AgentChildManager;
+  cleanup?: { close(): Promise<void> };
   childDirectory: AgentChildRegistry;
-  hostCapabilities: string[];
+  capabilities: ResolvedAgentCapabilities;
   model: string;
 }
 
@@ -366,8 +395,9 @@ export function createAssembledAgent(
     options.effects,
     options.identity,
     options.childManager,
+    options.cleanup ? () => options.cleanup!.close() : async () => {},
     options.childDirectory,
-    options.hostCapabilities,
+    options.capabilities,
     options.model,
   );
 }

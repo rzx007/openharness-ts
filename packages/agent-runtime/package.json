@@ -24,6 +24,10 @@
     "test": "vitest run",
     "clean": "rimraf dist"
   },
+  "dependencies": {
+    "@openharness/terminal-node": "workspace:*",
+    "node-pty": "^1.0.0"
+  },
   "peerDependencies": {
     "@openharness/api": "workspace:*",
     "@openharness/auth": "workspace:*",

@@ -18,6 +18,7 @@ import type {
   AgentBackgroundShellHost,
   AgentImageToTextHost,
   AgentAttachmentResourceHost,
+  AgentScheduleEffects,
   McpAuthHost,
 } from "../index";
 import type {
@@ -31,7 +32,7 @@ import type { AgentJobHost } from "@openharness/jobs";
 import {
   CompactService,
   type CompactClient,
-  type CompactAttachmentsProvider,
+  type CompactContextProvider,
 } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
@@ -199,6 +200,7 @@ export class QueryEngine implements IQueryEngine {
   private backgroundShell: AgentBackgroundShellHost | undefined;
   private imageToText: AgentImageToTextHost | undefined;
   private attachments: AgentAttachmentResourceHost | undefined;
+  private schedules: AgentScheduleEffects | undefined;
   private cwd: string;
   private sessionId: string | undefined;
 
@@ -235,9 +237,9 @@ export class QueryEngine implements IQueryEngine {
     this.memoryRetriever = retriever;
   }
 
-  /** 注册 compact 附件提供者（B.2）：compact 时注入 taskFocus/plan 等结构化上下文。 */
-  setAttachmentsProvider(fn: CompactAttachmentsProvider | undefined): void {
-    this.compactService.setAttachmentsProvider(fn);
+  /** 注册 compact 上下文提供者：compact 时注入附件目录、Session Memory 等结构化上下文。 */
+  setCompactContextProvider(fn: CompactContextProvider | undefined): void {
+    this.compactService.setCompactContextProvider(fn);
   }
 
   setAllowedTools(tools: string[] | null): void {
@@ -274,6 +276,10 @@ export class QueryEngine implements IQueryEngine {
 
   setAttachments(attachments: AgentAttachmentResourceHost | undefined): void {
     this.attachments = attachments;
+  }
+
+  setSchedules(schedules: AgentScheduleEffects | undefined): void {
+    this.schedules = schedules;
   }
 
   /**
@@ -700,6 +706,7 @@ export class QueryEngine implements IQueryEngine {
             backgroundShell: this.backgroundShell,
             imageToText: this.imageToText,
             attachments: this.attachments,
+            schedules: this.schedules,
             agent: execution,
           };
           const result = await this.executeToolWithTimeout(

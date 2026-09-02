@@ -136,6 +136,7 @@ function createSoakAgent(metrics: SoakMetrics): CreateDaemonAgent {
       },
       clear: () => { history = []; },
       setModel: () => {},
+      setCompactContextProvider: () => {},
       compact: async () => ({
         history: [...history],
         beforeMessageCount: history.length,

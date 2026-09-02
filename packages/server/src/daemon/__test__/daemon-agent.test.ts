@@ -1,20 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@openharness/coordinator", () => ({
-  getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
-  getCoordinatorTools: () => [
-    "Agent",
-    "JobList",
-    "JobRead",
-    "JobWait",
-    "JobSend",
-    "JobCancel",
-    "Workflow",
-  ],
-  getCoordinatorUserContext: vi.fn(() => ({
-    workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, JobWait",
-  })),
-}));
+vi.mock("@openharness/coordinator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@openharness/coordinator")>();
+  return {
+    ...actual,
+    getCoordinatorSystemPrompt: () => "You are a **coordinator** test prompt.",
+    getCoordinatorTools: () => [
+      "Agent",
+      "JobList",
+      "JobRead",
+      "JobWait",
+      "JobSend",
+      "JobCancel",
+      "Workflow",
+    ],
+    getCoordinatorUserContext: vi.fn(() => ({
+      workerToolsContext: "Workers spawned via the Agent tool have access to these tools: Agent, JobWait",
+    })),
+  };
+});
 
 vi.mock("@openharness/agent-runtime", () => ({
   createDefaultNodeAgent: vi.fn(async () => {
@@ -24,6 +28,7 @@ vi.mock("@openharness/agent-runtime", () => ({
 
 import { createDaemonAgentLoader } from "../daemon-agent.js";
 import { getCoordinatorUserContext } from "@openharness/coordinator";
+import { createDefaultNodeAgentWithInternals } from "../../../../agent-runtime/src/default-agent.js";
 
 const session = {
   id: "session-1",
@@ -56,15 +61,25 @@ describe("createDaemonAgentLoader", () => {
     const requestPermission = vi.fn();
     const createAgent = vi.fn(async () => agent);
     const createEventSink = vi.fn(() => sink);
-    const jobs = {} as any;
+    const terminal = {} as any;
+    const terminalJobs = {} as any;
     const backgroundShell = { create: vi.fn() } as any;
+    const backgroundShellJobs = {} as any;
+    const schedules = {} as any;
+    const attachments = { readText: vi.fn() } as any;
     const loader = createDaemonAgentLoader({
       settings: { model: "default-model" } as any,
       createAgent,
       requestPermission,
+      schedules,
       createEventSink,
-      createJobHost: () => jobs,
-      createBackgroundShellHost: () => backgroundShell,
+      createTerminal: () => ({ value: terminal, jobs: terminalJobs }),
+      createBackgroundShell: () => ({
+        value: backgroundShell,
+        jobs: backgroundShellJobs,
+      }),
+      attachments,
+      attachmentResourceRoot: (durableSession) => `/resources/${durableSession.id}`,
     })!;
 
     const loaded = await loader({ session, history: [], parts: [] });
@@ -83,18 +98,58 @@ describe("createDaemonAgentLoader", () => {
       disallowedTools: ["Bash"],
       effort: "high",
       pluginsEnabled: false,
-      hostCapabilities: {
-        permissions: { requestPermission },
-        jobs,
-        backgroundShell,
+      capabilityOverrides: {
+        terminal: { value: terminal, jobs: terminalJobs },
+        backgroundShell: {
+          value: backgroundShell,
+          jobs: backgroundShellJobs,
+        },
+        schedules,
+        attachments,
       },
+      effects: { requestPermission },
+      attachmentResourceRoot: "/resources/session-1",
     });
+    expect(terminalJobs).not.toBe(backgroundShellJobs);
     expect(loadHistory).toHaveBeenCalledWith([]);
     expect(createEventSink).toHaveBeenCalledWith(agent, session);
 
     const event = { type: "run.started" } as any;
     await context.options.onEvent(event);
     expect(sink).toHaveBeenCalledWith(event);
+  });
+
+  it("passes the daemon Terminal override through the real default Agent without creating a local Terminal", async () => {
+    const terminal = {} as any;
+    const terminalJobs = {} as any;
+    const createLocalTerminal = vi.fn(async () => {
+      throw new Error("daemon must not create a local Terminal provider");
+    });
+    const loader = createDaemonAgentLoader({
+      settings: {
+        apiKey: "test-key",
+        apiFormat: "anthropic",
+        model: "default-model",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      } as any,
+      createAgent: async ({ options }) =>
+        createDefaultNodeAgentWithInternals(options, { createLocalTerminal }),
+      createTerminal: () => ({ value: terminal, jobs: terminalJobs }),
+    })!;
+
+    const loaded = await loader({ session, history: [], parts: [] });
+    try {
+      expect(createLocalTerminal).not.toHaveBeenCalled();
+      expect(loaded.getCapabilities().terminal).toEqual({
+        status: "available",
+        source: "override",
+      });
+    } finally {
+      await loaded.close();
+    }
   });
 
   it("loads Agent settings for the durable session cwd", async () => {

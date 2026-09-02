@@ -33,9 +33,8 @@ import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import type { AgentDefinition } from "@openharness/coordinator";
-import type { WorkflowRunRepository } from "@openharness/coordinator";
-
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+import type { ResolvedAgentCapabilities } from "./capability-resolution.js";
 
 const bundlesWithExitCleanup = new Set<RuntimeBundle>();
 let exitCleanupInstalled = false;
@@ -72,15 +71,8 @@ interface OpenHarnessRuntimeOptions {
   credentialStorage?: CredentialStorage;
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
-  hostCapabilities?: {
-    schedules?: boolean;
-    terminal?: boolean;
-    jobs?: boolean;
-    workflowRepository?: WorkflowRunRepository;
-    imageToText?: boolean;
-    attachments?: boolean;
-    attachmentResourceRoot?: string;
-  };
+  capabilities?: ResolvedAgentCapabilities;
+  attachmentResourceRoot?: string;
 }
 
 /**
@@ -145,13 +137,29 @@ export async function createOpenHarnessRuntime(
     configuration.client ??
     (await resolveApiClient(settings, configuration, storage));
 
+  const terminal = availableValue(options.capabilities?.terminal);
+  const jobs = availableValue(options.capabilities?.jobs);
+  const backgroundShell = availableValue(options.capabilities?.backgroundShell);
+  const childEnvironment = availableValue(options.capabilities?.childEnvironment);
+  const workflowRepository = availableValue(options.capabilities?.workflowRepository);
+  const imageToText = availableValue(options.capabilities?.imageToText);
+  const attachments = availableValue(options.capabilities?.attachments);
+  const schedules = availableValue(options.capabilities?.schedules);
+  const includeBackgroundShell = options.capabilities === undefined
+    ? undefined
+    : backgroundShell !== undefined && jobs !== undefined;
+  const includeDelegation = options.capabilities === undefined
+    ? undefined
+    : childEnvironment !== undefined && jobs !== undefined;
   const baseToolRegistry = createDefaultToolRegistry({
-    schedules: options.hostCapabilities?.schedules,
-    terminal: options.hostCapabilities?.terminal,
-    jobs: options.hostCapabilities?.jobs,
+    schedules: schedules !== undefined,
+    terminal: terminal !== undefined,
+    jobs: jobs !== undefined,
+    backgroundShell: includeBackgroundShell,
+    childEnvironment: includeDelegation,
     agentDefinitions: options.agentDefinitions,
-    workflowRepository: options.hostCapabilities?.workflowRepository,
-    imageToText: options.hostCapabilities?.imageToText,
+    workflowRepository,
+    imageToText: imageToText !== undefined,
   });
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
@@ -215,6 +223,8 @@ export async function createOpenHarnessRuntime(
       fastMode: configuration.fastMode ?? settings.fastMode,
       effort: configuration.effort ?? settings.effort,
       passes: settings.passes,
+      includeBackgroundShell,
+      includeDelegation,
       skillsList: options.skillRegistry?.modelVisibleList(),
     }));
 
@@ -235,6 +245,12 @@ export async function createOpenHarnessRuntime(
     hookExecutor,
     engineOptions,
   );
+  queryEngine.setTerminal(terminal);
+  queryEngine.setJobs(jobs);
+  queryEngine.setBackgroundShell(backgroundShell);
+  queryEngine.setImageToText(imageToText);
+  if (attachments) queryEngine.setAttachments(attachments);
+  queryEngine.setSchedules(schedules);
 
   const bundle = new RuntimeBuilder()
     .setApiClient(apiClient)
@@ -249,7 +265,7 @@ export async function createOpenHarnessRuntime(
     cwd,
     options.sandboxReporter,
     options.sessionId,
-    options.hostCapabilities?.attachmentResourceRoot,
+    options.attachmentResourceRoot,
   );
   return bundle;
 }
@@ -363,6 +379,12 @@ async function attachSandboxRuntime(
     () => sandboxRuntime.stopSync(),
   );
   registerExitCleanup(bundle);
+}
+
+function availableValue<T>(
+  capability: import("./capability-resolution.js").ResolvedCapability<T> | undefined,
+): T | undefined {
+  return capability?.status === "available" ? capability.value : undefined;
 }
 
 function registerExitCleanup(bundle: RuntimeBundle): void {

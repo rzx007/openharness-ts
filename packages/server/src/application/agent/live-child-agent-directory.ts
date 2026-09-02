@@ -31,6 +31,14 @@ export class LiveChildAgentDirectory {
     return false;
   }
 
+  resolveRootSessionId(sessionId: string): string | undefined {
+    const current = this.entries.get(sessionId);
+    if (!current) return undefined;
+    if (current.rootAgent.children.get(current.childId)) return current.rootAgent.id;
+    this.entries.delete(sessionId);
+    return undefined;
+  }
+
   async send(sessionId: string, input: AgentChildInput): Promise<AgentInputReceipt | undefined> {
     const current = this.entries.get(sessionId);
     if (!current) return undefined;

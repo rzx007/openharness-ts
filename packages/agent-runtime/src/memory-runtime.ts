@@ -8,6 +8,8 @@ import {
   selectWritableMemoryExtractionRecords,
 } from "@openharness/memory";
 
+import type { FrameworkAgentRunToolActivity } from "./framework-agent-run.js";
+
 export interface AgentRememberResult {
   skipped: boolean;
   reason?: string;
@@ -19,7 +21,12 @@ export interface AgentMemoryRuntime {
   manager: MemoryManager;
   directory: string;
   retrieve(userInput: string): Promise<string | null>;
-  remember(messages: Message[], apiClient: StreamingMessageClient, model: string): Promise<AgentRememberResult>;
+  remember(
+    messages: Message[],
+    apiClient: StreamingMessageClient,
+    model: string,
+    completedRunToolActivity?: FrameworkAgentRunToolActivity,
+  ): Promise<AgentRememberResult>;
 }
 
 export async function createAgentMemoryRuntime(
@@ -37,7 +44,7 @@ export async function createAgentMemoryRuntime(
       if (selected.ids.length > 0) await manager.markMemoryUsed(selected.ids);
       return selected.text || null;
     },
-    async remember(messages, apiClient, model) {
+    async remember(messages, apiClient, model, completedRunToolActivity) {
       return await extractMemories({
         apiClient,
         model,
@@ -45,6 +52,7 @@ export async function createAgentMemoryRuntime(
         manager,
         memoryDir: directory,
         cwd,
+        completedRunToolActivity,
       });
     },
   };
@@ -57,11 +65,17 @@ export async function extractMemories(options: {
   manager: MemoryManager;
   memoryDir: string;
   cwd: string;
+  completedRunToolActivity?: FrameworkAgentRunToolActivity;
 }): Promise<AgentRememberResult> {
   if (options.messages.length < 2) {
     return { skipped: true, reason: "not enough messages", writtenIds: [], titles: [] };
   }
-  if (hasMemoryWrites(options.messages, options.memoryDir, options.cwd)) {
+  if (hasMemoryWrites(
+    options.completedRunToolActivity ??
+      toolActivityFromMessages(currentRunMessages(options.messages)),
+    options.memoryDir,
+    options.cwd,
+  )) {
     return {
       skipped: true,
       reason: "main conversation already wrote memory",
@@ -114,17 +128,58 @@ export async function extractMemories(options: {
     : { skipped: true, reason: "no durable memories proposed", writtenIds: [], titles: [] };
 }
 
-function hasMemoryWrites(messages: Message[], memoryDir: string, cwd: string): boolean {
-  for (const message of messages) {
-    if (message.type !== "assistant") continue;
-    for (const toolUse of message.toolUses ?? []) {
-      const input = toolUse.input as Record<string, unknown>;
-      if (isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)) {
-        return true;
-      }
+function hasMemoryWrites(
+  activity: FrameworkAgentRunToolActivity,
+  memoryDir: string,
+  cwd: string,
+): boolean {
+  const memoryWriteIds = new Set<string>();
+  for (const toolUse of activity.toolUses) {
+    const input = toolUse.input as Record<string, unknown>;
+    if (
+      toolUse.name === "Remember" ||
+      isMemoryWriteToolCall(toolUse.name, input, memoryDir, cwd)
+    ) {
+      memoryWriteIds.add(toolUse.id);
     }
   }
-  return false;
+  return activity.toolResults.some(
+    (result) =>
+      result.isError !== true && memoryWriteIds.has(result.toolUseId),
+  );
+}
+
+function toolActivityFromMessages(
+  messages: Message[],
+): FrameworkAgentRunToolActivity {
+  const activity: FrameworkAgentRunToolActivity = {
+    toolUses: [],
+    toolResults: [],
+  };
+  for (const message of messages) {
+    if (message.type === "assistant") {
+      for (const toolUse of message.toolUses ?? []) {
+        activity.toolUses.push({
+          id: toolUse.id,
+          name: toolUse.name,
+          input: toolUse.input,
+        });
+      }
+    } else if (message.type === "tool_result") {
+      activity.toolResults.push({
+        toolUseId: message.toolUseId,
+        isError: message.isError,
+      });
+    }
+  }
+  return activity;
+}
+
+function currentRunMessages(messages: Message[]): Message[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index]?.type === "user") return messages.slice(index);
+  }
+  return messages;
 }
 
 function summarizeMessage(message: Message): string {

@@ -310,7 +310,7 @@ describe("compact attachments", () => {
     const client = makeSummaryClient("<summary>ok</summary>");
     const svc = new CompactService(SMALL_MAX, 2, {
       client,
-      attachmentsProvider: () => ({
+      contextProvider: () => ({
         sessionMemory: "remember the current checkpoint",
         taskFocus: "finish compact docs",
       }),
@@ -328,7 +328,7 @@ describe("compact attachments", () => {
     const client = makeSummaryClient("<summary>ok</summary>");
     const svc = new CompactService(SMALL_MAX, 2, {
       client,
-      attachmentsProvider: () => ({
+      contextProvider: () => ({
         attachmentCatalog: {
           entries: [
             {
@@ -377,6 +377,24 @@ describe("compact attachments", () => {
     expect(client.lastPrompt).toContain("processor=safe-text@1");
     expect(client.lastPrompt).toContain("3 additional attachment references omitted");
     expect(client.lastPrompt).not.toContain("recognized total");
+  });
+
+  it("rejects compact when the context provider fails and preserves its cause", async () => {
+    const client = makeSummaryClient("<summary>must not be used</summary>");
+    const providerError = new Error("session memory unavailable");
+    const svc = new CompactService(SMALL_MAX, 2, {
+      client,
+      contextProvider: async () => {
+        throw providerError;
+      },
+    });
+
+    const failure = await svc.autoCompact(bigConversation(15)).catch((error) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBe(providerError);
+    expect((failure as Error).cause).toBe(providerError);
+    expect(client.lastPrompt).toBe("");
   });
 });
 

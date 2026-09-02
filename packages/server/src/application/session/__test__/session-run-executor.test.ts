@@ -1,4 +1,5 @@
 import type { AgentRunHandle } from "@openharness/core";
+import type { AgentCapabilitySnapshot } from "@openharness/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionRunExecutor } from "../session-run-executor.js";
@@ -146,6 +147,13 @@ describe("SessionRunExecutor", () => {
     const publishSince = vi.fn();
     const cleanupResources = vi.fn(async () => {});
     const materializeRun = vi.fn(async () => cleanupResources);
+    const routeAttachments = vi.fn(async () => ({
+      content: [
+        { type: "text" as const, text: "hello" },
+        { type: "image" as const, source: { type: "file" as const, mediaType: "image/png", path: "D:/blobs/asset-1", sizeBytes: 4 } },
+      ],
+      decisions: [{ assetId: "asset-1", intent: "auto" as const, mediaType: "image/png", route: "native_image" as const }],
+    }));
     const executor = new SessionRunExecutor({
       store: store as any,
       agentPool: {
@@ -153,7 +161,10 @@ describe("SessionRunExecutor", () => {
         acquireSession: vi.fn(async () => ({
           setModel: vi.fn(),
           submitMessage,
-          inspect: () => ({ tools: [{ name: "ImageToText" }], hostCapabilities: ["imageToText"] }),
+          inspect: () => ({
+            tools: [{ name: "ImageToText" }],
+            capabilities: capabilitySnapshot("available"),
+          }),
         })),
         close: vi.fn(),
       } as any,
@@ -166,13 +177,7 @@ describe("SessionRunExecutor", () => {
         modelCapabilities: { image: "native" as const },
         providerCapabilities: { image: "native" as const, imageMediaTypes: ["image/png"] },
       })),
-      routeAttachments: vi.fn(async () => ({
-        content: [
-          { type: "text" as const, text: "hello" },
-          { type: "image" as const, source: { type: "file" as const, mediaType: "image/png", path: "D:/blobs/asset-1", sizeBytes: 4 } },
-        ],
-        decisions: [{ assetId: "asset-1", intent: "auto" as const, mediaType: "image/png", route: "native_image" as const }],
-      })),
+      routeAttachments,
       attachmentResources: { materializeRun },
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
@@ -190,6 +195,9 @@ describe("SessionRunExecutor", () => {
       ],
       expect.any(Object),
     );
+    expect(routeAttachments).toHaveBeenCalledWith(expect.objectContaining({
+      imageToTextHostAvailable: true,
+    }));
     expect(projectAttachmentTransformations).toHaveBeenCalledWith(
       expect.objectContaining({ status: "completed" }),
     );
@@ -223,7 +231,7 @@ describe("SessionRunExecutor", () => {
     const store = createStore({ attachments: [attachment("asset-1", 0)] });
     const acquireSession = vi.fn(async () => ({
       setModel: vi.fn(),
-      inspect: () => ({ tools: [], hostCapabilities: [] }),
+      inspect: () => ({ tools: [], capabilities: capabilitySnapshot("disabled") }),
     }));
     const close = vi.fn();
     const projectAttachmentTransformations = vi.fn();
@@ -274,6 +282,25 @@ describe("SessionRunExecutor", () => {
     );
   });
 });
+
+function capabilitySnapshot(
+  imageToText: "available" | "disabled",
+): AgentCapabilitySnapshot {
+  const disabled = { status: "disabled" } as const;
+  return {
+    terminal: disabled,
+    backgroundShell: disabled,
+    jobs: disabled,
+    attachments: disabled,
+    memory: disabled,
+    childEnvironment: disabled,
+    workflowRepository: disabled,
+    imageToText: imageToText === "available"
+      ? { status: "available", source: "override" }
+      : disabled,
+    schedules: disabled,
+  };
+}
 
 function createStore(options: {
   attachments?: ReturnType<typeof attachment>[];

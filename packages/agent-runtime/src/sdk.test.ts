@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,12 +7,587 @@ import type {
   Settings,
   StreamingMessageClient,
 } from "@openharness/core";
-import { FileWorkflowRunRepository } from "@openharness/coordinator";
+import {
+  createWorkflowPlan,
+  createWorkflowRunSnapshot,
+  FileWorkflowRunRepository,
+} from "@openharness/coordinator";
 import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultNodeAgent } from "./index.js";
 
+async function withTemporaryAgent<T extends { close(): Promise<void> }, R>(
+  prefix: string,
+  createAgent: (cwd: string) => Promise<T>,
+  run: (agent: T, cwd: string) => Promise<R>,
+): Promise<R> {
+  const cwd = mkdtempSync(join(tmpdir(), prefix));
+  let agent: T | undefined;
+  try {
+    agent = await createAgent(cwd);
+    return await run(agent, cwd);
+  } finally {
+    try {
+      await agent?.close();
+    } finally {
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }
+}
+
+const nodePtySupportedPlatforms = new Set<NodeJS.Platform>([
+  "win32",
+  "linux",
+  "darwin",
+]);
+const realPtyIt = nodePtySupportedPlatforms.has(process.platform) ? it : it.skip;
+
 describe("programmatic agent SDK", () => {
+  it("removes the real-Terminal fixture directory when Agent initialization fails", async () => {
+    let cwd: string | undefined;
+
+    await expect(
+      withTemporaryAgent(
+        "openharness-sdk-init-failure-",
+        async (temporaryCwd) => {
+          cwd = temporaryCwd;
+          throw new Error("initialization failed");
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow("initialization failed");
+
+    expect(cwd).toBeDefined();
+    expect(existsSync(cwd!)).toBe(false);
+  });
+
+  it("removes the real-Terminal fixture directory when Agent close fails", async () => {
+    let cwd: string | undefined;
+
+    await expect(
+      withTemporaryAgent(
+        "openharness-sdk-close-failure-",
+        async (temporaryCwd) => {
+          cwd = temporaryCwd;
+          return {
+            close: vi.fn(async () => {
+              throw new Error("close failed");
+            }),
+          } as any;
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow("close failed");
+
+    expect(cwd).toBeDefined();
+    expect(existsSync(cwd!)).toBe(false);
+  });
+
+  realPtyIt("runs a real Node REPL through Terminal and the shared Jobs control plane", async () => {
+    let waitPayload: Record<string, any> | undefined;
+    let readPayload: Record<string, any> | undefined;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (!hasToolResult(params.messages, "real-terminal-open")) {
+          yield toolUse("real-terminal-open", "TerminalOpen", {
+            name: "node-repl",
+            shell: process.execPath,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const jobId = terminalIdFromResult(params.messages, "real-terminal-open");
+        if (!hasToolResult(params.messages, "real-terminal-send")) {
+          yield toolUse("real-terminal-send", "JobSend", {
+            jobId,
+            data: "process.stdout.write('terminal-ok'); process.exit(0)\n",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "real-terminal-wait")) {
+          yield toolUse("real-terminal-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 5,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "real-terminal-read")) {
+          waitPayload = toolResultPayload(params.messages, "real-terminal-wait");
+          yield toolUse("real-terminal-read", "JobRead", { jobId });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        readPayload = toolResultPayload(params.messages, "real-terminal-read");
+        yield { type: "text_delta" as const, delta: "real terminal complete" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    await withTemporaryAgent(
+      "openharness-sdk-real-terminal-",
+      (cwd) => createDefaultNodeAgent({
+        cwd,
+        sessionId: "real-terminal-session",
+        client,
+        settings: { ...testSettings(), maxTurns: 8 },
+      }),
+      async (agent) => {
+        await expect(agent.runMessage("exercise the real terminal")).resolves.toMatchObject({
+          output: "real terminal complete",
+        });
+        expect(waitPayload).toMatchObject({
+          results: [{ timedOut: false, snapshot: { status: "completed" } }],
+        });
+        expect(JSON.stringify(waitPayload)).toContain("terminal-ok");
+        expect(readPayload).toMatchObject({
+          snapshot: { status: "completed" },
+        });
+        expect(JSON.stringify(readPayload)).toContain("terminal-ok");
+      },
+    );
+  }, 15_000);
+
+  realPtyIt("sends interactive stdin to a real Node REPL before closing it", async () => {
+    let runningWaitPayload: Record<string, any> | undefined;
+    let readPayload: Record<string, any> | undefined;
+    let finishedWaitPayload: Record<string, any> | undefined;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (!hasToolResult(params.messages, "stdin-terminal-open")) {
+          yield toolUse("stdin-terminal-open", "TerminalOpen", { shell: process.execPath });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const jobId = terminalIdFromResult(params.messages, "stdin-terminal-open");
+        if (!hasToolResult(params.messages, "stdin-terminal-send")) {
+          yield toolUse("stdin-terminal-send", "JobSend", {
+            jobId,
+            data: "process.stdout.write('stdin-echo:' + 'hello')\n",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-running-wait")) {
+          yield toolUse("stdin-terminal-running-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 0.25,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-read")) {
+          runningWaitPayload = toolResultPayload(params.messages, "stdin-terminal-running-wait");
+          yield toolUse("stdin-terminal-read", "JobRead", { jobId });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-exit")) {
+          readPayload = toolResultPayload(params.messages, "stdin-terminal-read");
+          yield toolUse("stdin-terminal-exit", "JobSend", {
+            jobId,
+            data: "process.exit(0)\n",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "stdin-terminal-finished-wait")) {
+          yield toolUse("stdin-terminal-finished-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 5,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        finishedWaitPayload = toolResultPayload(params.messages, "stdin-terminal-finished-wait");
+        yield { type: "text_delta" as const, delta: "interactive terminal complete" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    await withTemporaryAgent(
+      "openharness-sdk-real-stdin-",
+      (cwd) => createDefaultNodeAgent({
+        cwd,
+        sessionId: "stdin-terminal-session",
+        client,
+        settings: { ...testSettings(), maxTurns: 10 },
+      }),
+      async (agent) => {
+        await expect(agent.runMessage("exercise interactive stdin")).resolves.toMatchObject({
+          output: "interactive terminal complete",
+        });
+        expect(runningWaitPayload).toMatchObject({
+          results: [{ timedOut: true, snapshot: { status: "running" } }],
+        });
+        expect(JSON.stringify(readPayload)).toContain("stdin-echo:hello");
+        expect(finishedWaitPayload).toMatchObject({
+          results: [{ timedOut: false, snapshot: { status: "completed" } }],
+        });
+      },
+    );
+  }, 15_000);
+
+  realPtyIt("cancels a real Node REPL as a killed Terminal Job", async () => {
+    let cancelPayload: Record<string, any> | undefined;
+    let waitPayload: Record<string, any> | undefined;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        if (!hasToolResult(params.messages, "cancel-terminal-open")) {
+          yield toolUse("cancel-terminal-open", "TerminalOpen", { shell: process.execPath });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const jobId = terminalIdFromResult(params.messages, "cancel-terminal-open");
+        if (!hasToolResult(params.messages, "cancel-terminal-cancel")) {
+          yield toolUse("cancel-terminal-cancel", "JobCancel", {
+            jobId,
+            reason: "integration test complete",
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        if (!hasToolResult(params.messages, "cancel-terminal-wait")) {
+          cancelPayload = toolResultPayload(params.messages, "cancel-terminal-cancel");
+          yield toolUse("cancel-terminal-wait", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 5,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        waitPayload = toolResultPayload(params.messages, "cancel-terminal-wait");
+        yield { type: "text_delta" as const, delta: "cancelled terminal complete" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    await withTemporaryAgent(
+      "openharness-sdk-real-cancel-",
+      (cwd) => createDefaultNodeAgent({
+        cwd,
+        sessionId: "cancel-terminal-session",
+        client,
+        settings: { ...testSettings(), maxTurns: 7 },
+      }),
+      async (agent) => {
+        await expect(agent.runMessage("cancel the real terminal")).resolves.toMatchObject({
+          output: "cancelled terminal complete",
+        });
+        expect(cancelPayload).toMatchObject({
+          snapshot: { status: "stopping", capabilities: { send: false, cancel: false } },
+        });
+        expect(waitPayload).toMatchObject({
+          results: [{ timedOut: false, snapshot: { status: "killed" } }],
+        });
+      },
+    );
+  }, 15_000);
+
+  it("installs the complete standalone Node capability set without a Host", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-default-capabilities-"));
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      settings: testSettingsWithDefaultMemory(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        terminal: { status: "available", source: "default" },
+        backgroundShell: { status: "available", source: "default" },
+        jobs: { status: "available", source: "default" },
+        memory: { status: "available", source: "default" },
+        workflowRepository: { status: "available", source: "default" },
+        attachments: { status: "unavailable" },
+        schedules: { status: "unavailable" },
+      });
+      expect(agent.inspect().tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["TerminalOpen", "JobList"]),
+      );
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("creates managed memory by default without exposing managed paths to the model", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-default-memory-"));
+    const requests: Array<Parameters<StreamingMessageClient["streamMessage"]>[0]> = [];
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        requests.push(params);
+        yield { type: "text_delta" as const, delta: "memory available" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      client,
+      settings: testSettingsWithDefaultMemory(),
+    });
+
+    try {
+      expect(agent.getCapabilities().memory).toEqual({
+        status: "available",
+        source: "default",
+      });
+      expect(agent.inspect().tools.map((tool) => tool.name)).toContain("Remember");
+
+      await expect(agent.runMessage("use the managed memory tools")).resolves.toMatchObject({
+        output: "memory available",
+      });
+      const rememberTool = requests[0]?.tools?.find((tool) => tool.name === "Remember");
+      const serializedTool = JSON.stringify(rememberTool);
+      expect(rememberTool).toBeDefined();
+      expect(serializedTool).not.toContain("USER.md");
+      expect(serializedTool).not.toContain(".openharness");
+      expect(serializedTool).not.toContain(cwd);
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("gives settings and capability override memory disables identical behavior", async () => {
+    const settingsCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-settings-memory-disabled-"));
+    const overrideCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-override-memory-disabled-"));
+    const settingsDisabled = await createDefaultNodeAgent({
+      cwd: settingsCwd,
+      settings: testSettings(),
+    });
+    const overrideDisabled = await createDefaultNodeAgent({
+      cwd: overrideCwd,
+      capabilityOverrides: { memory: false },
+      settings: testSettingsWithDefaultMemory(),
+    });
+
+    try {
+      expect(settingsDisabled.getCapabilities().memory).toEqual({ status: "disabled" });
+      expect(overrideDisabled.getCapabilities().memory).toEqual({ status: "disabled" });
+      expect(settingsDisabled.getCapabilities()).toEqual(overrideDisabled.getCapabilities());
+
+      for (const agent of [settingsDisabled, overrideDisabled]) {
+        expect(agent.inspect().tools.map((tool) => tool.name)).not.toContain("Remember");
+        await expect(agent.remember()).resolves.toMatchObject({
+          skipped: true,
+          reason: "memory is disabled",
+        });
+      }
+    } finally {
+      await settingsDisabled.close();
+      await overrideDisabled.close();
+      rmSync(settingsCwd, { recursive: true, force: true });
+      rmSync(overrideCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps disabled long-running capabilities out of diagnostics, tools, and the model prompt", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-disabled-capabilities-"));
+    const requests: Array<Parameters<StreamingMessageClient["streamMessage"]>[0]> = [];
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        requests.push(params);
+        yield { type: "text_delta" as const, delta: "restricted runtime" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      client,
+      capabilityOverrides: {
+        jobs: false,
+        terminal: false,
+        backgroundShell: false,
+        childEnvironment: false,
+        workflowRepository: false,
+      },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        jobs: { status: "disabled" },
+        terminal: { status: "disabled" },
+        backgroundShell: { status: "disabled" },
+        childEnvironment: { status: "disabled" },
+        workflowRepository: { status: "disabled" },
+      });
+      const installedTools = agent.inspect().tools.map((tool) => tool.name);
+      const disabledToolNames = [
+        "Agent",
+        "BackgroundShellCreate",
+        "JobList",
+        "JobRead",
+        "JobWait",
+        "JobSend",
+        "JobCancel",
+        "TerminalOpen",
+        "Workflow",
+      ];
+      expect(installedTools.filter((name) => disabledToolNames.includes(name))).toEqual([]);
+
+      await expect(agent.runMessage("describe the restricted runtime")).resolves.toMatchObject({
+        output: "restricted runtime",
+      });
+      const request = requests[0];
+      const requestToolNames = request?.tools?.map((tool) => tool.name) ?? [];
+      expect(requestToolNames.filter((name) => disabledToolNames.includes(name))).toEqual([]);
+      expect(request?.system).not.toContain("BackgroundShellCreate");
+      expect(request?.system).not.toContain("JobWait");
+      expect(request?.system).not.toContain("JobRead");
+      expect(request?.system).not.toContain("# Delegation And Subagents");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("reports standalone attachments as unavailable, false as disabled, and an object as an override", async () => {
+    const unavailableCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-attachments-unavailable-"));
+    const disabledCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-attachments-disabled-"));
+    const overrideCwd = mkdtempSync(join(tmpdir(), "openharness-sdk-attachments-override-"));
+    const attachmentHost = {
+      async readText() {
+        return { text: "attachment", offset: 0, nextOffset: 10, done: true };
+      },
+    };
+    const unavailableAgent = await createDefaultNodeAgent({
+      cwd: unavailableCwd,
+      settings: testSettings(),
+    });
+    const disabledAgent = await createDefaultNodeAgent({
+      cwd: disabledCwd,
+      capabilityOverrides: { attachments: false },
+      settings: testSettings(),
+    });
+    const overrideAgent = await createDefaultNodeAgent({
+      cwd: overrideCwd,
+      capabilityOverrides: { attachments: attachmentHost },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(unavailableAgent.getCapabilities().attachments).toEqual({
+        status: "unavailable",
+        reason: "No attachment intake configured",
+      });
+      expect(disabledAgent.getCapabilities().attachments).toEqual({ status: "disabled" });
+      expect(overrideAgent.getCapabilities()).toMatchObject({
+        attachments: { status: "available", source: "override" },
+        backgroundShell: { status: "available", source: "default" },
+        jobs: { status: "available", source: "default" },
+      });
+      expect(unavailableAgent.inspect().tools.map((tool) => tool.name)).not.toContain("ReadAttachment");
+      expect(disabledAgent.inspect().tools.map((tool) => tool.name)).not.toContain("ReadAttachment");
+    } finally {
+      await unavailableAgent.close();
+      await disabledAgent.close();
+      await overrideAgent.close();
+      rmSync(unavailableCwd, { recursive: true, force: true });
+      rmSync(disabledCwd, { recursive: true, force: true });
+      rmSync(overrideCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("disables image to text without disabling the default workflow", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-workflow-capability-"));
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      capabilityOverrides: { imageToText: false },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities()).toMatchObject({
+        imageToText: { status: "disabled" },
+        workflowRepository: { status: "available", source: "default" },
+      });
+      expect(agent.inspect().tools.map((tool) => tool.name)).toContain("Workflow");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("routes Workflow jobs through the injected repository", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-workflow-jobs-"));
+    const workflows = new FileWorkflowRunRepository({ dir: join(cwd, "external-workflows") });
+    const spec = { mode: "sequential" as const, tasks: [{ id: "review" }] };
+    workflows.save(createWorkflowRunSnapshot({
+      runId: "workflow-override",
+      ownerSession: "session-1",
+      status: "running",
+      summary: "shared repository",
+      spec,
+      plan: createWorkflowPlan(spec),
+      results: new Map(),
+      running: new Set(["review"]),
+      createdAt: 10,
+    }));
+    let jobReadResult: unknown;
+    const client: StreamingMessageClient = {
+      async *streamMessage(params) {
+        const toolResult = params.messages.find((message) => message.type === "tool_result");
+        if (!toolResult || toolResult.type !== "tool_result") {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: {
+              type: "tool_use" as const,
+              id: "sdk-workflow-job-read",
+              name: "JobRead",
+              input: { jobId: "workflow-override" },
+            },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
+        const text = toolResult.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("");
+        jobReadResult = JSON.parse(text);
+        yield { type: "text_delta" as const, delta: "workflow read" };
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      sessionId: "session-1",
+      client,
+      capabilityOverrides: { workflowRepository: workflows },
+      settings: testSettings(),
+    });
+
+    try {
+      await expect(agent.runMessage("read workflow job")).resolves.toMatchObject({
+        output: "workflow read",
+      });
+      expect(jobReadResult).toMatchObject({
+        kind: "job",
+        action: "read",
+        snapshot: { id: "workflow-override", kind: "workflow" },
+      });
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("does not register Schedule tools when schedules are explicitly disabled", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-schedule-capability-"));
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      capabilityOverrides: { schedules: false },
+      settings: testSettings(),
+    });
+
+    try {
+      expect(agent.getCapabilities().schedules).toEqual({ status: "disabled" });
+      expect(agent.inspect().tools.map((tool) => tool.name)).not.toContain("ScheduleCreate");
+    } finally {
+      await agent.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("runs a complete turn without daemon, including events and permission decisions", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-"));
     const reliableEvents: AgentEvent[] = [];
@@ -58,7 +633,7 @@ describe("programmatic agent SDK", () => {
       cwd,
       settings,
       client,
-      hostCapabilities: { permissions: { requestPermission } },
+      effects: { requestPermission },
       onEvent: (event) => { reliableEvents.push(event); },
     });
     agent.subscribe(() => { throw new Error("observer failures are isolated"); });
@@ -229,8 +804,8 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      hostCapabilities: {
-        permissions: { requestPermission: async () => ({ status: "approved" }) },
+      effects: { requestPermission: async () => ({ status: "approved" }) },
+      capabilityOverrides: {
         workflowRepository: new FileWorkflowRunRepository({ cwd }),
       },
       onEvent: (event) => { events.push(event); },
@@ -351,8 +926,8 @@ describe("programmatic agent SDK", () => {
         sandbox: { enabled: false },
       },
       client,
-      hostCapabilities: {
-        permissions: { requestPermission: async () => ({ status: "approved" }) },
+      effects: { requestPermission: async () => ({ status: "approved" }) },
+      capabilityOverrides: {
         workflowRepository: new FileWorkflowRunRepository({ cwd }),
       },
       roleAllowedTools: [
@@ -498,4 +1073,62 @@ function toolResultText(
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");
+}
+
+function hasToolResult(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): boolean {
+  return messages.some((message) =>
+    message.type === "tool_result" && message.toolUseId === toolUseId
+  );
+}
+
+function toolResultPayload(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): Record<string, any> {
+  const text = toolResultText(messages, toolUseId);
+  if (!text) throw new Error(`Missing tool result: ${toolUseId}`);
+  return JSON.parse(text) as Record<string, any>;
+}
+
+function terminalIdFromResult(
+  messages: Parameters<StreamingMessageClient["streamMessage"]>[0]["messages"],
+  toolUseId: string,
+): string {
+  const payload = toolResultPayload(messages, toolUseId);
+  const terminal = payload.terminal as { id?: unknown } | undefined;
+  if (typeof terminal?.id !== "string") {
+    throw new Error(`Terminal tool did not return an id: ${JSON.stringify(payload)}`);
+  }
+  return terminal.id;
+}
+
+function toolUse(id: string, name: string, input: Record<string, unknown>) {
+  return {
+    type: "tool_use_start" as const,
+    toolUse: { type: "tool_use" as const, id, name, input },
+  };
+}
+
+function testSettings(): Settings {
+  return {
+    apiFormat: "anthropic",
+    model: "sdk-capability-test-model",
+    maxTurns: 3,
+    permission: { mode: "full_auto" },
+    sandbox: { enabled: false },
+    memory: { enabled: false },
+  };
+}
+
+function testSettingsWithDefaultMemory(): Settings {
+  return {
+    apiFormat: "anthropic",
+    model: "sdk-capability-test-model",
+    maxTurns: 3,
+    permission: { mode: "full_auto" },
+    sandbox: { enabled: false },
+  };
 }

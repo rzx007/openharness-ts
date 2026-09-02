@@ -79,6 +79,11 @@ describe("extractMemories", () => {
           },
         ],
       },
+      {
+        type: "tool_result",
+        toolUseId: "write-memory",
+        content: [{ type: "text", text: "Successfully wrote memory." }],
+      },
     ];
     let streamCalls = 0;
 
@@ -86,6 +91,152 @@ describe("extractMemories", () => {
       apiClient: fakeClient('{"memories":[]}', () => streamCalls++),
       model: "test-model",
       messages: wroteMemory,
+      manager: new MemoryManager(100),
+      memoryDir,
+      cwd,
+    });
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "main conversation already wrote memory",
+      writtenIds: [],
+      titles: [],
+    });
+    expect(streamCalls).toBe(0);
+  });
+
+  it("does not let a successful Remember from a previous run suppress extraction", async () => {
+    const cwd = resolve("project");
+    const memoryDir = join(cwd, ".openharness", "memory");
+    const remembered: Message[] = [
+      { type: "user", content: "remember this project fact" },
+      {
+        type: "assistant",
+        content: "saved through the managed tool",
+        toolUses: [
+          {
+            type: "tool_use",
+            id: "remember-project-fact",
+            name: "Remember",
+            input: { scope: "project", content: "Build commands use pnpm." },
+          },
+        ],
+      },
+      {
+        type: "tool_result",
+        toolUseId: "remember-project-fact",
+        content: [{ type: "text", text: "Remembered this project information." }],
+      },
+      { type: "assistant", content: "I will remember that." },
+      { type: "user", content: "new run with another durable fact" },
+      { type: "assistant", content: "noted the new fact" },
+    ];
+    let streamCalls = 0;
+
+    const result = await extractMemories({
+      apiClient: fakeClient('{"memories":[]}', () => streamCalls++),
+      model: "test-model",
+      messages: remembered,
+      manager: new MemoryManager(100),
+      memoryDir,
+      cwd,
+    });
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "no durable memories proposed",
+      writtenIds: [],
+      titles: [],
+    });
+    expect(streamCalls).toBe(1);
+  });
+
+  it("does not treat a failed Remember or an unrelated successful result as a memory write", async () => {
+    const cwd = resolve("project");
+    const memoryDir = join(cwd, ".openharness", "memory");
+    const failedRemember: Message[] = [
+      { type: "user", content: "remember this project fact" },
+      {
+        type: "assistant",
+        content: "trying managed memory",
+        toolUses: [
+          {
+            type: "tool_use",
+            id: "remember-failed",
+            name: "Remember",
+            input: { scope: "project", content: "Build commands use pnpm." },
+          },
+          {
+            type: "tool_use",
+            id: "read-succeeded",
+            name: "Read",
+            input: { file_path: "README.md" },
+          },
+        ],
+      },
+      {
+        type: "tool_result",
+        toolUseId: "read-succeeded",
+        content: [{ type: "text", text: "README contents" }],
+      },
+      {
+        type: "tool_result",
+        toolUseId: "remember-failed",
+        content: [{ type: "text", text: "Error: memory write failed" }],
+        isError: true,
+      },
+      { type: "assistant", content: "I could not save that memory." },
+    ];
+    let streamCalls = 0;
+
+    const result = await extractMemories({
+      apiClient: fakeClient('{"memories":[]}', () => streamCalls++),
+      model: "test-model",
+      messages: failedRemember,
+      manager: new MemoryManager(100),
+      memoryDir,
+      cwd,
+    });
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "no durable memories proposed",
+      writtenIds: [],
+      titles: [],
+    });
+    expect(streamCalls).toBe(1);
+  });
+
+  it("skips extraction only after the current run has a matching successful Remember result", async () => {
+    const cwd = resolve("project");
+    const memoryDir = join(cwd, ".openharness", "memory");
+    const successfulRemember: Message[] = [
+      { type: "user", content: "remember this project fact" },
+      {
+        type: "assistant",
+        content: "saving through managed memory",
+        toolUses: [
+          {
+            type: "tool_use",
+            id: "remember-succeeded",
+            name: "Remember",
+            input: { scope: "project", content: "Build commands use pnpm." },
+          },
+        ],
+      },
+      {
+        type: "tool_result",
+        toolUseId: "remember-succeeded",
+        content: [{ type: "text", text: "Remembered this project information." }],
+      },
+      { type: "assistant", content: "I will remember that." },
+    ];
+    let streamCalls = 0;
+
+    const result = await extractMemories({
+      apiClient: fakeClient('{"memories":[]}', () => streamCalls++),
+      model: "test-model",
+      messages: successfulRemember,
       manager: new MemoryManager(100),
       memoryDir,
       cwd,

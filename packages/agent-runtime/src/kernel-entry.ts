@@ -7,10 +7,13 @@ export {
   type OpenHarnessAgentSubmitOptions,
 } from "./agent.js";
 export type {
-  AgentHostCapabilities,
-  AgentPermissionHost,
   OpenHarnessAgentConfiguration,
 } from "./agent-options.js";
+export type {
+  AgentCapabilitySnapshot,
+  ResolvedAgentCapabilities,
+  ResolvedCapability,
+} from "./capability-resolution.js";
 export {
   createAgentKernel,
   createBasicAgentKernelRuntime,

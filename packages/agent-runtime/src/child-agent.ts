@@ -19,13 +19,18 @@ import type {
 import { AgentChildBudgetExceededError, AgentRunNotAcceptingInputError } from "@openharness/core";
 
 import type { OpenHarnessAgent, OpenHarnessAgentOptions } from "./agent.js";
-import type { AgentHostCapabilities, OpenHarnessAgentConfiguration } from "./agent-options.js";
+import type {
+  AgentCapabilityOverrides,
+  AgentEffectOverrides,
+  OpenHarnessAgentConfiguration,
+} from "./agent-options.js";
 import {
   createInProcessChildEnvironmentProvider,
   type AgentChildEnvironmentLease,
   type AgentChildEnvironmentProvider,
 } from "./child-environment.js";
 import type { AgentEventBus } from "./event-source.js";
+import { deriveChildAgentOptions } from "./child-agent-options.js";
 
 export type { AgentChildEnvironmentLease, AgentChildEnvironmentProvider } from "./child-environment.js";
 
@@ -72,7 +77,8 @@ interface AgentChildBudgetReservation {
 export interface AgentChildManagerOptions {
   settings: Settings;
   configuration: OpenHarnessAgentConfiguration;
-  hostCapabilities?: AgentHostCapabilities;
+  capabilityOverrides?: AgentCapabilityOverrides;
+  effects?: AgentEffectOverrides;
   cwd: string;
   idleTtlMs?: number;
   eventBus: AgentEventBus;
@@ -286,23 +292,15 @@ export class AgentChildManager implements AgentChildDirectory {
       spawn: input,
       parentScope,
       lease,
-      createAgent: () => this.options.createAgent({
-        ...this.options.configuration,
+      createAgent: () => this.options.createAgent(deriveChildAgentOptions({
+        configuration: this.options.configuration,
         settings: this.options.settings,
+        capabilityOverrides: this.options.capabilityOverrides,
+        effects: this.options.effects,
+        child: input,
         cwd: lease.cwd,
         sessionId,
-        model: input.model ?? this.options.configuration.model,
-        systemPrompt: input.systemPrompt ?? this.options.configuration.systemPrompt,
-        permissionMode: input.permissionMode ?? this.options.configuration.permissionMode,
-        hostToolCeiling: this.options.configuration.hostToolCeiling,
-        roleAllowedTools: input.allowedTools,
-        disallowedTools: mergeToolLists(this.options.configuration.disallowedTools, input.disallowedTools),
-        maxTurns: input.maxTurns ?? this.options.configuration.maxTurns,
-        effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
-          ? input.effort
-          : this.options.configuration.effort,
-        hostCapabilities: this.options.hostCapabilities,
-      }, {
+      }), {
         childId,
         parentSessionId: parentScope.sessionId,
         parentRunId: parentScope.runId,
@@ -714,14 +712,6 @@ function normalizeChildBudget(budget: AgentChildBudget): AgentChildBudget {
     }
   }
   return { ...budget };
-}
-
-function mergeToolLists(
-  inherited: string[] | undefined,
-  child: string[] | undefined,
-): string[] | undefined {
-  const merged = [...(inherited ?? []), ...(child ?? [])];
-  return merged.length > 0 ? [...new Set(merged)] : undefined;
 }
 
 function isChildUnavailable(record: ChildRecord): boolean {

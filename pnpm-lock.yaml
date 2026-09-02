@@ -466,6 +466,13 @@ importers:
         version: 5.9.3
 
   packages/agent-runtime:
+    dependencies:
+      '@openharness/terminal-node':
+        specifier: workspace:*
+        version: link:../terminal-node
+      node-pty:
+        specifier: ^1.0.0
+        version: 1.1.0
     devDependencies:
       '@openharness/api':
         specifier: workspace:*
@@ -1010,6 +1017,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/jobs':
+        specifier: workspace:*
+        version: link:../jobs
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../sandbox
