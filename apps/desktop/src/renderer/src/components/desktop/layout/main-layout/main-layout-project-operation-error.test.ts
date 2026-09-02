@@ -38,8 +38,11 @@ vi.mock("@renderer/components/desktop/settings-page/settings-navigation", () => 
   defaultSettingsSection: "general",
 }))
 vi.mock("@renderer/components/desktop/open-with", () => ({ OpenWithSplitButton: () => null }))
-vi.mock("@renderer/components/theme-provider", () => ({
-  useTheme: () => ({ theme: "light" as const, setTheme: vi.fn() }),
+vi.mock("@renderer/components/appearance/appearance-provider", () => ({
+  useAppearance: () => ({
+    resolvedTheme: "light" as const,
+    setPreference: vi.fn(),
+  }),
 }))
 vi.mock("@renderer/components/desktop/use-desktop-shortcuts", () => ({
   useDesktopShortcuts: () => undefined,

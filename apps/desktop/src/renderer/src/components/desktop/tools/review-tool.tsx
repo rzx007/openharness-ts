@@ -13,6 +13,7 @@ import {
 import type * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { useAppearance } from "@renderer/components/appearance/appearance-provider"
 import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import { collectChangedFiles } from "@renderer/components/desktop/conversation-page/message/message-render-model"
 import { Button } from "@renderer/components/ui/button"
@@ -94,7 +95,7 @@ export function ReviewTool({
   const [error, setError] = useState<string | null>(null)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>("unified")
-  const [themeType, setThemeType] = useThemeType()
+  const { resolvedTheme: themeType } = useAppearance()
   const handledOpenRequestRef = useRef<number | null>(null)
   const lastTurnFilePaths = useMemo(() => collectLastTurnFilePaths(sessionView), [sessionView])
 
@@ -150,13 +151,6 @@ export function ReviewTool({
     }, 0)
     return () => window.clearTimeout(timer)
   }, [changes?.files, loadChanges, openRequest, selectedProjectPath])
-
-  useEffect(() => {
-    const update = (): void => setThemeType(resolveThemeType())
-    const observer = new MutationObserver(update)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => observer.disconnect()
-  }, [setThemeType])
 
   const activeFile = changes?.files.find((file) => file.path === activePath) ?? null
 
@@ -594,14 +588,6 @@ function statusLabel(status: DesktopGitFileStatus): string {
     case "modified":
       return "修改"
   }
-}
-
-function useThemeType(): ["dark" | "light", (value: "dark" | "light") => void] {
-  return useState<"dark" | "light">(() => resolveThemeType())
-}
-
-function resolveThemeType(): "dark" | "light" {
-  return document.documentElement.classList.contains("dark") ? "dark" : "light"
 }
 
 function reviewRangeLabel(value: ReviewRange): string {

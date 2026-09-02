@@ -28,7 +28,8 @@ import { AnimatePresence, motion } from "motion/react"
 import { useMemo, useRef, useState } from "react"
 import { useMatchRoute } from "@tanstack/react-router"
 
-import { useTheme } from "@renderer/components/theme-provider"
+import { nextExplicitTheme } from "@renderer/components/appearance/appearance-actions"
+import { useAppearance } from "@renderer/components/appearance/appearance-provider"
 import { Button } from "@renderer/components/ui/button"
 import {
   Dialog,
@@ -87,10 +88,10 @@ export function Sidebar({
   onOpenConversation,
 }: SidebarProps): React.JSX.Element {
   const matchRoute = useMatchRoute()
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, setPreference } = useAppearance()
   const scheduledSelected = Boolean(matchRoute({ to: "/scheduled" }))
   const pluginsSelected = Boolean(matchRoute({ to: "/plugins" }))
-  const darkTheme = isDarkTheme(theme)
+  const darkTheme = resolvedTheme === "dark"
   const projects = useDesktopSessionStore(selectProjects)
   const sessions = useDesktopSessionStore(selectSessions)
   const archivedSessions = useDesktopSessionStore(selectArchivedSessions)
@@ -377,7 +378,7 @@ export function Sidebar({
               size="icon"
               title={darkTheme ? "切换到浅色主题" : "切换到深色主题"}
               aria-label={darkTheme ? "切换到浅色主题" : "切换到深色主题"}
-              onClick={() => setTheme(darkTheme ? "light" : "dark")}
+              onClick={() => setPreference("theme", nextExplicitTheme(resolvedTheme))}
               className="text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
             >
               {darkTheme ? <Sun /> : <Moon />}
@@ -788,10 +789,4 @@ function samePath(left: string, right: string): boolean {
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase()
-}
-
-function isDarkTheme(theme: "dark" | "light" | "system"): boolean {
-  if (theme === "dark") return true
-  if (theme === "light") return false
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
 }

@@ -1,7 +1,8 @@
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import { CalendarClock, CircleAlert, ExternalLink } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 
+import { useAppearance } from "@renderer/components/appearance/appearance-provider"
 import { Button } from "@renderer/components/ui/button"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
@@ -30,7 +31,7 @@ export function ScheduledPage({
   onStartConversation,
   onOpenConversation,
 }: ScheduledPageProps): React.JSX.Element {
-  const prefersReducedMotion = useReducedMotion()
+  const { resolvedReducedMotion } = useAppearance()
   const [tasks, setTasks] = useState<DesktopScheduledTask[]>([])
   const [runs, setRuns] = useState<DesktopScheduledRun[]>([])
   const [status, setStatus] = useState<DesktopScheduledStatus | null>(null)
@@ -212,7 +213,7 @@ export function ScheduledPage({
         className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
         style={{
           gridTemplateColumns: hasSelection ? splitColumns : overviewColumns,
-          transition: prefersReducedMotion
+          transition: resolvedReducedMotion
             ? undefined
             : `grid-template-columns ${splitDuration} ${splitEase}`,
         }}
@@ -308,11 +309,11 @@ export function ScheduledPage({
             {selected ? (
               <motion.section
                 key="scheduled-detail"
-                initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+                initial={resolvedReducedMotion ? { opacity: 1 } : { opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+                exit={resolvedReducedMotion ? { opacity: 1 } : { opacity: 0 }}
                 transition={{
-                  duration: prefersReducedMotion ? 0 : 0.32,
+                  duration: resolvedReducedMotion ? 0 : 0.32,
                   ease: easeOutQuint,
                 }}
                 className="flex min-h-0 min-w-0 flex-1 flex-col"

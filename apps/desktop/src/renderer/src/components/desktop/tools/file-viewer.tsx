@@ -2,13 +2,13 @@
 import { ExternalLink, FileCode2, FileText } from "lucide-react"
 import { Streamdown } from "streamdown"
 
+import { useAppearance } from "@renderer/components/appearance/appearance-provider"
 import { streamdownComponents } from "@renderer/components/desktop/conversation-page/message/streamdown-components"
 import { streamdownPlugins } from "@renderer/components/desktop/conversation-page/message/streamdown-plugins"
 import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import { Button } from "@renderer/components/ui/button"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import { Spinner } from "@renderer/components/ui/spinner"
-import { useTheme } from "@renderer/components/theme-provider"
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
 import { VirtualizedCodePreview } from "./virtualized-code-preview"
@@ -66,7 +66,7 @@ export function FileViewer({
   targetLine,
   onOpenHtmlInBrowser,
 }: FileViewerProps): React.JSX.Element {
-  const { resolvedTheme: themeType } = useTheme()
+  const { resolvedTheme: themeType } = useAppearance()
   const activeTab = tabs.find((tab) => tab.preview.path === activePath) ?? null
   const showLargeHtmlAction = activeTab
     ? shouldOfferHtmlBrowserOpen(activeTab.preview.path, activeTab.preview.content ?? "")

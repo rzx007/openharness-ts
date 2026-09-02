@@ -4,9 +4,9 @@ import { DEFAULT_THEMES, type FileContents } from "@pierre/diffs"
 import { File as PierreFile, type FileOptions } from "@pierre/diffs/react"
 import { Check, Copy, FileCode2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { useAppearance } from "@renderer/components/appearance/appearance-provider"
 import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
-import { useTheme } from "@renderer/components/theme-provider"
 
 // -- Styles --
 // Injected once at runtime — ships as a single self-contained file with no
@@ -78,7 +78,7 @@ function CodeRenderer({
   highlightLines,
   bodyClassName,
 }: RendererProps): React.JSX.Element {
-  const { resolvedTheme: themeType } = useTheme()
+  const { resolvedTheme: themeType } = useAppearance()
   const file = useMemo<FileContents>(
     () => ({
       name: codeBlockFilename(language),
