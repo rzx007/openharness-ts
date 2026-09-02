@@ -52,6 +52,8 @@ export interface PermissionCheckOptions {
   autoApproveTools?: string[];
   /** Tool names whose current implementation must not inherit name-based trust. */
   untrustedToolNames?: string[];
+  /** When provided, only these local read-only names retain implicit trust. */
+  trustedLocalReadOnlyToolNames?: string[];
   cwd?: string;
 }
 
@@ -64,6 +66,7 @@ export class PermissionChecker implements IPermissionChecker {
   private deniedCommands: string[];
   private autoApproveTools: Set<string>;
   private untrustedToolNames: Set<string>;
+  private trustedLocalReadOnlyToolNames: Set<string> | undefined;
   private cwd: string | undefined;
 
   constructor(options: PermissionCheckOptions) {
@@ -75,6 +78,9 @@ export class PermissionChecker implements IPermissionChecker {
     this.deniedCommands = options.deniedCommands ?? [];
     this.autoApproveTools = new Set(options.autoApproveTools ?? []);
     this.untrustedToolNames = new Set(options.untrustedToolNames ?? []);
+    this.trustedLocalReadOnlyToolNames = options.trustedLocalReadOnlyToolNames
+      ? new Set(options.trustedLocalReadOnlyToolNames)
+      : undefined;
     const cwd = options.cwd;
     this.cwd = typeof cwd === "string" && cwd ? resolve(cwd) : undefined;
   }
@@ -167,6 +173,8 @@ export class PermissionChecker implements IPermissionChecker {
 
     if (
       !this.untrustedToolNames.has(toolName) &&
+      (!this.trustedLocalReadOnlyToolNames ||
+        this.trustedLocalReadOnlyToolNames.has(toolName)) &&
       isLocalReadOnlyToolAllowed(toolName, input, this.cwd)
     ) {
       return {

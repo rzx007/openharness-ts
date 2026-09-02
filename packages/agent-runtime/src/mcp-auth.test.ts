@@ -79,6 +79,10 @@ describe("createMcpAuthHost", () => {
     const manager = {
       getConnection: vi.fn(),
       reconnect: vi.fn(async () => connection),
+      getConnectedTools: vi.fn(() => [
+        { serverName: "remote", name: "query" },
+        { serverName: "other", name: "query" },
+      ]),
       getAsToolDefinitions: vi.fn(() => [
         {
           name: "mcp__remote__query",
@@ -142,6 +146,7 @@ describe("createMcpAuthHost", () => {
         status: "error",
         error: new Error("401 Unauthorized"),
       })),
+      getConnectedTools: vi.fn(() => []),
       getAsToolDefinitions: vi.fn(() => []),
     } as unknown as McpClientManager;
     const registry = new ToolRegistry();
@@ -163,7 +168,7 @@ describe("createMcpAuthHost", () => {
       mode: "bearer",
       value: "tok",
     })).rejects.toThrow("reconnect failed: 401 Unauthorized");
-    expect(registry.has("mcp__remote__old")).toBe(false);
+    expect(registry.has("mcp__remote__old")).toBe(true);
   });
 
   it("does not remove or replace a caller tool that resembles an MCP tool", async () => {
@@ -180,6 +185,9 @@ describe("createMcpAuthHost", () => {
     const manager = {
       getConnection: vi.fn(),
       reconnect: vi.fn(async () => ({ status: "connected" })),
+      getConnectedTools: vi.fn(() => [
+        { serverName: "remote", name: "query" },
+      ]),
       getAsToolDefinitions: vi.fn(() => [{ ...callerTool, description: "mcp" }]),
     } as unknown as McpClientManager;
     const registry = new ToolRegistry();
@@ -198,5 +206,47 @@ describe("createMcpAuthHost", () => {
     })).rejects.toMatchObject({ code: "tool_already_registered" });
     expect(registry.get("mcp__remote__query")).toBe(callerTool);
     expect(registry.inspect("mcp__remote__query")?.source).toEqual({ kind: "agent" });
+  });
+
+  it("rolls back newly registered MCP tools when a later tool conflicts", async () => {
+    const settings: Settings = {
+      ...baseSettings,
+      mcpServers: { remote: { type: "http", url: "https://mcp.example" } },
+    };
+    const conflict = {
+      name: "mcp__remote__conflict",
+      description: "caller-owned",
+      inputSchema: {},
+      execute: vi.fn(),
+    };
+    const definitions = [
+      { ...conflict, name: "mcp__remote__first", description: "first" },
+      { ...conflict, description: "mcp conflict" },
+    ];
+    const manager = {
+      getConnection: vi.fn(),
+      reconnect: vi.fn(async () => ({ status: "connected" })),
+      getConnectedTools: vi.fn(() => [
+        { serverName: "remote", name: "first" },
+        { serverName: "remote", name: "conflict" },
+      ]),
+      getAsToolDefinitions: vi.fn(() => definitions),
+    } as unknown as McpClientManager;
+    const registry = new ToolRegistry();
+    registry.register(conflict, { kind: "agent" });
+    const host = createMcpAuthHost({
+      settings,
+      mcpManager: manager,
+      toolRegistry: registry,
+      persistSettings: async () => {},
+    });
+
+    await expect(host.configure({
+      serverName: "remote",
+      mode: "bearer",
+      value: "tok",
+    })).rejects.toMatchObject({ code: "tool_already_registered" });
+    expect(registry.has("mcp__remote__first")).toBe(false);
+    expect(registry.get("mcp__remote__conflict")).toBe(conflict);
   });
 });

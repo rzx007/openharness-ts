@@ -92,14 +92,14 @@ describe("resolveAutoApproveTools", () => {
       resolveAutoApproveTools(
         base,
         { autoApproveReadOnly: true },
-        new Set(["WebFetch"]),
+        new Set(["WebSearch", "JobList"]),
       ),
     ).not.toContain("WebFetch");
     expect(
       resolveAutoApproveTools(
         base,
         { autoApproveReadOnly: true, autoApproveTools: ["WebFetch"] },
-        new Set(["WebFetch"]),
+        new Set(["WebSearch", "JobList"]),
       ),
     ).toContain("WebFetch");
   });
@@ -194,6 +194,39 @@ describe("createOpenHarnessRuntime tool visibility", () => {
         name: "BusinessSearch",
         source: { kind: "agent" },
       });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("does not trust a caller tool that borrows a disabled builtin name", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        tools: [testTool("JobList")],
+        autoApproveReadOnly: true,
+      },
+      capabilities: {
+        jobs: { status: "disabled" },
+        terminal: { status: "disabled" },
+        backgroundShell: { status: "disabled" },
+        attachments: { status: "disabled" },
+        memory: { status: "disabled" },
+        childEnvironment: { status: "disabled" },
+        workflowRepository: { status: "disabled" },
+        imageToText: { status: "disabled" },
+        schedules: { status: "disabled" },
+      },
+    });
+
+    try {
+      await expect(runtime.permissionChecker.checkTool("JobList", {}))
+        .resolves.toMatchObject({ action: "ask" });
     } finally {
       await runtime.close();
     }

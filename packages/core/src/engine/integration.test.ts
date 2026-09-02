@@ -225,7 +225,12 @@ describe("Integration: Full Agent Loop", () => {
       execute: async (_input, context) => ({
         content: [{
           type: "text" as const,
-          text: context.toolRegistry?.getAll().map((tool) => tool.name).join(",") ?? "",
+          text: JSON.stringify({
+            names: context.toolRegistry?.getAll().map((tool) => tool.name) ?? [],
+            mutableMethods: ["register", "override", "unregister"].filter(
+              (name) => typeof (context.toolRegistry as any)?.[name] === "function",
+            ),
+          }),
         }],
       }),
     });
@@ -250,7 +255,10 @@ describe("Integration: Full Agent Loop", () => {
     for await (const event of engine.submitMessage("search")) events.push(event);
 
     const toolEnd = events.find((event) => event.type === "tool_use_end") as any;
-    expect(toolEnd.result.content[0].text).toBe("SearchProbe");
+    expect(JSON.parse(toolEnd.result.content[0].text)).toEqual({
+      names: ["SearchProbe"],
+      mutableMethods: [],
+    });
   });
 
   it("does not execute tools hidden by QueryEngine.setAllowedTools", async () => {

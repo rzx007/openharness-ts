@@ -91,7 +91,7 @@ export interface ToolContext {
   abortSignal?: AbortSignal;
   settings?: Settings;
   /** Actual tools available to the current QueryEngine after host injection and allow/deny filtering. */
-  toolRegistry?: ToolRegistry;
+  toolRegistry?: ToolRegistryView;
   skillRegistry?: unknown;
   /** MCP 客户端管理器，供 McpToolCall / ListMcpResources / ReadMcpResource 元工具使用。 */
   mcpManager?: unknown;
@@ -142,8 +142,8 @@ export interface ToolDefinition {
 }
 
 export interface ToolRegistrationSource {
-  kind: "builtin" | "agent" | "extension" | "plugin" | "mcp" | "runtime";
-  id?: string;
+  readonly kind: "builtin" | "agent" | "extension" | "plugin" | "mcp" | "runtime";
+  readonly id?: string;
 }
 
 export interface RegisteredToolInspection {
@@ -152,12 +152,15 @@ export interface RegisteredToolInspection {
   overrides?: ToolRegistrationSource;
 }
 
-export interface ToolRegistry {
-  register(tool: ToolDefinition, source?: ToolRegistrationSource): void;
-  override(tool: ToolDefinition, source: ToolRegistrationSource): void;
-  unregister?(name: string): boolean;
+export interface ToolRegistryView {
   get(name: string): ToolDefinition | undefined;
   getAll(): ToolDefinition[];
   has(name: string): boolean;
   inspect(name: string): RegisteredToolInspection | undefined;
+}
+
+export interface ToolRegistry extends ToolRegistryView {
+  register(tool: ToolDefinition, source?: ToolRegistrationSource): void;
+  override(tool: ToolDefinition, source: ToolRegistrationSource): void;
+  unregister?(name: string): boolean;
 }

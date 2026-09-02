@@ -26,6 +26,7 @@ import type {
   ToolDefinition,
   ToolExecutionResult,
   ToolRegistry as IToolRegistry,
+  ToolRegistryView,
 } from "../types/tools";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
@@ -697,7 +698,7 @@ export class QueryEngine implements IQueryEngine {
             toolAttemptId,
             runAbortSignal: signal,
             settings: this.options.settings,
-            toolRegistry: this.visibleToolRegistry(),
+            toolRegistry: this.visibleToolRegistryView(),
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
             mcpAuth: this.mcpAuth,
@@ -855,6 +856,16 @@ export class QueryEngine implements IQueryEngine {
       inspect(name: string) {
         return allowed.has(name) ? inner.inspect(name) : undefined;
       },
+    };
+  }
+
+  private visibleToolRegistryView(): ToolRegistryView {
+    const registry = this.visibleToolRegistry();
+    return {
+      get: (name) => registry.get(name),
+      getAll: () => registry.getAll(),
+      has: (name) => registry.has(name),
+      inspect: (name) => registry.inspect(name),
     };
   }
 }

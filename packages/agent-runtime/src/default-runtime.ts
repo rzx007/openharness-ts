@@ -90,7 +90,7 @@ interface OpenHarnessRuntimeOptions {
 export function resolveAutoApproveTools(
   settings: Settings,
   overrides: { autoApproveReadOnly?: boolean; autoApproveTools?: string[] },
-  untrustedToolNames: ReadonlySet<string> = new Set(),
+  trustedBuiltinToolNames?: ReadonlySet<string>,
 ): string[] | undefined {
   const merged = new Set([
     ...(settings.permission.autoApproveTools ?? []),
@@ -98,7 +98,10 @@ export function resolveAutoApproveTools(
   ]);
   if (overrides.autoApproveReadOnly) {
     for (const tool of READ_ONLY_TOOLS) {
-      if (!LOCAL_READ_ONLY_TOOLS.has(tool) && !untrustedToolNames.has(tool)) {
+      if (
+        !LOCAL_READ_ONLY_TOOLS.has(tool) &&
+        (!trustedBuiltinToolNames || trustedBuiltinToolNames.has(tool))
+      ) {
         merged.add(tool);
       }
     }
@@ -170,8 +173,10 @@ export async function createOpenHarnessRuntime(
     imageToText: imageToText !== undefined,
   });
   applyConfiguredTools(baseToolRegistry, configuration);
-  const overriddenToolNames = new Set(
-    (configuration.toolOverrides ?? []).map((tool) => tool.name),
+  const trustedBuiltinToolNames = new Set(
+    baseToolRegistry.getAll()
+      .filter((tool) => baseToolRegistry.inspect(tool.name)?.source.kind === "builtin")
+      .map((tool) => tool.name),
   );
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
@@ -205,7 +210,7 @@ export async function createOpenHarnessRuntime(
   const autoApproveTools = resolveAutoApproveTools(
     settings,
     configuration,
-    overriddenToolNames,
+    trustedBuiltinToolNames,
   );
 
   const permissionChecker = new PermissionChecker({
@@ -217,7 +222,7 @@ export async function createOpenHarnessRuntime(
     pathRules: settings.permission.pathRules,
     deniedCommands: settings.permission.deniedCommands,
     autoApproveTools,
-    untrustedToolNames: [...overriddenToolNames],
+    trustedLocalReadOnlyToolNames: [...trustedBuiltinToolNames],
   });
 
   const hookExecutor = new HookExecutor({
@@ -393,12 +398,22 @@ class RuntimeToolRegistry implements IToolRegistry {
     return this.isVisible(name) ? this.inner.inspect(name) : undefined;
   }
 
+  internalRegistry(): IToolRegistry {
+    return this.inner;
+  }
+
   private isVisible(name: string): boolean {
     if (this.deniedTools.has(name)) return false;
     return (
       this.allowedTools.kind === "all" || this.allowedTools.names.has(name)
     );
   }
+}
+
+export function getInternalToolRegistry(registry: IToolRegistry): IToolRegistry {
+  return registry instanceof RuntimeToolRegistry
+    ? registry.internalRegistry()
+    : registry;
 }
 
 function resolveToolLimit(

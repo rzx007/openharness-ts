@@ -95,6 +95,21 @@ describe("ToolRegistry", () => {
     expect(registry.unregister("Read")).toBe(true);
     expect(registry.inspect("Read")).toBeUndefined();
   });
+
+  it("isolates registration source metadata from external mutation", () => {
+    const registry = new ToolRegistry();
+    const source = { kind: "mcp" as const, id: "remote" };
+    registry.register(registryTool("Remote", "remote"), source);
+    source.id = "changed";
+    const first = registry.inspect("Remote")!;
+    expect(() => {
+      (first.source as { id?: string }).id = "changed-again";
+    }).toThrow();
+    expect(registry.inspect("Remote")?.source).toEqual({
+      kind: "mcp",
+      id: "remote",
+    });
+  });
 });
 
 function registryTool(name: string, description: string): ToolDefinition {

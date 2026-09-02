@@ -39,7 +39,7 @@ export class ToolRegistry implements IToolRegistry {
         `Tool "${tool.name}" is already registered by ${formatSource(existing.source)}; use an explicit override`,
       );
     }
-    this.tools.set(tool.name, { definition: tool, source });
+    this.tools.set(tool.name, { definition: tool, source: copySource(source) });
   }
 
   override(tool: ToolDefinition, source: ToolRegistrationSource): void {
@@ -52,8 +52,8 @@ export class ToolRegistry implements IToolRegistry {
     }
     this.tools.set(tool.name, {
       definition: tool,
-      source,
-      overrides: existing.source,
+      source: copySource(source),
+      overrides: copySource(existing.source),
     });
   }
 
@@ -78,10 +78,17 @@ export class ToolRegistry implements IToolRegistry {
     if (!entry) return undefined;
     return {
       name,
-      source: entry.source,
-      ...(entry.overrides ? { overrides: entry.overrides } : {}),
+      source: copySource(entry.source),
+      ...(entry.overrides ? { overrides: copySource(entry.overrides) } : {}),
     };
   }
+}
+
+function copySource(source: ToolRegistrationSource): ToolRegistrationSource {
+  return Object.freeze({
+    kind: source.kind,
+    ...(source.id === undefined ? {} : { id: source.id }),
+  });
 }
 
 function formatSource(source: ToolRegistrationSource): string {

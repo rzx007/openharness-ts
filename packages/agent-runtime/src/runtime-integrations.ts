@@ -13,6 +13,7 @@ import {
 import type { AgentMemoryRuntime } from "./memory-runtime.js";
 import { createMcpAuthHost } from "./mcp-auth.js";
 import { createRememberTool } from "./remember-tool.js";
+import { getInternalToolRegistry } from "./default-runtime.js";
 
 export interface InstallRuntimeIntegrationsOptions {
   cwd: string;
@@ -67,9 +68,15 @@ export async function installRuntimeIntegrations(
     await mcpManager.connectAll(mcpServers);
   }
   const registeredMcpToolNames: string[] = [];
+  const mcpToolOwners = new Map(
+    mcpManager.getConnectedTools().map((tool) => [
+      `mcp__${tool.serverName}__${tool.name}`,
+      tool.serverName,
+    ]),
+  );
   try {
     for (const tool of mcpManager.getAsToolDefinitions()) {
-      const serverName = readMcpServerName(tool.name);
+      const serverName = mcpToolOwners.get(tool.name);
       runtime.toolRegistry.register(tool, {
         kind: "mcp",
         ...(serverName ? { id: serverName } : {}),
@@ -87,7 +94,7 @@ export async function installRuntimeIntegrations(
     createMcpAuthHost({
       settings: options.settings,
       mcpManager,
-      toolRegistry: runtime.toolRegistry,
+      toolRegistry: getInternalToolRegistry(runtime.toolRegistry),
     }),
   );
 
@@ -104,8 +111,4 @@ export async function installRuntimeIntegrations(
   );
 
   return () => mcpManager.getConnections();
-}
-
-function readMcpServerName(toolName: string): string | undefined {
-  return /^mcp__(.+?)__/.exec(toolName)?.[1];
 }

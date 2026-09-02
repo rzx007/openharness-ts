@@ -38,30 +38,60 @@ export function createMcpAuthHost(options: CreateMcpAuthHostOptions): McpAuthHos
       await persistSettings(nextSettings);
       Object.assign(options.settings, nextSettings);
 
+      const previousTools = listMcpServerTools(
+        options.toolRegistry,
+        input.serverName,
+      );
       unregisterMcpServerTools(options.toolRegistry, input.serverName);
-      const connection = await options.mcpManager.reconnect(input.serverName, nextConfig);
-      for (const tool of options.mcpManager.getAsToolDefinitions()) {
-        if (tool.name.startsWith(`mcp__${input.serverName}__`)) {
-          options.toolRegistry.register(tool, {
-            kind: "mcp",
-            id: input.serverName,
-          });
+      const registeredNames: string[] = [];
+      let connection;
+      try {
+        connection = await options.mcpManager.reconnect(input.serverName, nextConfig);
+        const ownedNames = new Set(
+          options.mcpManager.getConnectedTools()
+            .filter((tool) => tool.serverName === input.serverName)
+            .map((tool) => `mcp__${tool.serverName}__${tool.name}`),
+        );
+        for (const tool of options.mcpManager.getAsToolDefinitions()) {
+          if (ownedNames.has(tool.name)) {
+            options.toolRegistry.register(tool, {
+              kind: "mcp",
+              id: input.serverName,
+            });
+            registeredNames.push(tool.name);
+          }
         }
+
+        if (!connection) {
+          throw new Error(`Saved MCP auth for ${input.serverName}, but reconnect did not run.`);
+        }
+        if (connection.status !== "connected") {
+          const detail = connection.error ? `: ${connection.error.message}` : "";
+          throw new Error(`Saved MCP auth for ${input.serverName}, but reconnect failed${detail}`);
+        }
+      } catch (error) {
+        for (const name of registeredNames) options.toolRegistry.unregister?.(name);
+        for (const previous of previousTools) {
+          options.toolRegistry.register(previous.definition, previous.source);
+        }
+        throw error;
       }
 
-      if (!connection) {
-        throw new Error(`Saved MCP auth for ${input.serverName}, but reconnect did not run.`);
-      }
-      if (connection.status !== "connected") {
-        const detail = connection.error ? `: ${connection.error.message}` : "";
-        throw new Error(`Saved MCP auth for ${input.serverName}, but reconnect failed${detail}`);
-      }
 
       return {
         message: `Saved MCP auth for ${input.serverName} and reconnected it (mode=${input.mode}).`,
       };
     },
   };
+}
+
+function listMcpServerTools(toolRegistry: IToolRegistry, serverName: string) {
+  return toolRegistry.getAll().flatMap((definition) => {
+    const source = toolRegistry.inspect(definition.name)?.source;
+    return source?.kind === "mcp" && source.id === serverName
+      ? [{ definition, source }]
+      : [];
+  });
 }
 
 function assertMcpToolUnregisterAvailable(toolRegistry: IToolRegistry, serverName: string): void {

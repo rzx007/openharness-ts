@@ -40,6 +40,7 @@ export type {
   AgentAttachmentResourceHost,
   AgentAttachmentTextSlice,
   ToolRegistry as IToolRegistry,
+  ToolRegistryView,
 } from "./types/tools";
 
 export type {
