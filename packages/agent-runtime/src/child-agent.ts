@@ -30,6 +30,7 @@ import {
   type AgentChildEnvironmentProvider,
 } from "./child-environment.js";
 import type { AgentEventBus } from "./event-source.js";
+import { deriveChildAgentOptions } from "./child-agent-options.js";
 
 export type { AgentChildEnvironmentLease, AgentChildEnvironmentProvider } from "./child-environment.js";
 
@@ -291,27 +292,15 @@ export class AgentChildManager implements AgentChildDirectory {
       spawn: input,
       parentScope,
       lease,
-      createAgent: () => this.options.createAgent({
-        ...this.options.configuration,
+      createAgent: () => this.options.createAgent(deriveChildAgentOptions({
+        configuration: this.options.configuration,
         settings: this.options.settings,
-        cwd: lease.cwd,
-        sessionId,
-        model: input.model ?? this.options.configuration.model,
-        systemPrompt: input.systemPrompt ?? this.options.configuration.systemPrompt,
-        permissionMode: input.permissionMode ?? this.options.configuration.permissionMode,
-        hostToolCeiling: this.options.configuration.hostToolCeiling,
-        roleAllowedTools: input.allowedTools,
-        disallowedTools: mergeToolLists(this.options.configuration.disallowedTools, input.disallowedTools),
-        maxTurns: input.maxTurns ?? this.options.configuration.maxTurns,
-        effort: input.effort === "low" || input.effort === "medium" || input.effort === "high"
-          ? input.effort
-          : this.options.configuration.effort,
-        // Host overrides/effects are borrowed unchanged by the whole root session
-        // tree. Resolved defaults are deliberately not propagated: the child
-        // composition rebuilds Memory, Workflow and Jobs for its cwd/session.
         capabilityOverrides: this.options.capabilityOverrides,
         effects: this.options.effects,
-      }, {
+        child: input,
+        cwd: lease.cwd,
+        sessionId,
+      }), {
         childId,
         parentSessionId: parentScope.sessionId,
         parentRunId: parentScope.runId,
@@ -723,14 +712,6 @@ function normalizeChildBudget(budget: AgentChildBudget): AgentChildBudget {
     }
   }
   return { ...budget };
-}
-
-function mergeToolLists(
-  inherited: string[] | undefined,
-  child: string[] | undefined,
-): string[] | undefined {
-  const merged = [...(inherited ?? []), ...(child ?? [])];
-  return merged.length > 0 ? [...new Set(merged)] : undefined;
 }
 
 function isChildUnavailable(record: ChildRecord): boolean {
