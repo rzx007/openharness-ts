@@ -23,7 +23,10 @@ export function SettingsSidebar({
   onSelectSection,
 }: SettingsSidebarProps): React.JSX.Element {
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col bg-transparent py-3 text-sidebar-foreground">
+    <aside
+      data-settings-sidebar
+      className="flex h-full min-h-0 w-full flex-col bg-transparent py-3 text-sidebar-foreground"
+    >
       <Button
         type="button"
         variant="ghost"
