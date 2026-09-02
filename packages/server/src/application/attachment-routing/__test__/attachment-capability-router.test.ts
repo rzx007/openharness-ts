@@ -215,6 +215,10 @@ describe("AttachmentCapabilityRouter", () => {
     ]);
     const block = result.content[0] as { type: "text"; text: string };
     expect(block.text).toContain("attachment://large/large.log");
+    expect(block.text).toContain(
+      '{"file_path":"attachment://large/large.log","offset":1,"limit":2000}',
+    );
+    expect(block.text).toContain("不要调用 ReadMcpResource");
     expect(block.text).not.toContain("x".repeat(3_001));
   });
 

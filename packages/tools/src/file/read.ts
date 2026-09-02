@@ -9,11 +9,16 @@ const MAX_ATTACHMENT_READ_LINES = 2_000;
 export const fileReadTool: ToolDefinition = {
   name: "Read",
   description:
-    "Read a file or directory from the local filesystem.",
+    "Read a local file, directory, or OpenHarness attachment:// resource. " +
+    "Use Read, not ReadMcpResource, for attachment:// resources.",
   inputSchema: {
     type: "object",
     properties: {
-      file_path: { type: "string", description: "Absolute path to the file or directory." },
+      file_path: {
+        type: "string",
+        description:
+          "An absolute local path or the exact attachment:// resource URI provided in the conversation.",
+      },
       offset: { type: "number", description: "Start line (1-indexed)." },
       limit: { type: "number", description: "Max lines to read." },
     },

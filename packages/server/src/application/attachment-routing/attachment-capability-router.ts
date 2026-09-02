@@ -216,7 +216,10 @@ function textResourceBlock(
     `attachment_id: ${attachment.assetId}`,
     `display_name: ${attachment.displayName}`,
     `resource_uri: ${resourceUri}`,
-    "以下只是开头预览；需要更多内容时使用 Read 读取 resource_uri。",
+    "这是 OpenHarness 附件资源，不是 MCP Resource。以下只是开头预览。",
+    "需要更多内容时调用 Read，并传入：",
+    JSON.stringify({ file_path: resourceUri, offset: 1, limit: 2_000 }),
+    "不要调用 ReadMcpResource。",
     preview,
     "[附件预览结束]",
   ].join("\n");

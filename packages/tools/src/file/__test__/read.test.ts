@@ -5,6 +5,15 @@ import { describe, expect, it, vi } from "vitest";
 import { fileReadTool } from "../read.js";
 
 describe("fileReadTool", () => {
+  it("advertises attachment resources as Read inputs rather than MCP resources", () => {
+    expect(fileReadTool.description).toContain("attachment://");
+    expect(fileReadTool.description).toContain("not ReadMcpResource");
+    const schema = fileReadTool.inputSchema as {
+      properties: { file_path: { description: string } };
+    };
+    expect(schema.properties.file_path.description).toContain("attachment://");
+  });
+
   it("reads an attachment URI through the session-scoped host", async () => {
     const readText = vi.fn(async () => ({
       displayName: "report.log",
