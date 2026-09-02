@@ -127,6 +127,18 @@ export function projectFromSession(session: DesktopSessionRecord): DesktopProjec
   }
 }
 
+/** 项目外起始页在创建会话前使用的占位工作区，供 slash 命令和右侧面板解析 cwd。 */
+export function outsideProjectDraftWorkspace(root: string): DesktopProject {
+  const normalized = root.replace(/[\\/]+$/, "")
+  return {
+    id: "outside-project-draft",
+    name: normalized.split(/[\\/]/).pop() || "OpenHarness",
+    path: root,
+    lastOpenedAt: 0,
+    available: true,
+  }
+}
+
 export function samePath(left: string, right: string): boolean {
   return normalizePath(left) === normalizePath(right)
 }

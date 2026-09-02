@@ -29,6 +29,7 @@ import {
   selectActiveSessionPromptSubmissions,
   selectActiveSessionQueuedPromptActions,
   selectActiveSessionSending,
+  selectCommandCatalogCwd,
   selectNewConversationError,
   selectNewConversationSending,
 } from "@renderer/stores/desktop-session/selectors"
@@ -216,7 +217,7 @@ function ConversationPane({
   const hasAgentTasks = Boolean(
     sessionView?.tasks.some((task) => task.type === "agent" && task.childSessionId)
   )
-  const commandCwd = hasSession ? sessionView?.session.cwd : selectedProject?.path
+  const commandCwd = useDesktopSessionStore(selectCommandCatalogCwd)
   const skillCommands =
     commandCwd && skillCommandSnapshot?.cwd === commandCwd ? skillCommandSnapshot.commands : []
   const canSubmit =

@@ -1,5 +1,5 @@
 import { Box } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { cn } from "@renderer/lib/utils"
@@ -29,6 +29,15 @@ export function SkillCommandMenu({
   )
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const activeIndex = Math.min(highlightedIndex, Math.max(options.length - 1, 0))
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  useEffect(() => {
+    setHighlightedIndex(0)
+  }, [query])
+
+  useEffect(() => {
+    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" })
+  }, [activeIndex, options])
 
   useEffect(() => {
     if (!open || options.length === 0) return
@@ -60,12 +69,16 @@ export function SkillCommandMenu({
       role="listbox"
       aria-label="技能"
       className="absolute right-0 bottom-[calc(100%+10px)] left-0 z-40 overflow-hidden rounded-2xl bg-background/95 py-2 shadow-composer ring-1 ring-black/7 backdrop-blur dark:bg-card/95 dark:ring-white/12"
+      onWheel={(event) => event.stopPropagation()}
     >
       <div className="px-4 pb-1 text-[11px] font-medium text-muted-foreground">技能</div>
-      <div className="max-h-72 overflow-y-auto px-2 pb-1">
+      <div className="scrollbar-thin max-h-72 scroll-py-1 overflow-y-auto overscroll-contain px-2 pb-1">
         {options.map((command, index) => (
           <SkillCommandMenuItem
             key={command.name}
+            buttonRef={(element) => {
+              optionRefs.current[index] = element
+            }}
             command={command}
             highlighted={index === activeIndex}
             onHighlight={() => setHighlightedIndex(index)}
@@ -78,11 +91,13 @@ export function SkillCommandMenu({
 }
 
 function SkillCommandMenuItem({
+  buttonRef,
   command,
   highlighted,
   onHighlight,
   onSelect,
 }: {
+  buttonRef?: (element: HTMLButtonElement | null) => void
   command: ComposerSkillCommand
   highlighted: boolean
   onHighlight: () => void
@@ -90,10 +105,12 @@ function SkillCommandMenuItem({
 }): React.JSX.Element {
   return (
     <Button
+      ref={buttonRef}
       type="button"
       variant="ghost"
       role="option"
       aria-selected={highlighted}
+      title={`${command.label} — ${command.description}`}
       onMouseEnter={onHighlight}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onSelect}
@@ -106,7 +123,7 @@ function SkillCommandMenuItem({
         <Box className="size-3.5" />
       </span>
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{command.label}</span>
-      <span className="min-w-0 flex-[1.35] truncate text-xs text-muted-foreground">
+      <span className="hidden min-w-0 flex-[1.35] truncate text-xs text-muted-foreground sm:inline">
         {command.description}
       </span>
       <span className="shrink-0 text-[11px] text-muted-foreground/65">

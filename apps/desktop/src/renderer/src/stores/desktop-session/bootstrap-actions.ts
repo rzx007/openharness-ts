@@ -67,6 +67,7 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
           selectedProvider: data.defaultProvider ?? null,
           selectedPermissionMode: data.defaultPermissionMode,
           workspaceMode,
+          outsideProjectWorkspaceRoot: data.outsideProjectWorkspaceRoot,
           selectedProject,
           selectedProjectGit: false,
           selectedProjectGitCheckedAt: null,
@@ -173,6 +174,7 @@ export function applyBootstrapData(
     selectedProvider: provider,
     selectedPermissionMode: data.defaultPermissionMode,
     workspaceMode: resolvedWorkspaceMode,
+    outsideProjectWorkspaceRoot: data.outsideProjectWorkspaceRoot,
     selectedProject,
   }
 }

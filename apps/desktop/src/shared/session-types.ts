@@ -182,6 +182,8 @@ export interface DesktopBootstrapData {
   defaultProvider?: string
   defaultPermissionMode: DesktopPermissionMode
   attachments: DesktopAttachmentSupport
+  /** 项目外工作模式的托管根目录，用于起始页加载 slash 命令和右侧面板。 */
+  outsideProjectWorkspaceRoot: string
 }
 
 export interface DesktopProjectDetails {
