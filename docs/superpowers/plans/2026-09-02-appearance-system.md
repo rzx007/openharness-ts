@@ -921,10 +921,10 @@ git commit -m "docs(desktop): record appearance verification"
 
 - 任务 6–8 原计划新增的 `appearance-typography-contract.test.ts` 属于扫描源码字符串的伪测试，按测试规范不落库；改为运行真实组件测试、Web 类型检查以及固定字号静态扫描。对话、页面、工具和 Shadow DOM 的实际改造均已完成。
 - 外观定向测试共 6 个文件、36 个用例，全部通过；`typecheck:web` 和外观目录定向 ESLint 通过。
-- 桌面完整测试实际结果为 73 个文件通过、1 个文件加载失败，453 个测试用例全部通过。唯一失败是既有的 `packages/server/src/application/daemon-application.ts` 引用未声明的 `@openharness/tools`；同一问题也阻断 `typecheck:node`、完整应用启动与正式构建。该依赖问题不属于本外观任务，且未在本分支改动。
+- 初次验收时，桌面测试因 `packages/server/src/application/daemon-application.ts` 引用未声明的 `@openharness/tools` 而有 1 个套件无法加载。合并远端 `main` 的修复提交 `e23c6d10` 后，桌面测试 74 个文件、464 个用例全部通过，完整桌面类型检查和正式构建也通过。
 - 完整应用无法启动后，使用只加载真实 `AppearanceProvider`、`AppearanceSettings` 和正式样式的临时渲染预览完成视觉检查；临时文件已删除。验证了浅色/深色/系统主题、预设与自定义颜色、UI 12/18 px、代码 11/18 px、本机字体、方向键加空格键操作、恢复默认，以及 480 px 窄窗口无横向滚动。
 - 视觉检查发现并修复两项问题：单值 Slider 误渲染两个手柄；恢复默认成功后确认框未关闭。两项均先增加失败断言，再完成修复并通过回归。
-- 因完整应用启动被既有依赖问题阻断，任务 10 的步骤 4–5 保持未勾选：对话区、输入框、代码块、Diff 与 xterm 的同窗计算样式仍需在该依赖恢复后补验。
+- 任务 10 的步骤 4–5 保持未勾选：设置页已完成真实渲染、响应式和键盘验收，但对话区、输入框、代码块、Diff 与 xterm 的同窗计算样式未逐项手工记录；自动测试、静态边界检查和正式构建均已覆盖对应代码路径。
 
 ---
 
