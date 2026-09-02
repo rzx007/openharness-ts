@@ -65,62 +65,64 @@ export function createDefaultToolRegistry(
   } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
-  registry.register(bashTool);
-  registry.register(fileReadTool);
-  registry.register(fileWriteTool);
-  registry.register(fileEditTool);
-  registry.register(globTool);
-  registry.register(grepTool);
-  registry.register(webFetchTool);
-  registry.register(webSearchTool);
-  registry.register(todoWriteTool);
-  registry.register(configTool);
-  registry.register(sleepTool);
-  registry.register(skillTool);
-  registry.register(listSkillsTool);
-  registry.register(toolSearchTool);
-  registry.register(askUserTool);
-  registry.register(briefTool);
+  const registerBuiltin = (tool: Parameters<ToolRegistry["register"]>[0]) =>
+    registry.register(tool, { kind: "builtin" });
+  registerBuiltin(bashTool);
+  registerBuiltin(fileReadTool);
+  registerBuiltin(fileWriteTool);
+  registerBuiltin(fileEditTool);
+  registerBuiltin(globTool);
+  registerBuiltin(grepTool);
+  registerBuiltin(webFetchTool);
+  registerBuiltin(webSearchTool);
+  registerBuiltin(todoWriteTool);
+  registerBuiltin(configTool);
+  registerBuiltin(sleepTool);
+  registerBuiltin(skillTool);
+  registerBuiltin(listSkillsTool);
+  registerBuiltin(toolSearchTool);
+  registerBuiltin(askUserTool);
+  registerBuiltin(briefTool);
   if (options.backgroundShell !== false) {
-    registry.register(backgroundShellCreateTool);
+    registerBuiltin(backgroundShellCreateTool);
   }
-  registry.register(enterPlanModeTool);
-  registry.register(exitPlanModeTool);
-  registry.register(enterWorktreeTool);
-  registry.register(exitWorktreeTool);
-  registry.register(notebookEditTool);
+  registerBuiltin(enterPlanModeTool);
+  registerBuiltin(exitPlanModeTool);
+  registerBuiltin(enterWorktreeTool);
+  registerBuiltin(exitWorktreeTool);
+  registerBuiltin(notebookEditTool);
   if (options.childEnvironment !== false) {
-    registry.register(
+    registerBuiltin(
       options.agentDefinitions === undefined
         ? agentTool
         : createAgentTool({ agentDefinitions: options.agentDefinitions }),
     );
   }
   if (options.workflowRepository) {
-    registry.register(createWorkflowTool({ repository: options.workflowRepository }));
+    registerBuiltin(createWorkflowTool({ repository: options.workflowRepository }));
   }
-  registry.register(teamCreateTool);
-  registry.register(teamDeleteTool);
+  registerBuiltin(teamCreateTool);
+  registerBuiltin(teamDeleteTool);
   if (options.schedules) {
-    registry.register(scheduleCreateTool);
-    registry.register(scheduleUpdateTool);
-    registry.register(scheduleDeleteTool);
-    registry.register(scheduleListTool);
-    registry.register(scheduleRunNowTool);
+    registerBuiltin(scheduleCreateTool);
+    registerBuiltin(scheduleUpdateTool);
+    registerBuiltin(scheduleDeleteTool);
+    registerBuiltin(scheduleListTool);
+    registerBuiltin(scheduleRunNowTool);
   }
   if (options.terminal) {
-    for (const tool of terminalTools) registry.register(tool);
+    for (const tool of terminalTools) registerBuiltin(tool);
   }
   if (options.jobs) {
-    for (const tool of jobTools) registry.register(tool);
+    for (const tool of jobTools) registerBuiltin(tool);
   }
-  registry.register(mcpToolCallTool);
-  registry.register(listMcpResourcesTool);
-  registry.register(readMcpResourceTool);
-  registry.register(mcpAuthTool);
-  registry.register(lspTool);
-  if (options.imageToText) registry.register(imageToTextTool);
-  registry.register(imageGenerationTool);
-  registry.register(feishuPushTool);
+  registerBuiltin(mcpToolCallTool);
+  registerBuiltin(listMcpResourcesTool);
+  registerBuiltin(readMcpResourceTool);
+  registerBuiltin(mcpAuthTool);
+  registerBuiltin(lspTool);
+  if (options.imageToText) registerBuiltin(imageToTextTool);
+  registerBuiltin(imageGenerationTool);
+  registerBuiltin(feishuPushTool);
   return registry;
 }

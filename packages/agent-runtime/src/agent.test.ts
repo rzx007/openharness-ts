@@ -98,10 +98,46 @@ describe("createDefaultNodeAgent", () => {
     expect(agent.children.list()).toEqual([]);
     expect(agent.getHistory()).toEqual([]);
     expect(agent.inspect().tools.length).toBeGreaterThan(0);
-    expect(agent.inspect().tools).toContainEqual({ name: "Remember" });
+    expect(agent.inspect().tools).toContainEqual({
+      name: "Remember",
+      source: { kind: "runtime" },
+    });
     expect(agent.inspect().model).toBe("claude-test");
     expect(agent.getUsage()).toEqual(expect.objectContaining({ inputTokens: 0, outputTokens: 0 }));
     await agent.close();
+  });
+
+  it("exposes caller tool override provenance through the public API", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "openharness-agent-tool-"));
+    tempDirs.push(cwd);
+    const replacement = {
+      name: "Read",
+      description: "Read through the caller resource service",
+      inputSchema: {},
+      async execute() { return { content: [] }; },
+    };
+    const agent = await createDefaultNodeAgent({
+      cwd,
+      settings: {
+        apiFormat: "anthropic",
+        model: "tool-test-model",
+        maxTurns: 3,
+        permission: { mode: "default" },
+        sandbox: { enabled: false },
+        memory: { enabled: false },
+      },
+      toolOverrides: [replacement],
+    });
+
+    try {
+      expect(agent.inspect().tools).toContainEqual({
+        name: "Read",
+        source: { kind: "agent" },
+        overrides: { kind: "builtin" },
+      });
+    } finally {
+      await agent.close();
+    }
   });
 
   it("closes the runtime exactly once and preserves an extension setup failure", async () => {

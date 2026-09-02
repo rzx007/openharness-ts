@@ -4,7 +4,12 @@ import type {
   StreamingMessageClient,
   ToolDefinition,
 } from "@openharness/core";
-import { QueryEngine, RuntimeBuilder, RuntimeBundle } from "@openharness/core";
+import {
+  QueryEngine,
+  RuntimeBuilder,
+  RuntimeBundle,
+  ToolRegistrationError,
+} from "@openharness/core";
 import {
   assertNoRemovedLifecycleToolNames,
   normalizeToolNames,
@@ -85,6 +90,7 @@ interface OpenHarnessRuntimeOptions {
 export function resolveAutoApproveTools(
   settings: Settings,
   overrides: { autoApproveReadOnly?: boolean; autoApproveTools?: string[] },
+  untrustedToolNames: ReadonlySet<string> = new Set(),
 ): string[] | undefined {
   const merged = new Set([
     ...(settings.permission.autoApproveTools ?? []),
@@ -92,7 +98,9 @@ export function resolveAutoApproveTools(
   ]);
   if (overrides.autoApproveReadOnly) {
     for (const tool of READ_ONLY_TOOLS) {
-      if (!LOCAL_READ_ONLY_TOOLS.has(tool)) merged.add(tool);
+      if (!LOCAL_READ_ONLY_TOOLS.has(tool) && !untrustedToolNames.has(tool)) {
+        merged.add(tool);
+      }
     }
   }
   return merged.size > 0 ? [...merged] : undefined;
@@ -161,6 +169,10 @@ export async function createOpenHarnessRuntime(
     workflowRepository,
     imageToText: imageToText !== undefined,
   });
+  applyConfiguredTools(baseToolRegistry, configuration);
+  const overriddenToolNames = new Set(
+    (configuration.toolOverrides ?? []).map((tool) => tool.name),
+  );
 
   const knownToolNames = baseToolRegistry.getAll().map((tool) => tool.name);
   const effectiveAllowed = resolveEffectiveAllowedTools({
@@ -190,7 +202,11 @@ export async function createOpenHarnessRuntime(
   // 自动放行三来源合并:settings.permission.autoApproveTools(用户显式配置,
   // 此前从未接线)+ swarm worker / 无头只读模式注入非本地 READ_ONLY_TOOLS。
   // denied 永远优先于 autoApprove(checker 内保证)。
-  const autoApproveTools = resolveAutoApproveTools(settings, configuration);
+  const autoApproveTools = resolveAutoApproveTools(
+    settings,
+    configuration,
+    overriddenToolNames,
+  );
 
   const permissionChecker = new PermissionChecker({
     mode,
@@ -201,6 +217,7 @@ export async function createOpenHarnessRuntime(
     pathRules: settings.permission.pathRules,
     deniedCommands: settings.permission.deniedCommands,
     autoApproveTools,
+    untrustedToolNames: [...overriddenToolNames],
   });
 
   const hookExecutor = new HookExecutor({
@@ -268,6 +285,55 @@ export async function createOpenHarnessRuntime(
     options.attachmentResourceRoot,
   );
   return bundle;
+}
+
+function applyConfiguredTools(
+  registry: IToolRegistry,
+  configuration: OpenHarnessAgentConfiguration,
+): void {
+  const additions = configuration.tools ?? [];
+  const overrides = configuration.toolOverrides ?? [];
+  const additionNames = assertUniqueToolNames(additions, "tools");
+  const overrideNames = assertUniqueToolNames(overrides, "toolOverrides");
+
+  for (const name of additionNames) {
+    if (overrideNames.has(name)) {
+      throw new Error(
+        `Tool "${name}" cannot appear in both tools and toolOverrides`,
+      );
+    }
+    if (registry.has(name)) {
+      throw new ToolRegistrationError(
+        "tool_already_registered",
+        `Tool "${name}" is already registered by builtin; use toolOverrides`,
+      );
+    }
+  }
+  for (const name of overrideNames) {
+    if (!registry.has(name)) {
+      throw new ToolRegistrationError(
+        "tool_override_target_not_found",
+        `Tool override target "${name}" is not registered`,
+      );
+    }
+  }
+
+  for (const tool of additions) registry.register(tool, { kind: "agent" });
+  for (const tool of overrides) registry.override(tool, { kind: "agent" });
+}
+
+function assertUniqueToolNames(
+  tools: readonly ToolDefinition[],
+  field: "tools" | "toolOverrides",
+): Set<string> {
+  const names = new Set<string>();
+  for (const tool of tools) {
+    if (names.has(tool.name)) {
+      throw new Error(`Duplicate Tool "${tool.name}" in ${field}`);
+    }
+    names.add(tool.name);
+  }
+  return names;
 }
 
 function validateLifecycleToolConfiguration(

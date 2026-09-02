@@ -23,7 +23,18 @@ import {
   resolveRuntimeModel,
 } from "./default-runtime.js";
 import { LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
-import type { Settings } from "@openharness/core";
+import type { Settings, ToolDefinition } from "@openharness/core";
+
+function testTool(name: string): ToolDefinition {
+  return {
+    name,
+    description: `${name} test tool`,
+    inputSchema: {},
+    async execute() {
+      return { content: [] };
+    },
+  };
+}
 
 const BASE_SETTINGS: Settings = {
   model: "claude-sonnet-4-20250514",
@@ -74,6 +85,23 @@ describe("resolveAutoApproveTools", () => {
     expect(tools.has("TodoWrite")).toBe(true);
     expect(tools.has("Read")).toBe(true);
     expect(tools.size).toBe(READ_ONLY_TOOLS.size - LOCAL_READ_ONLY_TOOLS.size + 2);
+  });
+
+  it("does not implicitly auto-approve an overridden read-only tool", () => {
+    expect(
+      resolveAutoApproveTools(
+        base,
+        { autoApproveReadOnly: true },
+        new Set(["WebFetch"]),
+      ),
+    ).not.toContain("WebFetch");
+    expect(
+      resolveAutoApproveTools(
+        base,
+        { autoApproveReadOnly: true, autoApproveTools: ["WebFetch"] },
+        new Set(["WebFetch"]),
+      ),
+    ).toContain("WebFetch");
   });
 });
 
@@ -145,6 +173,83 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
+  it("registers agent tools before applying visibility filters", async () => {
+    const custom = testTool("BusinessSearch");
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        tools: [custom],
+        hostToolCeiling: ["BusinessSearch"],
+      },
+    });
+
+    try {
+      expect(runtime.toolRegistry.get("BusinessSearch")).toBe(custom);
+      expect(runtime.toolRegistry.inspect("BusinessSearch")).toEqual({
+        name: "BusinessSearch",
+        source: { kind: "agent" },
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("replaces a built-in only through toolOverrides and records provenance", async () => {
+    const replacement = testTool("Read");
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        toolOverrides: [replacement],
+      },
+    });
+
+    try {
+      expect(runtime.toolRegistry.get("Read")).toBe(replacement);
+      expect(runtime.toolRegistry.inspect("Read")).toEqual({
+        name: "Read",
+        source: { kind: "agent" },
+        overrides: { kind: "builtin" },
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("rejects ambiguous additions and invalid overrides before startup", async () => {
+    const client = {
+      async *streamMessage() {
+        yield { type: "complete" as const, stopReason: "end_turn" as const };
+      },
+    };
+
+    await expect(createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: { client, tools: [testTool("Read")] },
+    })).rejects.toThrow(/already registered/i);
+    await expect(createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: { client, toolOverrides: [testTool("Raed")] },
+    })).rejects.toThrow(/override target.*not registered/i);
+    await expect(createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      configuration: {
+        client,
+        tools: [testTool("BusinessSearch")],
+        toolOverrides: [testTool("BusinessSearch")],
+      },
+    })).rejects.toThrow(/both tools and toolOverrides/i);
+  });
+
   it("mounts attachmentResourceRoot read-only without treating it as an attachment API", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,

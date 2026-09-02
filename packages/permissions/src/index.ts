@@ -50,6 +50,8 @@ export interface PermissionCheckOptions {
   pathRules?: PathRuleConfig[];
   deniedCommands?: string[];
   autoApproveTools?: string[];
+  /** Tool names whose current implementation must not inherit name-based trust. */
+  untrustedToolNames?: string[];
   cwd?: string;
 }
 
@@ -61,6 +63,7 @@ export class PermissionChecker implements IPermissionChecker {
   private pathRules: PathRuleConfig[];
   private deniedCommands: string[];
   private autoApproveTools: Set<string>;
+  private untrustedToolNames: Set<string>;
   private cwd: string | undefined;
 
   constructor(options: PermissionCheckOptions) {
@@ -71,6 +74,7 @@ export class PermissionChecker implements IPermissionChecker {
     this.pathRules = options.pathRules ?? [];
     this.deniedCommands = options.deniedCommands ?? [];
     this.autoApproveTools = new Set(options.autoApproveTools ?? []);
+    this.untrustedToolNames = new Set(options.untrustedToolNames ?? []);
     const cwd = options.cwd;
     this.cwd = typeof cwd === "string" && cwd ? resolve(cwd) : undefined;
   }
@@ -161,7 +165,10 @@ export class PermissionChecker implements IPermissionChecker {
       };
     }
 
-    if (isLocalReadOnlyToolAllowed(toolName, input, this.cwd)) {
+    if (
+      !this.untrustedToolNames.has(toolName) &&
+      isLocalReadOnlyToolAllowed(toolName, input, this.cwd)
+    ) {
       return {
         action: "allow",
         reason: `Local read-only tool '${toolName}' is within cwd`,

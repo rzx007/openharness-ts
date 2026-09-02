@@ -15,6 +15,7 @@ import type {
   Message,
   RuntimeBundle,
   Settings,
+  ToolRegistrationSource,
   UsageSnapshot,
 } from "@openharness/core";
 import type { McpConnection } from "@openharness/mcp";
@@ -90,7 +91,11 @@ export interface AgentCompactResult {
 
 export interface AgentInspection {
   model: string;
-  tools: Array<{ name: string }>;
+  tools: Array<{
+    name: string;
+    source: ToolRegistrationSource;
+    overrides?: ToolRegistrationSource;
+  }>;
   hooks: Array<Pick<HookDefinition, "id" | "event" | "type" | "enabled">>;
   mcpServers: Array<{
     name: string;
@@ -285,7 +290,10 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       model: this.model,
       tools: this.runtime.toolRegistry
         .getAll()
-        .map((tool) => ({ name: tool.name })),
+        .flatMap((tool) => {
+          const inspection = this.runtime.toolRegistry.inspect(tool.name);
+          return inspection ? [inspection] : [];
+        }),
       hooks: (this.runtime.hookExecutor.getAll?.() ?? []).map((hook) => ({
         id: hook.id,
         event: hook.event,

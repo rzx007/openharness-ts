@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { deriveChildAgentOptions } from "./child-agent-options.js";
 
+const addedTool = {
+  name: "BusinessSearch",
+  description: "Search business data",
+  inputSchema: {},
+  async execute() { return { content: [] }; },
+};
+const overriddenTool = {
+  name: "Read",
+  description: "Read an attachment resource",
+  inputSchema: {},
+  async execute() { return { content: [] }; },
+};
+
 describe("deriveChildAgentOptions", () => {
   it("preserves the host boundary while applying child role overrides", () => {
     const settings = { model: "settings-model" } as any;
@@ -18,6 +31,8 @@ describe("deriveChildAgentOptions", () => {
         disallowedTools: ["Write", "Bash"],
         maxTurns: 9,
         effort: "high",
+        tools: [addedTool],
+        toolOverrides: [overriddenTool],
       },
       settings,
       capabilityOverrides,
@@ -54,6 +69,10 @@ describe("deriveChildAgentOptions", () => {
     });
     expect(options.capabilityOverrides).toBe(capabilityOverrides);
     expect(options.effects).toBe(effects);
+    expect(options.tools).toBeDefined();
+    expect(options.tools?.[0]).toBe(addedTool);
+    expect(options.toolOverrides).toBeDefined();
+    expect(options.toolOverrides?.[0]).toBe(overriddenTool);
   });
 
   it("inherits parent runtime choices and ignores unsupported child effort values", () => {

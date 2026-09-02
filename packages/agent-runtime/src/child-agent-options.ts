@@ -40,6 +40,8 @@ export function deriveChildAgentOptions(
     effort: isSupportedEffort(child.effort)
       ? child.effort
       : configuration.effort,
+    tools: configuration.tools,
+    toolOverrides: configuration.toolOverrides,
     // Host overrides/effects are borrowed unchanged by the whole root session
     // tree. Resolved defaults are deliberately not propagated: the child
     // composition rebuilds Memory, Workflow and Jobs for its cwd/session.

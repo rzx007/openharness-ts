@@ -236,6 +236,21 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
 });
 
 describe("local read-only cwd auto-approval", () => {
+  it("does not auto-approve an untrusted replacement for a local read-only tool", async () => {
+    await withTempCwd(async (cwd) => {
+      const checker = new PermissionChecker({
+        mode: "default",
+        cwd,
+        untrustedToolNames: ["Read"],
+      });
+
+      expect(
+        (await checker.checkTool("Read", { file_path: join(cwd, "src/a.ts") }))
+          .action,
+      ).toBe("ask");
+    });
+  });
+
   it("allows local read-only filesystem tools inside cwd in default mode", async () => {
     await withTempCwd(async (cwd) => {
       const checker = new PermissionChecker({ mode: "default", cwd });

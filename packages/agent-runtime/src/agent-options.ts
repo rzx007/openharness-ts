@@ -8,6 +8,7 @@ import type {
   PermissionMode,
   Settings,
   StreamingMessageClient,
+  ToolDefinition,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
@@ -61,6 +62,10 @@ export interface OpenHarnessAgentConfiguration {
   pluginsEnabled?: boolean;
   autoApproveReadOnly?: boolean;
   autoApproveTools?: string[];
+  /** New tools. Creation fails if any name already exists. */
+  tools?: ToolDefinition[];
+  /** Complete replacements for existing built-in tools. */
+  toolOverrides?: ToolDefinition[];
   /** Overrides the root-tree child-agent limits. */
   childBudget?: Partial<AgentChildBudget>;
 }
