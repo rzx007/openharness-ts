@@ -12,6 +12,7 @@ import {
 import type { ObservabilityEvent } from "../../shared/observability.js";
 import type { LiveChildAgentDirectory } from "./live-child-agent-directory.js";
 import type { SessionEventPublisher } from "../session/session-event-publisher.js";
+import { applySkillInvocationToContent } from "../session/skill-invocation.js";
 import type {
   SessionChildExecutionBridge,
   SessionExecutionProjector,
@@ -266,6 +267,12 @@ export class DaemonAgentEventProjector {
             executingRun?.sessionId === sessionId &&
             executingRun.inputId === inputId &&
             attachmentRouting?.status === "completed";
+          const expectedSkillContent = contentToText(
+            applySkillInvocationToContent(input.content, input.metadata),
+          );
+          const selectedSkillExecution =
+            expectedSkillContent !== input.content &&
+            expectedSkillContent === content;
           const baseMetadata = { ...metadata };
           delete baseMetadata.promotion;
           const queuedPromptPromotion =
@@ -283,7 +290,7 @@ export class DaemonAgentEventProjector {
             !queuedPromptPromotion &&
             (
               input.sessionId !== sessionId ||
-              (!routedAttachmentExecution && input.content !== content) ||
+              (!routedAttachmentExecution && !selectedSkillExecution && input.content !== content) ||
               input.delivery !== event.data.delivery ||
               !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))
             )

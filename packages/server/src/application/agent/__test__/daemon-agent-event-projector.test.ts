@@ -299,6 +299,46 @@ describe("DaemonAgentEventProjector", () => {
     expect(events.publishSince).toHaveBeenCalled();
   });
 
+  it("accepts model-facing content transformed from an admitted slash skill input", async () => {
+    const input = {
+      id: "input-1",
+      sessionId: "s1",
+      content: "这是什么技能",
+      delivery: "queue",
+      metadata: {
+        skillInvocation: {
+          name: "agent-reach",
+          commandName: "agent-reach",
+          source: "project",
+          invocationSource: "slash",
+        },
+      },
+      attachments: [],
+    };
+    const store = {
+      transaction: <T>(work: () => T) => work(),
+      getInput: vi.fn(() => input),
+    };
+    const events = { checkpoint: vi.fn(), publish: vi.fn(), publishSince: vi.fn() };
+    const projector = new DaemonAgentEventProjector({
+      rootAgent: { children: { get: vi.fn() } } as any,
+      store: store as any,
+      transcriptProjection: {} as any,
+      executionProjector: {} as any,
+      liveChildren: {} as any,
+      events,
+      log: vi.fn(),
+    });
+
+    await expect(projector.apply(event("input.accepted", {
+      content: '请先使用 Skill 工具加载 "agent-reach" 技能，然后按该技能要求完成下面的任务：\n\n这是什么技能',
+      delivery: "queue",
+      metadata: input.metadata,
+    }, { sessionId: "s1", inputId: input.id, runId: "run-1" }))).resolves.toBeUndefined();
+
+    expect(events.publishSince).toHaveBeenCalled();
+  });
+
   it("rejects reuse of a durable child session by a different child identity", async () => {
     const store = {
       getSession: vi.fn((id) => id === "parent"
