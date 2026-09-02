@@ -55,7 +55,7 @@
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-preferences.ts`
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-preferences.test.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 覆盖默认配置、合法 JSON、字段级恢复、未知版本回退、字号限制和 HEX 规范化。明确证明旧键不参与解析：测试只向 `parseAppearancePreferences()` 传新键内容；Provider 层另测“只有旧键时仍使用默认配置”。核心断言：
 
@@ -86,7 +86,7 @@ expect(normalizeHexColor("#0a6aff")).toBe("#0A6AFF");
 expect(normalizeHexColor("#abc")).toBeNull();
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-preferences.test.ts
@@ -94,7 +94,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，模块和导出尚不存在。
 
-- [ ] **步骤 3：实现最小配置模块**
+- [x] **步骤 3：实现最小配置模块**
 
 导出以下稳定接口：
 
@@ -127,11 +127,11 @@ export function normalizeHexColor(value: string): `#${string}` | null;
 
 解析器先检查普通对象和 `version === 1`，再逐字段保留合法值；数字使用 `Math.round()` 后限制范围。未知版本、非对象或坏 JSON 返回全新默认对象。不要声明旧存储键常量，也不要读取 `openharness-desktop-theme`。
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行步骤 2 的命令，预期全部 PASS。
 
-- [ ] **步骤 5：提交任务 1**
+- [x] **步骤 5：提交任务 1**
 
 ```powershell
 git add apps/desktop/src/renderer/src/components/appearance/appearance-preferences.ts apps/desktop/src/renderer/src/components/appearance/appearance-preferences.test.ts
@@ -147,7 +147,7 @@ git commit -m "feat(desktop): define appearance preferences"
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-colors.ts`
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-colors.test.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 对五个预设和代表性的自定义色 `#006AFF`、`#808080`、`#FFFF00`、`#050505`，分别在浅色和深色表面解析。断言 token 完整，普通文字至少 `4.5`，焦点/控件边界至少 `3`，弱背景不等于原始高饱和色：
 
@@ -180,7 +180,7 @@ expect(
 expect(tokens.accent).not.toBe("#006AFF");
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-colors.test.ts
@@ -188,7 +188,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，颜色模块尚不存在。
 
-- [ ] **步骤 3：实现颜色数学和 token 映射**
+- [x] **步骤 3：实现颜色数学和 token 映射**
 
 导出 `contrastRatio()`、`resolveAppearanceColors()` 和用于测试的稳定表面色。算法顺序固定为：HEX 转 sRGB；计算相对亮度；黑白前景二选一；焦点和强色向黑或白做二分混合直到达到 `3:1`；弱色与实际表面按低比例混合，再独立选择前景。
 
@@ -214,11 +214,11 @@ export function resolveAppearanceColors(
 
 不要把原始 HEX 直接写入 `accent`、`sidebarAccent` 或 `sidebarSelected`。表面常量必须与 `main.css` 的浅色/深色 `background` 和 `sidebar` 基线对应，并在同一测试中留下显式断言。
 
-- [ ] **步骤 4：运行颜色测试验证通过**
+- [x] **步骤 4：运行颜色测试验证通过**
 
 运行步骤 2 的命令，预期全部 PASS。
 
-- [ ] **步骤 5：提交任务 2**
+- [x] **步骤 5：提交任务 2**
 
 ```powershell
 git add apps/desktop/src/renderer/src/components/appearance/appearance-colors.ts apps/desktop/src/renderer/src/components/appearance/appearance-colors.test.ts
@@ -237,7 +237,7 @@ git commit -m "feat(desktop): derive accessible appearance colors"
 - 修改：`pnpm-lock.yaml`
 - 修改：`apps/desktop/src/renderer/src/assets/main.css`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 测试必须区分 bundled、system-generic 和 local 三种来源，并用注入的 `check()` 验证固定候选，不读取系统字体列表：
 
@@ -258,7 +258,7 @@ expect(availability.consolas).toBe(false);
 
 增加 `repairUnavailableFonts()` 用例：已保存的不可用 Cascadia Code 恢复为 Geist Mono；系统 UI 字体和打包字体始终可用。
 
-- [ ] **步骤 2：运行字体测试验证失败**
+- [x] **步骤 2：运行字体测试验证失败**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-fonts.test.ts
@@ -266,7 +266,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，字体注册表尚不存在。
 
-- [ ] **步骤 3：实现字体模块**
+- [x] **步骤 3：实现字体模块**
 
 ```ts
 export type AppearanceFontOption<Id extends string> = {
@@ -290,7 +290,7 @@ export async function detectLocalFontAvailability(
 
 `checkQuery` 使用带引号的字体族，例如 `12px "Cascadia Code"`。不要调用任何字体枚举 API。
 
-- [ ] **步骤 4：加入并导入 Geist Mono**
+- [x] **步骤 4：加入并导入 Geist Mono**
 
 ```powershell
 pnpm --filter @openharness/desktop add -D @fontsource-variable/geist-mono@^5.3.0
@@ -302,7 +302,7 @@ pnpm --filter @openharness/desktop add -D @fontsource-variable/geist-mono@^5.3.0
 @import "@fontsource-variable/geist-mono";
 ```
 
-- [ ] **步骤 5：运行字体测试和桌面类型检查**
+- [x] **步骤 5：运行字体测试和桌面类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-fonts.test.ts
@@ -311,7 +311,7 @@ pnpm --filter @openharness/desktop typecheck:web
 
 预期：全部通过，锁文件只增加 Geist Mono 相关条目。
 
-- [ ] **步骤 6：提交任务 3**
+- [x] **步骤 6：提交任务 3**
 
 ```powershell
 git add apps/desktop/package.json pnpm-lock.yaml apps/desktop/src/renderer/src/assets/main.css apps/desktop/src/renderer/src/components/appearance/appearance-fonts.ts apps/desktop/src/renderer/src/components/appearance/appearance-fonts.test.ts
@@ -327,7 +327,7 @@ git commit -m "feat(desktop): register appearance fonts"
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-provider.tsx`
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-provider.test.ts`
 
-- [ ] **步骤 1：编写失败的 Provider 测试**
+- [x] **步骤 1：编写失败的 Provider 测试**
 
 测试文件使用 `// @vitest-environment jsdom`，通过 `React.createElement()` 避免在 `.test.ts` 中写 JSX。建立可控的 `matchMedia`，覆盖：
 
@@ -351,7 +351,7 @@ function Probe() {
 }
 ```
 
-- [ ] **步骤 2：运行 Provider 测试验证失败**
+- [x] **步骤 2：运行 Provider 测试验证失败**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-provider.test.ts
@@ -359,7 +359,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，Provider 尚不存在。
 
-- [ ] **步骤 3：实现 Provider 和 DOM 应用**
+- [x] **步骤 3：实现 Provider 和 DOM 应用**
 
 上下文公开接口固定为：
 
@@ -392,7 +392,7 @@ root.style.setProperty("--code-font-size", `${preferences.codeFontSize}px`);
 
 再把任务 2 的 camelCase token 映射到对应的十个 kebab-case CSS 变量。字体检测在 `document.fonts.ready` 后执行；发现已保存本机字体不可用时，写入修复后的打包默认项。
 
-- [ ] **步骤 4：在 Provider 内统一 Motion 入口**
+- [x] **步骤 4：在 Provider 内统一 Motion 入口**
 
 Provider 用 `MotionConfig` 包裹 children：
 
@@ -402,7 +402,7 @@ Provider 用 `MotionConfig` 包裹 children：
 </MotionConfig>
 ```
 
-- [ ] **步骤 5：运行定向测试和类型检查**
+- [x] **步骤 5：运行定向测试和类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-provider.test.ts
@@ -411,7 +411,7 @@ pnpm --filter @openharness/desktop typecheck:web
 
 预期：Provider 测试和类型检查全部通过。新 Provider 此时尚未挂到应用根部，现有 ThemeProvider 暂时保持原状，任务 5 将以一个完整提交完成切换和删除。
 
-- [ ] **步骤 6：提交任务 4**
+- [x] **步骤 6：提交任务 4**
 
 ```powershell
 git add apps/desktop/src/renderer/src/components/appearance/appearance-provider.tsx apps/desktop/src/renderer/src/components/appearance/appearance-provider.test.ts
@@ -436,7 +436,7 @@ git commit -m "feat(desktop): add appearance provider"
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-actions.ts`
 - 创建：`apps/desktop/src/renderer/src/components/appearance/appearance-actions.test.ts`
 
-- [ ] **步骤 1：补充失败测试**
+- [x] **步骤 1：补充失败测试**
 
 在 `appearance-actions.test.ts` 为侧边栏显式主题切换编写纯 helper 测试：
 
@@ -447,7 +447,7 @@ expect(nextExplicitTheme("light")).toBe("dark");
 
 在现有主布局测试中把 mock 从 `useTheme` 改成 `useAppearance`，并明确返回 `resolvedTheme`。
 
-- [ ] **步骤 2：运行相关测试验证失败**
+- [x] **步骤 2：运行相关测试验证失败**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-actions.test.ts src/renderer/src/components/desktop/layout/main-layout/main-layout-project-operation-error.test.ts
@@ -455,7 +455,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，调用方仍依赖旧 Hook 或缺少 helper。
 
-- [ ] **步骤 3：迁移主题调用方**
+- [x] **步骤 3：迁移主题调用方**
 
 - 在 `appearance-actions.ts` 实现 `nextExplicitTheme(resolvedTheme)`，只接受并返回 `"light" | "dark"`。
 - `code-block.tsx`、`file-viewer.tsx` 读取 `useAppearance().resolvedTheme`。
@@ -463,7 +463,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 - `sidebar.tsx` 读取 `resolvedTheme` 和 `setPreference`；按钮点击调用 `setPreference("theme", resolvedTheme === "dark" ? "light" : "dark")`。
 - 删除 `sidebar.tsx` 的 `isDarkTheme()`，不读取 `window.matchMedia()`。
 
-- [ ] **步骤 4：切换应用根入口并删除旧 Provider**
+- [x] **步骤 4：切换应用根入口并删除旧 Provider**
 
 `main.tsx` 改为：
 
@@ -479,7 +479,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 删除 `theme-provider.tsx`，不要创建 re-export 或兼容文件。把 `main.css` 的无条件 `@media (prefers-reduced-motion: reduce)` 改成 `:root[data-reduced-motion="true"]` 选择器，使 CSS 不再独立读取系统偏好。
 
-- [ ] **步骤 5：迁移业务 Motion 判断**
+- [x] **步骤 5：迁移业务 Motion 判断**
 
 `scheduled-page.tsx` 删除 `useReducedMotion` 导入，改为：
 
@@ -489,7 +489,7 @@ const { resolvedReducedMotion } = useAppearance();
 
 将文件内所有 `prefersReducedMotion` 判断改为 `resolvedReducedMotion`。侧边栏已有的 `motion`/`AnimatePresence` 保持原组件结构，由根部 `MotionConfig` 控制。
 
-- [ ] **步骤 6：确认没有旧入口**
+- [x] **步骤 6：确认没有旧入口**
 
 ```powershell
 rg -n "ThemeProvider|useTheme|openharness-desktop-theme|prefers-reduced-motion|useReducedMotion" apps/desktop/src/renderer/src
@@ -497,7 +497,7 @@ rg -n "ThemeProvider|useTheme|openharness-desktop-theme|prefers-reduced-motion|u
 
 预期：生产代码零命中；测试中只允许“不读取旧键”的字符串断言。`main.css` 不再有 `@media (prefers-reduced-motion: reduce)`。
 
-- [ ] **步骤 7：运行测试和类型检查**
+- [x] **步骤 7：运行测试和类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-provider.test.ts src/renderer/src/components/appearance/appearance-actions.test.ts src/renderer/src/components/desktop/layout/main-layout/main-layout-project-operation-error.test.ts
@@ -506,7 +506,7 @@ pnpm --filter @openharness/desktop typecheck:web
 
 预期：全部通过。
 
-- [ ] **步骤 8：提交任务 5**
+- [x] **步骤 8：提交任务 5**
 
 ```powershell
 git add apps/desktop/src/renderer/src/main.tsx apps/desktop/src/renderer/src/assets/main.css apps/desktop/src/renderer/src/components/appearance/appearance-actions.ts apps/desktop/src/renderer/src/components/appearance/appearance-actions.test.ts apps/desktop/src/renderer/src/components/theme-provider.tsx apps/desktop/src/renderer/src/components/ui/code-block.tsx apps/desktop/src/renderer/src/components/desktop/tools/file-viewer.tsx apps/desktop/src/renderer/src/components/desktop/tools/review-tool.tsx apps/desktop/src/renderer/src/components/desktop/layout/main-layout/sidebar.tsx apps/desktop/src/renderer/src/components/desktop/scheduled-page/scheduled-page.tsx apps/desktop/src/renderer/src/components/desktop/layout/main-layout/main-layout-project-operation-error.test.ts
@@ -551,7 +551,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，列出对话界面的固定像素字号和 Markdown 固定值。
 
-- [ ] **步骤 3：在 main.css 建立动态层级**
+- [x] **步骤 3：在 main.css 建立动态层级**
 
 在 `@theme inline` 中覆盖 Tailwind 文字 token，并保留稳定的单位无关行高：
 
@@ -566,13 +566,13 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 在 `:root` 定义规格中的 caption/xs/sm/base/lg/xl/title/2xl/display 和代码字号默认值；增加 `text-ui-caption`、`text-ui-small` 两个语义 utility。把 `.assistant-markdown`、`.desktop-markdown-preview` 及其标题、列表、引用等直接字号改为这些变量，不改变布局间距。
 
-- [ ] **步骤 4：逐文件替换对话固定字号**
+- [x] **步骤 4：逐文件替换对话固定字号**
 
 按当前基线映射：`10–11px → text-ui-caption`，`11.5–12px → text-xs`，`12.5–13.5px → text-ui-small`，`14px → text-sm`，`15–16px → text-base`，`17px → text-lg`，`26px → text-[length:var(--ui-font-size-display)]`。每处先判断它是文字还是尺寸值；不要改宽度、高度或图标尺寸。
 
 `assistant-message.tsx` 在主工作区已有其他改动，隔离 worktree 中只能基于提交历史修改排版 class；后续集成时不得覆盖主工作区的图片附件代码。
 
-- [ ] **步骤 5：运行契约、对话测试和类型检查**
+- [x] **步骤 5：运行契约、对话测试和类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-typography-contract.test.ts src/renderer/src/components/desktop/conversation-page/transcript.test.ts src/renderer/src/components/desktop/conversation-page/message/message-render-model.test.ts
@@ -581,7 +581,7 @@ pnpm --filter @openharness/desktop typecheck:web
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交任务 6**
+- [x] **步骤 6：提交任务 6**
 
 只暂存本任务文件：
 
@@ -622,11 +622,11 @@ git commit -m "refactor(desktop): apply appearance typography to conversations"
 
 运行任务 6 的契约测试命令，预期 FAIL 并列出本组文件。
 
-- [ ] **步骤 3：按语义映射替换固定字号**
+- [x] **步骤 3：按语义映射替换固定字号**
 
 使用任务 6 的同一映射。保持设置页当前 `Card`、`Field`、`Select` 结构，不在本任务重构业务逻辑。调度页的时间、状态和说明文字分别使用 caption、xs 和 small 层级；页面标题使用标准 title 层级。
 
-- [ ] **步骤 4：运行契约、相关测试和类型检查**
+- [x] **步骤 4：运行契约、相关测试和类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-typography-contract.test.ts src/renderer/src/components/desktop/settings-page/attachment-storage-settings.test.ts
@@ -635,7 +635,7 @@ pnpm --filter @openharness/desktop typecheck:web
 
 预期：契约测试、存储设置回归测试和类型检查全部通过；调度页面当前没有专用渲染测试，由排版契约与 TypeScript 编译共同覆盖。
 
-- [ ] **步骤 5：提交任务 7**
+- [x] **步骤 5：提交任务 7**
 
 ```powershell
 git add apps/desktop/src/renderer/src/components/appearance/appearance-typography-contract.test.ts apps/desktop/src/renderer/src/components/desktop/desktop-empty-state.tsx apps/desktop/src/renderer/src/components/desktop/layout/settings-layout/settings-sidebar.tsx apps/desktop/src/renderer/src/components/desktop/layout/title-bar.tsx apps/desktop/src/renderer/src/components/desktop/open-with/open-with-submenu.tsx apps/desktop/src/renderer/src/components/desktop/plugin-page/plugin-page.tsx apps/desktop/src/renderer/src/components/desktop/scheduled-page apps/desktop/src/renderer/src/components/desktop/settings-page/attachment-storage-settings.tsx apps/desktop/src/renderer/src/components/desktop/settings-page/plugin-settings.tsx apps/desktop/src/renderer/src/components/desktop/settings-page/settings-content.tsx apps/desktop/src/renderer/src/routes/__root.tsx
@@ -683,7 +683,7 @@ expect(filesSource).toContain(
 
 运行任务 6 的契约测试命令，预期 FAIL。
 
-- [ ] **步骤 3：适配代码 Shadow DOM**
+- [x] **步骤 3：适配代码 Shadow DOM**
 
 把 `code-block.tsx`、`review-tool.tsx` 和 `virtualized-code-preview.tsx` 的 `unsafeCSS` 统一改为：
 
@@ -695,11 +695,11 @@ line-height: var(--code-line-height);
 
 `pre` 保留 `!important` 以覆盖第三方默认值。文件树的 `--trees-font-family-override` 保持 `var(--font-sans)`，字号改成 UI xs 变量。
 
-- [ ] **步骤 4：替换工具和 primitive 固定字号**
+- [x] **步骤 4：替换工具和 primitive 固定字号**
 
 按任务 6 的映射替换 React 文本 class。不要修改 xterm 内容字号、图标大小、面板尺寸或 z-index。shadcn primitives 继续使用语义颜色，不顺带重写其交互样式。
 
-- [ ] **步骤 5：运行契约、工具测试和类型检查**
+- [x] **步骤 5：运行契约、工具测试和类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-typography-contract.test.ts src/renderer/src/components/desktop/tools/file-viewer.test.ts src/renderer/src/components/desktop/tools/virtualized-code-preview.test.ts
@@ -714,7 +714,7 @@ rg -n "text-\[[0-9.]+px\]" apps/desktop/src/renderer/src
 
 预期：零命中。`fontSize: 13` 只允许保留在 xterm 初始化配置中。
 
-- [ ] **步骤 6：提交任务 8**
+- [x] **步骤 6：提交任务 8**
 
 ```powershell
 git add apps/desktop/src/renderer/src/components/appearance/appearance-typography-contract.test.ts apps/desktop/src/renderer/src/components/ui apps/desktop/src/renderer/src/components/desktop/layout/main-layout/sidebar.tsx apps/desktop/src/renderer/src/components/desktop/layout/main-layout/utility-panel/utility-panel-tab-strip.tsx apps/desktop/src/renderer/src/components/desktop/tools
@@ -736,7 +736,7 @@ git commit -m "refactor(desktop): apply appearance typography to tools"
 - 修改：`apps/desktop/src/renderer/src/components/desktop/settings-page/settings-content.tsx`
 - 修改：`apps/desktop/src/renderer/src/components/desktop/settings-page/index.ts`
 
-- [ ] **步骤 1：检查并添加 shadcn ToggleGroup**
+- [x] **步骤 1：检查并添加 shadcn ToggleGroup**
 
 ```powershell
 pnpm dlx shadcn@latest add toggle-group --dry-run
@@ -745,7 +745,7 @@ pnpm dlx shadcn@latest add toggle-group
 
 命令在 `apps/desktop` 目录运行。读取生成的 `toggle-group.tsx`，确认它使用项目的 Base UI、`@renderer` 别名和 lucide 图标约定；不要覆盖已有组件。
 
-- [ ] **步骤 2：编写失败的页面交互测试**
+- [x] **步骤 2：编写失败的页面交互测试**
 
 测试使用 `// @vitest-environment jsdom` 和 `React.createElement()` 渲染页面，mock `useAppearance()`。覆盖：
 
@@ -774,7 +774,7 @@ expect(setPreference).toHaveBeenCalledWith("accent", {
 });
 ```
 
-- [ ] **步骤 3：运行页面测试验证失败**
+- [x] **步骤 3：运行页面测试验证失败**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-settings.test.ts
@@ -782,7 +782,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：FAIL，页面组件尚不存在。
 
-- [ ] **步骤 4：实现预览卡和设置页**
+- [x] **步骤 4：实现预览卡和设置页**
 
 使用现有 `SettingsSection`/`SettingRow` 视觉模式，但将可复用版本移动到外观页面内部或一个小型设置页 helper；不要继续扩大 `settings-content.tsx`。页面由：
 
@@ -799,7 +799,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 主题卡片只用语义 token 和 CSS 形状，选中状态同时显示边框、勾选和可读文字。自定义色输入使用 `aria-invalid`，Field 使用 `data-invalid`。
 
-- [ ] **步骤 5：接入设置路由内容**
+- [x] **步骤 5：接入设置路由内容**
 
 在 `SettingsContent` 增加明确分支：
 
@@ -809,7 +809,7 @@ selectedSection === "外观" ? <AppearanceSettings /> : ...
 
 页面头部说明改为“调整 OpenHarness 在当前设备上的显示方式。更改会立即预览并自动保存。”，不再显示占位卡。
 
-- [ ] **步骤 6：运行页面、设置导航测试和类型检查**
+- [x] **步骤 6：运行页面、设置导航测试和类型检查**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance/appearance-settings.test.ts src/renderer/src/components/desktop/settings-page/settings-navigation.test.ts
@@ -818,7 +818,7 @@ pnpm --filter @openharness/desktop typecheck:web
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交任务 9**
+- [x] **步骤 7：提交任务 9**
 
 ```powershell
 git add apps/desktop/src/renderer/src/components/ui/toggle-group.tsx apps/desktop/src/renderer/src/components/appearance/theme-preview-card.tsx apps/desktop/src/renderer/src/components/appearance/appearance-settings.tsx apps/desktop/src/renderer/src/components/appearance/appearance-settings.test.ts apps/desktop/src/renderer/src/components/desktop/settings-page/settings-content.tsx apps/desktop/src/renderer/src/components/desktop/settings-page/index.ts
@@ -834,7 +834,7 @@ git commit -m "feat(desktop): add appearance settings page"
 - 检查：本计划全部修改文件。
 - 更新：`docs/superpowers/plans/2026-09-02-appearance-system.md`，勾选实际完成步骤并记录偏差。
 
-- [ ] **步骤 1：运行全部外观定向测试**
+- [x] **步骤 1：运行全部外观定向测试**
 
 ```powershell
 pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/appearance
@@ -842,7 +842,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/components/a
 
 预期：配置、颜色、字体、Provider、排版契约和页面测试全部通过。
 
-- [ ] **步骤 2：运行桌面端完整质量检查**
+- [x] **步骤 2：运行桌面端完整质量检查**
 
 ```powershell
 pnpm --filter @openharness/desktop test
@@ -853,7 +853,7 @@ git diff --check
 
 预期：全部退出码为 0。
 
-- [ ] **步骤 3：检查不兼容升级和范围边界**
+- [x] **步骤 3：检查不兼容升级和范围边界**
 
 ```powershell
 rg -n "ThemeProvider|useTheme|openharness-desktop-theme|@media \(prefers-reduced-motion: reduce\)|useReducedMotion|text-\[[0-9.]+px\]" apps/desktop/src/renderer/src
@@ -902,7 +902,7 @@ getComputedStyle($0).lineHeight;
 - 重启应用后新配置保留，新键缺失时默认跟随系统；
 - 侧边栏按钮从跟随系统切换为显式相反主题；按裸 `D` 不再切换主题。
 
-- [ ] **步骤 6：检查工作区和提交最终验收记录**
+- [x] **步骤 6：检查工作区和提交最终验收记录**
 
 ```powershell
 git status --short
@@ -916,6 +916,15 @@ git log --oneline -10
 git add docs/superpowers/plans/2026-09-02-appearance-system.md
 git commit -m "docs(desktop): record appearance verification"
 ```
+
+### 执行记录（2026-09-03）
+
+- 任务 6–8 原计划新增的 `appearance-typography-contract.test.ts` 属于扫描源码字符串的伪测试，按测试规范不落库；改为运行真实组件测试、Web 类型检查以及固定字号静态扫描。对话、页面、工具和 Shadow DOM 的实际改造均已完成。
+- 外观定向测试共 6 个文件、36 个用例，全部通过；`typecheck:web` 和外观目录定向 ESLint 通过。
+- 桌面完整测试实际结果为 73 个文件通过、1 个文件加载失败，453 个测试用例全部通过。唯一失败是既有的 `packages/server/src/application/daemon-application.ts` 引用未声明的 `@openharness/tools`；同一问题也阻断 `typecheck:node`、完整应用启动与正式构建。该依赖问题不属于本外观任务，且未在本分支改动。
+- 完整应用无法启动后，使用只加载真实 `AppearanceProvider`、`AppearanceSettings` 和正式样式的临时渲染预览完成视觉检查；临时文件已删除。验证了浅色/深色/系统主题、预设与自定义颜色、UI 12/18 px、代码 11/18 px、本机字体、方向键加空格键操作、恢复默认，以及 480 px 窄窗口无横向滚动。
+- 视觉检查发现并修复两项问题：单值 Slider 误渲染两个手柄；恢复默认成功后确认框未关闭。两项均先增加失败断言，再完成修复并通过回归。
+- 因完整应用启动被既有依赖问题阻断，任务 10 的步骤 4–5 保持未勾选：对话区、输入框、代码块、Diff 与 xterm 的同窗计算样式仍需在该依赖恢复后补验。
 
 ---
 
