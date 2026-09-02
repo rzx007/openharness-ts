@@ -354,7 +354,7 @@ export function FilesTool({
       </div>
 
       {loadState === "loading" && (
-        <div className="flex flex-1 items-center justify-center gap-2 text-[13px] text-ui-muted">
+        <div className="text-ui-small flex flex-1 items-center justify-center gap-2 text-ui-muted">
           <Spinner />
           正在读取项目文件...
         </div>
@@ -463,7 +463,7 @@ function FileBreadcrumb({
   return (
     <nav
       aria-label="文件路径"
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[13px] text-ui-muted"
+      className="text-ui-small flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-ui-muted"
     >
       <span className="max-w-40 shrink-0 truncate text-ui-foreground" title={projectName}>
         {projectName}
@@ -545,7 +545,7 @@ function ProjectFileTree({
         --trees-selected-fg-override: var(--foreground);
         font-family: var(--font-sans);
         --trees-font-family-override: var(--font-sans);
-        --trees-font-size-override: 12.5px;
+        --trees-font-size-override: var(--ui-font-size-xs);
         --trees-font-weight-regular-override: 450;
         --trees-item-padding-x-override: 7px;
       }
@@ -695,7 +695,7 @@ function FileTreeContextMenu({
       onMouseDown={(event) => {
         event.stopPropagation()
       }}
-      className="fixed z-50 w-64 rounded-xl border border-border/55 bg-popover p-1.5 text-[13px] text-popover-foreground shadow-xl shadow-black/12 dark:border-white/8 dark:shadow-black/40"
+      className="text-ui-small fixed z-50 w-64 rounded-xl border border-border/55 bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/12 dark:border-white/8 dark:shadow-black/40"
     >
       <FileTreeMenuButton icon={FolderOpen} onClick={() => onAction("reveal")}>
         在 File Explorer 中打开
@@ -726,7 +726,7 @@ function FileTreeContextMenu({
         添加到聊天
       </FileTreeMenuButton>
 
-      <div className="mt-1 border-t border-border/45 px-2.5 pt-2 pb-1 text-[11px] text-ui-muted">
+      <div className="text-ui-caption mt-1 border-t border-border/45 px-2.5 pt-2 pb-1 text-ui-muted">
         {item.kind === "directory" ? "文件夹" : "文件"} · {item.name}
       </div>
     </div>,
@@ -837,10 +837,10 @@ function FileSearchControls({
             onClose()
           }
         }}
-        className="h-full w-52 min-w-0 bg-transparent px-2 text-[13px] text-ui-foreground placeholder:text-ui-muted focus:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+        className="text-ui-small h-full w-52 min-w-0 bg-transparent px-2 text-ui-foreground placeholder:text-ui-muted focus:outline-none disabled:cursor-not-allowed disabled:opacity-45"
       />
       {hasQuery && (
-        <span className="shrink-0 px-2 text-[12px] text-ui-muted tabular-nums">
+        <span className="shrink-0 px-2 text-xs text-ui-muted tabular-nums">
           {matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : "No results"}
         </span>
       )}

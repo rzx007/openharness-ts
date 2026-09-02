@@ -52,14 +52,14 @@ export type TerminalSessionTabInfo = {
 
 export type TerminalPanelCommand =
   | {
-    id: number
-    type: "ensure" | "create"
-  }
+      id: number
+      type: "ensure" | "create"
+    }
   | {
-    id: number
-    type: "close"
-    terminalIds: string[]
-  }
+      id: number
+      type: "close"
+      terminalIds: string[]
+    }
 
 export function TerminalTool({
   active,
@@ -385,13 +385,16 @@ export function TerminalTool({
           current.map((record) =>
             record.id === event.terminalId
               ? {
-                ...record,
-                status: record.status === "stopping" || record.status === "killed"
-                  ? "killed"
-                  : event.exitCode === 0 ? "completed" : "failed",
-                exitedAt: new Date().toISOString(),
-                exitCode: event.exitCode,
-              }
+                  ...record,
+                  status:
+                    record.status === "stopping" || record.status === "killed"
+                      ? "killed"
+                      : event.exitCode === 0
+                        ? "completed"
+                        : "failed",
+                  exitedAt: new Date().toISOString(),
+                  exitCode: event.exitCode,
+                }
               : record
           )
         )
@@ -404,9 +407,11 @@ export function TerminalTool({
       }
 
       if (event.type === "status") {
-        setRecords((current) => current.map((record) =>
-          record.id === event.terminalId ? { ...record, status: event.status } : record
-        ))
+        setRecords((current) =>
+          current.map((record) =>
+            record.id === event.terminalId ? { ...record, status: event.status } : record
+          )
+        )
         return
       }
 
@@ -467,9 +472,7 @@ export function TerminalTool({
     if (command.type === "close") {
       let cancelled = false
       void Promise.all(
-        command.terminalIds.map((terminalId) =>
-          closeTerminal(terminalId, { notifyParent: false })
-        )
+        command.terminalIds.map((terminalId) => closeTerminal(terminalId, { notifyParent: false }))
       ).finally(() => {
         if (!cancelled) onCommandSettledRef.current(command.id)
       })
@@ -638,10 +641,10 @@ export function TerminalTool({
           <div className="absolute inset-0 grid place-items-center bg-conversation/90 px-8 text-center backdrop-blur-sm">
             <div className="max-w-sm">
               <Folder className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
-              <h2 className="text-[15px] font-semibold text-ui-foreground">
+              <h2 className="text-base font-semibold text-ui-foreground">
                 {selectedProject ? "项目目录不可用" : "未选择项目"}
               </h2>
-              <p className="mt-2 text-[13px] leading-6 text-ui-muted">
+              <p className="text-ui-small mt-2 leading-6 text-ui-muted">
                 {selectedProject
                   ? "当前项目目录可能已被移动，请重新绑定目录后再启动终端。"
                   : "选择项目后，终端会在项目目录中启动。"}
@@ -663,7 +666,7 @@ export function TerminalTool({
           <div className="absolute inset-0 grid place-items-center bg-conversation/84 px-8 text-center backdrop-blur-sm">
             <div>
               <SquareTerminal className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
-              <p className="text-[13px] text-ui-muted">当前项目没有打开的终端</p>
+              <p className="text-ui-small text-ui-muted">当前项目没有打开的终端</p>
               <Button type="button" className="mt-4" onClick={() => void createTerminal()}>
                 <Plus data-icon="inline-start" />
                 新建终端
@@ -673,13 +676,13 @@ export function TerminalTool({
         )}
 
         {error && selectedProject?.available && (
-          <div className="absolute right-3 bottom-3 max-w-[calc(100%-1.5rem)] rounded-lg border bg-popover px-3 py-2 text-[12px] text-popover-foreground shadow-lg">
+          <div className="absolute right-3 bottom-3 max-w-[calc(100%-1.5rem)] rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
             <span>{error}</span>
             <Button
               type="button"
               variant="link"
               onClick={() => setError(null)}
-              className="ml-3 h-auto px-0 text-[12px] text-foreground"
+              className="ml-3 h-auto px-0 text-xs text-foreground"
             >
               关闭
             </Button>
@@ -716,7 +719,7 @@ function TerminalContextMenu({
       ref={menuRef}
       role="menu"
       style={{ left: state.x, top: state.y }}
-      className="fixed z-[100] w-44 rounded-md border border-border/80 bg-popover p-1 text-[12.5px] text-popover-foreground shadow-xl outline-none"
+      className="text-ui-small fixed z-[100] w-44 rounded-md border border-border/80 bg-popover p-1 text-popover-foreground shadow-xl outline-none"
     >
       <TerminalContextMenuItem disabled={!state.selectedText} onClick={onCopy}>
         <ClipboardCopy />
@@ -761,9 +764,9 @@ function TerminalContextMenuItem({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-8 w-full items-center gap-2 rounded px-2 text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-3.5",
+        "flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-3.5",
         destructive &&
-        "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+          "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
       )}
     >
       {children}

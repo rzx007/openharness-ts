@@ -86,7 +86,7 @@ export function FileViewer({
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       <div className="min-h-0 min-w-0 flex-1">
         {loadingPath && loadingPath === activePath ? (
-          <div className="flex h-full items-center justify-center gap-2 text-[13px] text-ui-muted">
+          <div className="text-ui-small flex h-full items-center justify-center gap-2 text-ui-muted">
             <Spinner />
             正在读取文件...
           </div>
@@ -141,7 +141,7 @@ export function FileViewer({
 function MarkdownPreview({ preview }: { preview: WorkspaceReadFileResult }): React.JSX.Element {
   return (
     <ScrollArea className="h-full min-w-0" viewportClassName="p-0">
-      <article className="desktop-markdown-preview mx-auto min-h-full w-full max-w-[920px] px-8 py-8 text-[13.5px] leading-7 text-content-foreground">
+      <article className="desktop-markdown-preview text-ui-small mx-auto min-h-full w-full max-w-[920px] px-8 py-8 leading-7 text-content-foreground">
         <Streamdown
           mode="static"
           controls={false}

@@ -544,7 +544,7 @@
     background: var(--file-link);
     color: var(--background);
     font-family: var(--font-sans);
-    font-size: 0.43rem;
+    font-size: calc(var(--ui-font-size-caption) * 0.64);
     font-weight: 700;
     line-height: 1;
   }

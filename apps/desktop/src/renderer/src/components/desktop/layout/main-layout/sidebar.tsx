@@ -203,7 +203,7 @@ export function Sidebar({
         <div className="flex min-w-0 items-center gap-2 px-4 pt-2 pb-2">
           <button
             type="button"
-            className="flex h-8 items-center gap-1 rounded-md px-1.5 text-[15px] font-semibold hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="flex h-8 items-center gap-1 rounded-md px-1.5 text-base font-semibold hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             OpenHarness
             <ChevronDown className="size-3.5 text-sidebar-muted" />
@@ -344,7 +344,7 @@ export function Sidebar({
             className="flex h-9 w-full items-center rounded-md bg-background px-3 text-left shadow-sm ring-1 ring-black/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             <CircleDot className="mr-2 size-4 text-sidebar-muted" />
-            <span className="text-[13px] font-medium">开始使用</span>
+            <span className="text-ui-small font-medium">开始使用</span>
             <span className="ml-auto text-xs text-sidebar-muted">1/3</span>
           </button>
         </div>
@@ -449,7 +449,7 @@ export function Sidebar({
                 />
               </Field>
             </FieldGroup>
-            <div className="rounded-md bg-muted/55 px-3 py-2 text-[11.5px] leading-5 text-muted-foreground">
+            <div className="rounded-md bg-muted/55 px-3 py-2 text-xs leading-5 text-muted-foreground">
               当前项目：{shellProjectTarget?.name}
             </div>
             <DialogFooter>
@@ -531,7 +531,7 @@ function SessionRow({
         type="button"
         onClick={() => actions.onOpen(session)}
         className={cn(
-          "h-7.5 min-w-0 flex-1 truncate rounded-md pr-8 text-left text-[12.5px] leading-7.5 font-normal transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          "text-ui-small h-7.5 min-w-0 flex-1 truncate rounded-md pr-8 text-left leading-7.5 font-normal transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           nested ? "pl-8" : "pl-2.5",
           active
             ? "bg-sidebar-selected text-sidebar-foreground"
@@ -613,7 +613,7 @@ function ProjectGroup({
             title={project.path}
             aria-expanded={expanded}
             onClick={onToggle}
-            className="flex h-7.5 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 pr-8 text-left text-[12.5px] font-[450] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="text-ui-small flex h-7.5 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 pr-8 text-left font-[450] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             {expanded ? (
               <FolderOpen className="size-3.75 shrink-0 text-sidebar-muted" strokeWidth={1.7} />
@@ -622,7 +622,9 @@ function ProjectGroup({
             )}
             <span className="truncate">{project.name}</span>
             {!project.available ? (
-              <span className="shrink-0 text-[10px] font-normal text-amber-600">目录不可用</span>
+              <span className="text-ui-caption shrink-0 font-normal text-amber-600">
+                目录不可用
+              </span>
             ) : null}
             {project.pinnedAt ? (
               <Pin className="ml-auto size-3 shrink-0 text-sidebar-muted" />
@@ -695,7 +697,7 @@ function ProjectGroup({
                 <button
                   type="button"
                   onClick={() => setShowAll((current) => !current)}
-                  className="flex h-7 w-full items-center rounded-md pr-2 pl-8 text-left text-[11.5px] font-normal text-sidebar-muted/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  className="flex h-7 w-full items-center rounded-md pr-2 pl-8 text-left text-xs font-normal text-sidebar-muted/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 >
                   {showAll ? "收起" : "展开显示"}
                 </button>
@@ -754,7 +756,7 @@ function SidebarNavigationButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-[450] text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "text-ui-small flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left font-[450] text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         selected && "bg-sidebar-selected"
       )}
     >
@@ -772,7 +774,7 @@ function SidebarSectionLabel({
   className?: string
 }): React.JSX.Element {
   return (
-    <div className={cn("px-2.5 pb-1.5 text-[13px] font-normal text-sidebar-muted/70", className)}>
+    <div className={cn("text-ui-small px-2.5 pb-1.5 font-normal text-sidebar-muted/70", className)}>
       {children}
     </div>
   )

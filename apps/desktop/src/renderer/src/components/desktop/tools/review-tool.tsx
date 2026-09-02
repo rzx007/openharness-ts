@@ -63,8 +63,8 @@ const diffOptions: FileDiffOptions<undefined> = {
       background: transparent;
       color: var(--content-foreground);
       font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 20px;
+      font-size: var(--code-font-size);
+      line-height: var(--code-line-height);
     }
 
     pre {
@@ -72,8 +72,8 @@ const diffOptions: FileDiffOptions<undefined> = {
       min-width: max-content;
       background: transparent !important;
       font-family: var(--font-mono) !important;
-      font-size: 12px !important;
-      line-height: 20px !important;
+      font-size: var(--code-font-size) !important;
+      line-height: var(--code-line-height) !important;
     }
   `,
 }
@@ -226,7 +226,7 @@ export function ReviewTool({
       </div>
 
       {loadState === "loading" && !changes && (
-        <div className="flex flex-1 items-center justify-center gap-2 text-[13px] text-ui-muted">
+        <div className="text-ui-small flex flex-1 items-center justify-center gap-2 text-ui-muted">
           <Spinner />
           正在读取改动...
         </div>
@@ -315,7 +315,7 @@ function ReviewRangeSummary({
     <div className="flex min-w-0 items-center">
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="flex h-8 max-w-full items-center gap-1.5 rounded-lg px-2 text-left text-[13px] font-medium text-ui-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          className="text-ui-small flex h-8 max-w-full items-center gap-1.5 rounded-lg px-2 text-left font-medium text-ui-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
           title={label}
         >
           <span className="truncate">{loading && !changes ? "正在读取改动" : label}</span>
@@ -333,7 +333,7 @@ function ReviewRangeSummary({
         </DropdownMenuContent>
       </DropdownMenu>
       {changes ? (
-        <span className="ml-2 inline-flex align-baseline font-mono text-[12px] font-semibold">
+        <span className="ml-2 inline-flex align-baseline font-mono text-xs font-semibold">
           <span className="text-emerald-600 dark:text-emerald-400">+{changes.totalAdditions}</span>
           <span className="ml-1 text-rose-600 dark:text-rose-400">-{changes.totalDeletions}</span>
         </span>
@@ -372,7 +372,7 @@ function ChangedFileStream({
                 aria-expanded={active}
               >
                 <FileText className="size-3.5 shrink-0 text-sky-500" strokeWidth={1.8} />
-                <span className="min-w-0 flex-1 truncate text-[12.5px]" title={file.path}>
+                <span className="text-ui-small min-w-0 flex-1 truncate" title={file.path}>
                   <PathWithFileName path={file.path} />
                 </span>
                 <StatusBadge status={file.status} />
@@ -450,7 +450,7 @@ function DiffPreviewContent({
 
   if (state === "loading") {
     return (
-      <div className="flex min-h-40 items-center justify-center gap-2 text-[13px] text-ui-muted">
+      <div className="text-ui-small flex min-h-40 items-center justify-center gap-2 text-ui-muted">
         <Spinner />
         正在读取 diff...
       </div>
@@ -512,7 +512,7 @@ function InlineEmptyState({
     <div className="flex min-h-40 items-center justify-center px-4 py-8 text-center">
       <div className="flex max-w-sm flex-col items-center gap-2">
         <Icon className="size-5 text-muted-foreground" />
-        <div className="text-[13px] font-medium text-foreground">{title}</div>
+        <div className="text-ui-small font-medium text-foreground">{title}</div>
         <p className="text-xs leading-5 text-ui-muted">{description}</p>
       </div>
     </div>
@@ -523,7 +523,7 @@ function StatusBadge({ status }: { status: DesktopGitFileStatus }): React.JSX.El
   return (
     <span
       className={cn(
-        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-semibold",
+        "text-ui-caption inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border font-semibold",
         status === "added" || status === "untracked"
           ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
           : status === "deleted"
@@ -541,15 +541,15 @@ function StatusBadge({ status }: { status: DesktopGitFileStatus }): React.JSX.El
 
 function LineStats({ file }: { file: DesktopGitChangedFile }): React.JSX.Element {
   if (file.binary) {
-    return <span className="shrink-0 font-mono text-[11px] text-ui-muted">bin</span>
+    return <span className="text-ui-caption shrink-0 font-mono text-ui-muted">bin</span>
   }
 
   if (file.additions === null && file.deletions === null) {
-    return <span className="shrink-0 font-mono text-[11px] text-ui-muted">--</span>
+    return <span className="text-ui-caption shrink-0 font-mono text-ui-muted">--</span>
   }
 
   return (
-    <span className="shrink-0 font-mono text-[11px] font-semibold tabular-nums">
+    <span className="text-ui-caption shrink-0 font-mono font-semibold tabular-nums">
       <span className="text-emerald-600 dark:text-emerald-400">+{file.additions ?? 0}</span>
       <span className="ml-1 text-rose-600 dark:text-rose-400">-{file.deletions ?? 0}</span>
     </span>

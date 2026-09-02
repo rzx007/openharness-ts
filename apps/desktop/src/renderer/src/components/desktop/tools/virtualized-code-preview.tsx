@@ -41,8 +41,8 @@ const codeViewerCSS = `
     background: transparent;
     color: var(--content-foreground);
     font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 20px;
+    font-size: var(--code-font-size);
+    line-height: var(--code-line-height);
   }
 
   pre {
@@ -50,8 +50,8 @@ const codeViewerCSS = `
     min-width: max-content;
     background: transparent !important;
     font-family: var(--font-mono) !important;
-    font-size: 12px !important;
-    line-height: 20px !important;
+    font-size: var(--code-font-size) !important;
+    line-height: var(--code-line-height) !important;
   }
 `
 

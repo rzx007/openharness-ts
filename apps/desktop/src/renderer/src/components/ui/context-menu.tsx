@@ -42,7 +42,7 @@ export function ContextMenuItem({
   return (
     <BaseContextMenu.Item
       className={cn(
-        "flex h-8 cursor-default items-center gap-2 rounded px-2 text-[12.5px] outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-45 data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground [&_svg]:size-3.5",
+        "text-ui-small flex h-8 cursor-default items-center gap-2 rounded px-2 outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-45 data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground [&_svg]:size-3.5",
         destructive &&
           "text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive",
         className

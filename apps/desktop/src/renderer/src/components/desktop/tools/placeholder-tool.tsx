@@ -20,7 +20,7 @@ export function PlaceholderTool({
     <section className="flex h-full min-h-0 flex-col">
       <DesktopEmptyState icon={icon} title={title} description={description} />
       {footer && (
-        <div className="border-t bg-muted/35 px-4 py-3 font-mono text-[12px] text-ui-muted">
+        <div className="border-t bg-muted/35 px-4 py-3 font-mono text-xs text-ui-muted">
           {footer}
         </div>
       )}

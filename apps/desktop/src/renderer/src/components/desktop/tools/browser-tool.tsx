@@ -158,7 +158,7 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
             value={tab.input}
             onChange={(event) => onUpdate({ input: event.target.value })}
             placeholder="输入 URL 或本地路径"
-            className="h-full min-w-0 flex-1 bg-transparent text-center text-[14px] text-ui-foreground outline-none placeholder:text-[12px]"
+            className="h-full min-w-0 flex-1 bg-transparent text-center text-sm text-ui-foreground outline-none placeholder:text-xs"
           />
           <Button
             type="button"

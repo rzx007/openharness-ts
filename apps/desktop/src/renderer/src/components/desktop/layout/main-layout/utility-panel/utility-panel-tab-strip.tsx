@@ -170,13 +170,13 @@ export function EmptyUtilityPanelState({
                 <Icon strokeWidth={1.8} />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle className="d text-[13px] font-normal">
+                <ItemTitle className="text-ui-small font-normal">
                   {utilityToolMeta[tool].label}
                 </ItemTitle>
               </ItemContent>
               <ItemActions className="min-w-28 justify-end">
                 {utilityToolMeta[tool].shortcut ? (
-                  <Kbd className="bg-code text-[11px] text-muted-foreground">
+                  <Kbd className="text-ui-caption bg-code text-muted-foreground">
                     {utilityToolMeta[tool].shortcut}
                   </Kbd>
                 ) : null}
@@ -219,7 +219,7 @@ function UtilityTabButton({
     <ContextMenu>
       <ContextMenuTrigger
         className={cn(
-          "group relative flex h-8 max-w-42 min-w-28 flex-[1_1_10.5rem] items-center rounded-xl text-[12.5px] transition-colors",
+          "text-ui-small group relative flex h-8 max-w-42 min-w-28 flex-[1_1_10.5rem] items-center rounded-xl transition-colors",
           active
             ? "bg-neutral-200/80 text-ui-foreground dark:bg-neutral-800"
             : "text-ui-muted hover:bg-muted/35 hover:text-ui-foreground",
@@ -237,7 +237,7 @@ function UtilityTabButton({
             className={cn("size-3.5 shrink-0", loading && "animate-pulse")}
             strokeWidth={1.8}
           />
-          <span className="utility-tab-title relative min-w-0 flex-1 overflow-hidden text-[12px] whitespace-nowrap">
+          <span className="utility-tab-title relative min-w-0 flex-1 overflow-hidden text-xs whitespace-nowrap">
             {tab.title}
           </span>
         </button>
@@ -293,12 +293,12 @@ function AddTabMenu({
             variant="ghost"
             disabled={disabled}
             onClick={() => onAdd(tool)}
-            className="h-10 w-full justify-start gap-2 px-2.5 text-[14px] font-normal"
+            className="h-10 w-full justify-start gap-2 px-2.5 text-sm font-normal"
           >
             <Icon className="text-muted-foreground" strokeWidth={1.8} />
             <span>{utilityToolMeta[tool].label}</span>
             {utilityToolMeta[tool].shortcut && (
-              <Kbd className="ml-auto bg-code text-[11px] text-muted-foreground">
+              <Kbd className="text-ui-caption ml-auto bg-code text-muted-foreground">
                 {utilityToolMeta[tool].shortcut}
               </Kbd>
             )}

@@ -31,7 +31,7 @@ export const WiFiToggleWidget = forwardRef<HTMLDivElement, WiFiToggleWidgetProps
         {...props}
       >
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
+          <p className="text-ui-caption font-semibold tracking-widest text-neutral-400 uppercase">
             Wi-Fi
           </p>
           {/* Green dot = connected, gray dot = off. */}
@@ -66,7 +66,9 @@ export const WiFiToggleWidget = forwardRef<HTMLDivElement, WiFiToggleWidgetProps
           >
             {on ? networkName : "No network"}
           </p>
-          <p className="text-[10px] text-neutral-400">{on ? "WPA3 · 5 GHz" : "Tap to connect"}</p>
+          <p className="text-ui-caption text-neutral-400">
+            {on ? "WPA3 · 5 GHz" : "Tap to connect"}
+          </p>
         </div>
 
         {/* Bottom switch — slides right when Wi-Fi is on. */}
