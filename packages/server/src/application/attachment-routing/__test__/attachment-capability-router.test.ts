@@ -55,7 +55,7 @@ describe("AttachmentCapabilityRouter", () => {
       modelCapabilities: { image: "unsupported" },
       providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
       availableTools: ["ImageToText"],
-      imageToTextHostAvailable: true,
+      attachmentOcrAvailable: true,
     } as any);
 
     expect(resolveReadyContentPath).not.toHaveBeenCalled();
@@ -77,7 +77,7 @@ describe("AttachmentCapabilityRouter", () => {
       modelCapabilities: { image: "unsupported" },
       providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
       availableTools: [],
-      imageToTextHostAvailable: true,
+      attachmentOcrAvailable: true,
     } as any)).rejects.toMatchObject({ code: "attachment_ocr_tool_unavailable" });
   });
   it.each(["unknown", "unsupported"] as const)("falls back when model image support is %s", async (image) => {
@@ -92,7 +92,7 @@ describe("AttachmentCapabilityRouter", () => {
           imageMediaTypes: ["image/png"],
         },
         availableTools: ["ImageToText"],
-        imageToTextHostAvailable: true,
+        attachmentOcrAvailable: true,
       }),
     ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
     expect(resolveReadyContentPath).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("AttachmentCapabilityRouter", () => {
         modelCapabilities: { image: "native" },
         providerCapabilities: { image, imageMediaTypes: ["image/png"] },
         availableTools: ["ImageToText"],
-        imageToTextHostAvailable: true,
+        attachmentOcrAvailable: true,
       }),
     ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
   });
@@ -124,7 +124,7 @@ describe("AttachmentCapabilityRouter", () => {
           imageMediaTypes: ["image/png"],
         },
         availableTools: ["ImageToText"],
-        imageToTextHostAvailable: true,
+        attachmentOcrAvailable: true,
       }),
     ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
     await expect(
@@ -134,7 +134,7 @@ describe("AttachmentCapabilityRouter", () => {
         modelCapabilities: { image: "native" },
         providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
         availableTools: ["ImageToText"],
-        imageToTextHostAvailable: true,
+        attachmentOcrAvailable: true,
       }),
     ).resolves.toMatchObject({ decisions: [{ route: "image_to_text_tool" }] });
     expect(resolveReadyContentPath).not.toHaveBeenCalled();

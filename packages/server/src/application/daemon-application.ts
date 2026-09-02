@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { AgentBackgroundShellHost, Settings } from "@openharness/core";
+import { fileReadTool, imageGenerationTool, imageToTextTool } from "@openharness/tools";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
@@ -79,9 +80,14 @@ import { buildCompactAttachmentCatalog } from "./attachment-resource/compact-att
 import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capability-router.js";
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
-import { createAgentImageToTextHost } from "./attachment-processing/agent-image-to-text-host.js";
-import { createAgentAttachmentResourceHost } from "./attachment-resource/agent-attachment-resource-host.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
+import {
+  createAttachmentAuthorizationSessionResolver,
+  createAttachmentOcrService,
+  createAttachmentTextReader,
+} from "./attachment-tools/attachment-access.js";
+import { createAttachmentReadTool } from "./attachment-tools/attachment-read-tool.js";
+import { createAttachmentImageToTextTool } from "./attachment-tools/attachment-image-to-text-tool.js";
 
 export interface DaemonApplicationOptions {
   store: SessionStore;
@@ -298,6 +304,20 @@ export class DaemonApplication implements DurableAgentApplication {
         this.workflows,
       );
 
+      const attachmentAuthorizationSessions =
+        createAttachmentAuthorizationSessionResolver({
+          store,
+          liveChildren: this.liveChildren,
+        });
+      const attachmentReader = createAttachmentTextReader({
+        store,
+        attachments: this.attachments,
+      });
+      const attachmentOcr = createAttachmentOcrService({
+        store,
+        recognize: (input) => this.localOcr.recognize(input),
+      });
+
       // 每个会话第一次用时，在这里造活 Agent，并接上投影。
       const loadAgent = createDaemonAgentLoader({
         settings: options.settings,
@@ -334,18 +354,22 @@ export class DaemonApplication implements DurableAgentApplication {
             jobs: this.jobs.createDetachedProcessAgentHost(session),
           })),
         workflowRepository: this.workflows,
-        imageToText: createAgentImageToTextHost({
-          attachments: this.attachments,
-          recognize: (input) => this.localOcr.recognize(input),
-        }),
-        attachments: createAgentAttachmentResourceHost({
-          store,
-          attachments: this.attachments,
-          resolveAuthorizationSessionId: (sessionId) =>
-            this.liveChildren.resolveRootSessionId(sessionId) ?? sessionId,
-        }),
-        attachmentResourceRoot: (session) =>
-          this.attachmentResources.prepareSessionSync(session.id),
+        tools: [
+          createAttachmentImageToTextTool({
+            defaultTool: imageToTextTool,
+            authorizationSessions: attachmentAuthorizationSessions,
+            attachmentOcr,
+          }),
+        ],
+        imageGenerationTool,
+        toolOverrides: [
+          createAttachmentReadTool({
+            defaultTool: fileReadTool,
+            authorizationSessions: attachmentAuthorizationSessions,
+            attachmentReader,
+          }),
+        ],
+        trustedToolOverrides: ["Read"],
         requestPermission: async (request, context) => {
           // 工具要写文件时，弹到会话的权限请求里，等人点允许。没有宿主就在 loader 里默认拒绝。
           return await this.permissions.ask({
@@ -432,6 +456,7 @@ export class DaemonApplication implements DurableAgentApplication {
         log: options.log,
         postRunMaintenance,
         attachmentResources: this.attachmentResources,
+        attachmentOcrAvailable: true,
         routeAttachments: (input) => attachmentRouter.route(input),
         resolveCapabilities: async (session) => {
           const settings = options.getSettingsForCwd

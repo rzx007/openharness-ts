@@ -179,6 +179,7 @@ describe("SessionRunExecutor", () => {
       })),
       routeAttachments,
       attachmentResources: { materializeRun },
+      attachmentOcrAvailable: true,
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
     });
@@ -196,7 +197,7 @@ describe("SessionRunExecutor", () => {
       expect.any(Object),
     );
     expect(routeAttachments).toHaveBeenCalledWith(expect.objectContaining({
-      imageToTextHostAvailable: true,
+      attachmentOcrAvailable: true,
     }));
     expect(projectAttachmentTransformations).toHaveBeenCalledWith(
       expect.objectContaining({ status: "completed" }),

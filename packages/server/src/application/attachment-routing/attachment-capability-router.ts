@@ -89,8 +89,8 @@ export class AttachmentCapabilityRouter {
       if (!availableTools.has("ImageToText")) {
         return { ...common, route: "blocked", reason: "attachment_ocr_tool_unavailable" };
       }
-      if (input.imageToTextHostAvailable !== true) {
-        return { ...common, route: "blocked", reason: "attachment_ocr_host_unavailable" };
+      if (input.attachmentOcrAvailable !== true) {
+        return { ...common, route: "blocked", reason: "attachment_ocr_unavailable" };
       }
       return { ...common, route: "image_to_text_tool" };
     });
@@ -251,8 +251,8 @@ function routingErrorMessage(code: AttachmentRoutingErrorCode): string {
   switch (code) {
     case "attachment_ocr_tool_unavailable":
       return "ImageToText is unavailable after tool filtering";
-    case "attachment_ocr_host_unavailable":
-      return "the local OCR host is unavailable";
+    case "attachment_ocr_unavailable":
+      return "the local OCR service is unavailable";
     case "attachment_kind_unsupported":
       return "attachment kind is not supported for image input";
     case "attachment_document_unsupported":

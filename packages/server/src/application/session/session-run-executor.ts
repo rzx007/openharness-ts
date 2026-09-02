@@ -40,6 +40,7 @@ export interface SessionRunExecutorContext {
   log(event: ObservabilityEvent): void;
   postRunMaintenance?: Pick<SessionPostRunMaintenance, "run">;
   attachmentResources?: Pick<SessionAttachmentResources, "materializeRun">;
+  attachmentOcrAvailable?: boolean;
 }
 
 export interface ExecuteSessionRunInput {
@@ -127,7 +128,7 @@ export class SessionRunExecutor {
           attachments: admitted.attachments,
           ...capabilities,
           availableTools: inspection.tools.map((tool) => tool.name),
-          imageToTextHostAvailable: inspection.capabilities.imageToText.status === "available",
+          attachmentOcrAvailable: this.context.attachmentOcrAvailable === true,
           signal: workContext.signal,
         });
         submittedContent = routed.content;

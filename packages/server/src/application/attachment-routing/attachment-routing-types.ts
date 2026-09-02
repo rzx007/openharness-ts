@@ -16,7 +16,7 @@ export type AttachmentRoutingErrorCode =
   | "attachment_text_invalid"
   | "attachment_media_type_unsupported"
   | "attachment_ocr_tool_unavailable"
-  | "attachment_ocr_host_unavailable"
+  | "attachment_ocr_unavailable"
   | "attachment_materialization_failed"
   | "attachment_routing_aborted";
 
@@ -37,8 +37,8 @@ export interface RouteAttachmentBatchInput {
   providerCapabilities: ProviderInputCapabilities;
   /** Actual tools left after the Agent's allow/deny filters. */
   availableTools?: readonly string[];
-  /** Whether the daemon installed the local OCR host for this Agent. */
-  imageToTextHostAvailable?: boolean;
+  /** Whether the daemon installed the local OCR service for this Agent. */
+  attachmentOcrAvailable?: boolean;
   signal?: AbortSignal;
 }
 

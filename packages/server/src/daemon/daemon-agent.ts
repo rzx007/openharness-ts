@@ -14,11 +14,10 @@ import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type {
   AgentScheduleEffects,
   AgentBackgroundShellHost,
-  AgentImageToTextHost,
-  AgentAttachmentResourceHost,
   AgentEffects,
   AgentEventListener,
   Settings,
+  ToolDefinition,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import { readSessionRuntimeConfig } from "@openharness/protocol";
@@ -73,9 +72,10 @@ export interface DaemonAgentLoaderOptions {
     session: SessionRecord,
   ): ObservableJobProducer<AgentBackgroundShellHost>;
   workflowRepository?: WorkflowRunRepository;
-  imageToText?: AgentImageToTextHost;
-  attachments?: AgentAttachmentResourceHost;
-  attachmentResourceRoot?(session: SessionRecord): string;
+  tools?: ToolDefinition[];
+  imageGenerationTool?: ToolDefinition;
+  toolOverrides?: ToolDefinition[];
+  trustedToolOverrides?: string[];
   /**
    * 生产里就是给这个 Agent 建一个投影：把模型吐出的事件写成会话记录，再推给 UI。
    * 要等 Agent 造好才能建（投影要用 agent.id），但 onEvent 在造 Agent 时就得先挂上。
@@ -129,7 +129,12 @@ export function createDaemonAgentLoader(
       }));
     const terminal = options.createTerminal?.(session);
     const backgroundShell = options.createBackgroundShell?.(session);
-    const attachmentResourceRoot = options.attachmentResourceRoot?.(session);
+    const tools = [
+      ...(options.tools ?? []),
+      ...(options.imageGenerationTool && settings?.imageGenerationBaseUrl
+        ? [options.imageGenerationTool]
+        : []),
+    ];
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
@@ -142,11 +147,13 @@ export function createDaemonAgentLoader(
         ...(options.workflowRepository
           ? { workflowRepository: options.workflowRepository }
           : {}),
-        ...(options.imageToText ? { imageToText: options.imageToText } : {}),
-        ...(options.attachments ? { attachments: options.attachments } : {}),
       },
       effects: { requestPermission },
-      ...(attachmentResourceRoot ? { attachmentResourceRoot } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      ...(options.toolOverrides ? { toolOverrides: options.toolOverrides } : {}),
+      ...(options.trustedToolOverrides
+        ? { trustedToolOverrides: options.trustedToolOverrides }
+        : {}),
       ...(options.createEventSink
         ? {
             // 窗口上的字从这里来：事件 → 投影 → 会话记录 → 推给 UI。

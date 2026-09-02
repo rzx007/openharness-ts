@@ -10,7 +10,6 @@ import {
 } from "@openharness/agent-runtime";
 import type {
   AgentBackgroundShellHost,
-  AgentAttachmentResourceHost,
   AgentEvent,
   AgentEventContext,
   AgentEventInput,
@@ -19,6 +18,7 @@ import type {
   CompactContextProvider,
   Message,
   StreamingMessageClient,
+  ToolDefinition,
 } from "@openharness/core";
 import type { AgentJobHost } from "@openharness/jobs";
 import { SessionStore } from "@openharness/services";
@@ -141,7 +141,7 @@ describe("DaemonApplication", () => {
   it("lets a real child Agent read its root attachment without authorizing another session", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-child-attachment-"));
     const store = new SessionStore({ path: join(dir, "store.db") });
-    let attachmentHost: AgentAttachmentResourceHost | undefined;
+    let attachmentReadTool: ToolDefinition | undefined;
     const events: AgentEvent[] = [];
     const agents = new Map<string, OpenHarnessAgent>();
     let assetId = "";
@@ -264,9 +264,8 @@ describe("DaemonApplication", () => {
         memory: { enabled: false },
       },
       createAgent: async (context) => {
-        const attachments = context.options.capabilityOverrides?.attachments;
-        if (!attachments || attachments === false) throw new Error("attachment host missing");
-        attachmentHost = attachments;
+        attachmentReadTool = context.options.toolOverrides?.find((tool) => tool.name === "Read");
+        if (!attachmentReadTool) throw new Error("attachment Read override missing");
         const agent = await createDefaultNodeAgent({
           ...context.options,
           client,
@@ -328,10 +327,13 @@ describe("DaemonApplication", () => {
         type: "child.closed",
         data: expect.objectContaining({ sessionId: childSessionId }),
       }));
-      await expect(attachmentHost!.readText(
-        { assetId: attachment.id, offset: 1, limit: 1 },
-        { sessionId: childSessionId },
-      )).rejects.toThrow("attachment_resource_access_denied");
+      const closedChildRead = await attachmentReadTool!.execute(
+        { file_path: `attachment://${attachment.id}/root-notes.txt`, offset: 1, limit: 1 },
+        { cwd: dir, sessionId: childSessionId },
+      );
+      expect(closedChildRead).toMatchObject({ isError: true });
+      expect((closedChildRead.content[0] as { text: string }).text)
+        .toContain("attachment_resource_access_denied");
 
       const otherSession = application.sessions.createSession({
         cwd: dir,
