@@ -56,8 +56,7 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
       if (!settings) {
         return policyError("ImageGeneration is unavailable because runtime settings are missing.");
       }
-      // const apiKey = settings.apiKey?.trim() ?? "";
-      const apiKey = "sk-jrLJzC241o89j3E39NUBpO2Go5eXgCzz8xzBL41G4leG7jDF";
+      const apiKey = settings.apiKey?.trim() ?? "";
       if (!apiKey) {
         return policyError("ImageGeneration is unavailable because no API key is configured.");
       }
