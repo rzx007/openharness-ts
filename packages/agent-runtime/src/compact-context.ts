@@ -10,7 +10,7 @@ type CompactContextSource<K extends keyof CompactContext> = () =>
   | Promise<CompactContext[K] | null | undefined>;
 
 export interface CompactContextSources {
-  attachmentCatalog?: CompactContextSource<"attachmentCatalog">;
+  supplementalSections?: CompactContextSource<"supplementalSections">;
   sessionMemory?: CompactContextSource<"sessionMemory">;
 }
 
@@ -19,8 +19,8 @@ export function createCompactContextProvider(
 ): CompactContextProvider {
   return async () => {
     const context: CompactContext = {};
-    const attachmentCatalog = await sources.attachmentCatalog?.();
-    if (attachmentCatalog) context.attachmentCatalog = attachmentCatalog;
+    const supplementalSections = await sources.supplementalSections?.();
+    if (supplementalSections) context.supplementalSections = supplementalSections;
     const sessionMemory = await sources.sessionMemory?.();
     if (sessionMemory) context.sessionMemory = sessionMemory;
     return context;

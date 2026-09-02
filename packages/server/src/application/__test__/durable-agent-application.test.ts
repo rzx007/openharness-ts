@@ -411,18 +411,13 @@ describe("DaemonApplication", () => {
       const compactContext = await compactContextProvider!();
       expect(compactContext).toMatchObject({
         sessionMemory: expect.stringContaining("preserve this checkpoint detail"),
-        attachmentCatalog: {
-          entries: [
-            expect.objectContaining({
-              assetId: attachment.id,
-              displayName: "phase-two-notes.txt",
-              access: "read_text",
-              status: "available",
-            }),
-          ],
-          omittedCount: 0,
-        },
+        supplementalSections: [{
+          heading: "Conversation Attachments",
+          content: expect.stringContaining(`assetId=${attachment.id}`),
+        }],
       });
+      expect(compactContext.supplementalSections?.[0]?.content)
+        .toContain("Use Read with attachment://");
     } finally {
       await application.close().catch(() => {});
       store.close();

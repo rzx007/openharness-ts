@@ -36,16 +36,16 @@ function createContext(factory = vi.fn(async () => createAgent())) {
 }
 
 describe("AgentPool", () => {
-  it("combines the attachment catalog and session memory for the same session", async () => {
+  it("combines supplemental sections and session memory for the same session", async () => {
     const agent = createAgent();
-    const attachmentCatalog = vi.fn(async () => ({
-      entries: [],
-      omittedCount: 0,
-    }));
+    const supplementalSections = vi.fn(async () => [{
+      heading: "Conversation Attachments",
+      content: "- attachment://att-1/notes.txt",
+    }]);
     const sessionMemory = vi.fn(async () => "goal: finish phase two");
     const pool = new AgentPool({
       ...createContext(vi.fn(async () => agent)),
-      attachmentCatalog,
+      supplementalSections,
       sessionMemory,
     } as any);
 
@@ -54,21 +54,24 @@ describe("AgentPool", () => {
     expect(agent.setCompactContextProvider).toHaveBeenCalledOnce();
     const provider = agent.setCompactContextProvider.mock.calls[0]![0];
     await expect(provider()).resolves.toEqual({
-      attachmentCatalog: { entries: [], omittedCount: 0 },
+      supplementalSections: [{
+        heading: "Conversation Attachments",
+        content: "- attachment://att-1/notes.txt",
+      }],
       sessionMemory: "goal: finish phase two",
     });
-    expect(attachmentCatalog).toHaveBeenCalledWith("s1");
+    expect(supplementalSections).toHaveBeenCalledWith("s1");
     expect(sessionMemory).toHaveBeenCalledWith("s1");
   });
 
   it.each([
     {
-      name: "attachment catalog",
+      name: "supplemental sections",
       sources: {
-        attachmentCatalog: async () => ({ entries: [], omittedCount: 2 }),
+        supplementalSections: async () => [{ heading: "Extra", content: "context" }],
       },
       expected: {
-        attachmentCatalog: { entries: [], omittedCount: 2 },
+        supplementalSections: [{ heading: "Extra", content: "context" }],
       },
     },
     {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCompactAttachmentCatalog } from "../compact-attachment-catalog.js";
+import { buildCompactAttachmentSection } from "../compact-attachment-catalog.js";
 
-describe("buildCompactAttachmentCatalog", () => {
+describe("buildCompactAttachmentSection", () => {
   it("keeps stable resources and only exposes representations that actually completed", () => {
     const references = [
       {
@@ -91,40 +91,17 @@ describe("buildCompactAttachmentCatalog", () => {
         : [],
     };
 
-    expect(buildCompactAttachmentCatalog(store, "session-1")).toEqual({
-      entries: [
-        {
-          assetId: "att-image",
-          inputId: "input-1",
-          displayName: "收据.png",
-          mediaType: "image/png",
-          sizeBytes: 2048,
-          intent: "ocr",
-          status: "available",
-          resourceUri: "attachment://att-image/%E6%94%B6%E6%8D%AE.png",
-          access: "image_to_text",
-        },
-        {
-          assetId: "att-text",
-          inputId: "input-2",
-          displayName: "notes.txt",
-          mediaType: "text/plain",
-          sizeBytes: 42,
-          intent: "tool_resource",
-          status: "available",
-          resourceUri: "attachment://att-text/notes.txt",
-          access: "read_text",
-          representation: {
-            kind: "plain_text",
-            processor: "safe-text",
-            processorVersion: "1",
-            textPreview: "hello from notes",
-            truncated: false,
-          },
-        },
-      ],
-      omittedCount: 0,
-    });
+    const section = buildCompactAttachmentSection(store, "session-1");
+
+    expect(section?.heading).toBe("Conversation Attachments");
+    expect(section?.content).toContain("assetId=att-image");
+    expect(section?.content).toContain("attachment://att-image/%E6%94%B6%E6%8D%AE.png");
+    expect(section?.content).toContain("Use ImageToText to inspect this image");
+    expect(section?.content).toContain("assetId=att-text");
+    expect(section?.content).toContain("Use Read with attachment://att-text/notes.txt");
+    expect(section?.content).toContain("processor=safe-text@1");
+    expect(section?.content).toContain("hello from notes");
+    expect(section?.content).not.toContain("rep-failed");
   });
 
   it("marks missing assets unavailable and bounds previews and entry count", () => {
@@ -173,22 +150,24 @@ describe("buildCompactAttachmentCatalog", () => {
         : [],
     };
 
-    const catalog = buildCompactAttachmentCatalog(store, "session-1", {
+    const section = buildCompactAttachmentSection(store, "session-1", {
       maxEntries: 2,
       maxPreviewChars: 100,
     });
 
-    expect(catalog.entries).toHaveLength(2);
-    expect(catalog.omittedCount).toBe(20);
-    expect(catalog.entries[0]).toMatchObject({
-      assetId: "att-20",
-      status: "available",
-      representation: { textPreview: "x".repeat(100), truncated: true },
-    });
-    expect(catalog.entries[1]).toMatchObject({
-      assetId: "att-21",
-      status: "unavailable",
-      access: "unavailable",
-    });
+    expect(section?.content).toContain("assetId=att-20");
+    expect(section?.content).toContain("x".repeat(100));
+    expect(section?.content).toContain("truncated=true");
+    expect(section?.content).toContain("assetId=att-21");
+    expect(section?.content).toContain("original attachment is unavailable");
+    expect(section?.content).toContain("20 additional attachment references omitted");
+  });
+
+  it("returns undefined when the session has no attachment references", () => {
+    expect(buildCompactAttachmentSection({
+      listSessionInputAttachments: () => [],
+      getAttachment: () => undefined,
+      listAttachmentRepresentations: () => [],
+    }, "session-1")).toBeUndefined();
   });
 });

@@ -76,7 +76,7 @@ import { ProjectApplicationService } from "./project-application-service.js";
 import { ChannelApplicationService } from "./channel/channel-application-service.js";
 import { SessionWorkflowRunRepository } from "./workflow/session-workflow-run-repository.js";
 import { ApplicationRetentionService } from "./retention/application-retention-service.js";
-import { buildCompactAttachmentCatalog } from "./attachment-resource/compact-attachment-catalog.js";
+import { buildCompactAttachmentSection } from "./attachment-resource/compact-attachment-catalog.js";
 import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capability-router.js";
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
@@ -411,8 +411,10 @@ export class DaemonApplication implements DurableAgentApplication {
       this.agentPool = new AgentPool({
         store,
         loadAgent,
-        attachmentCatalog: (sessionId) =>
-          buildCompactAttachmentCatalog(store, sessionId),
+        supplementalSections: (sessionId) => {
+          const section = buildCompactAttachmentSection(store, sessionId);
+          return section ? [section] : [];
+        },
         sessionMemory: (sessionId) => {
           const session = store.getSession(sessionId);
           return session

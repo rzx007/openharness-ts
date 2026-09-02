@@ -302,10 +302,10 @@ describe("image handling", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. compact attachments
+// 4. compact supplemental context
 // ---------------------------------------------------------------------------
 
-describe("compact attachments", () => {
+describe("compact supplemental context", () => {
   it("includes provider session memory in the summarizer prompt", async () => {
     const client = makeSummaryClient("<summary>ok</summary>");
     const svc = new CompactService(SMALL_MAX, 2, {
@@ -324,59 +324,53 @@ describe("compact attachments", () => {
     expect(client.lastPrompt).toContain("finish compact docs");
   });
 
-  it("includes a bounded attachment catalog without inventing image contents", async () => {
+  it("includes provider-defined supplemental sections without knowing their schema", async () => {
     const client = makeSummaryClient("<summary>ok</summary>");
     const svc = new CompactService(SMALL_MAX, 2, {
       client,
       contextProvider: () => ({
-        attachmentCatalog: {
-          entries: [
-            {
-              assetId: "att-image",
-              inputId: "input-1",
-              displayName: "收据.png",
-              mediaType: "image/png",
-              sizeBytes: 2048,
-              intent: "ocr",
-              status: "available",
-              resourceUri: "attachment://att-image/%E6%94%B6%E6%8D%AE.png",
-              access: "image_to_text",
-            },
-            {
-              assetId: "att-text",
-              inputId: "input-2",
-              displayName: "notes.txt",
-              mediaType: "text/plain",
-              sizeBytes: 42,
-              intent: "tool_resource",
-              status: "available",
-              resourceUri: "attachment://att-text/notes.txt",
-              access: "read_text",
-              representation: {
-                kind: "plain_text",
-                processor: "safe-text",
-                processorVersion: "1",
-                textPreview: "hello from the attachment",
-                truncated: false,
-              },
-            },
-          ],
-          omittedCount: 3,
-        },
+        supplementalSections: [{
+          heading: "Business Context",
+          content: "- ticket: OPS-42",
+        }],
       }),
     });
 
     await svc.autoCompact(bigConversation(15));
 
-    expect(client.lastPrompt).toContain("## Conversation Attachments");
-    expect(client.lastPrompt).toContain("att-image");
-    expect(client.lastPrompt).toContain("收据.png");
-    expect(client.lastPrompt).toContain("Use ImageToText to inspect this image");
-    expect(client.lastPrompt).toContain("att-text");
-    expect(client.lastPrompt).toContain("hello from the attachment");
-    expect(client.lastPrompt).toContain("processor=safe-text@1");
-    expect(client.lastPrompt).toContain("3 additional attachment references omitted");
-    expect(client.lastPrompt).not.toContain("recognized total");
+    expect(client.lastPrompt).toContain("## Business Context");
+    expect(client.lastPrompt).toContain("- ticket: OPS-42");
+  });
+
+  it("bounds and normalizes provider-defined supplemental sections", async () => {
+    const client = makeSummaryClient("<summary>ok</summary>");
+    const svc = new CompactService(SMALL_MAX, 2, {
+      client,
+      contextProvider: () => ({
+        supplementalSections: [
+          { heading: "", content: "ignored empty heading" },
+          { heading: "ignored empty content", content: "" },
+          {
+            heading: `first\r\n${"h".repeat(200)}`,
+            content: "甲".repeat(20_000),
+          },
+          { heading: "second", content: "乙".repeat(20_000) },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            heading: `extra-${index}`,
+            content: `value-${index}`,
+          })),
+        ],
+      }),
+    });
+
+    await svc.autoCompact(bigConversation(15));
+
+    expect(client.lastPrompt).toContain(`## ${`first ${"h".repeat(114)}`}`);
+    expect(client.lastPrompt).not.toContain("ignored empty heading");
+    expect(client.lastPrompt).not.toContain("ignored empty content");
+    expect((client.lastPrompt.match(/甲/g) ?? [])).toHaveLength(16_000);
+    expect((client.lastPrompt.match(/乙/g) ?? [])).toHaveLength(16_000);
+    expect(client.lastPrompt).not.toContain("extra-6");
   });
 
   it("rejects compact when the context provider fails and preserves its cause", async () => {

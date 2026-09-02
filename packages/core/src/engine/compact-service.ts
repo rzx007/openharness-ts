@@ -169,33 +169,13 @@ export interface CompactContext {
   plan?: string;
   /** 工具调用摘要（从历史自动统计，如 `Read×12, Bash×5`）。 */
   workLog?: string;
-  /** 当前会话仍持久引用的附件目录；只放身份、访问方式和有界 representation 预览。 */
-  attachmentCatalog?: CompactAttachmentCatalog;
+  /** 业务层提供的有界补充章节；core 只负责统一清洗和限额。 */
+  supplementalSections?: CompactContextSection[];
 }
 
-export interface CompactAttachmentCatalog {
-  entries: CompactAttachmentCatalogEntry[];
-  /** catalog provider 已因自己的上限省略的引用数。 */
-  omittedCount?: number;
-}
-
-export interface CompactAttachmentCatalogEntry {
-  assetId: string;
-  inputId?: string;
-  displayName: string;
-  mediaType: string;
-  sizeBytes: number;
-  intent: string;
-  status: "available" | "unavailable";
-  resourceUri?: string;
-  access: "native_image" | "image_to_text" | "read_text" | "unavailable";
-  representation?: {
-    kind: string;
-    processor: string;
-    processorVersion: string;
-    textPreview: string;
-    truncated: boolean;
-  };
+export interface CompactContextSection {
+  heading: string;
+  content: string;
 }
 
 /** 由调用方（QueryEngine / CLI）提供外部上下文的工厂函数。 */
@@ -254,10 +234,6 @@ const PTL_NEEDLES = [
   "exceeds the available context size",
   "available context size",
 ];
-
-function safeCompactValue(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._:/@+-]/g, "_").slice(0, 256);
-}
 
 /**
  * 判断错误是否属于 Prompt Too Long（上下文溢出）。
@@ -435,12 +411,7 @@ export class CompactService {
     if (context.workLog) {
       sections.push(`## Work Log\n${context.workLog}`);
     }
-    const attachmentCatalog = this.formatAttachmentCatalog(
-      context.attachmentCatalog,
-    );
-    if (attachmentCatalog) {
-      sections.push(`## Conversation Attachments\n${attachmentCatalog}`);
-    }
+    sections.push(...this.formatSupplementalSections(context.supplementalSections));
     if (sections.length === 0) return COMPACT_PROMPT;
     return (
       COMPACT_PROMPT +
@@ -450,37 +421,28 @@ export class CompactService {
     );
   }
 
-  private formatAttachmentCatalog(
-    catalog: CompactAttachmentCatalog | undefined,
-  ): string | undefined {
-    if (!catalog?.entries.length) return undefined;
-    const maxEntries = 20;
-    const maxPreviewChars = 1_000;
-    const maxCatalogChars = 12_000;
-    const blocks: string[] = [];
-    let included = 0;
-    for (const entry of catalog.entries.slice(0, maxEntries)) {
-      const access = entry.access === "image_to_text"
-        ? "Use ImageToText to inspect this image; no image contents are known yet."
-        : entry.access === "read_text"
-          ? `Use Read with ${entry.resourceUri ?? `attachment://${entry.assetId}`} to inspect the text.`
-          : entry.access === "native_image"
-            ? "The original image remains available to a vision-capable model."
-            : "The original attachment is unavailable; do not claim to have read it.";
-      const representation = entry.representation
-        ? `\n  representation: kind=${safeCompactValue(entry.representation.kind)} processor=${safeCompactValue(entry.representation.processor)}@${safeCompactValue(entry.representation.processorVersion)} truncated=${entry.representation.truncated}\n  <attachment-preview>\n${entry.representation.textPreview.slice(0, maxPreviewChars)}\n  </attachment-preview>`
-        : "";
-      const block = `- assetId=${safeCompactValue(entry.assetId)} inputId=${safeCompactValue(entry.inputId ?? "unknown")} name=${JSON.stringify(entry.displayName)} mediaType=${safeCompactValue(entry.mediaType)} sizeBytes=${entry.sizeBytes} intent=${safeCompactValue(entry.intent)} status=${entry.status}\n  access: ${access}${representation}`;
-      if (blocks.join("\n").length + block.length > maxCatalogChars) break;
-      blocks.push(block);
-      included++;
+  private formatSupplementalSections(
+    supplementalSections: CompactContextSection[] | undefined,
+  ): string[] {
+    const sections: string[] = [];
+    let remainingContentChars = 32_000;
+    for (const section of supplementalSections ?? []) {
+      if (sections.length >= 8 || remainingContentChars <= 0) break;
+      const heading = section.heading
+        .replace(/[\r\n]+/g, " ")
+        .trim()
+        .slice(0, 120);
+      const content = section.content.trim();
+      if (!heading || !content) continue;
+      const boundedContent = content.slice(
+        0,
+        Math.min(16_000, remainingContentChars),
+      );
+      if (!boundedContent) continue;
+      sections.push(`## ${heading}\n${boundedContent}`);
+      remainingContentChars -= boundedContent.length;
     }
-    const omitted = Math.max(0, catalog.entries.length - included) +
-      Math.max(0, catalog.omittedCount ?? 0);
-    if (omitted > 0) {
-      blocks.push(`- ${omitted} additional attachment references omitted by compaction limits.`);
-    }
-    return blocks.join("\n");
+    return sections;
   }
 
   /** 挂载 hook 执行器，使 PRE_COMPACT / POST_COMPACT 事件生效。 */
@@ -829,8 +791,8 @@ export class CompactService {
         recentFiles: external.recentFiles ?? context.recentFiles,
         plan: external.plan ?? context.plan,
         workLog: external.workLog ?? context.workLog,
-        attachmentCatalog:
-          external.attachmentCatalog ?? context.attachmentCatalog,
+        supplementalSections:
+          external.supplementalSections ?? context.supplementalSections,
       };
     }
     const compactPrompt = this.buildCompactPrompt(context);

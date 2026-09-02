@@ -1,45 +1,34 @@
-import type { CompactAttachmentCatalog } from "@openharness/core";
 import { describe, expect, it } from "vitest";
 
 import { createCompactContextProvider } from "./compact-context.js";
 
-const attachmentCatalog: CompactAttachmentCatalog = {
-  entries: [
-    {
-      assetId: "asset-spec",
-      displayName: "spec.pdf",
-      mediaType: "application/pdf",
-      sizeBytes: 128,
-      intent: "tool_resource",
-      status: "available",
-      resourceUri: "attachment://asset-spec/spec.pdf",
-      access: "read_text",
-    },
-  ],
-};
+const supplementalSections = [{
+  heading: "Business Context",
+  content: "- ticket: OPS-42",
+}];
 
 describe("createCompactContextProvider", () => {
-  it("combines the attachment catalog and session memory", async () => {
+  it("combines supplemental sections and session memory", async () => {
     const provider = createCompactContextProvider({
-      attachmentCatalog: async () => attachmentCatalog,
+      supplementalSections: async () => supplementalSections,
       sessionMemory: async () => "goal: finish phase two",
     });
 
     await expect(provider()).resolves.toEqual({
-      attachmentCatalog,
+      supplementalSections,
       sessionMemory: "goal: finish phase two",
     });
   });
 
   it("omits each source when it is not configured", async () => {
-    const attachmentOnly = createCompactContextProvider({
-      attachmentCatalog: () => attachmentCatalog,
+    const supplementalOnly = createCompactContextProvider({
+      supplementalSections: () => supplementalSections,
     });
     const memoryOnly = createCompactContextProvider({
       sessionMemory: () => "goal: finish phase two",
     });
 
-    await expect(attachmentOnly()).resolves.toEqual({ attachmentCatalog });
+    await expect(supplementalOnly()).resolves.toEqual({ supplementalSections });
     await expect(memoryOnly()).resolves.toEqual({
       sessionMemory: "goal: finish phase two",
     });
@@ -47,7 +36,7 @@ describe("createCompactContextProvider", () => {
 
   it("omits sources that return an empty value", async () => {
     const emptyMemory = createCompactContextProvider({
-      attachmentCatalog: () => undefined,
+      supplementalSections: () => undefined,
       sessionMemory: () => "",
     });
 

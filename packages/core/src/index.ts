@@ -136,9 +136,8 @@ export { ToolRegistry, ToolRegistrationError } from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
 export {
   CompactService,
-  type CompactAttachmentCatalog,
-  type CompactAttachmentCatalogEntry,
   type CompactContext,
+  type CompactContextSection,
   type CompactContextProvider,
 } from "./engine/compact-service";
 export { CostTracker } from "./engine/cost-tracker";
