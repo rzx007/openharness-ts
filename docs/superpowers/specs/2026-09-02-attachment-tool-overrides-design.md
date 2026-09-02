@@ -127,10 +127,13 @@ createDefaultNodeAgent({
       attachmentOcr,
     }),
   ],
+  trustedToolOverrides: ["Read"],
 });
 ```
 
 `defaultTool` 是明确导入的内置定义。覆盖 Tool 持有它用于委托，但不修改默认 Registry，也不在运行时查找“上一个版本”。
+
+`trustedToolOverrides` 是第一方 Agent 创建者的显式信任声明：指定的覆盖 Tool 保留被替换内置 Tool 的权限分类。名称必须同时存在于 `toolOverrides`，而且被替换目标必须是 builtin；否则 Agent 创建失败。Extension、Plugin 和 MCP 不能设置或继承这项声明。daemon 只信任自己构造的 `Read` 覆盖，不信任第三方 Tool。
 
 两个工厂必须显式接收同一个授权会话解析器：
 
@@ -381,18 +384,33 @@ server 将现有 `buildCompactAttachmentCatalog()` 调整为构建一个有界�
 
 ### 11.1 Tool 权限
 
-根据前置 Tool override 设计，覆盖后的 `Read` 来源是 `agent`，不能因为名称仍叫 `Read` 就继承内置实现的隐式只读信任。否则任何自定义 `Read` 都可以借名称绕过权限检查。
+普通覆盖 Tool 继续遵循前置设计：不能只因为名称仍叫 `Read` 就继承内置实现的隐式信任。本次增加一个只供创建 Agent 的第一方调用者使用的明确例外：
 
-因此本次不新增“可信覆盖”后门，也不由 daemon 自动把整个 `Read` 加入 `autoApproveTools`：后者会同时放行附件读取和任意本地路径读取，授权范围过宽。
+```ts
+interface OpenHarnessAgentConfiguration {
+  toolOverrides?: ToolDefinition[];
+  /** 覆盖实现保留原 builtin 的权限分类；只能引用本次 toolOverrides 中的 builtin 目标。 */
+  trustedToolOverrides?: string[];
+}
+```
+
+daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverrides: ["Read"]`。这不是按名称自动信任所有同名实现：没有显式声明的 SDK 覆盖仍失去信任，Extension、Plugin 和 MCP 仍然没有覆盖或声明可信覆盖的入口。
+
+可信覆盖保留的是原 builtin 的权限分类，不等于无条件加入 `autoApproveTools`：
+
+- 普通本地路径继续沿用 `Read` 的 cwd 内只读放行和 cwd 外询问；
+- `attachment://` 被视为可信 Host `Read` 管理的只读资源 URI，Tool 权限可以放行，但执行时仍必须做 Child → Root 和附件引用授权；
+- denied tool、path deny 和显式策略继续优先；
+- `ImageToText` 不在现有隐式本地只读集合中，因此不需要加入 `trustedToolOverrides`，继续沿用原权限行为。
 
 实际行为固定为：
 
 - `full_auto` 等原本无需询问的模式继续执行；
 - 用户已有的 deny、allow、path rule 和显式 `autoApproveTools` 继续生效；
-- 默认询问模式下，daemon 覆盖的 `Read` 按覆盖 Tool 请求许可；
-- 附件 Tool 即使获得 Tool 执行许可，仍必须在执行内部做 session 级资源授权。
+- 默认询问模式下，daemon 的可信 `Read` 覆盖保留普通 builtin `Read` 的只读体验；
+- 附件分支即使通过 Tool 权限，仍必须在执行内部做 session 级资源授权。
 
-这会把附件读取从过去依赖 Tool 名称的隐式放行，收紧为显式 Tool 权限加资源权限两层检查。非交互 Schedule 或 Workflow 如果需要读取附件，必须沿用现有机制配置可执行的权限模式；本次不改变调度和工作流本身的 API 或生命周期。
+`trustedToolOverrides` 随 Root Agent 配置传给 Child，但只能信任同一组由第一方 daemon 构造并继承的 Tool 定义，Child 不能自行追加可信名称。
 
 ## 12. 生命周期
 
@@ -423,6 +441,10 @@ server 将现有 `buildCompactAttachmentCatalog()` 调整为构建一个有界�
 - core 不再导出附件 Catalog 类型，也不格式化附件 compact 文案。
 - 通用 `supplementalSections` 能进入 compact prompt，并执行 heading、单节和总长度限制。
 - Agent Runtime 的 compact provider 只透传通用补充章节和 session memory。
+- 未声明可信的覆盖 Tool 仍失去 builtin 信任。
+- `trustedToolOverrides` 只能引用当前第一方 `toolOverrides` 中实际替换 builtin 的名称。
+- daemon 的可信 `Read` 覆盖保留 cwd 内本地读取的隐式放行，cwd 外读取仍按原规则询问。
+- 可信 `Read` 的 `attachment://` 分支通过 Tool 权限后仍执行 session 资源授权。
 - 现有 `toolOverrides` 仍受 allow/deny、权限、Hook、超时和取消控制。
 
 ### 13.3 `@openharness/server`
@@ -448,7 +470,7 @@ server 将现有 `buildCompactAttachmentCatalog()` 调整为构建一个有界�
 ### 13.4 回归
 
 - Schedules、Workflow、Memory、Terminal、Jobs 和 Background Shell 的 API、装配和生命周期不变。
-- daemon 覆盖的 `Read` 不继承内置 Tool 的隐式只读信任。
+- daemon 通过 `trustedToolOverrides` 让第一方 `Read` 覆盖保留内置权限分类；其他覆盖不继承。
 - 全仓类型检查通过。
 - core、tools、agent-runtime、server 测试通过。
 - `git diff --check` 通过。
@@ -457,10 +479,11 @@ server 将现有 `buildCompactAttachmentCatalog()` 调整为构建一个有界�
 
 1. 用失败测试锁定默认 `Read`、默认 `ImageToText` 和无附件 Capability 的目标契约。
 2. 恢复两个默认 Tool，并让默认 Registry 始终注册 `ImageToText`。
-3. 删除 core、QueryEngine、Agent Runtime 中的附件/OCR Capability 接口和 `attachmentResourceRoot`。
-4. 在 server 中实现共享的 Child → Root 授权会话解析器和两个附件 Tool 工厂，并迁移 daemon 装配。
-5. 将附件 Catalog 类型和格式化迁到 server，compact 改为通用补充章节，再调整路由与集成测试。
-6. 更新架构文档，运行全量验证并分批提交。
+3. 增加并测试第一方 `trustedToolOverrides`，保持默认拒绝继承、daemon `Read` 显式信任和原有 cwd 权限边界。
+4. 删除 core、QueryEngine、Agent Runtime 中的附件/OCR Capability 接口和 `attachmentResourceRoot`。
+5. 在 server 中实现共享的 Child → Root 授权会话解析器和两个附件 Tool 工厂，并迁移 daemon 装配。
+6. 将附件 Catalog 类型和格式化迁到 server，compact 改为通用补充章节，再调整路由与集成测试。
+7. 更新架构文档，运行全量验证并分批提交。
 
 每一段都先写或调整失败测试，再实现最小改动。提交不夹带工作区中已有的无关变更。
 
@@ -476,11 +499,13 @@ server 将现有 `buildCompactAttachmentCatalog()` 调整为构建一个有界�
 8. daemon 使用 `toolOverrides` 接入附件，不存在旧 Capability 兼容通道。
 9. 附件目录不再自动挂载到 Agent shell 或 sandbox。
 10. Tool 覆盖不绕过 QueryEngine 的统一执行流程。
-11. core 和 Agent Runtime 不再包含附件 Catalog 类型或附件 compact 格式化逻辑。
-12. 两个覆盖 Tool 使用同一个正式授权会话解析器，Child 和嵌套 Child 只能继承所属 Root 的附件范围。
-13. 图片附件在 OCR 前执行与文本附件相同的 session 引用授权。
-14. Schedules、Workflow、Memory 及其他默认能力的 API、装配和生命周期无变化。
-15. 相关测试、全仓测试、类型检查和 diff 检查全部通过。
+11. daemon 显式信任自己构造的 `Read` 覆盖，普通 cwd 内本地读取不新增权限询问，cwd 外读取不扩大授权。
+12. 未显式声明可信的 SDK 覆盖以及所有 Extension、Plugin、MCP Tool 不继承 builtin 信任。
+13. core 和 Agent Runtime 不再包含附件 Catalog 类型或附件 compact 格式化逻辑。
+14. 两个覆盖 Tool 使用同一个正式授权会话解析器，Child 和嵌套 Child 只能继承所属 Root 的附件范围。
+15. 图片附件在 OCR 前执行与文本附件相同的 session 引用授权。
+16. Schedules、Workflow、Memory 及其他默认能力的 API、装配和生命周期无变化。
+17. 相关测试、全仓测试、类型检查和 diff 检查全部通过。
 
 ## 16. 最终运行模型
 
