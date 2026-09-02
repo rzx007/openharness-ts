@@ -62,7 +62,7 @@ export function createDaemonImageGenerationTool(): ToolDefinition {
       }
       const baseUrl = optionalString(process.env.AGNES_IMAGE_BASE_URL) ?? DEFAULT_BASE_URL;
 
-      const generationAbortScope = createToolAbortScope(context.abortSignal, 180_000);
+      const generationAbortScope = createToolAbortScope(context.abortSignal, 980_000);
       try {
         const response = await fetch(imagesGenerationsUrl(baseUrl), {
           method: "POST",
