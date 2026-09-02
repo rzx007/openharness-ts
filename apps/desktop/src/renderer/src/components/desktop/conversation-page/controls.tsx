@@ -53,7 +53,7 @@ export function PermissionModeMenu({
           <ShieldCheck className="mt-0.5 text-muted-foreground" />
           <span className="min-w-0 flex-1">
             <span className="block text-xs font-medium text-foreground">{mode.label}</span>
-            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+            <span className="text-ui-caption mt-0.5 block text-muted-foreground">
               {mode.description}
             </span>
           </span>

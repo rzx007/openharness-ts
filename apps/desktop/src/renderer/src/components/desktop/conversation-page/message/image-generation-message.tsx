@@ -125,7 +125,7 @@ export function ImageGenerationMessage({
           </span>
         </div>
         {showElapsed ? (
-          <p data-image-generation-elapsed className="mt-1 pl-4 text-[11px] leading-4 tabular-nums">
+          <p data-image-generation-elapsed className="text-ui-caption mt-1 pl-4 tabular-nums">
             已等待 {elapsedSeconds} 秒{longRunning ? " · 生成时间可能较长" : null}
           </p>
         ) : null}
@@ -257,7 +257,7 @@ function ImageGenerationStatusCard({
             <span className="text-ui-muted">详情</span>
             <ChevronRight className="size-3.5 text-ui-muted transition-transform group-open:rotate-90" />
           </summary>
-          <pre className="mt-1 ml-6 max-h-40 overflow-auto rounded-lg bg-muted/40 px-3 py-2 text-[11px] leading-relaxed whitespace-pre-wrap text-ui-muted">
+          <pre className="text-ui-caption mt-1 ml-6 max-h-40 overflow-auto rounded-lg bg-muted/40 px-3 py-2 leading-relaxed whitespace-pre-wrap text-ui-muted">
             {normalizedDetail}
           </pre>
         </details>

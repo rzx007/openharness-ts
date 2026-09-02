@@ -138,7 +138,7 @@ export function NewConversationStart({
             className="mb-5"
             aria-hidden="true"
           />
-          <h2 className="max-w-full text-[26px] leading-9 font-medium wrap-break-word text-foreground">
+          <h2 className="max-w-full text-[length:var(--ui-font-size-display)] leading-9 font-medium wrap-break-word text-foreground">
             {selectedProject ? (
               <>
                 {"要在 "}
@@ -291,7 +291,7 @@ export function NewConversationStart({
                   >
                     <Box />
                     <span>沙箱</span>
-                    <span className="ml-auto text-[10px] text-muted-foreground">即将支持</span>
+                    <span className="text-ui-caption ml-auto text-muted-foreground">即将支持</span>
                   </PickerMenuItem>
                 </PopoverContent>
               </Popover>
@@ -331,7 +331,9 @@ export function NewConversationStart({
                         className="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-placeholder"
                       />
                     </label>
-                    <div className="border-b px-2 pt-1 pb-2 text-[11px] text-ui-muted">分支</div>
+                    <div className="text-ui-caption border-b px-2 pt-1 pb-2 text-ui-muted">
+                      分支
+                    </div>
                     <ScrollArea
                       horizontal={false}
                       className="max-h-56"

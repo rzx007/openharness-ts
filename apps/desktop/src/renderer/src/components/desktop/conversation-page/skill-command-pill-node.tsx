@@ -67,7 +67,7 @@ export class SkillCommandPillNode extends DecoratorNode<React.JSX.Element> {
     return (
       <span
         className={cn(
-          "mx-0.5 inline-flex h-6 max-w-48 items-center gap-1 rounded-md bg-muted px-2 text-[13px] leading-6 font-medium text-foreground select-none",
+          "text-ui-small mx-0.5 inline-flex h-6 max-w-48 items-center gap-1 rounded-md bg-muted px-2 leading-6 font-medium text-foreground select-none",
           "ring-1 ring-black/6 dark:ring-white/10"
         )}
       >

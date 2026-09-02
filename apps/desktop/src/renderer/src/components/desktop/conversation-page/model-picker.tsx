@@ -303,7 +303,9 @@ export function ModelPicker({
               )
               return (
                 <div key={group.id} className={index === 0 ? undefined : "pt-1"}>
-                  <div className="px-2 pt-1.5 pb-1 text-[11px] text-ui-muted">{group.title}</div>
+                  <div className="text-ui-caption px-2 pt-1.5 pb-1 text-ui-muted">
+                    {group.title}
+                  </div>
                   <ModelOptionList
                     models={previewModels}
                     selectedModel={selectedModel}
@@ -334,7 +336,7 @@ export function ModelPicker({
             <PickerMenuItem disabled title="模型管理将在后续版本接入" onClick={() => undefined}>
               <Settings2 />
               <span>模型管理</span>
-              <span className="ml-auto text-[10px] text-muted-foreground">即将支持</span>
+              <span className="text-ui-caption ml-auto text-muted-foreground">即将支持</span>
             </PickerMenuItem>
           </div>
         </PopoverContent>

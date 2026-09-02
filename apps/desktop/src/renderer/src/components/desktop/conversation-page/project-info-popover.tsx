@@ -88,7 +88,7 @@ export function ProjectInfoButton({
               <MessageSquare className="size-3.5 text-muted-foreground" />
             </ItemMedia>
             <ItemContent className="min-w-0">
-              <ItemTitle className="min-w-0 text-[12px] text-foreground">
+              <ItemTitle className="min-w-0 text-xs text-foreground">
                 {`${projectSessions.length} 个会话 · ${runningCount} 个运行中`}
               </ItemTitle>
             </ItemContent>
@@ -104,7 +104,7 @@ export function ProjectInfoButton({
               <Folder className="size-3.5 text-muted-foreground" />
             </ItemMedia>
             <ItemContent className="min-w-0">
-              <ItemTitle className="min-w-0 text-[12px] text-foreground">{path}</ItemTitle>
+              <ItemTitle className="min-w-0 text-xs text-foreground">{path}</ItemTitle>
             </ItemContent>
           </Item>
         </ItemGroup>

@@ -40,7 +40,7 @@ export function RunErrorNotice({ error }: { error?: string }): React.JSX.Element
       <div className="flex items-start gap-2.5">
         <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
-          <h3 className="text-[13px] font-semibold text-destructive">请求失败</h3>
+          <h3 className="text-ui-small font-semibold text-destructive">请求失败</h3>
           {guidance ? <p className="mt-1 text-xs leading-5 text-foreground">{guidance}</p> : null}
           <p className="mt-1.5 text-xs leading-5 break-words whitespace-pre-wrap text-ui-muted">
             {detail}
@@ -188,7 +188,7 @@ function UserMessageBlock({
                 }
                 if (event.key === "Escape") setEditing(false)
               }}
-              className="min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 text-[13px] leading-6 whitespace-pre-wrap text-foreground outline-none"
+              className="text-ui-small min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 leading-6 whitespace-pre-wrap text-foreground outline-none"
             />
             <div className="flex items-center gap-1">
               <MessageActionButton label="取消编辑" onClick={() => setEditing(false)}>
@@ -260,10 +260,12 @@ function SkillInvocationCapsule({
   return (
     <div
       aria-label="使用的技能"
-      className="inline-flex max-w-[78%] items-center gap-1.5 rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] leading-none text-ui-muted"
+      className="text-ui-caption inline-flex max-w-[78%] items-center gap-1.5 rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 leading-none text-ui-muted"
     >
       <span>Skill</span>
-      <span className="font-medium text-foreground">{invocation.displayName ?? invocation.name}</span>
+      <span className="font-medium text-foreground">
+        {invocation.displayName ?? invocation.name}
+      </span>
       {invocation.source ? <span>· {skillSourceLabel(invocation.source)}</span> : null}
     </div>
   )
@@ -308,7 +310,7 @@ function UserMessageBubble({ content }: { content: string }): React.JSX.Element 
   const collapsed = longEnough && !expanded
 
   return (
-    <div className="max-w-[78%] overflow-hidden rounded-xl bg-input/80 text-[13px] leading-6 text-sidebar-foreground">
+    <div className="text-ui-small max-w-[78%] overflow-hidden rounded-xl bg-input/80 leading-6 text-sidebar-foreground">
       <div className="relative">
         <div
           className={cn("px-4 py-3 whitespace-pre-wrap", collapsed && "max-h-72 overflow-hidden")}
@@ -448,7 +450,7 @@ export function PermissionCard({
           <ShieldCheck className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-[13px] font-semibold text-foreground">需要你的批准</h3>
+          <h3 className="text-ui-small font-semibold text-foreground">需要你的批准</h3>
           <p className="mt-1 text-xs text-ui-muted">
             {"OpenHarness 请求运行 "}
             {permission.toolName}

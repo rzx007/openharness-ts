@@ -144,7 +144,7 @@ function RichPromptPlaceholder({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute top-3 left-4 text-[13px] leading-6 text-placeholder/65",
+        "text-ui-small pointer-events-none absolute top-3 left-4 leading-6 text-placeholder/65",
         className
       )}
     >
@@ -212,7 +212,7 @@ export function RichPromptInput({
               aria-label="输入对话内容"
               aria-multiline="true"
               className={cn(
-                "block max-h-44 min-h-18 w-full overflow-y-auto bg-transparent px-4 pt-3 text-[13px] leading-6 break-words whitespace-pre-wrap text-foreground outline-none",
+                "text-ui-small block max-h-44 min-h-18 w-full overflow-y-auto bg-transparent px-4 pt-3 leading-6 break-words whitespace-pre-wrap text-foreground outline-none",
                 "**:text-inherit empty:before:content-none focus-visible:outline-none",
                 className
               )}

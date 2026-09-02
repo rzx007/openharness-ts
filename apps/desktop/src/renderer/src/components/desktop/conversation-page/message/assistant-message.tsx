@@ -27,10 +27,7 @@ import {
 import { createStreamdownComponents } from "./streamdown-components"
 import { streamdownPlugins } from "./streamdown-plugins"
 import { MessageAttachment } from "../message-attachment"
-import {
-  GeneratedImageGallery,
-  ImageGenerationMessage,
-} from "./image-generation-message"
+import { GeneratedImageGallery, ImageGenerationMessage } from "./image-generation-message"
 
 type ChangedFileStats = {
   additions: number
@@ -87,7 +84,7 @@ export function AssistantMessage({
         }
         if (unit.type === "reasoning") {
           return (
-            <details key={unit.id} className="text-[13px] text-ui-muted">
+            <details key={unit.id} className="text-ui-small text-ui-muted">
               <summary className="w-fit cursor-pointer font-medium select-none hover:text-foreground">
                 思考过程
               </summary>
@@ -121,13 +118,7 @@ export function AssistantMessage({
           )
         }
         if (unit.type === "generated_attachments") {
-          return (
-            <GeneratedImageGallery
-              key={unit.id}
-              parts={unit.parts}
-              ratio={unit.ratio}
-            />
-          )
+          return <GeneratedImageGallery key={unit.id} parts={unit.parts} ratio={unit.ratio} />
         }
         return (
           <div
@@ -246,7 +237,7 @@ function TerminalActivityCard({
   const terminal = payload.terminal
   if (!terminal) return null
   return (
-    <section className="overflow-hidden rounded-lg border border-border/80 bg-muted/18 text-[13px] shadow-sm">
+    <section className="text-ui-small overflow-hidden rounded-lg border border-border/80 bg-muted/18 shadow-sm">
       <div className="flex min-h-16 items-center gap-3 px-3.5 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-ui-muted">
           <TerminalSquare className="size-[18px]" strokeWidth={1.7} />
@@ -325,11 +316,12 @@ function ToolActivityGroup({ tools }: { tools: ToolUnit[] }): React.JSX.Element 
     .filter(Boolean)
     .join("，")
   const onlyToolSummary = tools.length === 1 ? summarizeToolCall(tools[0]!.call) : undefined
-  const heading = tools.length === 1 && tools[0]!.call.toolName === "ImageToText"
-    ? onlyToolSummary?.name
-    : activityHeading
+  const heading =
+    tools.length === 1 && tools[0]!.call.toolName === "ImageToText"
+      ? onlyToolSummary?.name
+      : activityHeading
   return (
-    <section className="text-[13px] text-ui-muted">
+    <section className="text-ui-small text-ui-muted">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -377,7 +369,7 @@ function ToolActivityGroup({ tools }: { tools: ToolUnit[] }): React.JSX.Element 
                     <div className="border-b px-3 py-1.5 text-xs">
                       {tool.call.toolName || "Tool"}
                     </div>
-                    <pre className="max-h-56 overflow-auto px-3 py-2 font-mono text-[12px] leading-5 whitespace-pre-wrap">
+                    <pre className="max-h-56 overflow-auto px-3 py-2 font-mono text-xs leading-5 whitespace-pre-wrap">
                       {formatValue(output)}
                     </pre>
                   </div>
@@ -465,15 +457,13 @@ function ChangedFilesSummary({
   const hasStats = filesWithStats.some((file) => file.hasStats)
 
   return (
-    <section className="overflow-hidden rounded-lg border bg-transparent text-[13px]">
+    <section className="text-ui-small overflow-hidden rounded-lg border bg-transparent">
       <header className="flex min-h-15 items-center gap-3 px-4 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted/75 text-ui-muted">
           <FileCode2 className="size-[18px]" strokeWidth={1.7} />
         </span>
         <div>
-          <h3 className="text-[14px] font-semibold text-foreground">
-            已编辑 {files.length} 个文件
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground">已编辑 {files.length} 个文件</h3>
           {hasStats ? (
             <p className="mt-0.5">
               <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>{" "}
@@ -490,7 +480,7 @@ function ChangedFilesSummary({
             onClick={() => (canOpenReview ? onOpenReview(file.path) : onOpenFile(file.path))}
             className="flex h-11 w-full items-center gap-3 px-4 text-left transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
           >
-            <span className="min-w-0 flex-1 truncate text-[14px] text-ui-muted">{file.path}</span>
+            <span className="min-w-0 flex-1 truncate text-sm text-ui-muted">{file.path}</span>
             {file.hasStats ? (
               <LineStats additions={file.additions} deletions={file.deletions} />
             ) : null}
@@ -518,7 +508,7 @@ function LineStats({
   deletions: number
 }): React.JSX.Element {
   return (
-    <span className="shrink-0 font-mono text-[12px] font-semibold tabular-nums">
+    <span className="shrink-0 font-mono text-xs font-semibold tabular-nums">
       <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>
       <span className="ml-1 text-red-500">-{deletions}</span>
     </span>

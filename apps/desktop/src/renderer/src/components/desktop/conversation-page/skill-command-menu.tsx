@@ -71,8 +71,8 @@ export function SkillCommandMenu({
       className="absolute right-0 bottom-[calc(100%+10px)] left-0 z-40 overflow-hidden rounded-2xl bg-background/95 py-2 shadow-composer ring-1 ring-black/7 backdrop-blur dark:bg-card/95 dark:ring-white/12"
       onWheel={(event) => event.stopPropagation()}
     >
-      <div className="px-4 pb-1 text-[11px] font-medium text-muted-foreground">技能</div>
-      <div className="scrollbar-thin max-h-72 scroll-py-1 overflow-y-auto overscroll-contain px-2 pb-1">
+      <div className="text-ui-caption px-4 pb-1 font-medium text-muted-foreground">技能</div>
+      <div className="max-h-72 scroll-py-1 scrollbar-thin overflow-y-auto overscroll-contain px-2 pb-1">
         {options.map((command, index) => (
           <SkillCommandMenuItem
             key={command.name}
@@ -122,11 +122,11 @@ function SkillCommandMenuItem({
       <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
         <Box className="size-3.5" />
       </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{command.label}</span>
+      <span className="text-ui-small min-w-0 flex-1 truncate font-medium">{command.label}</span>
       <span className="hidden min-w-0 flex-[1.35] truncate text-xs text-muted-foreground sm:inline">
         {command.description}
       </span>
-      <span className="shrink-0 text-[11px] text-muted-foreground/65">
+      <span className="text-ui-caption shrink-0 text-muted-foreground/65">
         {command.sourceLabel}
       </span>
     </Button>
