@@ -914,6 +914,9 @@ importers:
       '@openharness/terminal-node':
         specifier: workspace:*
         version: link:../terminal-node
+      '@openharness/tools':
+        specifier: workspace:*
+        version: link:../tools
       hono:
         specifier: 'catalog:'
         version: 4.12.12
