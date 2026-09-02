@@ -48,6 +48,7 @@ Daemon
 4. daemon 覆盖的是完整 `ToolDefinition`，执行仍经过 QueryEngine 的权限、Hook、超时、取消、审计和结果规范化。
 5. daemon 的覆盖工具只在附件输入上接管执行；普通输入委托默认 Tool，避免复制通用逻辑。
 6. 附件目录不再隐式挂载给 Agent shell。
+7. compact 只接受通用补充章节；附件 Catalog 的类型、构建、限额和文案全部由 server 负责。
 
 ## 4. 目标
 
@@ -57,6 +58,7 @@ Daemon
 4. 文本附件继续通过 `Read({ file_path: "attachment://..." })` 读取。
 5. 当前模型不能直接看图时，图片附件继续通过 `ImageToText({ attachment_id: "..." })` 做本地 OCR。
 6. 附件读取始终在 daemon 中按当前 session 授权，不暴露物理存储路径。
+7. Root Agent、Child Agent 和嵌套 Child Agent 使用同一 Root session 的附件授权范围，其他 session 不能借用该范围。
 
 ## 5. 非目标
 
@@ -130,6 +132,61 @@ createDefaultNodeAgent({
 
 `defaultTool` 是明确导入的内置定义。覆盖 Tool 持有它用于委托，但不修改默认 Registry，也不在运行时查找“上一个版本”。
 
+两个工厂必须显式接收同一个授权会话解析器：
+
+```ts
+export interface AttachmentAuthorizationSessionResolver {
+  resolve(executionSessionId: string): string | undefined;
+}
+
+export interface AttachmentTextReader {
+  readText(input: {
+    authorizationSessionId: string;
+    assetId: string;
+    offset: number;
+    limit: number;
+    signal?: AbortSignal;
+  }): Promise<AttachmentTextSlice>;
+}
+
+export interface AttachmentOcrService {
+  recognize(input: {
+    authorizationSessionId: string;
+    assetId: string;
+    signal?: AbortSignal;
+  }): Promise<AttachmentOcrResult>;
+}
+
+export interface AttachmentReadToolOptions {
+  defaultTool: ToolDefinition;
+  authorizationSessions: AttachmentAuthorizationSessionResolver;
+  attachmentReader: AttachmentTextReader;
+}
+
+export interface AttachmentImageToTextToolOptions {
+  defaultTool: ToolDefinition;
+  authorizationSessions: AttachmentAuthorizationSessionResolver;
+  attachmentOcr: AttachmentOcrService;
+}
+```
+
+`executionSessionId` 是实际执行 Tool 的 Root 或 Child session；返回值是用来查询附件引用的授权 session。解析规则固定为：
+
+```text
+当前是存活的 Child 或嵌套 Child
+  -> 返回所属 Root sessionId
+
+当前是普通 Root session
+  -> 返回自身 sessionId
+
+session 不存在，或无法证明它属于一个可访问的 Root tree
+  -> 返回 undefined，Tool 拒绝访问
+```
+
+解析器只负责确定“去哪个 session 查引用”，不能只凭 assetId 授权。两个 Tool 得到授权 sessionId 后，都必须确认该 session 的输入附件记录中存在目标 assetId，再读取正文或启动 OCR。
+
+这个确认由上面的 reader/OCR service 作为最后一道边界执行：`authorizationSessionId` 是必填参数，service 先查询该 session 的附件引用，再访问 asset。Tool 负责从执行上下文解析授权 session 并传入，service 不接受缺少授权 session 的 asset-only 调用。这样即使以后其他 server 代码直接复用这些 service，也不能跳过 session 引用校验。
+
 ### 7.1 附件版 `Read`
 
 附件版 `Read` 保持默认参数，并扩展 `file_path` 的描述以说明 `attachment://`：
@@ -137,7 +194,8 @@ createDefaultNodeAgent({
 ```text
 file_path 以 attachment:// 开头
   -> 严格解析 assetId 和展示文件名
-  -> 使用 context.sessionId 校验访问范围
+  -> 使用 authorizationSessions.resolve(context.sessionId) 得到授权 session
+  -> 确认授权 session 的输入附件记录引用了 assetId
   -> 将 offset / limit 传给 daemon AttachmentTextReader
   -> 格式化文本片段和分页提示
 
@@ -167,7 +225,8 @@ file_path 以 attachment:// 开头
 ```text
 存在 attachment_id
   -> 禁止同时提供 image_path、image_url 或 prompt
-  -> 使用 context.sessionId 校验附件访问范围
+  -> 使用 authorizationSessions.resolve(context.sessionId) 得到授权 session
+  -> 确认授权 session 的输入附件记录引用了 attachment_id
   -> 调用 daemon 当前的附件本地 OCR
   -> 返回带不可信内容边界和 OCR metadata 的 ToolResult
 
@@ -209,9 +268,13 @@ file_path 以 attachment:// 开头
 
 server 内部保留实现当前业务所需的小接口，例如 `AttachmentTextReader` 和 `AttachmentOcrService`。这些接口使用 server/services 自己的类型，不再从 core 导出，也不再出现在 `agent.inspect().capabilities`。
 
+`CompactAttachmentCatalog` 和 `CompactAttachmentCatalogEntry` 也从 core 删除。它们迁到 server 附件模块，或直接成为 server 构造补充章节时使用的私有类型。
+
 ## 9. daemon 装配
 
 `daemon-application.ts` 继续创建现有附件读取与 OCR 服务，但不再把它们放进 `capabilityOverrides`。它把服务交给两个 server Tool 工厂，再将结果传给 daemon Agent factory。
+
+daemon 同时创建一个 `AttachmentAuthorizationSessionResolver`，供两个 Tool 共享。它用 `LiveChildAgentDirectory` 将存活的 Child 和嵌套 Child 映射到 Root；普通持久 session 映射到自身；未知 session 返回 `undefined`。关闭 Child 后不得继续沿用之前的 Root 映射。
 
 `daemon-agent.ts` 的输入从：
 
@@ -235,7 +298,7 @@ server 内部保留实现当前业务所需的小接口，例如 `AttachmentText
 
 ## 10. 附件路由与 compact
 
-客户端上传、Catalog 和 compact 中保存的 `attachment://` URI 不变。它们属于 daemon 会话数据，不要求 Agent Runtime 原生理解该 URI。
+客户端上传和 server 附件 Catalog 中保存的 `attachment://` URI 不变。它们属于 daemon 会话数据，不要求 Agent Runtime 原生理解该 URI。
 
 图片附件路由不再检查：
 
@@ -258,14 +321,45 @@ ImageToText 可见且已安装附件 OCR 覆盖
 
 实现中可以把现有 `imageToTextHostAvailable` 改成语义准确的 `attachmentOcrAvailable`，它是 server 路由输入，不是 Agent Capability 快照。
 
-compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText` 读取图片文字。daemon 的默认装配保证这些提示对应最终覆盖工具；独立 Agent 没有 daemon 附件 Catalog，因此不会产生这类附件提示。
+### 10.1 compact 退出附件类型
+
+core 当前的 `CompactContext.attachmentCatalog`、`CompactAttachmentCatalog`、`CompactAttachmentCatalogEntry` 和 `CompactService.formatAttachmentCatalog()` 全部删除。Agent Runtime 的 `CompactContextSources.attachmentCatalog` 也删除。
+
+`CompactContext` 改为接受通用补充章节：
+
+```ts
+export interface CompactContextSection {
+  heading: string;
+  content: string;
+}
+
+export interface CompactContext {
+  // 现有 sessionMemory、taskFocus、recentFiles、plan、workLog 保持不变。
+  supplementalSections?: CompactContextSection[];
+}
+```
+
+core 只负责将经过通用长度限制的章节放进 compact prompt，不识别 assetId、媒体类型、representation、`attachment://`、`Read` 或 `ImageToText`。规则固定为：最多 8 节；heading 去除首尾空白、把换行折叠为空格并截到 120 字符，空 heading 的章节跳过；单节 content 最多 16,000 字符；所有补充章节合计最多 32,000 字符；空 content 跳过。这样任意 Host 都不能无限撑大 compact prompt。
+
+server 将现有 `buildCompactAttachmentCatalog()` 调整为构建一个有界的通用章节，例如：
+
+```ts
+{
+  heading: "Conversation Attachments",
+  content: "...server 格式化后的附件目录和访问提示...",
+}
+```
+
+附件条目数量、预览长度、Catalog 总长度、不可信预览边界，以及提示模型使用 `Read` / `ImageToText` 的文案，都在 server 中生成和测试。AgentPool 只把 server 生成的章节通过通用 `supplementalSections` provider 传给 Agent。
+
+这样 compact 仍能保留附件引用，但 core 和 Agent Runtime 只看见普通文本章节，不拥有附件类型或附件格式化规则。独立 Agent 没有 daemon 提供的附件章节，因此不会产生附件提示。
 
 ## 11. 安全与错误处理
 
 附件版 Tool 必须：
 
 1. 只接受规范化的 `attachment://` 或不透明 `attachment_id`，不接受附件物理路径。
-2. 使用当前 `ToolContext.sessionId` 做访问校验；缺少 session 时拒绝附件访问。
+2. 使用正式的授权会话解析器处理 Root、Child 和嵌套 Child；缺少 session、解析失败或 Root 引用不存在时拒绝附件访问。
 3. 继续校验附件状态、媒体类型、大小和可用 representation。
 4. 将 `abortSignal` 传到底层读取和 OCR。
 5. 限制单次文本返回量，保留分页信息。
@@ -276,6 +370,7 @@ compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText
 
 - 附件不存在；
 - 当前 session 无权访问；
+- Child 已关闭或无法解析到有效 Root；
 - 附件尚未处理完成；
 - 类型不支持；
 - 内容或图片过大；
@@ -325,6 +420,9 @@ compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText
 - 默认 Agent 无附件 Host 也注册并运行通用 `Read`、`ImageToText`。
 - Capability 解析和 inspect 快照中不再出现 `attachments`、`imageToText`。
 - Runtime 配置不再接受 `attachmentResourceRoot`，沙箱不再自动挂载附件目录。
+- core 不再导出附件 Catalog 类型，也不格式化附件 compact 文案。
+- 通用 `supplementalSections` 能进入 compact prompt，并执行 heading、单节和总长度限制。
+- Agent Runtime 的 compact provider 只透传通用补充章节和 session memory。
 - 现有 `toolOverrides` 仍受 allow/deny、权限、Hook、超时和取消控制。
 
 ### 13.3 `@openharness/server`
@@ -334,10 +432,18 @@ compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText
 - 附件版 `ImageToText` 对普通路径/URL 委托默认 Tool。
 - 附件版 `ImageToText` 对 `attachment_id` 调用本地 OCR。
 - `attachment_id` 与其他来源或 prompt 同时出现时拒绝。
-- 跨 session、缺少 session、附件不存在和取消请求都返回正确错误。
+- 两个覆盖 Tool 都验证普通 Root session 可以访问自己的附件。
+- 两个覆盖 Tool 都验证存活 Child 和嵌套 Child 解析到同一个 Root，并可访问 Root 附件。
+- 两个覆盖 Tool 都拒绝其他 Root 的附件、未知 session 和缺少 session 的请求。
+- Child 关闭并从 live directory 注销后，两个覆盖 Tool 都不再允许它借用原 Root 的附件授权。
+- 两个覆盖 Tool 的单元测试断言解析器收到实际 Child sessionId，而 reader/OCR service 收到解析后的 Root sessionId。
+- reader 和 OCR service 都拒绝缺少 `authorizationSessionId` 的 asset-only 访问；类型层面不提供这种调用签名。
+- 图片 OCR 在调用 processor 前完成 session 引用校验，不能只凭 assetId 识别图片。
+- 附件不存在和取消请求都返回正确错误。
 - daemon 创建 Agent 时安装正确的覆盖 Tool。
 - 路由只在附件 OCR 覆盖真实可用且 Tool 可见时生成提示。
-- compact 后的附件提示仍能触发覆盖 Tool。
+- server 负责附件 Catalog 的条目、预览和总长度限制，并产出通用 compact 章节。
+- compact 后的 server 附件章节仍能触发覆盖 Tool。
 
 ### 13.4 回归
 
@@ -352,8 +458,8 @@ compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText
 1. 用失败测试锁定默认 `Read`、默认 `ImageToText` 和无附件 Capability 的目标契约。
 2. 恢复两个默认 Tool，并让默认 Registry 始终注册 `ImageToText`。
 3. 删除 core、QueryEngine、Agent Runtime 中的附件/OCR Capability 接口和 `attachmentResourceRoot`。
-4. 在 server 中实现两个附件 Tool 工厂并迁移 daemon 装配。
-5. 调整附件路由、compact 相关断言和 server 集成测试。
+4. 在 server 中实现共享的 Child → Root 授权会话解析器和两个附件 Tool 工厂，并迁移 daemon 装配。
+5. 将附件 Catalog 类型和格式化迁到 server，compact 改为通用补充章节，再调整路由与集成测试。
 6. 更新架构文档，运行全量验证并分批提交。
 
 每一段都先写或调整失败测试，再实现最小改动。提交不夹带工作区中已有的无关变更。
@@ -370,8 +476,11 @@ compact 继续提示模型使用 `Read` 读取文本附件、使用 `ImageToText
 8. daemon 使用 `toolOverrides` 接入附件，不存在旧 Capability 兼容通道。
 9. 附件目录不再自动挂载到 Agent shell 或 sandbox。
 10. Tool 覆盖不绕过 QueryEngine 的统一执行流程。
-11. Schedules、Workflow、Memory 及其他默认能力的 API、装配和生命周期无变化。
-12. 相关测试、全仓测试、类型检查和 diff 检查全部通过。
+11. core 和 Agent Runtime 不再包含附件 Catalog 类型或附件 compact 格式化逻辑。
+12. 两个覆盖 Tool 使用同一个正式授权会话解析器，Child 和嵌套 Child 只能继承所属 Root 的附件范围。
+13. 图片附件在 OCR 前执行与文本附件相同的 session 引用授权。
+14. Schedules、Workflow、Memory 及其他默认能力的 API、装配和生命周期无变化。
+15. 相关测试、全仓测试、类型检查和 diff 检查全部通过。
 
 ## 16. 最终运行模型
 
