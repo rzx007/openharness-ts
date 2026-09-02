@@ -298,8 +298,12 @@ class RuntimeToolRegistry implements IToolRegistry {
     private readonly deniedTools: ReadonlySet<string>,
   ) {}
 
-  register(tool: ToolDefinition): void {
-    this.inner.register(tool);
+  register(tool: ToolDefinition, source?: Parameters<IToolRegistry["register"]>[1]): void {
+    this.inner.register(tool, source);
+  }
+
+  override(tool: ToolDefinition, source: Parameters<IToolRegistry["override"]>[1]): void {
+    this.inner.override(tool, source);
   }
 
   unregister(name: string): boolean {
@@ -317,6 +321,10 @@ class RuntimeToolRegistry implements IToolRegistry {
 
   has(name: string): boolean {
     return this.get(name) !== undefined;
+  }
+
+  inspect(name: string) {
+    return this.isVisible(name) ? this.inner.inspect(name) : undefined;
   }
 
   private isVisible(name: string): boolean {

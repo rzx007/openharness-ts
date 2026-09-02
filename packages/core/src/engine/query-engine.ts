@@ -834,8 +834,11 @@ export class QueryEngine implements IQueryEngine {
     const allowed = new Set(allowedTools);
     const inner = this.toolRegistry;
     return {
-      register(tool: ToolDefinition): void {
-        inner.register(tool);
+      register(tool: ToolDefinition, source): void {
+        inner.register(tool, source);
+      },
+      override(tool: ToolDefinition, source): void {
+        inner.override(tool, source);
       },
       unregister(name: string): boolean {
         return inner.unregister?.(name) ?? false;
@@ -848,6 +851,9 @@ export class QueryEngine implements IQueryEngine {
       },
       has(name: string): boolean {
         return allowed.has(name) && inner.has(name);
+      },
+      inspect(name: string) {
+        return allowed.has(name) ? inner.inspect(name) : undefined;
       },
     };
   }

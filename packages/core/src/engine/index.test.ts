@@ -54,7 +54,57 @@ describe("ToolRegistry", () => {
     registry.register({ name: "b", description: "", inputSchema: {}, execute: async () => ({ content: [] }) });
     expect(registry.getAll()).toHaveLength(2);
   });
+
+  it("rejects implicit duplicate registration", () => {
+    const registry = new ToolRegistry();
+    registry.register(registryTool("Read", "builtin"), { kind: "builtin" });
+
+    expect(() =>
+      registry.register(registryTool("Read", "extension"), { kind: "extension" }),
+    ).toThrow(expect.objectContaining({ code: "tool_already_registered" }));
+    expect(registry.get("Read")?.description).toBe("builtin");
+  });
+
+  it("overrides an existing tool and records both sources", () => {
+    const registry = new ToolRegistry();
+    const replacement = registryTool("Read", "custom");
+    registry.register(registryTool("Read", "builtin"), { kind: "builtin" });
+
+    registry.override(replacement, { kind: "agent" });
+
+    expect(registry.get("Read")).toBe(replacement);
+    expect(registry.inspect("Read")).toEqual({
+      name: "Read",
+      source: { kind: "agent" },
+      overrides: { kind: "builtin" },
+    });
+  });
+
+  it("rejects an override whose target does not exist", () => {
+    const registry = new ToolRegistry();
+
+    expect(() =>
+      registry.override(registryTool("Raed", "custom"), { kind: "agent" }),
+    ).toThrow(expect.objectContaining({ code: "tool_override_target_not_found" }));
+  });
+
+  it("removes registration metadata when a tool is unregistered", () => {
+    const registry = new ToolRegistry();
+    registry.register(registryTool("Read", "builtin"), { kind: "builtin" });
+
+    expect(registry.unregister("Read")).toBe(true);
+    expect(registry.inspect("Read")).toBeUndefined();
+  });
 });
+
+function registryTool(name: string, description: string): ToolDefinition {
+  return {
+    name,
+    description,
+    inputSchema: {},
+    execute: async () => ({ content: [] }),
+  };
+}
 
 describe("QueryEngine", () => {
   it("yields text_delta events for simple response", async () => {

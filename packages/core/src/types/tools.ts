@@ -141,10 +141,23 @@ export interface ToolDefinition {
   ) => Promise<ToolResult>;
 }
 
+export interface ToolRegistrationSource {
+  kind: "builtin" | "agent" | "extension" | "plugin" | "mcp" | "runtime";
+  id?: string;
+}
+
+export interface RegisteredToolInspection {
+  name: string;
+  source: ToolRegistrationSource;
+  overrides?: ToolRegistrationSource;
+}
+
 export interface ToolRegistry {
-  register(tool: ToolDefinition): void;
+  register(tool: ToolDefinition, source?: ToolRegistrationSource): void;
+  override(tool: ToolDefinition, source: ToolRegistrationSource): void;
   unregister?(name: string): boolean;
   get(name: string): ToolDefinition | undefined;
   getAll(): ToolDefinition[];
   has(name: string): boolean;
+  inspect(name: string): RegisteredToolInspection | undefined;
 }

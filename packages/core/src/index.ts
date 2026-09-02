@@ -28,6 +28,8 @@ export type {
   ToolResult,
   ToolExecutionResult,
   ToolFailureKind,
+  ToolRegistrationSource,
+  RegisteredToolInspection,
   McpAuthConfigureInput,
   McpAuthConfigureResult,
   McpAuthHost,
@@ -133,7 +135,7 @@ export {
 } from "./agent-session";
 
 export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
-export { ToolRegistry } from "./engine/tool-registry";
+export { ToolRegistry, ToolRegistrationError } from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
 export {
   CompactService,
