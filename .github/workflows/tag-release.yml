@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Validate version and create tag
         id: prepare
@@ -65,11 +65,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Setup Visual Studio Build Tools (Windows)
+        if: matrix.target == 'win'
+        uses: microsoft/setup-msbuild@v2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -128,7 +132,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
