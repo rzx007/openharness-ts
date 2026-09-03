@@ -103,6 +103,7 @@
 ### Context、Memory 与 Prompt
 
 - [Context And Memory Map](./context-memory-map.md)：进入模型上下文的信息总图。
+- [原生视觉图片预处理](./native-vision-image-preprocessing.md)：图片入历史前的预检、2000px/5 MiB 限制、进程内缓存和 Provider 出口。
 - [Memory System](./memory-system.md)：Memory 的读取、写入和检索。
 - [Memory Quartet](./services-memory-quartet-design.md)：四类 memory service 的职责。
 - [Prompt Runtime Audit](./prompt-runtime-audit.md)：prompt 运行时审计记录。
