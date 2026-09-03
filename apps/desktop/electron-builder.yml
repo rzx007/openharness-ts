@@ -42,6 +42,8 @@ linux:
   target:
     - AppImage
     - deb
+  executableName: OpenHarness
+  desktopName: OpenHarness
   maintainer: OpenHarness
   category: Utility
 appImage:

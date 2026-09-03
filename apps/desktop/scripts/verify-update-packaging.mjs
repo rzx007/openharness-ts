@@ -26,8 +26,13 @@ for (const marker of [
   "repo: openharness-ts",
   "- AppImage",
   "- deb",
+  "desktopName: OpenHarness",
 ]) {
   if (!builder.includes(marker)) failures.push(`electron-builder.yml is missing ${marker}`)
+}
+const linuxSection = builder.slice(builder.indexOf("\nlinux:"))
+if (!linuxSection.includes("executableName: OpenHarness")) {
+  failures.push("electron-builder.yml must set linux.executableName to OpenHarness")
 }
 if (builder.includes("- snap")) failures.push("electron-builder.yml should not publish snap")
 if (builder.includes("example.com")) {
