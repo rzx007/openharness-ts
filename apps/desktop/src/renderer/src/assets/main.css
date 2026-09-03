@@ -133,7 +133,7 @@
   --code: var(--muted);
   --code-foreground: var(--foreground);
   --user-message: var(--muted);
-  --file-link: oklch(0.53 0.105 47);
+  --file-link: var(--primary);
   --composer-shadow: 0 -8px 22px oklch(0.145 0 0 / 3.5%), 0 4px 12px oklch(0.145 0 0 / 5%);
   --workspace-shadow: -4px -2px 18px oklch(0.145 0 0 / 3%), -0px 0 10px oklch(0.145 0 0 / 2%);
   --workspace-top-shadow: -4px -4px 14px oklch(0.145 0 0 / 10%), 0 -1px 4px oklch(0.145 0 0 / 8%);
@@ -190,7 +190,7 @@
   --code: var(--muted);
   --code-foreground: var(--foreground);
   --user-message: var(--muted);
-  --file-link: oklch(0.76 0.09 52);
+  --file-link: var(--primary);
   --composer-shadow: 0 -8px 22px oklch(0 0 0 / 24%), 0 4px 12px oklch(0 0 0 / 28%);
   --workspace-shadow: -7px -3px 18px oklch(0 0 0 / 28%);
   --workspace-top-shadow: -5px -4px 16px oklch(0 0 0 / 34%), 0 -1px 5px oklch(0 0 0 / 28%);
@@ -327,7 +327,6 @@
   }
 
   .desktop-streamdown {
-    --primary: var(--file-link);
     --muted: var(--code);
     --muted-foreground: var(--ui-muted);
     --border: color-mix(in oklab, var(--workspace-border) 78%, transparent);
@@ -544,7 +543,7 @@
     place-items: center;
     border-radius: 0.18rem;
     background: var(--file-link);
-    color: var(--background);
+    color: var(--primary-foreground);
     font-family: var(--font-sans);
     font-size: calc(var(--ui-font-size-caption) * 0.64);
     font-weight: 700;

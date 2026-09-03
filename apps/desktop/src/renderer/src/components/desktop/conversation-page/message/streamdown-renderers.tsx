@@ -80,7 +80,8 @@ function FileReferenceIcon({ path }: { path: string }): React.JSX.Element {
     md: "MD",
   }
   const label = extension ? labels[extension] : undefined
-  if (!label) return <FileCode2 className="size-3.5 shrink-0 self-center" strokeWidth={1.8} />
+  if (!label)
+    return <FileCode2 className="size-3.5 shrink-0 self-center text-file-link" strokeWidth={1.8} />
   return (
     <span aria-hidden="true" className="assistant-file-type self-center">
       {label}

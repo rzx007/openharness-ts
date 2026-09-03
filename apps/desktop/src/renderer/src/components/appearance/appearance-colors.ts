@@ -12,6 +12,7 @@ export type AppearanceColorTokens = {
   sidebarAccent: string
   sidebarAccentForeground: string
   sidebarSelected: string
+  fileLink: string
 }
 
 export const APPEARANCE_SURFACES = {
@@ -143,5 +144,6 @@ export function resolveAppearanceColors(
     sidebarAccent,
     sidebarAccentForeground: chooseForeground(sidebarAccent),
     sidebarSelected: mixColors(surfaces.sidebar, color, sidebarSelectedStrength),
+    fileLink: primary,
   }
 }

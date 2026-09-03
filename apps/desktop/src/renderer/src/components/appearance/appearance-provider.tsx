@@ -53,6 +53,7 @@ const COLOR_PROPERTIES = {
   sidebarAccent: "--sidebar-accent",
   sidebarAccentForeground: "--sidebar-accent-foreground",
   sidebarSelected: "--sidebar-selected",
+  fileLink: "--file-link",
 } as const
 
 function readStoredPreferences(): AppearancePreferences {

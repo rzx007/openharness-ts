@@ -6,7 +6,7 @@ vi.mock("streamdown", () => ({
 
 import { CodeBlock } from "@renderer/components/ui/code-block"
 
-import { StreamdownCodeBlock } from "./streamdown-renderers"
+import { FileButton, StreamdownCodeBlock } from "./streamdown-renderers"
 
 describe("StreamdownCodeBlock", () => {
   it("routes a non-Mermaid fence to CodeBlock with its source and language", () => {
@@ -25,5 +25,42 @@ describe("StreamdownCodeBlock", () => {
       filename: "typescript",
       showLineNumbers: false,
     })
+  })
+})
+
+describe("FileButton", () => {
+  it("renders file link with extension badge and text-file-link class", () => {
+    const onOpenFile = vi.fn()
+    const rendered = FileButton({
+      path: "src/index.tsx",
+      line: 42,
+      onOpenFile,
+      children: "src/index.tsx:42",
+    })
+
+    expect(rendered.props.className).toContain("assistant-file-link")
+    expect(rendered.props.className).toContain("assistant-file-link-source")
+    expect(rendered.props.title).toBe("打开 src/index.tsx")
+
+    const [icon, label] = rendered.props.children
+    expect(icon.props.path).toBe("src/index.tsx")
+    expect(label.props.className).toContain("text-file-link")
+    expect(label.props.children).toBe("src/index.tsx:42")
+
+    rendered.props.onClick()
+    expect(onOpenFile).toHaveBeenCalledWith("src/index.tsx", 42)
+  })
+
+  it("renders default FileCode2 icon with text-file-link when extension is unknown", () => {
+    const onOpenFile = vi.fn()
+    const rendered = FileButton({
+      path: "notes.unknown",
+      onOpenFile,
+      children: "notes.unknown",
+    })
+
+    const [icon] = rendered.props.children
+    const iconElement = icon.type({ path: "notes.unknown" })
+    expect(iconElement.props.className).toContain("text-file-link")
   })
 })

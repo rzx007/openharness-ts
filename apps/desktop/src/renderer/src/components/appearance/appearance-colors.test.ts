@@ -18,6 +18,7 @@ const accents: AppearancePreferences["accent"][] = [
 const tokenNames = [
   "accent",
   "accentForeground",
+  "fileLink",
   "primary",
   "primaryForeground",
   "ring",
@@ -45,6 +46,7 @@ describe("appearance color derivation", () => {
         const tokens = resolveAppearanceColors(accent, theme)
 
         expect(Object.keys(tokens).sort()).toEqual(tokenNames)
+        expect(tokens.fileLink).toBe(tokens.primary)
         expect(contrastRatio(tokens.primary, tokens.primaryForeground)).toBeGreaterThanOrEqual(4.5)
         expect(
           contrastRatio(tokens.sidebarPrimary, tokens.sidebarPrimaryForeground)

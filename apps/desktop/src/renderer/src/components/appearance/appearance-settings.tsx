@@ -242,19 +242,37 @@ function CustomColorField({
   const normalizedCustomColor = normalizeHexColor(customColor)
   const customColorInvalid = customColor.length > 0 && normalizedCustomColor === null
 
+  const handleCommit = (value: string): void => {
+    setCustomColor(value)
+    const normalized = normalizeHexColor(value)
+    if (normalized) onChange(normalized)
+  }
+
   return (
     <Field orientation="responsive" data-invalid={customColorInvalid || undefined}>
       <FieldContent>
         <FieldLabel htmlFor="appearance-custom-color">自定义颜色</FieldLabel>
-        <FieldDescription>输入六位十六进制颜色，例如 #006AFF。</FieldDescription>
+        <FieldDescription>
+          输入六位十六进制颜色，例如 #006AFF，或直接使用选色板选取。
+        </FieldDescription>
         {customColorInvalid ? <FieldError>请输入完整的六位十六进制颜色。</FieldError> : null}
       </FieldContent>
       <div className="flex w-full max-w-52 items-center gap-2">
-        <span
-          aria-hidden="true"
-          className="size-6 shrink-0 rounded-full border"
+        <label
+          htmlFor="appearance-custom-color-picker"
+          className="relative flex size-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-black/10 shadow-xs transition-transform focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 hover:scale-110 active:scale-95"
           style={{ backgroundColor: normalizedCustomColor ?? initialColor }}
-        />
+          title="打开选色板"
+        >
+          <input
+            id="appearance-custom-color-picker"
+            type="color"
+            aria-label="自定义强调色选色板"
+            className="absolute inset-0 size-full cursor-pointer opacity-0"
+            value={normalizedCustomColor ?? initialColor}
+            onChange={(event) => handleCommit(event.target.value.toUpperCase())}
+          />
+        </label>
         <Input
           id="appearance-custom-color"
           aria-label="自定义强调色"
@@ -263,12 +281,7 @@ function CustomColorField({
           maxLength={7}
           spellCheck={false}
           className="font-mono uppercase"
-          onChange={(event) => {
-            const next = event.target.value
-            setCustomColor(next)
-            const normalized = normalizeHexColor(next)
-            if (normalized) onChange(normalized)
-          }}
+          onChange={(event) => handleCommit(event.target.value)}
         />
       </div>
     </Field>

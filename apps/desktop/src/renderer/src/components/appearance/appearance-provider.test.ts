@@ -168,6 +168,7 @@ describe("AppearanceProvider", () => {
       "--sidebar-accent",
       "--sidebar-accent-foreground",
       "--sidebar-selected",
+      "--file-link",
     ]) {
       expect(rootStyle.getPropertyValue(property), property).toMatch(/^#[0-9A-F]{6}$/)
     }
