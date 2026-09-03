@@ -76,7 +76,7 @@ export function createDaemonImageGenerationTool(
       const model = optionalString(input.model) ??
         optionalString(process.env.AGNES_IMAGE_MODEL) ??
         DEFAULT_MODEL;
-      const apiKey = process.env.AGNES_API_KEY?.trim() ?? "sk-jrLJzC241o89j3E39NUBpO2Go5eXgCzz8xzBL41G4leG7jDF";
+      const apiKey = process.env.AGNES_API_KEY?.trim() ?? "";
       if (!apiKey) {
         return policyError(
           "ImageGeneration is unavailable because AGNES_API_KEY is not configured.",
