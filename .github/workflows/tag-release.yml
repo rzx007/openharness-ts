@@ -1,12 +1,15 @@
 name: Tag Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.1)"
+        required: true
+        type: string
 
 concurrency:
-  group: tag-release-${{ github.ref }}
+  group: tag-release
   cancel-in-progress: false
 
 permissions:
@@ -27,17 +30,20 @@ jobs:
         with:
           node-version: 22
 
-      - name: Prepare and check release tag
+      - name: Validate version and create tag
         id: prepare
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Only stable tags in vX.Y.Z format can publish."
+            echo "::error::Invalid version: expected X.Y.Z format, received '${VERSION}'"
             exit 1
           fi
-          node --input-type=module -e "import { parseReleaseTag } from './scripts/prepare-tag-release.mjs'; parseReleaseTag(process.env.GITHUB_REF_NAME)"
+          node --input-type=module -e "import { parseReleaseTag } from './scripts/prepare-tag-release.mjs'; parseReleaseTag('${TAG}')"
+          git tag "$TAG"
+          git push origin "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build-desktop:
     needs: validate

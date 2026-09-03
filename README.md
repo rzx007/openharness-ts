@@ -111,10 +111,8 @@ pnpm --filter @rzx/ohs test
 pnpm --filter @openharness/frontend dev
 pnpm --filter @openharness/tools test
 
-# 发布 Desktop 和 CLI（推送稳定 tag，GitHub Actions 会打包并发布）
+# 发布 Desktop 和 CLI（在 GitHub Actions 页面手动触发 Tag Release，输入版本号）
 # 详见 docs/release-process.md
-git tag v1.0.1
-git push origin v1.0.1
 
 # 应急手动发布 CLI（必须与 GitHub tag 同一版本）
 pnpm release:cli:dry -- 1.0.1

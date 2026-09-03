@@ -4,7 +4,7 @@
 
 ## 一句话结论
 
-推送 `vX.Y.Z` tag 后，GitHub Actions 会把同一版本写进仓库根目录、Desktop 和 CLI，打出 Windows NSIS 与 Linux AppImage/deb、发布 GitHub Latest Release，并把 `@rzx/ohs` 发到 npm。已安装的 Desktop 会在启动后静默检查这个 Latest Release；发现新版本后弹出应用内确认，用户同意才下载，下载完成后再确认是否立即重启安装。
+在 GitHub Actions 页面手动触发 Tag Release 工作流并输入版本号，工作流会自动打 tag、把同一版本写进仓库根目录、Desktop 和 CLI，打出 Windows NSIS 与 Linux AppImage/deb、发布 GitHub Latest Release，并把 `@rzx/ohs` 发到 npm。已安装的 Desktop 会在启动后静默检查这个 Latest Release；发现新版本后弹出应用内确认，用户同意才下载，下载完成后再确认是否立即重启安装。
 
 ## 发什么
 
@@ -39,16 +39,14 @@ pnpm --filter @openharness/desktop verify:update-packaging
 
 ## 正式发版
 
-在准备发布的 commit 上打 tag 并推送：
+在 GitHub 仓库页面手动触发：
 
-```bash
-git tag v1.0.1
-git push origin v1.0.1
-```
+1. 进入 **Actions** → **Tag Release** 工作流。
+2. 点击 **Run workflow**，在 `version` 输入框填写版本号（例如 `1.0.1`），点击确认。
 
-GitHub Actions 工作流 [`.github/workflows/tag-release.yml`](../.github/workflows/tag-release.yml) 会：
+工作流会自动在当前 `main` 分支最新 commit 上打 `v1.0.1` tag 并推送，然后：
 
-1. 校验 tag 是 `vX.Y.Z`。
+1. 校验版本格式是 `X.Y.Z`。
 2. 在 Windows / Ubuntu runner 上同步版本、构建 Desktop，并上传安装包和 `latest.yml` / `latest-linux.yml`。
 3. 两个平台的 Desktop 安装包都打成功后，再构建 `@rzx/ohs`；如果 npm 上还没有这个精确版本就发布，已经存在则跳过。
 4. 创建或更新 GitHub Release，并标成 Latest。Release 已存在时只覆盖资产，方便失败后重跑。
