@@ -74,6 +74,9 @@ jobs:
       - name: Verify update packaging config
         run: pnpm --filter @openharness/desktop verify:update-packaging
 
+      - name: Build workspace dependencies
+        run: pnpm --filter @openharness/desktop^... build
+
       - name: Build Desktop
         run: pnpm --filter @openharness/desktop build
 
@@ -133,7 +136,7 @@ jobs:
         run: node scripts/prepare-tag-release.mjs ${{ needs.validate.outputs.tag }}
 
       - name: Build CLI
-        run: pnpm --filter @rzx/ohs build
+        run: pnpm --filter @rzx/ohs... build
 
       - name: Publish CLI if this version is new
         env:
