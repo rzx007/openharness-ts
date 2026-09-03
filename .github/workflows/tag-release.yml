@@ -51,7 +51,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             target: win
           - os: ubuntu-latest
             target: linux
