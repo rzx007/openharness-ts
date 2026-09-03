@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, it, expect, vi } from "vitest";
 
 const startSandboxRuntime = vi.hoisted(() => vi.fn(async () => ({
@@ -287,7 +289,8 @@ describe("createOpenHarnessRuntime tool visibility", () => {
         yield { type: "complete" as const, stopReason: "end_turn" as const };
       },
     };
-    const cwd = "D:/repo";
+    const cwd = resolve(tmpdir(), "ohs-trust-test-repo");
+    const outsidePath = resolve(tmpdir(), "secret.txt");
     const readOverride = testTool("Read");
     const untrusted = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,
@@ -306,13 +309,13 @@ describe("createOpenHarnessRuntime tool visibility", () => {
 
     try {
       await expect(untrusted.permissionChecker.checkTool("Read", {
-        file_path: "D:/repo/notes.txt",
+        file_path: resolve(cwd, "notes.txt"),
       })).resolves.toMatchObject({ action: "ask" });
       await expect(trusted.permissionChecker.checkTool("Read", {
-        file_path: "D:/repo/notes.txt",
+        file_path: resolve(cwd, "notes.txt"),
       })).resolves.toMatchObject({ action: "allow" });
       await expect(trusted.permissionChecker.checkTool("Read", {
-        file_path: "D:/secret.txt",
+        file_path: outsidePath,
       })).resolves.toMatchObject({ action: "ask" });
       await expect(trusted.permissionChecker.checkTool("Read", {
         file_path: "attachment://att-1/notes.txt",

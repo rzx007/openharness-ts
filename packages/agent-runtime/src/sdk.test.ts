@@ -160,6 +160,14 @@ describe("programmatic agent SDK", () => {
           return;
         }
         const jobId = terminalIdFromResult(params.messages, "stdin-terminal-open");
+        if (!hasToolResult(params.messages, "stdin-terminal-warmup")) {
+          yield toolUse("stdin-terminal-warmup", "JobWait", {
+            jobIds: [jobId],
+            timeoutSeconds: 2,
+          });
+          yield { type: "complete" as const, stopReason: "tool_use" as const };
+          return;
+        }
         if (!hasToolResult(params.messages, "stdin-terminal-send")) {
           yield toolUse("stdin-terminal-send", "JobSend", {
             jobId,

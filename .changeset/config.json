@@ -6,5 +6,5 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@rzx/ohs"]
+  "ignore": ["@rzx/ohs", "@openharness/frontend", "@openharness/desktop"]
 }
