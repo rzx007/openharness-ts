@@ -111,11 +111,14 @@ pnpm --filter @rzx/ohs test
 pnpm --filter @openharness/frontend dev
 pnpm --filter @openharness/tools test
 
-# 发布 npm CLI（只发布 @rzx/ohs，不发布整个 workspace）
-pnpm release:cli:plan      # 查看本地版本、npm 最新版本和自动计算出的下一版本
-pnpm release:cli:dry       # 根目录发布预演：自动版本管理 + build + publish --dry-run
-pnpm release:cli           # 根目录正式发布；首发用本地版本，后续自动 patch
-pnpm release:cli -- minor  # 显式发 minor 版本，也支持 major、patch、0.2.0
+# 发布 Desktop 和 CLI（推送稳定 tag，GitHub Actions 会打包并发布）
+# 详见 docs/release-process.md
+git tag v1.0.1
+git push origin v1.0.1
+
+# 应急手动发布 CLI（必须与 GitHub tag 同一版本）
+pnpm release:cli:dry -- 1.0.1
+pnpm release:cli -- 1.0.1
 
 # 本地调试 CLI 源码（不需要先 build）
 bun apps/cli/src/index.ts --dry-run

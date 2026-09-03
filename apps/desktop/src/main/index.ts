@@ -11,10 +11,12 @@ import { createPetWindow } from "./features/pet/window"
 import { desktopSessionService } from "./features/session/session-service"
 import { desktopTerminalService } from "./features/terminal/terminal-service"
 import { createTray, destroyTray } from "./features/tray/tray"
+import { startDesktopUpdater } from "./features/updater/start"
 import icon from "../../resources/icon.png?asset"
 
 let ctx: AppContext | null = null
 let ipcRegistry: IpcRegistry | null = null
+let updaterRuntime: ReturnType<typeof startDesktopUpdater> | null = null
 
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("enable-transparent-visuals")
@@ -51,7 +53,8 @@ app.whenReady().then(() => {
   })
 
   ipcRegistry = new IpcRegistry(ctx)
-  for (const contribution of allIpcContributions) {
+  updaterRuntime = startDesktopUpdater()
+  for (const contribution of [...allIpcContributions, updaterRuntime.contribution]) {
     ipcRegistry.register(contribution)
   }
 
@@ -59,6 +62,7 @@ app.whenReady().then(() => {
   createTray(ctx)
   createPetWindow(ctx)
   showMainWindow(mainWindow)
+  updaterRuntime.service.startAfterWindowShown()
 })
 
 app.on("activate", () => {
@@ -82,6 +86,8 @@ app.on("window-all-closed", () => {
 })
 
 app.on("before-quit", () => {
+  updaterRuntime?.service.dispose()
+  updaterRuntime = null
   ipcRegistry?.dispose()
   destroyTray()
   void desktopTerminalService.dispose()

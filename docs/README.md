@@ -152,6 +152,7 @@
 - 使用 slash command：[Slash Commands](./slash-commands.md)
 - 远程连接 daemon：[Remote Attach](./remote-attach.md)
 - 安装和管理常驻 daemon：[Daemon System Service](./daemon-system-service.md)
+- 发布 Desktop 和 CLI：[Desktop 与 CLI Tag 发版](./release-process.md)
 - 配置认证、Provider 和 Model：[Auth、Provider、Model](./auth-provider-model.md)
 - 查看 trace、metrics 和运行诊断：[Observability](./observability.md)
 - 处理启动恢复、Owner、Retention 和备份：[Operations and Recovery](./operations-and-recovery.md)

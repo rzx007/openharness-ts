@@ -1,6 +1,6 @@
 {
   "name": "@rzx/ohs",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "OpenHarness terminal CLI — interactive TUI and headless agent for your codebase",
   "type": "module",
   "bin": {

@@ -93,11 +93,16 @@ import type {
   AttachmentStorageRepairResult,
   AttachmentStorageReport,
 } from "@openharness/client"
+import type { DesktopUpdateState } from "./update-types"
 
 export const IpcChannels = {
   appGetInfo: "app:get-info",
   appGetPlatform: "app:get-platform",
   appQuit: "app:quit",
+
+  updateGetState: "update:get-state",
+  updateDownload: "update:download",
+  updateInstall: "update:install",
 
   windowShowMain: "window:show-main",
   windowMinimize: "window:minimize",
@@ -217,6 +222,7 @@ export const IpcChannels = {
 } as const
 
 export const IpcEvents = {
+  updateStateChanged: "update:state-changed",
   windowMaximizedChanged: "window:maximized-changed",
   petClicked: "pet:clicked",
   sessionUpdated: "session:updated",
@@ -267,6 +273,10 @@ export interface IpcInvokeMap {
   [IpcChannels.appGetInfo]: { args: []; result: DesktopAppInfo }
   [IpcChannels.appGetPlatform]: { args: []; result: PlatformInfo }
   [IpcChannels.appQuit]: { args: []; result: void }
+
+  [IpcChannels.updateGetState]: { args: []; result: DesktopUpdateState }
+  [IpcChannels.updateDownload]: { args: []; result: void }
+  [IpcChannels.updateInstall]: { args: []; result: void }
 
   [IpcChannels.windowShowMain]: { args: []; result: void }
   [IpcChannels.windowMinimize]: { args: []; result: void }

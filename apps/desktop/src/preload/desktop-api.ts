@@ -11,6 +11,7 @@ import type { DesktopTerminalEvent } from "../shared/terminal-types"
 import type { DesktopAuxSessionUpdate, DesktopDaemonStatus } from "../shared/session-types"
 import type { DesktopAPI } from "../shared/desktop-api-contract"
 import type { DesktopAttachmentUploadEvent } from "../shared/attachment-types"
+import type { DesktopUpdateState } from "../shared/update-types"
 
 const invoke = <C extends IpcChannel>(
   channel: C,
@@ -22,6 +23,19 @@ export const desktopAPI = {
     getInfo: () => invoke(IpcChannels.appGetInfo),
     getPlatform: () => invoke(IpcChannels.appGetPlatform),
     quit: () => invoke(IpcChannels.appQuit),
+  },
+  updates: {
+    getState: () => invoke(IpcChannels.updateGetState),
+    download: () => invoke(IpcChannels.updateDownload),
+    install: () => invoke(IpcChannels.updateInstall),
+    onStateChanged: (listener: (state: DesktopUpdateState) => void): (() => void) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        state: DesktopUpdateState
+      ): void => listener(state)
+      ipcRenderer.on(IpcEvents.updateStateChanged, wrapped)
+      return () => ipcRenderer.removeListener(IpcEvents.updateStateChanged, wrapped)
+    },
   },
   window: {
     showMain: () => invoke(IpcChannels.windowShowMain),

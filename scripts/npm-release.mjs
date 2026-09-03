@@ -8,8 +8,11 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, "..");
 const WORKSPACE_DIRS = ["apps", "packages"];
 const PNPM_BIN = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const NPM_BIN = process.platform === "win32" ? "npm.cmd" : "npm";
 const CLI_PACKAGE_NAME = "@rzx/ohs";
+const SEMVER_CORE = /^\d+\.\d+\.\d+$/;
+
+export const USAGE =
+  "Usage: pnpm release:cli -- <x.y.z>   or   pnpm release:cli:dry -- <x.y.z>";
 
 function commandInvocation(command, args) {
   if (process.platform !== "win32") return { command, args };
@@ -53,107 +56,20 @@ function discoverWorkspacePackages() {
   return packages;
 }
 
-function getPublishablePackages() {
-  return discoverWorkspacePackages().filter((pkg) => pkg.manifest.private !== true);
+function getPackageByName(name) {
+  const pkg = discoverWorkspacePackages().find((item) => item.manifest.name === name);
+  if (!pkg) fail(`Workspace package not found: ${name}`);
+  return pkg;
 }
 
-function ensureSingleVersion(packages) {
-  const versions = [...new Set(packages.map((pkg) => pkg.manifest.version).filter(Boolean))];
-  if (versions.length !== 1) {
-    fail(`Expected a single workspace version, found: ${versions.join(", ")}`);
-  }
-  return versions[0];
+function writePackageVersion(pkg, version) {
+  if (pkg.manifest.version === version) return false;
+  pkg.manifest = { ...pkg.manifest, version };
+  writeJson(pkg.packageJsonPath, pkg.manifest);
+  return true;
 }
 
-function parseVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  if (!match) fail(`Unsupported version format: ${version}`);
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-  };
-}
-
-function computeNextVersion(currentVersion, spec) {
-  if (/^\d+\.\d+\.\d+$/.test(spec)) return spec;
-  const { major, minor, patch } = parseVersion(currentVersion);
-  switch (spec) {
-    case "patch":
-      return `${major}.${minor}.${patch + 1}`;
-    case "minor":
-      return `${major}.${minor + 1}.0`;
-    case "major":
-      return `${major + 1}.0.0`;
-    default:
-      fail(`Unsupported release spec: ${spec}. Use patch, minor, major, or an explicit x.y.z version.`);
-  }
-}
-
-function getInternalDeps(pkg, packageNameSet) {
-  const manifest = pkg.manifest;
-  const sections = [
-    manifest.dependencies ?? {},
-    manifest.optionalDependencies ?? {},
-  ];
-  const deps = new Set();
-  for (const section of sections) {
-    for (const depName of Object.keys(section)) {
-      if (packageNameSet.has(depName)) deps.add(depName);
-    }
-  }
-  return deps;
-}
-
-function topoSortPackages(packages) {
-  const byName = new Map(packages.map((pkg) => [pkg.manifest.name, pkg]));
-  const packageNames = new Set(byName.keys());
-  const depsByName = new Map();
-  const dependentsByName = new Map();
-  const indegree = new Map();
-
-  for (const pkg of packages) {
-    const name = pkg.manifest.name;
-    const deps = getInternalDeps(pkg, packageNames);
-    depsByName.set(name, deps);
-    indegree.set(name, deps.size);
-    for (const dep of deps) {
-      const set = dependentsByName.get(dep) ?? new Set();
-      set.add(name);
-      dependentsByName.set(dep, set);
-    }
-  }
-
-  const queue = [...packages]
-    .map((pkg) => pkg.manifest.name)
-    .filter((name) => (indegree.get(name) ?? 0) === 0)
-    .sort();
-  const ordered = [];
-
-  while (queue.length > 0) {
-    const name = queue.shift();
-    ordered.push(byName.get(name));
-    for (const dependent of dependentsByName.get(name) ?? []) {
-      const next = (indegree.get(dependent) ?? 0) - 1;
-      indegree.set(dependent, next);
-      if (next === 0) {
-        queue.push(dependent);
-        queue.sort();
-      }
-    }
-  }
-
-  if (ordered.length !== packages.length) {
-    const unresolved = packages
-      .map((pkg) => pkg.manifest.name)
-      .filter((name) => !ordered.some((pkg) => pkg.manifest.name === name));
-    fail(`Failed to compute publish order. Check for cyclic workspace deps: ${unresolved.join(", ")}`);
-  }
-
-  return ordered;
-}
-
-function run(command, args, options = {}) {
+function run(command, args) {
   const invocation = commandInvocation(command, args);
   const result = spawnSync(invocation.command, invocation.args, {
     cwd: ROOT,
@@ -165,167 +81,61 @@ function run(command, args, options = {}) {
       PNPM_CONFIG_CONFIRM_MODULES_PURGE:
         process.env.PNPM_CONFIG_CONFIRM_MODULES_PURGE ?? "false",
     },
-    ...options,
   });
   if (result.status !== 0) {
     fail(`Command failed: ${command} ${args.join(" ")}`);
   }
 }
 
-function capture(command, args) {
-  const invocation = commandInvocation(command, args);
-  return spawnSync(invocation.command, invocation.args, {
-    cwd: ROOT,
-    encoding: "utf8",
-    shell: false,
-    env: process.env,
-  });
-}
-
-function compareVersions(a, b) {
-  const left = parseVersion(a);
-  const right = parseVersion(b);
-  for (const key of ["major", "minor", "patch"]) {
-    if (left[key] !== right[key]) return left[key] > right[key] ? 1 : -1;
-  }
-  return 0;
-}
-
-function getPackageByName(name) {
-  const pkg = discoverWorkspacePackages().find((item) => item.manifest.name === name);
-  if (!pkg) fail(`Workspace package not found: ${name}`);
-  return pkg;
-}
-
-function latestPublishedVersion(packageName) {
-  const result = capture(NPM_BIN, ["view", packageName, "version", "--json"]);
-  if (result.error) fail(`Failed to run npm view: ${result.error.message}`);
-  if (result.status === 0) {
-    const output = (result.stdout ?? "").trim();
-    if (!output) return undefined;
-    const parsed = JSON.parse(output);
-    return typeof parsed === "string" ? parsed : undefined;
-  }
-  const combined = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  if (combined.includes("E404") || combined.includes("404 Not Found")) return undefined;
-  if (result.stderr) process.stderr.write(result.stderr);
-  fail(`Failed to read published version for ${packageName}`);
-}
-
-function resolvePackageVersion(pkg, spec = "auto") {
-  if (spec !== "auto") return computeNextVersion(pkg.manifest.version, spec);
-  const latest = latestPublishedVersion(pkg.manifest.name);
-  if (!latest) return pkg.manifest.version;
-  if (compareVersions(pkg.manifest.version, latest) > 0) return pkg.manifest.version;
-  return computeNextVersion(latest, "patch");
-}
-
-function writePackageVersion(pkg, version) {
-  if (pkg.manifest.version === version) return false;
-  pkg.manifest = { ...pkg.manifest, version };
-  writeJson(pkg.packageJsonPath, pkg.manifest);
-  return true;
-}
-
-function printPlan(packages) {
-  const version = ensureSingleVersion(packages);
-  const ordered = topoSortPackages(packages);
-  console.log(`Current workspace version: ${version}`);
-  console.log(`Publishable packages: ${packages.length}`);
-  console.log("");
-  console.log("Publish order:");
-  for (const pkg of ordered) {
-    console.log(`- ${pkg.manifest.name}  (${pkg.dir.replace(`${ROOT}\\`, "").replace(`${ROOT}/`, "")})`);
-  }
-}
-
-function bumpVersions(spec) {
-  const packages = getPublishablePackages();
-  const currentVersion = ensureSingleVersion(packages);
-  const nextVersion = computeNextVersion(currentVersion, spec);
-  let changed = 0;
-
-  for (const pkg of packages) {
-    if (pkg.manifest.version === nextVersion) continue;
-    const manifest = { ...pkg.manifest, version: nextVersion };
-    writeJson(pkg.packageJsonPath, manifest);
-    changed += 1;
-  }
-
-  console.log(
-    `Bumped ${changed} packages: ${currentVersion} -> ${nextVersion}`
-  );
-}
-
-function publishPackages(args) {
-  const packages = getPublishablePackages();
-  const version = ensureSingleVersion(packages);
-  const ordered = topoSortPackages(packages);
-  const dryRun = args.includes("--dry-run");
-
-  console.log(`Publishing ${ordered.length} packages at version ${version}${dryRun ? " (dry-run)" : ""}`);
-  run(PNPM_BIN, ["build"]);
-
-  for (const pkg of ordered) {
-    const publishArgs = [
-      "--filter",
-      pkg.manifest.name,
-      "publish",
-      "--access",
-      "public",
-      "--no-git-checks",
-    ];
-    if (dryRun) publishArgs.push("--dry-run");
-    console.log(`\n==> ${pkg.manifest.name}`);
-    run(PNPM_BIN, publishArgs);
-  }
-}
-
-function parseCliOptions(args) {
+export function parseReleaseArgs(argv) {
   const options = {
     dryRun: false,
     skipBuild: false,
-    spec: "auto",
+    version: undefined,
   };
-  for (const arg of args) {
-    if (arg === "--dry-run") options.dryRun = true;
-    else if (arg === "--skip-build") options.skipBuild = true;
-    else if (options.spec === "auto") options.spec = arg;
-    else fail(`Unexpected argument: ${arg}`);
+
+  for (const arg of argv) {
+    if (arg === "--dry-run") {
+      options.dryRun = true;
+      continue;
+    }
+    if (arg === "--skip-build") {
+      options.skipBuild = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h" || arg === "help") {
+      throw new ReleaseArgError(USAGE);
+    }
+    if (options.version) {
+      throw new ReleaseArgError(`Unexpected argument: ${arg}\n${USAGE}`);
+    }
+    options.version = arg;
   }
+
+  if (!options.version) {
+    throw new ReleaseArgError(`Missing version. Emergency CLI publish must match the GitHub tag.\n${USAGE}`);
+  }
+  if (!SEMVER_CORE.test(options.version)) {
+    throw new ReleaseArgError(
+      `Invalid version ${JSON.stringify(options.version)}. Use explicit x.y.z, not patch/minor/major/auto.\n${USAGE}`,
+    );
+  }
+
   return options;
 }
 
-function printCliPlan() {
-  const pkg = getPackageByName(CLI_PACKAGE_NAME);
-  const latest = latestPublishedVersion(pkg.manifest.name);
-  const next = resolvePackageVersion(pkg, "auto");
-  console.log(`Package: ${pkg.manifest.name}`);
-  console.log(`Local version: ${pkg.manifest.version}`);
-  console.log(`Published latest: ${latest ?? "(not published)"}`);
-  console.log(`Next auto version: ${next}`);
-  console.log("");
-  console.log("Root commands:");
-  console.log("  pnpm release:cli:dry");
-  console.log("  pnpm release:cli");
-  console.log("  pnpm release:cli -- minor");
-  console.log("  pnpm release:cli -- 0.2.0");
+export class ReleaseArgError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ReleaseArgError";
+  }
 }
 
-function versionCli(args) {
-  const { spec } = parseCliOptions(args);
-  const pkg = getPackageByName(CLI_PACKAGE_NAME);
-  const next = resolvePackageVersion(pkg, spec);
-  const previous = pkg.manifest.version;
-  const changed = writePackageVersion(pkg, next);
-  console.log(`${pkg.manifest.name}: ${previous} -> ${next}${changed ? "" : " (unchanged)"}`);
-}
-
-function publishCli(args) {
-  const options = parseCliOptions(args);
+export function publishCli(args) {
+  const options = parseReleaseArgs(args);
   const pkg = getPackageByName(CLI_PACKAGE_NAME);
   const previous = pkg.manifest.version;
-  const next = resolvePackageVersion(pkg, options.spec);
+  const next = options.version;
   const changed = writePackageVersion(pkg, next);
   const restoreDryRun = options.dryRun && changed;
 
@@ -351,51 +161,14 @@ function publishCli(args) {
 }
 
 function main() {
-  const [command, ...rest] = process.argv.slice(2);
-  if (!command || command === "help" || command === "--help") {
-    console.log("Usage:");
-    console.log("  node scripts/npm-release.mjs plan");
-    console.log("  node scripts/npm-release.mjs version patch|minor|major|x.y.z");
-    console.log("  node scripts/npm-release.mjs publish [--dry-run]");
-    console.log("  node scripts/npm-release.mjs cli-plan");
-    console.log("  node scripts/npm-release.mjs cli-version [auto|patch|minor|major|x.y.z]");
-    console.log("  node scripts/npm-release.mjs cli-publish [auto|patch|minor|major|x.y.z] [--dry-run] [--skip-build]");
-    process.exit(0);
+  try {
+    publishCli(process.argv.slice(2));
+  } catch (error) {
+    if (error instanceof ReleaseArgError) fail(error.message);
+    throw error;
   }
-
-  if (command === "plan") {
-    printPlan(getPublishablePackages());
-    return;
-  }
-
-  if (command === "version") {
-    const spec = rest[0];
-    if (!spec) fail("Missing version spec. Use patch, minor, major, or explicit x.y.z.");
-    bumpVersions(spec);
-    return;
-  }
-
-  if (command === "publish") {
-    publishPackages(rest);
-    return;
-  }
-
-  if (command === "cli-plan") {
-    printCliPlan();
-    return;
-  }
-
-  if (command === "cli-version") {
-    versionCli(rest);
-    return;
-  }
-
-  if (command === "cli-publish") {
-    publishCli(rest);
-    return;
-  }
-
-  fail(`Unknown command: ${command}`);
 }
 
-main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main();
+}

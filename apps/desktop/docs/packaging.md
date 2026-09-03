@@ -8,7 +8,7 @@
 
 | 放哪里 | 放什么 | 为什么 |
 |---|---|---|
-| `dependencies` | `better-sqlite3`、`node-pty` | C++ 插件，不能打进 bundle；`install-app-deps` 也只重编这两份 |
+| `dependencies` | `better-sqlite3`、`node-pty`、`sharp`、`electron-updater`、`electron-log` | C++ 插件和更新器运行时不能打进主进程 bundle；`install-app-deps` 只重编原生模块 |
 | `devDependencies` | React、Tailwind、图标、workspace 包、electron-vite 等 | 开发期用；渲染进程和主进程 JS 已经打进 `out/` |
 | `electron-builder.yml` 的 `files` | `out/**`、`resources/**`、`package.json` | 不要默认拷整个 `apps/desktop` |
 

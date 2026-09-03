@@ -109,6 +109,7 @@ ohs config set daemon.autoStart true
 - **TUI** 需要 Bun；没有 Bun 时可用 `-p` / 带 prompt 的 print 模式。
 - 默认会连接已有本机 daemon；没有可用进程时会按需启动。Desktop 等客户端也可连同一 daemon，共享会话状态。
 - 原生依赖含 `sharp`、`better-sqlite3`、`node-pty`；全局安装时会由 npm/pnpm 一并安装对应平台包。
+- 正式版本随 GitHub tag `vX.Y.Z` 发布，和 Desktop 安装包同一版本。详见仓库 `docs/release-process.md`。
 
 ## 文档与源码
 

@@ -41,15 +41,18 @@ dmg:
 linux:
   target:
     - AppImage
-    - snap
     - deb
   maintainer: OpenHarness
   category: Utility
 appImage:
   artifactName: ${productName}-${version}.${ext}
+deb:
+  artifactName: ${productName}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/openharness/auto-updates
+  provider: github
+  owner: rzx007
+  repo: openharness-ts
+  releaseType: release
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

@@ -55,3 +55,27 @@ describe("desktop window preload bridge", () => {
     )
   })
 })
+
+describe("desktop updater preload bridge", () => {
+  it("exposes narrow update commands through their IPC channels", async () => {
+    await desktopAPI.updates.getState()
+    await desktopAPI.updates.download()
+    await desktopAPI.updates.install()
+
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.updateGetState)
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.updateDownload)
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.updateInstall)
+  })
+
+  it("subscribes and unsubscribes the narrow update state event", () => {
+    const listener = vi.fn()
+    const unsubscribe = desktopAPI.updates.onStateChanged(listener)
+
+    expect(electron.on).toHaveBeenCalledWith(IpcEvents.updateStateChanged, expect.any(Function))
+    unsubscribe()
+    expect(electron.removeListener).toHaveBeenCalledWith(
+      IpcEvents.updateStateChanged,
+      expect.any(Function)
+    )
+  })
+})
