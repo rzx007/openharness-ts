@@ -28,8 +28,8 @@ macOS 安装包本轮不发布。Windows 当前不签名，首次安装可能被
 ## 发版前检查
 
 1. `main` 上的 CI 已经通过。
-2. GitHub 仓库 Secrets 里有 `NPM_TOKEN`（npm 发布权限）。
-3. 工作流权限能写 `contents`（创建 Release）和 `id-token`（npm provenance）。
+2. npm 包 `@rzx/ohs` 已配置 Trusted Publisher：GitHub 用户 `rzx007`、仓库 `openharness-ts`、工作流文件名 `tag-release.yml`（允许 `npm publish`）。不再依赖仓库 Secret `NPM_TOKEN`。
+3. 工作流权限能写 `contents`（创建 Release）和 `id-token`（npm Trusted Publishing / provenance）。
 4. 本地确认 tag 格式和打包配置：
 
 ```bash
