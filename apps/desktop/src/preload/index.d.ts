@@ -18,6 +18,7 @@ declare global {
         partition?: string
         preload?: string
         src?: string
+        insertCSS?: (css: string) => Promise<string>
         useragent?: string
         webpreferences?: string
       }

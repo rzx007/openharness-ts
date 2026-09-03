@@ -128,7 +128,7 @@ export function resolveAppearanceColors(
   const ring = ensureSurfaceContrast(color, surfaces.background, 3)
   const accentStrength = theme === "light" ? 0.12 : 0.2
   const sidebarAccentStrength = theme === "light" ? 0.14 : 0.22
-  const sidebarSelectedStrength = theme === "light" ? 0.22 : 0.32
+  const sidebarSelectedStrength = theme === "light" ? 0.1 : 0.2
   const weakAccent = mixColors(surfaces.background, color, accentStrength)
   const sidebarAccent = mixColors(surfaces.sidebar, color, sidebarAccentStrength)
 

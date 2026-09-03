@@ -72,6 +72,15 @@ describe("appearance color derivation", () => {
     }
   )
 
+  it.each([
+    ["light", "#E0E6E9"],
+    ["dark", "#22262A"],
+  ] as const)("uses the C-level neutral selected color in %s mode", (theme, expected) => {
+    expect(resolveAppearanceColors({ kind: "preset", id: "neutral" }, theme).sidebarSelected).toBe(
+      expected
+    )
+  })
+
   it("calculates WCAG contrast ratios from sRGB colors", () => {
     expect(contrastRatio("#000000", "#FFFFFF")).toBe(21)
     expect(contrastRatio("#777777", "#FFFFFF")).toBeCloseTo(4.478, 3)

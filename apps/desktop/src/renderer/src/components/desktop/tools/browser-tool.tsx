@@ -7,8 +7,9 @@ import {
   RefreshCw,
   SlidersHorizontal,
 } from "lucide-react"
-import { useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 
+import { useAppearance } from "@renderer/components/appearance/appearance-provider"
 import { DesktopEmptyState } from "@renderer/components/desktop/desktop-empty-state"
 import { Button } from "@renderer/components/ui/button"
 import { cn } from "@renderer/lib/utils"
@@ -19,6 +20,7 @@ import {
   normalizeBrowserUrl,
   resolveExternalBrowserUrl,
 } from "./browser-navigation"
+import { buildBrowserScrollbarCss } from "./browser-webview-style"
 
 export type BrowserToolTab = {
   id: string
@@ -45,10 +47,24 @@ type BrowserWebviewElement = HTMLElement & {
   stop?: () => void
   getURL?: () => string
   getTitle?: () => string
+  insertCSS?: (css: string) => Promise<string>
 }
 
 export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.JSX.Element {
   const webviewRef = useRef<BrowserWebviewElement | null>(null)
+  const { resolvedTheme } = useAppearance()
+
+  const applyScrollbarStyle = useCallback(
+    (webview: BrowserWebviewElement): void => {
+      void webview.insertCSS?.(buildBrowserScrollbarCss(resolvedTheme)).catch(() => undefined)
+    },
+    [resolvedTheme]
+  )
+
+  useEffect(() => {
+    const webview = webviewRef.current
+    if (webview) applyScrollbarStyle(webview)
+  }, [applyScrollbarStyle])
 
   const navigate = (): void => {
     const url = normalizeBrowserUrl(tab.input)
@@ -84,7 +100,10 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
     webview.addEventListener("did-start-loading", () => {
       onUpdate({ loading: true })
     })
-    webview.addEventListener("did-stop-loading", updateNavigationState)
+    webview.addEventListener("did-stop-loading", () => {
+      applyScrollbarStyle(webview)
+      updateNavigationState()
+    })
     webview.addEventListener("did-navigate", updateNavigationState)
     webview.addEventListener("did-navigate-in-page", updateNavigationState)
     webview.addEventListener("page-title-updated", (event) => {
