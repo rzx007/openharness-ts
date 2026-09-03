@@ -11,6 +11,8 @@ const cliExternals = [...new Set([
   "better-sqlite3",
   // Native addon: node-pty loads conpty.node from its own package directory.
   "node-pty",
+  // Native addon: sharp loads @img/sharp-<platform> from its own package directory.
+  "sharp",
 ])].filter((d) => !d.startsWith("@openharness/"));
 const frontendExternals = [...new Set([
   ...Object.keys(frontendPkg.dependencies || {}),

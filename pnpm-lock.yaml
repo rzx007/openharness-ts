@@ -113,6 +113,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.7
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@openharness/agent-runtime':
         specifier: workspace:*
@@ -473,9 +476,15 @@ importers:
       '@openharness/terminal-node':
         specifier: workspace:*
         version: link:../terminal-node
+      better-sqlite3:
+        specifier: ^13.0.2
+        version: 13.0.2
       node-pty:
         specifier: ^1.0.0
         version: 1.1.0
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@openharness/api':
         specifier: workspace:*

@@ -31,7 +31,8 @@
     "commander": "catalog:",
     "diff": "catalog:",
     "node-pty": "^1.0.0",
-    "react": "catalog:"
+    "react": "catalog:",
+    "sharp": "0.34.4"
   },
   "devDependencies": {
     "@openharness/agent-runtime": "workspace:*",

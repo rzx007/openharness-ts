@@ -3,6 +3,7 @@ dist
 build
 *.tsbuildinfo
 .superpowers/*
+.superpowers/
 .worktrees/
 
 .env
