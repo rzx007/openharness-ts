@@ -20,6 +20,7 @@ import {
   normalizeBrowserUrl,
   resolveExternalBrowserUrl,
 } from "./browser-navigation"
+import { insertWebviewCssWhenReady } from "./browser-webview-css"
 import { buildBrowserScrollbarCss } from "./browser-webview-style"
 
 export type BrowserToolTab = {
@@ -52,11 +53,16 @@ type BrowserWebviewElement = HTMLElement & {
 
 export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.JSX.Element {
   const webviewRef = useRef<BrowserWebviewElement | null>(null)
+  const webviewReadyRef = useRef(false)
   const { resolvedTheme } = useAppearance()
 
   const applyScrollbarStyle = useCallback(
     (webview: BrowserWebviewElement): void => {
-      void webview.insertCSS?.(buildBrowserScrollbarCss(resolvedTheme)).catch(() => undefined)
+      insertWebviewCssWhenReady(
+        webview,
+        buildBrowserScrollbarCss(resolvedTheme),
+        webviewReadyRef.current
+      )
     },
     [resolvedTheme]
   )
@@ -94,9 +100,19 @@ export function BrowserTool({ tab, active, onUpdate }: BrowserToolProps): React.
 
   const bindWebview = (element: Element | null): void => {
     const webview = element as BrowserWebviewElement | null
-    if (!webview || webviewRef.current === webview) return
+    if (!webview) {
+      webviewRef.current = null
+      webviewReadyRef.current = false
+      return
+    }
+    if (webviewRef.current === webview) return
     webviewRef.current = webview
+    webviewReadyRef.current = false
 
+    webview.addEventListener("dom-ready", () => {
+      webviewReadyRef.current = true
+      applyScrollbarStyle(webview)
+    })
     webview.addEventListener("did-start-loading", () => {
       onUpdate({ loading: true })
     })
