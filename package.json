@@ -17,17 +17,12 @@
     "test": "turbo test && node --test scripts/prepare-tag-release.test.mjs scripts/npm-release.test.mjs",
     "test:client-browser": "vite build --config tests/browser-client/vite.config.ts",
     "clean": "turbo clean",
-    "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "changeset:publish": "changeset publish",
-    "release:ci": "pnpm build && pnpm changeset:publish",
     "release:cli": "node scripts/npm-release.mjs",
     "release:cli:dry": "node scripts/npm-release.mjs --dry-run",
     "test:scripts": "node --test scripts/prepare-tag-release.test.mjs scripts/npm-release.test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.0",
     "@types/node": "catalog:",
     "husky": "^9.1.7",
     "rimraf": "^6.0.1",

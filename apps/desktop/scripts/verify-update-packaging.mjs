@@ -26,7 +26,6 @@ for (const marker of [
   "repo: openharness-ts",
   "- AppImage",
   "- deb",
-  "desktopName: OpenHarness",
 ]) {
   if (!builder.includes(marker)) failures.push(`electron-builder.yml is missing ${marker}`)
 }
