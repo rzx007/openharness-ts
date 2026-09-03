@@ -1430,6 +1430,69 @@ describe("Integration: CostTracker", () => {
 });
 
 describe("Integration: Steer follow-ups", () => {
+  it("prepares image content before storing it in history", async () => {
+    const preparedContent = [
+      { type: "text" as const, text: "inspect" },
+      {
+        type: "image" as const,
+        source: {
+          type: "file" as const,
+          mediaType: "image/png",
+          path: "/images/original.png",
+          prepared: {
+            mediaType: "image/jpeg",
+            width: 1200,
+            height: 800,
+            base64Bytes: 1234,
+            policyVersion: "vision-v1",
+          },
+        },
+      },
+    ];
+    const client = {
+      prepareUserContent: vi.fn(async () => preparedContent),
+      streamMessage: async function* () {
+        yield { type: "text_delta" as const, delta: "ok" };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+
+    for await (const _ of engine.submitMessage([
+      { type: "text", text: "inspect" },
+      {
+        type: "image",
+        source: { type: "file", mediaType: "image/png", path: "/images/original.png" },
+      },
+    ])) {}
+
+    expect(client.prepareUserContent).toHaveBeenCalledOnce();
+    expect(engine.getHistory()[0]).toEqual({ type: "user", content: preparedContent });
+  });
+
+  it("does not store user content when image preparation fails", async () => {
+    const client = {
+      prepareUserContent: vi.fn(async () => {
+        throw new Error("vision image preparation failed");
+      }),
+      streamMessage: async function* () {
+        throw new Error("provider must not be called");
+      },
+    };
+    const engine = new QueryEngine(client, new ToolRegistry(), allowAll(), noopHooks());
+
+    await expect(async () => {
+      for await (const _ of engine.submitMessage([
+        {
+          type: "image",
+          source: { type: "file", mediaType: "image/png", path: "/images/too-large.png" },
+        },
+      ])) {}
+    }).rejects.toThrow("vision image preparation failed");
+
+    expect(engine.getHistory()).toEqual([]);
+  });
+
   it("closes steering without consuming a follow-up when no model turn remains", async () => {
     const { client } = createMockStreamClient([[
       { type: "text_delta", delta: "final reply" },
@@ -1494,6 +1557,58 @@ describe("Integration: Steer follow-ups", () => {
       "assistant",
     ]);
     expect(history[4]).toMatchObject({ type: "user", content: "steered follow-up" });
+  });
+
+  it("prepares steered image content before storing the follow-up", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("Ping", () => "pong"));
+    const followUp = [{
+      type: "image" as const,
+      source: { type: "file" as const, mediaType: "image/png", path: "/images/steer.png" },
+    }];
+    const preparedFollowUp = [{
+      type: "image" as const,
+      source: {
+        ...followUp[0]!.source,
+        prepared: {
+          mediaType: "image/jpeg",
+          width: 1000,
+          height: 700,
+          base64Bytes: 900,
+          policyVersion: "vision-v1",
+        },
+      },
+    }];
+    const prepareUserContent = vi.fn(async (content: string | typeof followUp) =>
+      content === followUp ? preparedFollowUp : content);
+    let call = 0;
+    const client = {
+      prepareUserContent,
+      streamMessage: async function* () {
+        call++;
+        if (call === 1) {
+          yield {
+            type: "tool_use_start" as const,
+            toolUse: { type: "tool_use" as const, id: "tu1", name: "Ping", input: {} },
+          };
+          yield { type: "complete" as const, stopReason: "tool_use" };
+          return;
+        }
+        yield { type: "text_delta" as const, delta: "done" };
+        yield { type: "complete" as const, stopReason: "end_turn" };
+      },
+    };
+    let pulls = 0;
+    const engine = new QueryEngine(client, registry, allowAll(), noopHooks());
+
+    for await (const _ of engine.submitMessage("start", {
+      execution: createExecutionContext({
+        takeSteeredInputs: async () => (++pulls === 1 ? [{ content: followUp }] : []),
+      }),
+    })) {}
+
+    expect(prepareUserContent).toHaveBeenCalledWith(followUp, expect.any(Object));
+    expect(engine.getHistory()).toContainEqual({ type: "user", content: preparedFollowUp });
   });
 });
 

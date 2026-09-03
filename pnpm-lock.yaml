@@ -113,6 +113,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.7
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@openharness/agent-runtime':
         specifier: workspace:*
@@ -207,6 +210,12 @@ importers:
       better-sqlite3:
         specifier: ^13.0.2
         version: 13.0.2
+      electron-log:
+        specifier: ^5.4.4
+        version: 5.4.4
+      electron-updater:
+        specifier: ^6.3.9
+        version: 6.8.9
       node-pty:
         specifier: ^1.0.0
         version: 1.1.0
@@ -331,15 +340,9 @@ importers:
       electron-builder:
         specifier: ^26.0.12
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
-      electron-log:
-        specifier: ^5.4.4
-        version: 5.4.4
       electron-store:
         specifier: ^11.0.2
         version: 11.0.2
-      electron-updater:
-        specifier: ^6.3.9
-        version: 6.8.9
       electron-vite:
         specifier: ^5.0.0
         version: 5.0.0(vite@7.3.2(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
@@ -473,9 +476,15 @@ importers:
       '@openharness/terminal-node':
         specifier: workspace:*
         version: link:../terminal-node
+      better-sqlite3:
+        specifier: ^13.0.2
+        version: 13.0.2
       node-pty:
         specifier: ^1.0.0
         version: 1.1.0
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@openharness/api':
         specifier: workspace:*
@@ -546,6 +555,9 @@ importers:
       openai:
         specifier: 'catalog:'
         version: 4.104.0(ws@8.20.0)(zod@3.25.76)
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

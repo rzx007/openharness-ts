@@ -23,6 +23,7 @@ import {
   selectProjectOperationError,
   selectSessions,
 } from "@renderer/stores/desktop-session/selectors"
+import { UpdateDialog } from "@renderer/components/desktop/update/update-dialog"
 import { TitleBar } from "../title-bar"
 import { useDesktopWindowChrome } from "../use-desktop-window-chrome"
 import { MainLayoutContext } from "./main-layout-context"
@@ -384,6 +385,7 @@ export function MainLayout(): React.JSX.Element {
           />
         )}
       </MainLayoutContext.Provider>
+      <UpdateDialog />
     </main>
   )
 }

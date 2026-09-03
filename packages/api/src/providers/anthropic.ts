@@ -1,5 +1,4 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { readFile } from "node:fs/promises";
 import type {
   StreamingMessageClient,
   StreamMessageParams,
@@ -15,6 +14,10 @@ import {
 } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, requestFailure } from "../errors/index";
 import { abortableDelay } from "./retry";
+import {
+  prepareNativeImagePayload,
+  prepareUserContentWithVisionImages,
+} from "./native-image-payload.js";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;
@@ -29,6 +32,13 @@ export class AnthropicClient implements StreamingMessageClient {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
     });
+  }
+
+  prepareUserContent(
+    content: string | ContentBlock[],
+    options?: { signal?: AbortSignal },
+  ): Promise<string | ContentBlock[]> {
+    return prepareUserContentWithVisionImages(content, options);
   }
 
   async *streamMessage(params: StreamMessageParams): AsyncIterable<StreamEvent> {
@@ -238,14 +248,14 @@ export async function convertUserContentToAnthropic(
       if (block.text) converted.push({ type: "text", text: block.text });
       continue;
     }
-    assertNativeImageMediaType(block.source.mediaType);
-    const data = await readFile(block.source.path, { signal });
+    const prepared = await prepareNativeImagePayload(block, signal);
+    assertNativeImageMediaType(prepared.mediaType);
     converted.push({
       type: "image",
       source: {
         type: "base64",
-        media_type: block.source.mediaType as NativeImageMediaType,
-        data: data.toString("base64"),
+        media_type: prepared.mediaType as NativeImageMediaType,
+        data: prepared.base64,
       },
     });
   }

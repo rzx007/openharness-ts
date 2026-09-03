@@ -8,6 +8,7 @@ export type {
   TextBlock,
   ImageBlock,
   ImageSource,
+  VisionImagePreparationMetadata,
   ToolUseBlock,
   ContentBlock,
 } from "./types/messages";

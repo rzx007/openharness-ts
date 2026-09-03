@@ -308,9 +308,9 @@ export class QueryEngine implements IQueryEngine {
     content: string | ContentBlock[],
     options: SubmitMessageOptions = {},
   ): AsyncIterable<StreamEvent> {
+    const preparedContent = await this.prepareUserContent(content, options.signal);
     this.messages = sanitizeMessageHistory(this.messages);
-
-    this.messages.push({ type: "user", content });
+    this.messages.push({ type: "user", content: preparedContent });
 
     // per-turn 相关记忆检索：按本轮用户输入选相关记忆，作为瞬态上下文。
     // 仅在本轮（这次 submitMessage）拼进发往 API 的 system，不污染持久历史，
@@ -319,7 +319,7 @@ export class QueryEngine implements IQueryEngine {
     let memoryContext: string | null = null;
     if (this.memoryRetriever) {
       try {
-        memoryContext = await this.memoryRetriever(userContentToText(content));
+        memoryContext = await this.memoryRetriever(userContentToText(preparedContent));
       } catch {
         // retriever failure is non-fatal; continue without memory context
       }
@@ -492,10 +492,22 @@ export class QueryEngine implements IQueryEngine {
       closeIfEmpty,
     }) ?? []);
     if (followUps.length === 0) return false;
-    for (const input of followUps) {
-      this.messages.push({ type: "user", content: input.content });
-    }
+    const preparedFollowUps = await Promise.all(
+      followUps.map((input) => this.prepareUserContent(input.content, options.signal)),
+    );
+    this.messages.push(...preparedFollowUps.map((preparedContent) => ({
+      type: "user" as const,
+      content: preparedContent,
+    })));
     return true;
+  }
+
+  private prepareUserContent(
+    content: string | ContentBlock[],
+    signal?: AbortSignal,
+  ): Promise<string | ContentBlock[]> {
+    return this.apiClient.prepareUserContent?.(content, { signal })
+      ?? Promise.resolve(content);
   }
 
   getHistory(): Message[] {

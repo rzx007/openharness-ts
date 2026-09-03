@@ -35,7 +35,7 @@ export default defineConfig({
           "@openharness/terminal-node",
         ],
         // 原生模块不能打进 JS，运行时从 node_modules 加载
-        include: ["better-sqlite3", "node-pty"],
+        include: ["better-sqlite3", "electron-log", "electron-updater", "node-pty"],
       },
     },
   },

@@ -103,6 +103,7 @@
 ### Context、Memory 与 Prompt
 
 - [Context And Memory Map](./context-memory-map.md)：进入模型上下文的信息总图。
+- [原生视觉图片预处理](./native-vision-image-preprocessing.md)：图片入历史前的预检、2000px/5 MiB 限制、进程内缓存和 Provider 出口。
 - [Memory System](./memory-system.md)：Memory 的读取、写入和检索。
 - [Memory Quartet](./services-memory-quartet-design.md)：四类 memory service 的职责。
 - [Prompt Runtime Audit](./prompt-runtime-audit.md)：prompt 运行时审计记录。
@@ -151,6 +152,7 @@
 - 使用 slash command：[Slash Commands](./slash-commands.md)
 - 远程连接 daemon：[Remote Attach](./remote-attach.md)
 - 安装和管理常驻 daemon：[Daemon System Service](./daemon-system-service.md)
+- 发布 Desktop 和 CLI：[Desktop 与 CLI Tag 发版](./release-process.md)
 - 配置认证、Provider 和 Model：[Auth、Provider、Model](./auth-provider-model.md)
 - 查看 trace、metrics 和运行诊断：[Observability](./observability.md)
 - 处理启动恢复、Owner、Retention 和备份：[Operations and Recovery](./operations-and-recovery.md)

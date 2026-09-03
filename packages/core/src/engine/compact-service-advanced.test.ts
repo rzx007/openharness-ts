@@ -265,6 +265,42 @@ describe("image handling", () => {
     );
   });
 
+  it("uses prepared image dimensions instead of the fallback image estimate", () => {
+    const svc = new CompactService(100_000, 10, { imageTokenEstimate: 3000 });
+    const prepared: Message[] = [{
+      type: "user",
+      content: [{
+        type: "image",
+        source: {
+          type: "file",
+          mediaType: "image/png",
+          path: "/tmp/prepared-image.png",
+          prepared: {
+            mediaType: "image/jpeg",
+            width: 280,
+            height: 280,
+            base64Bytes: 1024,
+            policyVersion: "vision-v1",
+          },
+        },
+      }],
+    }];
+    const fallback: Message[] = [{
+      type: "user",
+      content: [{
+        type: "image",
+        source: {
+          type: "file",
+          mediaType: "image/png",
+          path: "/tmp/unprepared-image.png",
+        },
+      }],
+    }];
+
+    expect(svc.estimateTokens(prepared)).toBe(134);
+    expect(svc.estimateTokens(prepared)).toBeLessThan(svc.estimateTokens(fallback));
+  });
+
   it("replaces image payloads with placeholders for the summarizer request", () => {
     const svc = new CompactService();
     const messages: Message[] = [

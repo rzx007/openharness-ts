@@ -102,12 +102,19 @@ import type {
   AttachmentStorageRepairResult,
   AttachmentStorageReport,
 } from "@openharness/client"
+import type { DesktopUpdateState } from "./update-types"
 
 export type DesktopAPI = {
   app: {
     getInfo: () => Promise<DesktopAppInfo>
     getPlatform: () => Promise<PlatformInfo>
     quit: () => Promise<void>
+  }
+  updates: {
+    getState: () => Promise<DesktopUpdateState>
+    download: () => Promise<void>
+    install: () => Promise<void>
+    onStateChanged: (listener: (state: DesktopUpdateState) => void) => () => void
   }
   window: {
     showMain: () => Promise<void>

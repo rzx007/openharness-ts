@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCodexHeaders, CodexSubscriptionClient, resolveCodexUrl } from "./codex";
 
@@ -87,7 +88,10 @@ describe("CodexSubscriptionClient native image input", () => {
     const dir = await mkdtemp(join(tmpdir(), "oh-codex-image-"));
     try {
       const imagePath = join(dir, "cached.png");
-      await writeFile(imagePath, Buffer.from([9, 8, 7]));
+      const original = await sharp({
+        create: { width: 2400, height: 1200, channels: 3, background: "yellow" },
+      }).png().toBuffer();
+      await writeFile(imagePath, original);
       let requestBody: any;
       vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
         requestBody = JSON.parse(String(init?.body));
@@ -112,12 +116,41 @@ describe("CodexSubscriptionClient native image input", () => {
         }],
       })) {}
 
-      expect(requestBody.input[0].content).toEqual([
-        { type: "input_text", text: "describe" },
-        { type: "input_image", image_url: `data:image/png;base64,${Buffer.from([9, 8, 7]).toString("base64")}` },
-      ]);
+      expect(requestBody.input[0].content[0]).toEqual({ type: "input_text", text: "describe" });
+      const url = requestBody.input[0].content[1].image_url as string;
+      expect(url).toMatch(/^data:image\/png;base64,/);
+      expect(url).not.toContain(original.toString("base64"));
+      expect(await sharp(Buffer.from(url.slice(url.indexOf(",") + 1), "base64")).metadata())
+        .toMatchObject({ width: 2000, height: 1000 });
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prepares image metadata while preserving the source path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-codex-image-"));
+    try {
+      const imagePath = join(dir, "large.png");
+      await sharp({
+        create: { width: 2100, height: 700, channels: 3, background: "black" },
+      }).png().toFile(imagePath);
+      const client = new CodexSubscriptionClient({
+        apiKey: jwt({
+          "https://api.openai.com/auth": { chatgpt_account_id: "acct_123" },
+        }),
+      });
+
+      const prepared = await client.prepareUserContent!([{
+        type: "image",
+        source: { type: "file", mediaType: "image/png", path: imagePath },
+      }]);
+
+      expect((prepared as any[])[0].source).toMatchObject({
+        path: imagePath,
+        prepared: { width: 2000, height: 667, mediaType: "image/png" },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 });

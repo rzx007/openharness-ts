@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { readFile } from "node:fs/promises";
 import type {
   StreamingMessageClient,
   StreamMessageParams,
@@ -10,6 +9,11 @@ import type {
 import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, requestFailure } from "../errors/index";
 import { abortableDelay } from "./retry";
+import {
+  prepareNativeImagePayload,
+  preparedImageDataUrl,
+  prepareUserContentWithVisionImages,
+} from "./native-image-payload.js";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;
@@ -101,6 +105,7 @@ function emptyReasoningRequired(): boolean {
  */
 export function convertUserContentToOpenAI(
   blocks: ContentBlock[],
+  signal?: AbortSignal,
 ): Promise<string | OpenAI.ChatCompletionContentPart[]> {
   const hasImage = blocks.some((b) => b.type === "image");
   if (!hasImage) {
@@ -110,11 +115,12 @@ export function convertUserContentToOpenAI(
       .join(""));
   }
 
-  return convertMultimodalContentToOpenAI(blocks);
+  return convertMultimodalContentToOpenAI(blocks, signal);
 }
 
 async function convertMultimodalContentToOpenAI(
   blocks: ContentBlock[],
+  signal?: AbortSignal,
 ): Promise<OpenAI.ChatCompletionContentPart[]> {
   const content: OpenAI.ChatCompletionContentPart[] = [];
   for (const block of blocks) {
@@ -123,7 +129,7 @@ async function convertMultimodalContentToOpenAI(
     } else if (block.type === "image") {
       content.push({
         type: "image_url",
-        image_url: { url: await imageBlockToDataUrl(block) },
+        image_url: { url: await imageBlockToDataUrl(block, signal) },
       });
     }
   }
@@ -132,10 +138,11 @@ async function convertMultimodalContentToOpenAI(
 
 async function imageBlockToDataUrl(
   block: Extract<ContentBlock, { type: "image" }>,
+  signal?: AbortSignal,
 ): Promise<string> {
-  assertNativeImageMediaType(block.source.mediaType);
-  const raw = await readFile(block.source.path);
-  return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
+  const prepared = await prepareNativeImagePayload(block, signal);
+  assertNativeImageMediaType(prepared.mediaType);
+  return preparedImageDataUrl(prepared);
 }
 
 export class OpenAICompatibleClient implements StreamingMessageClient {
@@ -156,6 +163,13 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
 
   set client(value: OpenAI) {
     this._client = value;
+  }
+
+  prepareUserContent(
+    content: string | ContentBlock[],
+    options?: { signal?: AbortSignal },
+  ): Promise<string | ContentBlock[]> {
+    return prepareUserContentWithVisionImages(content, options);
   }
 
   async *streamMessage(params: StreamMessageParams): AsyncIterable<StreamEvent> {
@@ -338,7 +352,10 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
           if (typeof msg.content === "string") {
             messages.push({ role: "user", content: msg.content });
           } else {
-            const content = await convertUserContentToOpenAI(msg.content);
+            const content = await convertUserContentToOpenAI(
+              msg.content,
+              params.abortSignal,
+            );
             if (typeof content === "string") {
               if (content.trim()) {
                 messages.push({ role: "user", content });

@@ -3,7 +3,8 @@ import { cp, mkdir } from "node:fs/promises";
 
 const shared = {
   bundle: true,
-  external: ["node-pty"],
+  // Native addons must resolve from their own package directories at runtime.
+  external: ["node-pty", "sharp", "better-sqlite3"],
   platform: "node",
   target: "node20",
   logLevel: "info",

@@ -1,6 +1,7 @@
 {
   "name": "openharness-ts",
   "private": true,
+  "version": "1.0.0",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -13,24 +14,16 @@
     "lint": "turbo lint",
     "check-types": "turbo check-types",
     "check-docs": "node scripts/check-docs.mjs",
-    "test": "turbo test",
+    "test": "turbo test && node --test scripts/prepare-tag-release.test.mjs scripts/npm-release.test.mjs",
     "test:client-browser": "vite build --config tests/browser-client/vite.config.ts",
     "clean": "turbo clean",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
     "release:ci": "pnpm build && pnpm changeset:publish",
-    "release:plan": "node scripts/npm-release.mjs plan",
-    "release:version": "node scripts/npm-release.mjs version",
-    "release:patch": "node scripts/npm-release.mjs version patch",
-    "release:minor": "node scripts/npm-release.mjs version minor",
-    "release:major": "node scripts/npm-release.mjs version major",
-    "release:publish": "node scripts/npm-release.mjs publish",
-    "release:publish:dry": "node scripts/npm-release.mjs publish --dry-run",
-    "release:cli:plan": "node scripts/npm-release.mjs cli-plan",
-    "release:cli:version": "node scripts/npm-release.mjs cli-version",
-    "release:cli": "node scripts/npm-release.mjs cli-publish",
-    "release:cli:dry": "node scripts/npm-release.mjs cli-publish --dry-run",
+    "release:cli": "node scripts/npm-release.mjs",
+    "release:cli:dry": "node scripts/npm-release.mjs --dry-run",
+    "test:scripts": "node --test scripts/prepare-tag-release.test.mjs scripts/npm-release.test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
