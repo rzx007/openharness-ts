@@ -130,19 +130,25 @@ test("AppView with user+assistant transcript renders Session view", async () => 
   );
 
   await renderOnce();
-  // Poll until messages appear (markdown is async)
+  // Markdown parse is async and needs repeated renderOnce + wall-clock time.
+  // waitForFrame alone is not enough: cellsUpdated stays 0 until React re-renders.
   let frame = captureCharFrame();
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 100; i++) {
     await renderOnce();
     await new Promise((r) => setTimeout(r, 20));
     frame = captureCharFrame();
-    if (frame.includes("Hello from the user") && frame.includes("assistant")) break;
+    if (
+      frame.includes("Hello from the user") &&
+      frame.includes("Hello from the assistant") &&
+      frame.includes("claude-opus-4-5")
+    ) {
+      break;
+    }
   }
 
   expect(frame).toContain("Hello from the user");
   expect(frame).toContain("Hello from the assistant");
-
-  // Footer renders model name from status
+  // Prompt meta row renders model name from status
   expect(frame).toContain("claude-opus-4-5");
 
   renderer.destroy();
