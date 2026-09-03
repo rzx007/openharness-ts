@@ -1,5 +1,4 @@
 import { platform, machine } from "node:os";
-import { readFile } from "node:fs/promises";
 import type {
   ContentBlock,
   Message,
@@ -10,6 +9,11 @@ import type {
 } from "@openharness/core";
 import { assertNativeImageMediaType, type ProviderConfig } from "./registry";
 import { AuthenticationFailure, RateLimitFailure, RequestFailure, requestFailure } from "../errors/index";
+import {
+  prepareNativeImagePayload,
+  preparedImageDataUrl,
+  prepareUserContentWithVisionImages,
+} from "./native-image-payload.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_AUTH_CLAIM = "https://api.openai.com/auth";
@@ -51,6 +55,13 @@ export class CodexSubscriptionClient implements StreamingMessageClient {
     this.url = resolveCodexUrl(config.baseURL);
   }
 
+  prepareUserContent(
+    content: string | ContentBlock[],
+    options?: { signal?: AbortSignal },
+  ): Promise<string | ContentBlock[]> {
+    return prepareUserContentWithVisionImages(content, options);
+  }
+
   async *streamMessage(params: StreamMessageParams): AsyncIterable<StreamEvent> {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -73,7 +84,7 @@ export class CodexSubscriptionClient implements StreamingMessageClient {
   }
 
   private async *streamOnce(params: StreamMessageParams): AsyncIterable<StreamEvent> {
-    const input = await convertMessagesToCodex(params.messages);
+    const input = await convertMessagesToCodex(params.messages, params.abortSignal);
     const body: Record<string, unknown> = {
       model: params.model,
       store: false,
@@ -194,11 +205,15 @@ function extractAccountId(token: string): string {
   return accountId;
 }
 
-async function convertMessagesToCodex(messages: Message[]): Promise<Array<Record<string, unknown>>> {
+async function convertMessagesToCodex(
+  messages: Message[],
+  signal?: AbortSignal,
+): Promise<Array<Record<string, unknown>>> {
   const result: Array<Record<string, unknown>> = [];
   for (const msg of messages) {
+    signal?.throwIfAborted();
     if (msg.type === "user") {
-      const userContent = await convertUserContent(msg.content);
+      const userContent = await convertUserContent(msg.content, signal);
       if (userContent.length) {
         result.push({ role: "user", content: userContent });
       }
@@ -231,7 +246,10 @@ async function convertMessagesToCodex(messages: Message[]): Promise<Array<Record
   return result;
 }
 
-async function convertUserContent(content: string | ContentBlock[]): Promise<Array<Record<string, string>>> {
+async function convertUserContent(
+  content: string | ContentBlock[],
+  signal?: AbortSignal,
+): Promise<Array<Record<string, string>>> {
   if (typeof content === "string") {
     return content.trim() ? [{ type: "input_text", text: content }] : [];
   }
@@ -242,7 +260,7 @@ async function convertUserContent(content: string | ContentBlock[]): Promise<Arr
     } else if (block.type === "image") {
       blocks.push({
         type: "input_image",
-        image_url: await imageBlockToDataUrl(block),
+        image_url: await imageBlockToDataUrl(block, signal),
       });
     }
   }
@@ -251,10 +269,11 @@ async function convertUserContent(content: string | ContentBlock[]): Promise<Arr
 
 async function imageBlockToDataUrl(
   block: Extract<ContentBlock, { type: "image" }>,
+  signal?: AbortSignal,
 ): Promise<string> {
-  assertNativeImageMediaType(block.source.mediaType);
-  const raw = await readFile(block.source.path);
-  return `data:${block.source.mediaType};base64,${raw.toString("base64")}`;
+  const prepared = await prepareNativeImagePayload(block, signal);
+  assertNativeImageMediaType(prepared.mediaType);
+  return preparedImageDataUrl(prepared);
 }
 
 function contentBlocksToText(blocks: ContentBlock[]): string {

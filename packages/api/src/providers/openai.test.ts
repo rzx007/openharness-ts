@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { Message } from "@openharness/core";
 import {
@@ -107,19 +108,24 @@ describe("convertUserContentToOpenAI", () => {
     expect(result).toBe("hello world");
   });
 
-  it("converts a cached file image block to image_url data URI", async () => {
+  it("converts an oversized image to a bounded image_url data URI", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
     try {
       const imagePath = join(dir, "cached.png");
-      await writeFile(imagePath, Buffer.from([1, 2, 3, 4]));
+      const original = await sharp({
+        create: { width: 2400, height: 1200, channels: 3, background: "red" },
+      }).png().toBuffer();
+      await writeFile(imagePath, original);
       const result = await convertUserContentToOpenAI([
         { type: "text", text: "look:" },
         { type: "image", source: { type: "file", mediaType: "image/png", path: imagePath } },
       ]);
-      expect(result).toEqual([
-        { type: "text", text: "look:" },
-        { type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from([1, 2, 3, 4]).toString("base64")}` } },
-      ]);
+      expect(result[0]).toEqual({ type: "text", text: "look:" });
+      const url = (result[1] as any).image_url.url as string;
+      expect(url).toMatch(/^data:image\/png;base64,/);
+      expect(url).not.toContain(original.toString("base64"));
+      const prepared = Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
+      expect(await sharp(prepared).metadata()).toMatchObject({ width: 2000, height: 1000 });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -129,13 +135,16 @@ describe("convertUserContentToOpenAI", () => {
     const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
     try {
       const imagePath = join(dir, "cached.jpg");
-      await writeFile(imagePath, Buffer.from([5, 6, 7]));
+      const image = await sharp({
+        create: { width: 10, height: 10, channels: 3, background: "blue" },
+      }).jpeg().toBuffer();
+      await writeFile(imagePath, image);
       const result = await convertUserContentToOpenAI([
         { type: "text", text: "" },
         { type: "image", source: { type: "file", mediaType: "image/jpeg", path: imagePath } },
       ]);
       expect(result).toEqual([
-        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${Buffer.from([5, 6, 7]).toString("base64")}` } },
+        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image.toString("base64")}` } },
       ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -199,7 +208,10 @@ describe("convertMessages image passing", () => {
     const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
     try {
       const imagePath = join(dir, "cached.png");
-      await writeFile(imagePath, Buffer.from([65]));
+      const image = await sharp({
+        create: { width: 10, height: 10, channels: 3, background: "green" },
+      }).png().toBuffer();
+      await writeFile(imagePath, image);
       const out = await client.build([
         {
           type: "user",
@@ -213,10 +225,42 @@ describe("convertMessages image passing", () => {
       expect(Array.isArray(user.content)).toBe(true);
       expect(user.content).toContainEqual({
         type: "image_url",
-        image_url: { url: `data:image/png;base64,${Buffer.from([65]).toString("base64")}` },
+        image_url: { url: `data:image/png;base64,${image.toString("base64")}` },
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adds preparation metadata without replacing the original path", async () => {
+    const client = new TestableClient({ apiKey: "test", baseURL: undefined } as any);
+    const dir = await mkdtemp(join(tmpdir(), "oh-openai-image-"));
+    try {
+      const imagePath = join(dir, "large.png");
+      await sharp({
+        create: { width: 2200, height: 1100, channels: 3, background: "white" },
+      }).png().toFile(imagePath);
+
+      const prepared = await client.prepareUserContent!([{
+        type: "image",
+        source: { type: "file", mediaType: "image/png", path: imagePath },
+      }]);
+
+      expect(prepared).toEqual([{
+        type: "image",
+        source: expect.objectContaining({
+          path: imagePath,
+          mediaType: "image/png",
+          prepared: expect.objectContaining({
+            mediaType: "image/png",
+            width: 2000,
+            height: 1000,
+            policyVersion: "vision-v1",
+          }),
+        }),
+      }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 });

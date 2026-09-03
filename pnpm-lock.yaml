@@ -546,6 +546,9 @@ importers:
       openai:
         specifier: 'catalog:'
         version: 4.104.0(ws@8.20.0)(zod@3.25.76)
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

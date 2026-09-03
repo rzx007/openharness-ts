@@ -241,4 +241,51 @@ describe("buildUserContentWithAttachments", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("accepts source images above 5 MB so the provider can prepare them", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-attachment-"));
+    const previousCacheDir = process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR;
+    const previousLimit = process.env.OPENHARNESS_MAX_IMAGE_BYTES;
+    try {
+      process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR = join(dir, "cache");
+      delete process.env.OPENHARNESS_MAX_IMAGE_BYTES;
+      const imagePath = join(dir, "large.png");
+      await writeFile(imagePath, Buffer.alloc(5_000_001));
+
+      const content = await buildUserContentWithAttachments("compress this", [
+        { type: "image", path: imagePath },
+      ]) as any[];
+
+      expect(content[1].source).toMatchObject({
+        type: "file",
+        mediaType: "image/png",
+        sizeBytes: 5_000_001,
+      });
+      expect(content[1].source.prepared).toBeUndefined();
+    } finally {
+      if (previousCacheDir === undefined) delete process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR;
+      else process.env.OPENHARNESS_IMAGE_ATTACHMENT_CACHE_DIR = previousCacheDir;
+      if (previousLimit === undefined) delete process.env.OPENHARNESS_MAX_IMAGE_BYTES;
+      else process.env.OPENHARNESS_MAX_IMAGE_BYTES = previousLimit;
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it("rejects source images above the 20 MiB preparation guard", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-attachment-"));
+    const previousLimit = process.env.OPENHARNESS_MAX_IMAGE_BYTES;
+    try {
+      delete process.env.OPENHARNESS_MAX_IMAGE_BYTES;
+      const imagePath = join(dir, "too-large.png");
+      await writeFile(imagePath, Buffer.alloc(20 * 1024 * 1024 + 1));
+
+      await expect(buildUserContentWithAttachments("too large", [
+        { type: "image", path: imagePath },
+      ])).rejects.toThrow(`max ${20 * 1024 * 1024} bytes`);
+    } finally {
+      if (previousLimit === undefined) delete process.env.OPENHARNESS_MAX_IMAGE_BYTES;
+      else process.env.OPENHARNESS_MAX_IMAGE_BYTES = previousLimit;
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
 });

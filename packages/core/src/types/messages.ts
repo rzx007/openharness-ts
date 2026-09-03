@@ -45,6 +45,15 @@ export interface ImageSource {
   mediaType: string;
   path: string;
   sizeBytes?: number;
+  prepared?: VisionImagePreparationMetadata;
+}
+
+export interface VisionImagePreparationMetadata {
+  mediaType: string;
+  width: number;
+  height: number;
+  base64Bytes: number;
+  policyVersion: string;
 }
 
 export interface ToolUseBlock {

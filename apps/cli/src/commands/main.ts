@@ -67,7 +67,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
 };
 const DEFAULT_MAX_IMAGE_ATTACHMENTS = 4;
-const DEFAULT_MAX_IMAGE_BYTES = 5_000_000;
+const DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 function positiveIntegerEnv(name: string, fallback: number): number {
   const raw = process.env[name];

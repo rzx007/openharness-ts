@@ -1127,7 +1127,10 @@ export class CompactService {
         if (block.type === "text") {
           total += estimateTokens(block.text);
         } else if (block.type === "image") {
-          total += this.imageTokenEstimate;
+          const prepared = block.source.prepared;
+          total += prepared
+            ? Math.ceil(prepared.width / 28) * Math.ceil(prepared.height / 28)
+            : this.imageTokenEstimate;
         }
       }
     }

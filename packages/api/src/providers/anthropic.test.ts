@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import { AnthropicClient } from "./anthropic.js";
 
@@ -78,8 +79,14 @@ describe("AnthropicClient native image input", () => {
     try {
       const png = join(dir, "first.png");
       const webp = join(dir, "second.webp");
-      await writeFile(png, Buffer.from([1, 2, 3]));
-      await writeFile(webp, Buffer.from([4, 5]));
+      const pngBytes = await sharp({
+        create: { width: 2200, height: 1100, channels: 3, background: "red" },
+      }).png().toBuffer();
+      const webpBytes = await sharp({
+        create: { width: 20, height: 10, channels: 3, background: "blue" },
+      }).webp().toBuffer();
+      await writeFile(png, pngBytes);
+      await writeFile(webp, webpBytes);
       const stream = vi.fn(() => ({
         async *[Symbol.asyncIterator]() {},
         finalMessage: async () => ({
@@ -102,21 +109,44 @@ describe("AnthropicClient native image input", () => {
         }],
       })) {}
 
-      expect(stream).toHaveBeenCalledWith(
-        expect.objectContaining({
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: "compare" },
-              { type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from([1, 2, 3]).toString("base64") } },
-              { type: "image", source: { type: "base64", media_type: "image/webp", data: Buffer.from([4, 5]).toString("base64") } },
-            ],
-          }],
-        }),
-        expect.any(Object),
-      );
+      const request = stream.mock.calls[0]![0] as any;
+      expect(request.messages[0].content[0]).toEqual({ type: "text", text: "compare" });
+      expect(request.messages[0].content[1]).toMatchObject({
+        type: "image",
+        source: { type: "base64", media_type: "image/png" },
+      });
+      expect(request.messages[0].content[1].source.data).not.toBe(pngBytes.toString("base64"));
+      expect(await sharp(Buffer.from(request.messages[0].content[1].source.data, "base64")).metadata())
+        .toMatchObject({ width: 2000, height: 1000 });
+      expect(request.messages[0].content[2]).toEqual({
+        type: "image",
+        source: { type: "base64", media_type: "image/webp", data: webpBytes.toString("base64") },
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prepares user image metadata before QueryEngine history insertion", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oh-anthropic-image-"));
+    try {
+      const imagePath = join(dir, "large.png");
+      await sharp({
+        create: { width: 2100, height: 1050, channels: 3, background: "white" },
+      }).png().toFile(imagePath);
+      const client = new AnthropicClient({ apiKey: "test" } as any);
+
+      const prepared = await client.prepareUserContent!([{
+        type: "image",
+        source: { type: "file", mediaType: "image/png", path: imagePath },
+      }]);
+
+      expect((prepared as any[])[0].source).toMatchObject({
+        path: imagePath,
+        prepared: { width: 2000, height: 1000, mediaType: "image/png" },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 
