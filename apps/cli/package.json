@@ -1,15 +1,35 @@
 {
   "name": "@rzx/ohs",
   "version": "0.1.0",
-  "description": "OpenHarness terminal CLI",
+  "description": "OpenHarness terminal CLI — interactive TUI and headless agent for your codebase",
   "type": "module",
   "bin": {
     "ohs": "./dist/index.js",
     "openharness": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
+  "keywords": [
+    "openharness",
+    "cli",
+    "ai",
+    "agent",
+    "tui",
+    "llm",
+    "coding-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rzx007/openharness-ts.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/rzx007/openharness-ts/tree/main/apps/cli",
+  "bugs": {
+    "url": "https://github.com/rzx007/openharness-ts/issues"
+  },
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
