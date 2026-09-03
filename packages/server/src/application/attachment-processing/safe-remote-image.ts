@@ -78,10 +78,63 @@ function mappedIpv4(address: string): string | undefined {
   const dotted = address.match(/^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/)?.[1];
   if (dotted) return dotted;
   const hexadecimal = address.match(/^::(?:ffff:)?([\da-f]{1,4}):([\da-f]{1,4})$/);
-  if (!hexadecimal) return undefined;
-  const high = Number.parseInt(hexadecimal[1]!, 16);
-  const low = Number.parseInt(hexadecimal[2]!, 16);
+  if (hexadecimal) {
+    const high = Number.parseInt(hexadecimal[1]!, 16);
+    const low = Number.parseInt(hexadecimal[2]!, 16);
+    return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
+  }
+
+  const expanded = expandIpv6(address);
+  if (!expanded) return undefined;
+
+  // NAT64 well-known prefix 64:ff9b::/96 — IPv4 lives in the final 32 bits.
+  if (
+    expanded[0] === 0x64 &&
+    expanded[1] === 0xff9b &&
+    expanded[2] === 0 &&
+    expanded[3] === 0 &&
+    expanded[4] === 0 &&
+    expanded[5] === 0
+  ) {
+    return hextetsToIpv4(expanded[6]!, expanded[7]!);
+  }
+
+  // 6to4 2002::/16 — IPv4 lives in bits 16..48 (hextets 1 and 2).
+  if (expanded[0] === 0x2002) {
+    return hextetsToIpv4(expanded[1]!, expanded[2]!);
+  }
+
+  return undefined;
+}
+
+function hextetsToIpv4(high: number, low: number): string {
   return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
+}
+
+function expandIpv6(address: string): number[] | undefined {
+  const normalized = address.toLowerCase().split("%", 1)[0]!;
+  if (normalized.includes(".")) return undefined;
+  const [headText, tailText] = normalized.split("::");
+  if (tailText !== undefined && normalized.indexOf("::") !== normalized.lastIndexOf("::")) {
+    return undefined;
+  }
+  const head = headText ? headText.split(":") : [];
+  const tail = tailText ? tailText.split(":") : [];
+  if (tailText === undefined) {
+    if (head.length !== 8 || head.some((part) => part.length === 0)) return undefined;
+  } else if (head.length + tail.length > 7) {
+    return undefined;
+  }
+  const missing = 8 - head.length - tail.length;
+  const parts = [
+    ...head,
+    ...(tailText === undefined ? [] : Array.from({ length: missing }, () => "0")),
+    ...tail,
+  ];
+  if (parts.length !== 8 || parts.some((part) => !/^[0-9a-f]{1,4}$/.test(part))) {
+    return undefined;
+  }
+  return parts.map((part) => Number.parseInt(part, 16));
 }
 
 async function get(
