@@ -1,4 +1,4 @@
-import { CirclePause, MoreHorizontal, Pencil, Play, Trash2 } from "lucide-react"
+import { CirclePause, CirclePlay, MoreHorizontal, Pencil, Play, Trash2 } from "lucide-react"
 
 import {
   DropdownMenu,
@@ -27,6 +27,7 @@ export function TaskActionsMenu({
   onDelete: () => void
   triggerClassName?: string
 }): React.JSX.Element {
+  const canToggle = task.status !== "completed" && Boolean(onToggle)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -49,9 +50,9 @@ export function TaskActionsMenu({
             <Play />
             立即运行
           </DropdownMenuItem>
-          {onToggle ? (
+          {canToggle ? (
             <DropdownMenuItem onClick={onToggle} disabled={busy}>
-              {task.status === "active" ? <CirclePause /> : <Play />}
+              {task.status === "active" ? <CirclePause /> : <CirclePlay />}
               {task.status === "active" ? "暂停" : "继续"}
             </DropdownMenuItem>
           ) : null}

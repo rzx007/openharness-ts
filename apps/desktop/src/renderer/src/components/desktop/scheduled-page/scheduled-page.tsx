@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react"
-import { CalendarClock, CircleAlert, ExternalLink } from "lucide-react"
+import { CalendarClock, CircleAlert, ExternalLink, X } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 
 import { useAppearance } from "@renderer/components/appearance/appearance-provider"
@@ -152,6 +152,7 @@ export function ScheduledPage({
   const mutate = useCallback(
     async (key: string, operation: () => Promise<unknown>): Promise<void> => {
       setBusy(key)
+      setError(null)
       try {
         await operation()
         await refresh()
@@ -201,11 +202,21 @@ export function ScheduledPage({
     <section className="flex h-full min-h-0 w-full flex-col bg-background" aria-busy={loading}>
       {error ? (
         <div
-          className="mx-8 mt-5 flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/8 px-3 py-2.5 text-xs text-destructive"
+          className="mx-8 mt-5 flex items-start justify-between gap-2 rounded-xl border border-destructive/20 bg-destructive/8 px-3 py-2.5 text-xs text-destructive"
           role="alert"
         >
-          <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-          <span>{error}</span>
+          <div className="flex items-start gap-2">
+            <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="rounded p-0.5 text-destructive/70 hover:text-destructive"
+            aria-label="关闭错误提示"
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
       ) : null}
 
@@ -287,13 +298,14 @@ export function ScheduledPage({
                       void mutate("run", () => window.desktop.schedules.runNow(task.id))
                     }
                     onEdit={() => openEditEditor(task)}
-                    onToggle={() =>
+                    onToggle={() => {
+                      if (task.status === "completed") return
                       void mutate("toggle", () =>
                         window.desktop.schedules.update(task.id, {
                           status: nextScheduleStatus(task),
                         })
                       )
-                    }
+                    }}
                     onDelete={() =>
                       void mutate("delete", () => window.desktop.schedules.remove(task.id))
                     }
@@ -334,13 +346,14 @@ export function ScheduledPage({
                       )
                     }
                     onEdit={() => openEditEditor(selected)}
-                    onToggle={() =>
+                    onToggle={() => {
+                      if (selected.status === "completed") return
                       void mutate("toggle", () =>
                         window.desktop.schedules.update(selected.id, {
                           status: nextScheduleStatus(selected),
                         })
                       )
-                    }
+                    }}
                     onDelete={() =>
                       void mutate("delete", () => window.desktop.schedules.remove(selected.id))
                     }

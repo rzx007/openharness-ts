@@ -1,5 +1,6 @@
 import {
   computeNextScheduledTime,
+  validateScheduledRecurrence,
   type SessionStore,
 } from "@openharness/services";
 import type {
@@ -114,12 +115,14 @@ export class ScheduledTaskService {
     this.assertAvailable();
     const current = this.getTask(id);
     const candidate = { ...current, ...patch } as ScheduledTaskRecord;
-    this.validateInput(candidate);
     const scheduleChanged =
       patch.recurrence !== undefined ||
       patch.recurrenceFormat !== undefined ||
       patch.timezone !== undefined ||
       patch.status !== undefined;
+    this.validateInput(candidate, {
+      validateFutureSchedule: scheduleChanged && candidate.status === "active",
+    });
     const nextRunAt =
       candidate.status === "active"
         ? scheduleChanged
@@ -369,6 +372,7 @@ export class ScheduledTaskService {
 
   private validateInput(
     input: CreateScheduledTaskInput | ScheduledTaskRecord,
+    options: { validateFutureSchedule?: boolean } = {},
   ): void {
     if (!input.name.trim()) throw new Error("Scheduled task name is required");
     if (!input.prompt.trim())
@@ -429,10 +433,22 @@ export class ScheduledTaskService {
     ) {
       throw new Error("Unknown scheduled task missed-run policy");
     }
-    computeNextScheduledTime(
-      { format: input.recurrenceFormat, value: input.recurrence },
-      { after: new Date(), anchor: new Date(), timezone: input.timezone },
-    );
+    const shouldValidateFuture =
+      options.validateFutureSchedule ??
+      (input.status === "active" || input.status === undefined);
+    if (shouldValidateFuture) {
+      computeNextScheduledTime(
+        { format: input.recurrenceFormat, value: input.recurrence },
+        { after: new Date(), anchor: new Date(), timezone: input.timezone },
+      );
+    } else if (
+      !validateScheduledRecurrence({
+        format: input.recurrenceFormat,
+        value: input.recurrence,
+      })
+    ) {
+      throw new Error(`Invalid scheduled recurrence: ${input.recurrence}`);
+    }
   }
 
   private clearTimer(id: string): void {

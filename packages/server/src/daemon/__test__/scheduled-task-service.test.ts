@@ -477,4 +477,38 @@ describe("ScheduledTaskService", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(execute).toHaveBeenCalledOnce();
   });
+
+  it("allows updating a completed task and triggering it manually", async () => {
+    const { service, store } = createHarness();
+    const task = service.createTask({
+      name: "completed-one-time",
+      prompt: "One-time run prompt.",
+      recurrence: "2099-01-01T00:00:00Z",
+      recurrenceFormat: "once",
+      timezone: "UTC",
+      destination: "chat",
+      sessionId: "chat-1",
+    });
+
+    await service.trigger(task.id);
+    expect(store.getScheduledTask(task.id)?.status).toBe("completed");
+
+    // Simulate that the one-time date has passed into history
+    store.updateScheduledTask(task.id, {
+      recurrence: "2020-01-01T00:00:00Z",
+    });
+
+    // Updating non-schedule fields should succeed without "One-time schedule is not in the future"
+    expect(() => {
+      service.updateTask(task.id, { prompt: "Updated prompt for completed task" });
+    }).not.toThrow();
+
+    expect(store.getScheduledTask(task.id)?.prompt).toBe("Updated prompt for completed task");
+
+    // Manually triggering a completed task should also succeed
+    const run = await service.trigger(task.id);
+    expect(run.status).toBe("succeeded");
+    expect(store.getScheduledTask(task.id)?.status).toBe("completed");
+  });
 });
+

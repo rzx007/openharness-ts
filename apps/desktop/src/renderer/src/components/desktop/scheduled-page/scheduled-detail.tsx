@@ -1,4 +1,13 @@
-import { Archive, Circle, CirclePause, History, MoreHorizontal, Play, X } from "lucide-react"
+import {
+  Archive,
+  Circle,
+  CirclePause,
+  CirclePlay,
+  History,
+  MoreHorizontal,
+  Play,
+  X,
+} from "lucide-react"
 
 import { Button } from "@renderer/components/ui/button"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
@@ -33,44 +42,65 @@ export function DetailPanel({
   onToggle: () => void
   onDelete: () => void
 }): React.JSX.Element {
+  const isRunning = busy === "run" || busy === `run:${task.id}`
+  const canToggle = task.status !== "completed"
+
   return (
     <div className="mx-auto w-full">
       <div className="flex items-center justify-between gap-4">
         <span className="text-ui-small font-medium text-blue-600 dark:text-blue-400">
           {statusLabel(task.status)}
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRunNow}
+            disabled={busy !== null}
+            title="立即运行任务"
+            className="h-8 gap-1.5 rounded-lg px-2.5 text-xs font-medium"
+          >
+            {isRunning ? (
+              <Spinner className="size-3.5" />
+            ) : (
+              <Play className="size-3.5 fill-current" />
+            )}
+            <span>立即运行</span>
+          </Button>
+          {canToggle ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onToggle}
+              disabled={busy !== null}
+              title={task.status === "active" ? "暂停任务" : "继续任务"}
+              aria-label={task.status === "active" ? "暂停任务" : "继续任务"}
+              className="size-8 rounded-lg text-muted-foreground hover:text-foreground"
+            >
+              {busy === "toggle" ? (
+                <Spinner className="size-3.5" />
+              ) : task.status === "active" ? (
+                <CirclePause className="size-4" />
+              ) : (
+                <CirclePlay className="size-4" />
+              )}
+            </Button>
+          ) : null}
           <TaskActionsMenu
             task={task}
             busy={busy !== null}
             onRunNow={onRunNow}
             onEdit={onEdit}
-            onToggle={onToggle}
+            onToggle={canToggle ? onToggle : undefined}
             onDelete={onDelete}
           />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onToggle}
-            disabled={busy !== null}
-            title={task.status === "active" ? "暂停任务" : "继续任务"}
-            className="h-8 rounded-lg px-3 text-xs"
-          >
-            {busy === "toggle" ? (
-              <Spinner className="size-3.5" />
-            ) : task.status === "active" ? (
-              <CirclePause className="size-3.5" />
-            ) : (
-              <Play className="size-3.5" />
-            )}
-          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={onBack}
             title="关闭详情"
             aria-label="关闭详情"
-            className="size-8 rounded-lg text-muted-foreground"
+            className="size-8 rounded-lg text-muted-foreground hover:text-foreground"
           >
             <X className="size-4" />
           </Button>
