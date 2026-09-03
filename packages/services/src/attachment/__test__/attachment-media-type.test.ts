@@ -12,6 +12,11 @@ describe("sniffAttachmentMediaType", () => {
       "image/webp",
       [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
     ],
+    // BMP headers include reserved NUL bytes; signature match must win before the NUL reject.
+    [
+      "image/bmp",
+      [0x42, 0x4d, 0x3a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00],
+    ],
     ["application/pdf", Array.from(new TextEncoder().encode("%PDF-1.7"))],
     ["application/zip", [0x50, 0x4b, 0x03, 0x04]],
   ])("detects %s from magic bytes", (mediaType, bytes) => {
