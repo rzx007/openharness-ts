@@ -270,6 +270,8 @@ export const desktopAPI = {
     updatePermissionMode: (
       input: IpcInvokeMap[typeof IpcChannels.sessionUpdatePermissionMode]["args"][0]
     ) => invoke(IpcChannels.sessionUpdatePermissionMode, input),
+    getContextUsage: (input: IpcInvokeMap[typeof IpcChannels.sessionGetContextUsage]["args"][0]) =>
+      invoke(IpcChannels.sessionGetContextUsage, input),
     rename: (input: IpcInvokeMap[typeof IpcChannels.sessionRename]["args"][0]) =>
       invoke(IpcChannels.sessionRename, input),
     setPinned: (input: IpcInvokeMap[typeof IpcChannels.sessionSetPinned]["args"][0]) =>

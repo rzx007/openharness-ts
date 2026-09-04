@@ -35,6 +35,7 @@ import {
   reconcileRuntimeWithView,
   releaseAcknowledgedRuntime,
 } from "./session-view-state"
+import { parseDesktopContextUsageSnapshot } from "@shared/parse-context-usage-snapshot"
 import type {
   DesktopSessionRuntime,
   DesktopSessionState,
@@ -73,6 +74,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       return {
         activeSessionId: sessionId,
         sessionView: null,
+        contextUsageSnapshot: null,
         sessionRuntimes: {
           ...state.sessionRuntimes,
           ...(previousActiveSessionId && previousActiveSessionId !== sessionId
@@ -183,6 +185,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         }
       }
+      void get().refreshContextUsage()
       return "applied"
     } catch (error) {
       let failed = false
@@ -223,6 +226,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       set((state) => ({
         activeSessionId: null,
         sessionView: null,
+        contextUsageSnapshot: null,
         selectedModel: state.defaultModel,
         selectedProvider: state.defaultProvider,
         selectedPermissionMode: state.defaultPermissionMode,
@@ -261,6 +265,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             model.providerName
           )
         )
+        void get().refreshContextUsage({ refresh: true })
       } catch {
         if (generation !== defaultSettingsGeneration) return
       }
@@ -316,6 +321,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             ? { ...state.sessionView, session }
             : state.sessionView,
       }))
+      if (get().activeSessionId === sessionId) {
+        void get().refreshContextUsage({ refresh: true })
+      }
     },
 
     async updateSessionPermissionMode(sessionId, permissionMode) {
@@ -760,6 +768,31 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         context.scheduleSelectedProjectGitRefresh(true)
       }
       return startedSessionId
+    },
+
+    async refreshContextUsage(options) {
+      const state = get()
+      const cwd =
+        state.sessionView?.session.cwd ??
+        state.selectedProject?.path ??
+        state.outsideProjectWorkspaceRoot
+      if (!cwd) return
+      const sessionId = state.activeSessionId ?? undefined
+      try {
+        if (typeof window.desktop.sessions.getContextUsage !== "function") return
+        const snapshot = await window.desktop.sessions.getContextUsage({
+          cwd,
+          ...(sessionId ? { sessionId } : {}),
+          ...(options?.refresh !== undefined ? { refresh: options.refresh } : {}),
+        })
+        const parsed = parseDesktopContextUsageSnapshot(snapshot)
+        // Ignore stale responses if the active session changed mid-flight.
+        const latest = get()
+        if ((latest.activeSessionId ?? undefined) !== sessionId) return
+        if (parsed) set({ contextUsageSnapshot: parsed })
+      } catch {
+        // 环保留上次成功快照；不阻断 composer。
+      }
     },
   }
 

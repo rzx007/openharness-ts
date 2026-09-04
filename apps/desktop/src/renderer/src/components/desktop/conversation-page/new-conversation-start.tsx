@@ -18,6 +18,7 @@ import {
   areDesktopAttachmentsSendable,
   type DesktopAttachmentDraft,
 } from "@shared/attachment-types"
+import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import { Composer } from "./composer"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
@@ -62,6 +63,8 @@ export function NewConversationStart({
   onSelectModel,
   onSelectPermissionMode,
   onTogglePanel,
+  contextUsage = null,
+  onOpenContextUsage,
 }: {
   draft: string
   sending: boolean
@@ -99,6 +102,8 @@ export function NewConversationStart({
   onSelectModel: (model: DesktopModel) => void
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
   onTogglePanel: () => void
+  contextUsage?: DesktopContextUsageSnapshot | null
+  onOpenContextUsage?: () => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<StartPicker | null>(null)
   const [blobatarName] = useState(() => crypto.randomUUID())
@@ -421,6 +426,8 @@ export function NewConversationStart({
             onRemoveAttachment={onRemoveAttachment}
             onSelectModel={onSelectModel}
             onSelectPermissionMode={onSelectPermissionMode}
+            contextUsage={contextUsage}
+            onOpenContextUsage={onOpenContextUsage}
           />
         </div>
       </div>

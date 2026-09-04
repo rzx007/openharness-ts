@@ -66,6 +66,7 @@ export function createInitialState(): Omit<
     branches: [],
     activeSessionId: null,
     sessionView: null,
+    contextUsageSnapshot: null,
     ...emptyComposerDraftState(),
     ...createInitialRuntimeState(),
   }

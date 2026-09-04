@@ -17,6 +17,7 @@ import type {
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
+  GetDesktopContextUsageInput,
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
@@ -27,6 +28,7 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
 } from "./session-types"
+import type { DesktopContextUsageSnapshot } from "./context-usage-types"
 import type {
   WorkspaceListFilesInput,
   WorkspaceListFilesResult,
@@ -152,6 +154,7 @@ export const IpcChannels = {
   sessionSetDefaultPermissionMode: "session:set-default-permission-mode",
   sessionUpdateModel: "session:update-model",
   sessionUpdatePermissionMode: "session:update-permission-mode",
+  sessionGetContextUsage: "session:get-context-usage",
   sessionRename: "session:rename",
   sessionSetPinned: "session:set-pinned",
   sessionArchive: "session:archive",
@@ -392,6 +395,10 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionUpdatePermissionMode]: {
     args: [input: UpdateDesktopSessionPermissionModeInput]
     result: DesktopSessionRecord
+  }
+  [IpcChannels.sessionGetContextUsage]: {
+    args: [input: GetDesktopContextUsageInput]
+    result: DesktopContextUsageSnapshot
   }
   [IpcChannels.sessionRename]: {
     args: [input: RenameDesktopSessionInput]

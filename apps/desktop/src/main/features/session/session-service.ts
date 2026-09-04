@@ -66,8 +66,11 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
+  GetDesktopContextUsageInput,
 } from "../../../shared/session-types"
 import { resolveDesktopAttachmentSupport } from "../../../shared/attachment-types"
+import type { DesktopContextUsageSnapshot } from "../../../shared/context-usage-types"
+import { parseDesktopContextUsageSnapshot } from "../../../shared/parse-context-usage-snapshot"
 import {
   allocateOutsideProjectWorkspace,
   buildOutsideProjectRoot,
@@ -546,6 +549,21 @@ export class DesktopSessionService {
         metadata: { runtime: { permissionMode } },
       })
     )
+  }
+
+  async getContextUsage(input: GetDesktopContextUsageInput): Promise<DesktopContextUsageSnapshot> {
+    const cwd = requireString(input.cwd, "工作目录")
+    const client = await this.getClient()
+    const result = await client.getContextUsage({
+      cwd,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.refresh !== undefined ? { refresh: input.refresh } : {}),
+    })
+    const snapshot = parseDesktopContextUsageSnapshot(result.snapshot)
+    if (!snapshot) {
+      throw new Error("Context usage 快照格式无效")
+    }
+    return snapshot
   }
 
   async renameSession(input: RenameDesktopSessionInput): Promise<DesktopSessionRecord> {
