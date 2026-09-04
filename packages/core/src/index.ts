@@ -179,6 +179,22 @@ export { AppStateStore } from "./state/state-store";
 export { retryWithBackoff } from "./utils/retry";
 export { estimateTokens } from "./utils/token-counter";
 export {
+  assembleContextUsageSnapshot,
+  createTip,
+  evaluateTips,
+} from "./context-budget";
+export type {
+  AssembleContextUsageInput,
+  ContextBucketId,
+  ContextLedgerSegment,
+  ContextUsageBucket,
+  ContextUsageSnapshot,
+  ContextUsageSource,
+  ContextUsageTip,
+  ContextUsageTipCode,
+  ModelSwitchContext,
+} from "./context-budget";
+export {
   assertNoRemovedLifecycleToolNames,
   normalizeToolName,
   normalizeToolNames,
