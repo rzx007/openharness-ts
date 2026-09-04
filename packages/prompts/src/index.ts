@@ -835,3 +835,8 @@ export function renderPromptLayers(layers: PromptLayers): string {
     .filter((s) => s.trim())
     .join("\n\n");
 }
+
+export {
+  buildPromptLedgerSegments,
+  type BuildPromptLedgerSegmentsOptions,
+} from "./ledger-segments.js";
