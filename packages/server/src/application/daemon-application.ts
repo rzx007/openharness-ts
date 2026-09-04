@@ -84,6 +84,7 @@ import { SessionAttachmentResources } from "./attachment-resource/session-attach
 import { sharedContextUsageCache } from "./context-usage-cache.js";
 import {
   assembleSessionContextUsage,
+  resolveModelContextLimits,
   tryAssembleSessionContextUsageLive,
   type SessionContextUsageAgent,
 } from "./assemble-session-context-usage.js";
@@ -458,6 +459,16 @@ export class DaemonApplication implements DurableAgentApplication {
         options.getSettingsForCwd
           ? await options.getSettingsForCwd(cwd)
           : (options.getSettings?.() ?? options.settings);
+      const resolveSessionModelLimits = async (
+        model: string,
+        settings: Settings,
+      ) =>
+        await resolveModelContextLimits({
+          model,
+          providerHint: settings.provider,
+          listProviders: () =>
+            createDefaultModelService({ current: settings }).list(),
+        });
       const refreshContextUsage = async (
         sessionId: string,
         agent: SessionContextUsageAgent,
@@ -466,6 +477,7 @@ export class DaemonApplication implements DurableAgentApplication {
         if (!session) return;
         const settings = await resolveSessionSettings(session.cwd);
         if (!settings) return;
+        const limits = await resolveSessionModelLimits(session.model, settings);
         await assembleSessionContextUsage({
           sessionId,
           cwd: session.cwd,
@@ -473,6 +485,8 @@ export class DaemonApplication implements DurableAgentApplication {
           settings,
           agent,
           cache: contextUsageCache,
+          contextWindow: limits.contextWindow,
+          outputLimit: limits.outputLimit,
         });
       };
       bindContextUsageLiveAssembler(async ({ sessionId, cwd, previousContextWindow }) => {
@@ -481,6 +495,7 @@ export class DaemonApplication implements DurableAgentApplication {
         if (!session) return null;
         const settings = await resolveSessionSettings(session.cwd || cwd);
         if (!settings) return null;
+        const limits = await resolveSessionModelLimits(session.model, settings);
         return await tryAssembleSessionContextUsageLive({
           sessionId,
           cwd: session.cwd || cwd,
@@ -488,6 +503,8 @@ export class DaemonApplication implements DurableAgentApplication {
           settings,
           cache: contextUsageCache,
           previousContextWindow,
+          contextWindow: limits.contextWindow,
+          outputLimit: limits.outputLimit,
           getAgent: async () => {
             const warm = await this.agentPool.get(sessionId);
             if (warm) return warm;

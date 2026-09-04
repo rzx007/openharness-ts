@@ -13,6 +13,7 @@ import {
 import { buildPromptLedgerSegments } from "@openharness/prompts";
 
 import type { ContextUsageCache } from "./context-usage-cache.js";
+import type { ModelInfo, ModelProviderInfo } from "./settings-api.js";
 
 export interface ModelVisibleTool {
   name: string;
@@ -38,6 +39,76 @@ export interface AssembleSessionContextUsageInput {
   outputLimit?: number | null;
   previousContextWindow?: number;
   skillsList?: Array<{ name: string; description: string }>;
+}
+
+export interface ModelContextLimits {
+  contextWindow: number | null;
+  outputLimit: number | null;
+}
+
+/** Match session runtime.model against ModelService catalog entries. */
+export function findModelInProviders(
+  model: string,
+  providers: ModelProviderInfo[],
+  providerHint?: string,
+): ModelInfo | undefined {
+  const needle = model.trim();
+  if (!needle) return undefined;
+
+  const ordered = providerHint
+    ? [
+        ...providers.filter((p) => p.name === providerHint),
+        ...providers.filter((p) => p.name !== providerHint),
+      ]
+    : providers;
+
+  for (const provider of ordered) {
+    const exact = provider.models.find((item) => item.id === needle);
+    if (exact) return exact;
+  }
+
+  // "provider/modelId" → try modelId within that provider, then any provider.
+  const slash = needle.indexOf("/");
+  if (slash > 0) {
+    const prefix = needle.slice(0, slash);
+    const rest = needle.slice(slash + 1);
+    const preferred = ordered.find((p) => p.name === prefix);
+    const fromPreferred = preferred?.models.find((item) => item.id === rest);
+    if (fromPreferred) return fromPreferred;
+    for (const provider of ordered) {
+      const hit = provider.models.find((item) => item.id === rest);
+      if (hit) return hit;
+      const prefixed = provider.models.find(
+        (item) => item.id === needle || `${provider.name}/${item.id}` === needle,
+      );
+      if (prefixed) return prefixed;
+    }
+  }
+
+  return undefined;
+}
+
+export async function resolveModelContextLimits(input: {
+  model: string;
+  providerHint?: string;
+  listProviders: () => Promise<ModelProviderInfo[]> | ModelProviderInfo[];
+}): Promise<ModelContextLimits> {
+  try {
+    const providers = await input.listProviders();
+    const info = findModelInProviders(
+      input.model,
+      providers,
+      input.providerHint,
+    );
+    return {
+      contextWindow:
+        typeof info?.contextWindow === "number" ? info.contextWindow : null,
+      outputLimit:
+        typeof info?.outputLimit === "number" ? info.outputLimit : null,
+    };
+  } catch {
+    return { contextWindow: null, outputLimit: null };
+  }
 }
 
 /** Stable serialization matching model-visible tool schema surface. */
@@ -134,6 +205,7 @@ export async function tryAssembleSessionContextUsageLive(input: {
   settings: Settings;
   previousContextWindow?: number;
   contextWindow?: number | null;
+  outputLimit?: number | null;
   memoryReminderText?: string;
   getAgent: () => Promise<SessionContextUsageAgent | undefined>;
 }): Promise<ContextUsageSnapshot | null> {
@@ -156,6 +228,7 @@ export async function tryAssembleSessionContextUsageLive(input: {
       cache: input.cache,
       memoryReminderText: input.memoryReminderText,
       contextWindow: input.contextWindow,
+      outputLimit: input.outputLimit,
       previousContextWindow: input.previousContextWindow,
     });
   } catch {
