@@ -131,6 +131,9 @@ export function TitleBar({
   return (
     <>
       <header className="titlebar-drag flex h-9 shrink-0 items-center bg-transparent text-ui-foreground select-none">
+        {isMac ? (
+          <div className="h-full w-19 shrink-0" data-titlebar-traffic-light-space aria-hidden />
+        ) : null}
         <div className="titlebar-no-drag flex h-full items-center gap-0.5 px-2">
           <ToolbarButton
             label={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
@@ -306,15 +309,19 @@ export function TitleBar({
 
         <div className="titlebar-no-drag ml-auto flex h-full items-stretch">
           <UpdateStatusCapsule />
-          <WindowButton label="最小化" onClick={onMinimize}>
-            <Minus />
-          </WindowButton>
-          <WindowButton label={isMaximized ? "还原" : "最大化"} onClick={onToggleMaximize}>
-            {isMaximized ? <CopySquareIcon /> : <Square />}
-          </WindowButton>
-          <WindowButton label="关闭" danger onClick={onClose}>
-            <X />
-          </WindowButton>
+          {isMac ? null : (
+            <>
+              <WindowButton label="最小化" onClick={onMinimize}>
+                <Minus />
+              </WindowButton>
+              <WindowButton label={isMaximized ? "还原" : "最大化"} onClick={onToggleMaximize}>
+                {isMaximized ? <CopySquareIcon /> : <Square />}
+              </WindowButton>
+              <WindowButton label="关闭" danger onClick={onClose}>
+                <X />
+              </WindowButton>
+            </>
+          )}
         </div>
       </header>
 

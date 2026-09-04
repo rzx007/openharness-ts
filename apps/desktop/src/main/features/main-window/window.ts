@@ -6,6 +6,7 @@ import { isForceQuit } from "../../core/services/lifecycle"
 import { showPetWindow, syncPetWithMainWindow } from "../pet/window"
 import { clearAttention } from "../tray/attention-badge"
 import { isAllowedWebviewUrl } from "./webview-policy"
+import { mainWindowChromeOptions } from "./window-chrome"
 
 export function createMainWindow(ctx: AppContext): BrowserWindow {
   const existing = ctx.windowManager.getMain()
@@ -25,7 +26,7 @@ export function createMainWindow(ctx: AppContext): BrowserWindow {
       minHeight: 640,
       title: "OpenHarness",
       autoHideMenuBar: true,
-      frame: false,
+      ...mainWindowChromeOptions(process.platform),
       backgroundColor: "#f4f7f9",
       webPreferences: {
         webviewTag: true,
