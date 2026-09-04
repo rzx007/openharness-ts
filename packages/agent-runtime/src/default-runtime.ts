@@ -1,31 +1,15 @@
-import type {
-  IToolRegistry,
-  Settings,
-  StreamingMessageClient,
-  ToolDefinition,
-} from "@openharness/core";
+import type { Settings } from "@openharness/core";
 import {
   QueryEngine,
   RuntimeBuilder,
   RuntimeBundle,
-  ToolRegistrationError,
 } from "@openharness/core";
 import {
   assertNoRemovedLifecycleToolNames,
   normalizeToolNames,
   resolveAllowedToolNames,
 } from "@openharness/core";
-import {
-  AnthropicClient,
-  CodexSubscriptionClient,
-  OpenAICompatibleClient,
-  detectProvider,
-  detectProviderFromEnv,
-  findByName,
-  resolveProviderScopedBaseUrl,
-} from "@openharness/api";
-import type { BackendType, ProviderSpec } from "@openharness/api";
-import { CredentialStorage, resolveApiKey } from "@openharness/auth";
+import { CredentialStorage } from "@openharness/auth";
 import {
   PermissionChecker,
   LOCAL_READ_ONLY_TOOLS,
@@ -34,38 +18,33 @@ import {
 import { HookExecutor } from "@openharness/hooks";
 import { createDefaultToolRegistry } from "@openharness/tools";
 import { buildRuntimeSystemPrompt } from "@openharness/prompts";
-import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import type { AgentDefinition } from "@openharness/coordinator";
+
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import type { ResolvedAgentCapabilities } from "./capability-resolution.js";
+import {
+  resolveApiClient,
+  resolveCustomProviderRuntime,
+  resolveRuntimeModel,
+  type CustomProviderRuntimeConfig,
+} from "./default-runtime-provider.js";
+import { attachSandboxRuntime } from "./default-runtime-sandbox.js";
+import {
+  applyConfiguredTools,
+  createVisibilityToolRegistry,
+  getInternalToolRegistry,
+  type ToolLimit,
+} from "./default-runtime-tools.js";
 
-const bundlesWithExitCleanup = new Set<RuntimeBundle>();
-let exitCleanupInstalled = false;
-
-export type ToolLimit =
-  { kind: "all" } | { kind: "only"; names: ReadonlySet<string> };
-
-export interface CustomProviderRuntimeConfig {
-  backendType: "openai_compat";
-  baseURL: string;
-  headers?: Record<string, string>;
-}
-
-export function resolveCustomProviderRuntime(
-  settings: Settings,
-  providerName: string | undefined,
-): CustomProviderRuntimeConfig | undefined {
-  if (!providerName) return undefined;
-  const provider = settings.customProviders?.find((item) => item.id === providerName);
-  if (!provider) return undefined;
-  return {
-    backendType: "openai_compat",
-    baseURL: provider.baseUrl,
-    ...(provider.headers ? { headers: provider.headers } : {}),
-  };
-}
+export type { ToolLimit };
+export type { CustomProviderRuntimeConfig };
+export {
+  resolveCustomProviderRuntime,
+  resolveRuntimeModel,
+};
+export { getInternalToolRegistry };
 
 interface OpenHarnessRuntimeOptions {
   settings: Settings;
@@ -106,13 +85,6 @@ export function resolveAutoApproveTools(
     }
   }
   return merged.size > 0 ? [...merged] : undefined;
-}
-
-export function resolveRuntimeModel(
-  settings: Settings,
-  overrides: { model?: string | undefined },
-): string {
-  return overrides.model ?? settings.model;
 }
 
 export function resolveEffectiveAllowedTools(options: {
@@ -195,7 +167,7 @@ export async function createOpenHarnessRuntime(
     ),
   );
 
-  const toolRegistry = new RuntimeToolRegistry(
+  const toolRegistry = createVisibilityToolRegistry(
     baseToolRegistry,
     effectiveAllowed,
     effectiveDenied,
@@ -288,73 +260,6 @@ export async function createOpenHarnessRuntime(
   return bundle;
 }
 
-function applyConfiguredTools(
-  registry: IToolRegistry,
-  configuration: OpenHarnessAgentConfiguration,
-): Set<string> {
-  const additions = configuration.tools ?? [];
-  const overrides = configuration.toolOverrides ?? [];
-  const trustedOverrides = new Set(configuration.trustedToolOverrides ?? []);
-  const additionNames = assertUniqueToolNames(additions, "tools");
-  const overrideNames = assertUniqueToolNames(overrides, "toolOverrides");
-
-  for (const name of trustedOverrides) {
-    if (!overrideNames.has(name)) {
-      throw new Error(
-        `trustedToolOverrides entry "${name}" must also appear in toolOverrides`,
-      );
-    }
-  }
-
-  for (const name of additionNames) {
-    if (overrideNames.has(name)) {
-      throw new Error(
-        `Tool "${name}" cannot appear in both tools and toolOverrides`,
-      );
-    }
-    if (registry.has(name)) {
-      throw new ToolRegistrationError(
-        "tool_already_registered",
-        `Tool "${name}" is already registered by builtin; use toolOverrides`,
-      );
-    }
-  }
-  for (const name of overrideNames) {
-    if (!registry.has(name)) {
-      throw new ToolRegistrationError(
-        "tool_override_target_not_found",
-        `Tool override target "${name}" is not registered`,
-      );
-    }
-    if (
-      trustedOverrides.has(name) &&
-      registry.inspect(name)?.source.kind !== "builtin"
-    ) {
-      throw new Error(
-        `trustedToolOverrides entry "${name}" must replace a builtin Tool`,
-      );
-    }
-  }
-
-  for (const tool of additions) registry.register(tool, { kind: "agent" });
-  for (const tool of overrides) registry.override(tool, { kind: "agent" });
-  return trustedOverrides;
-}
-
-function assertUniqueToolNames(
-  tools: readonly ToolDefinition[],
-  field: "tools" | "toolOverrides",
-): Set<string> {
-  const names = new Set<string>();
-  for (const tool of tools) {
-    if (names.has(tool.name)) {
-      throw new Error(`Duplicate Tool "${tool.name}" in ${field}`);
-    }
-    names.add(tool.name);
-  }
-  return names;
-}
-
 function validateLifecycleToolConfiguration(
   settings: Settings,
   configuration: OpenHarnessAgentConfiguration,
@@ -376,60 +281,6 @@ function validateLifecycleToolConfiguration(
   }
 }
 
-class RuntimeToolRegistry implements IToolRegistry {
-  constructor(
-    private readonly inner: IToolRegistry,
-    private readonly allowedTools: ToolLimit,
-    private readonly deniedTools: ReadonlySet<string>,
-  ) {}
-
-  register(tool: ToolDefinition, source?: Parameters<IToolRegistry["register"]>[1]): void {
-    this.inner.register(tool, source);
-  }
-
-  override(tool: ToolDefinition, source: Parameters<IToolRegistry["override"]>[1]): void {
-    this.inner.override(tool, source);
-  }
-
-  unregister(name: string): boolean {
-    return this.inner.unregister?.(name) ?? false;
-  }
-
-  get(name: string): ToolDefinition | undefined {
-    const tool = this.inner.get(name);
-    return tool && this.isVisible(tool.name) ? tool : undefined;
-  }
-
-  getAll(): ToolDefinition[] {
-    return this.inner.getAll().filter((tool) => this.isVisible(tool.name));
-  }
-
-  has(name: string): boolean {
-    return this.get(name) !== undefined;
-  }
-
-  inspect(name: string) {
-    return this.isVisible(name) ? this.inner.inspect(name) : undefined;
-  }
-
-  internalRegistry(): IToolRegistry {
-    return this.inner;
-  }
-
-  private isVisible(name: string): boolean {
-    if (this.deniedTools.has(name)) return false;
-    return (
-      this.allowedTools.kind === "all" || this.allowedTools.names.has(name)
-    );
-  }
-}
-
-export function getInternalToolRegistry(registry: IToolRegistry): IToolRegistry {
-  return registry instanceof RuntimeToolRegistry
-    ? registry.internalRegistry()
-    : registry;
-}
-
 function resolveToolLimit(
   tools: string[],
   knownToolNames: string[],
@@ -447,126 +298,8 @@ function intersectToolLimits(left: ToolLimit, right: ToolLimit): ToolLimit {
   return { kind: "only", names: new Set(names) };
 }
 
-async function attachSandboxRuntime(
-  bundle: RuntimeBundle,
-  cwd: string,
-  reporter?: SandboxRuntimeReporter,
-  sessionId?: string,
-): Promise<void> {
-  const sandboxRuntime = await startSandboxRuntime({
-    settings: bundle.settings,
-    cwd,
-    sessionId,
-    reporter,
-  });
-  bundle.sandboxStatus = sandboxRuntime.status;
-
-  if (
-    sandboxRuntime.status.backend !== "docker" ||
-    !sandboxRuntime.status.active
-  ) {
-    return;
-  }
-
-  bundle.addCleanup(
-    () => sandboxRuntime.stop(),
-    () => sandboxRuntime.stopSync(),
-  );
-  registerExitCleanup(bundle);
-}
-
 function availableValue<T>(
   capability: import("./capability-resolution.js").ResolvedCapability<T> | undefined,
 ): T | undefined {
   return capability?.status === "available" ? capability.value : undefined;
-}
-
-function registerExitCleanup(bundle: RuntimeBundle): void {
-  bundlesWithExitCleanup.add(bundle);
-  bundle.addCleanup(() => {
-    bundlesWithExitCleanup.delete(bundle);
-  });
-  if (exitCleanupInstalled) return;
-  exitCleanupInstalled = true;
-  process.on("exit", () => {
-    for (const runtime of bundlesWithExitCleanup) {
-      runtime.closeSync();
-    }
-    bundlesWithExitCleanup.clear();
-  });
-}
-
-/**
- * 解析并创建 API 客户端实例。
- *
- * 该函数根据提供的设置、覆盖选项和存储机制，确定正确的 API 密钥、基础 URL、提供商规范以及后端类型，
- * 最终返回相应的流式消息客户端实例。
- *
- * @param settings - 核心配置设置，包含模型、基础 URL、提供商和 API 格式等信息。
- * @param configuration - 可选的 SDK 配置，用于覆盖默认设置（如 baseUrl, provider 等）。
- * @param storage - 可选的凭证存储实例，用于检索 API 密钥；若未提供，则使用默认的 CredentialStorage。
- * @returns 一个解析后的 StreamingMessageClient 实例，用于与选定的后端进行通信。
- */
-async function resolveApiClient(
-  settings: Settings,
-  configuration?: OpenHarnessAgentConfiguration,
-  storage?: CredentialStorage,
-): Promise<StreamingMessageClient> {
-  const resolvedStorage = storage ?? new CredentialStorage();
-  const apiKey = await resolveApiKey(settings, configuration, resolvedStorage);
-  const providerName = configuration?.provider ?? settings.provider;
-  const customProvider = resolveCustomProviderRuntime(settings, providerName);
-  const rawBaseURL = configuration?.baseUrl ?? customProvider?.baseURL ?? settings.baseUrl;
-  const baseURL = providerName && !customProvider
-    ? resolveProviderScopedBaseUrl(rawBaseURL, providerName)
-    : rawBaseURL;
-  const runtimeModel = resolveRuntimeModel(settings, configuration ?? {});
-
-  // 按优先级顺序解析提供商规范：首先尝试通过名称查找，其次基于模型和凭据检测，最后尝试从环境变量检测
-  let spec: ProviderSpec | undefined;
-  if (providerName) {
-    spec = findByName(providerName);
-  }
-  if (!spec) {
-    spec = detectProvider(runtimeModel, apiKey, baseURL);
-  }
-  if (!spec) {
-    spec = detectProviderFromEnv(process.env);
-  }
-
-  // 确定后端类型：优先使用提供商规范中的类型，否则根据 API 格式推断
-  const backendType: BackendType =
-    customProvider?.backendType ?? spec?.backendType ??
-    resolveBackendFromFormat(configuration?.apiFormat ?? settings.apiFormat);
-
-  switch (backendType) {
-    case "codex":
-      return new CodexSubscriptionClient({
-        apiKey,
-        baseURL: baseURL ?? spec?.defaultBaseURL,
-        model: runtimeModel,
-      });
-    case "openai_compat":
-      return new OpenAICompatibleClient({
-        apiKey,
-        baseURL: baseURL ?? spec?.defaultBaseURL,
-        model: runtimeModel,
-        ...(customProvider?.headers ? { headers: customProvider.headers } : {}),
-      });
-    case "anthropic":
-    default:
-      return new AnthropicClient({
-        apiKey,
-        baseURL,
-      });
-  }
-}
-
-function resolveBackendFromFormat(format: string): BackendType {
-  switch (format) {
-    case "openai":
-      return "openai_compat";
-    default:
-      return "anthropic";
-  }
 }
