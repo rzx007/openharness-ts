@@ -1,7 +1,10 @@
-import type { ContextBucketId, ContextLedgerSegment } from "@openharness/core";
-import { buildPromptLayers } from "./index.js";
-import type { PromptPermissionMode } from "./index.js";
+import type { ContextLedgerSegment } from "@openharness/core";
 import type { WorkStyle } from "@openharness/core";
+import type { PromptPermissionMode } from "./index.js";
+import {
+  buildTaggedPromptSegments,
+  taggedSegmentsToLedgerSegments,
+} from "./prompt-segments-assembly.js";
 
 export interface BuildPromptLedgerSegmentsOptions {
   customPrompt?: string;
@@ -20,42 +23,19 @@ export interface BuildPromptLedgerSegmentsOptions {
   skillsList?: Array<{ name: string; description: string }>;
 }
 
-function classifyStableSegment(text: string): ContextBucketId {
-  if (text.includes("# Available Skills")) return "skills";
-  if (text.includes("# Delegation And Subagents")) return "subagents";
-  return "system";
-}
-
-/**
- * Build tagged ledger segments for context-usage estimation.
- * Reuses {@link buildPromptLayers} so model-visible prompt assembly stays unchanged.
- */
+/** Build tagged ledger segments for context-usage estimation. */
 export async function buildPromptLedgerSegments(
   options: BuildPromptLedgerSegmentsOptions = {},
 ): Promise<ContextLedgerSegment[]> {
-  const { memoryContent: _memoryContent, memoryReminderText, ...layerOptions } = options;
+  const { memoryContent: _memoryContent, memoryReminderText, ...assemblyOptions } = options;
 
-  const layers = await buildPromptLayers({
-    ...layerOptions,
-    memoryContent: undefined,
-  });
-
-  const segments: ContextLedgerSegment[] = [];
-
-  for (const text of layers.stable) {
-    segments.push({ bucket: classifyStableSegment(text), text });
-  }
-  for (const text of layers.context) {
-    segments.push({ bucket: "rules", text });
-  }
-  for (const text of layers.volatile) {
-    segments.push({ bucket: "rules", text });
-  }
+  const segments = await buildTaggedPromptSegments(assemblyOptions);
+  const ledger = taggedSegmentsToLedgerSegments(segments);
 
   const reminder = memoryReminderText?.trim();
   if (reminder) {
-    segments.push({ bucket: "conversation", text: reminder });
+    ledger.push({ bucket: "conversation", text: reminder });
   }
 
-  return segments;
+  return ledger;
 }

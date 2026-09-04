@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPromptLedgerSegments } from "./ledger-segments.js";
+import { buildTaggedPromptSegments } from "./prompt-segments-assembly.js";
 
 describe("buildPromptLedgerSegments", () => {
   let tmpDir: string;
@@ -24,6 +25,21 @@ describe("buildPromptLedgerSegments", () => {
     expect(segments.some((s) => s.bucket === "skills" && s.text.includes("foo"))).toBe(true);
     expect(segments.some((s) => s.bucket === "subagents")).toBe(true);
     expect(segments.some((s) => s.bucket === "system")).toBe(true);
+  });
+
+  it("assigns buckets at assembly push sites, not by header heuristics", async () => {
+    const tagged = await buildTaggedPromptSegments({
+      cwd: tmpDir,
+      includeDelegation: true,
+      skillsList: [{ name: "foo", description: "bar" }],
+    });
+    const skillsSeg = tagged.find((s) => s.text.includes("foo"));
+    expect(skillsSeg?.bucket).toBe("skills");
+    expect(skillsSeg?.layer).toBe("stable");
+
+    const delegationSegs = tagged.filter((s) => s.bucket === "subagents");
+    expect(delegationSegs).toHaveLength(1);
+    expect(delegationSegs[0]?.layer).toBe("stable");
   });
 
   it("does not put full memory preview into segments by default", async () => {
