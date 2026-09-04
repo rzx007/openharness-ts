@@ -2,7 +2,7 @@
 
 日期：2026-09-04
 
-状态：审查修订中（已吸收规格审查 Critical/Important）；待用户确认后进入实现计划
+状态：已确认；实现计划见 `docs/superpowers/plans/2026-09-05-context-usage-budget.md`
 
 ## 结论
 
