@@ -50,6 +50,7 @@ export interface ContextUsageSnapshot {
   /**
    * estimatedInputTokens / contextWindow。
    * 分母为裸 contextWindow（不扣 outputReserve）。
+   * 与 compact 内部阈值（另扣 summary/buffer）不对齐，属已知差异。
    * 无窗宽时为 null。允许大于 1。
    */
   percentFull: number | null;

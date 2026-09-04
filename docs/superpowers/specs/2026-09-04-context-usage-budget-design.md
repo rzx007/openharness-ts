@@ -2,7 +2,7 @@
 
 日期：2026-09-04
 
-状态：已确认；实现计划见 `docs/superpowers/plans/2026-09-05-context-usage-budget.md`
+状态：已完成实现；实现计划见 `docs/superpowers/plans/2026-09-05-context-usage-budget.md`
 
 ## 结论
 
