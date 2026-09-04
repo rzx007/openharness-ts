@@ -4,6 +4,7 @@ export type {
   UserMessage,
   AssistantMessage,
   AssistantMessagePhase,
+  CompactRole,
   ToolResultMessage,
   TextBlock,
   ImageBlock,
@@ -182,6 +183,7 @@ export {
   assembleContextUsageSnapshot,
   createTip,
   evaluateTips,
+  messagesToLedgerSegments,
 } from "./context-budget";
 export type {
   AssembleContextUsageInput,

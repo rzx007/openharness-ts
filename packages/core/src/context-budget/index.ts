@@ -1,4 +1,5 @@
 export { assembleContextUsageSnapshot } from "./assemble.js";
+export { messagesToLedgerSegments } from "./messages-to-segments.js";
 export { createTip, evaluateTips } from "./tips.js";
 export type {
   AssembleContextUsageInput,
