@@ -18,6 +18,8 @@ createDefaultNodeAgent(options)
 
 `QueryEngine`、`RuntimeBuilder`、provider/tool/hook/MCP/sandbox 的组装是内部实现，不是应用入口。
 
+发布包的 peerDependencies 标为 optional，是安装人体工程学；实现已 bundle，不要假设可以替换 `@openharness/core` / `@openharness/tools` 等 peer 实现。细节见 [Agent Framework Capability Boundary](./agent-framework-capability-boundary.md)。
+
 ## 最小运行
 
 ```ts

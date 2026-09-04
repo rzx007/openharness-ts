@@ -84,6 +84,8 @@ Kernel 的硬规则：
 
 构建结果在 `dist`，`main`、`types` 和 `exports` 不再指向 TypeScript 源码。Kernel ESM bundle 不需要仓库源码就能运行；完整入口也会生成可直接加载的 ESM bundle。workspace 包只作为开发期和类型 peer，`pnpm pack` 会把发布清单中的 `workspace:*` 转成正常版本号。
 
+`package.json` 里这些 peer 标了 `optional: true`，且源码对它们是**值导入**（不是 `import type`）。这不表示第三方可以自行提供替代实现：发布构建会用 esbuild 把 api/auth/core/tools/mcp/plugins 等一并打进 `dist/`，运行时不依赖消费者再装一套可互换的 peer。`optional: true` 只是避免 monorepo / 局部安装时 peer 警告噪声；消费方仍应把 `@openharness/agent-runtime` 当作自带组装内核的意见化 SDK，而不是可热插拔的 facade。
+
 `pnpm run test:pack` 每次都会：
 
 1. 重新生成 JavaScript bundle 和声明文件；
