@@ -53,6 +53,8 @@ describe("UpdateStatusCapsule", () => {
     expect(container.textContent).toContain("下载中 90%")
     expect(container.querySelector("[data-slot='alert-dialog'], [data-slot='dialog']")).toBeNull()
     expect(findButton("关闭")).toBeNull()
+    expect(container.querySelector("[data-update-capsule]")?.className).toContain("bg-primary")
+    expect(container.querySelector("[data-update-capsule-spinner]")).not.toBeNull()
   })
 
   it("starts a download from the available capsule and can dismiss it", async () => {
@@ -74,6 +76,7 @@ describe("UpdateStatusCapsule", () => {
 
     await click("重启安装")
     expect(updates.install).toHaveBeenCalledOnce()
+    expect(container.querySelector("[data-update-capsule]")?.className).toContain("bg-primary")
   })
 
   it("lets the user dismiss an update error", async () => {

@@ -74,6 +74,17 @@ export function createUpdaterService(dependencies: UpdaterServiceDependencies): 
       "update-available",
       (info: UpdateInfo) => {
         availableVersion = info.version
+        if (dependencies.updater.autoDownload) {
+          publish({
+            status: "downloading",
+            version: info.version,
+            percent: 0,
+            transferred: 0,
+            total: 0,
+            bytesPerSecond: 0,
+          })
+          return
+        }
         publish({ status: "available", version: info.version })
       },
     ],
@@ -101,7 +112,11 @@ export function createUpdaterService(dependencies: UpdaterServiceDependencies): 
     [
       "error",
       (error: unknown) => {
-        if (userDownloadPending) {
+        if (
+          userDownloadPending ||
+          state.status === "available" ||
+          state.status === "downloading"
+        ) {
           publish({
             status: "error",
             version: availableVersion,
@@ -116,7 +131,7 @@ export function createUpdaterService(dependencies: UpdaterServiceDependencies): 
   ]
 
   if (enabled) {
-    dependencies.updater.autoDownload = false
+    dependencies.updater.autoDownload = true
     dependencies.updater.autoInstallOnAppQuit = true
     for (const [event, listener] of listeners) dependencies.updater.on(event, listener)
   }

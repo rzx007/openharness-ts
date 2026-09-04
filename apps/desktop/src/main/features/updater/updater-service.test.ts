@@ -26,7 +26,7 @@ describe("updater service startup", () => {
 
     service.startAfterWindowShown()
 
-    expect(updater.autoDownload).toBe(false)
+    expect(updater.autoDownload).toBe(true)
     expect(updater.autoInstallOnAppQuit).toBe(true)
     expect(updater.checkForUpdates).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(2_000)
@@ -66,7 +66,7 @@ describe("updater service startup", () => {
 })
 
 describe("updater service state and commands", () => {
-  it("publishes available, download progress, and downloaded states", async () => {
+  it("starts downloading as soon as an update is available", async () => {
     const updater = new FakeUpdater()
     const service = createService(updater)
     const states: unknown[] = []
@@ -74,7 +74,6 @@ describe("updater service state and commands", () => {
 
     updater.emit("checking-for-update")
     updater.emit("update-available", { version: "1.2.0" })
-    await service.download()
     updater.emit("download-progress", {
       percent: 42.25,
       transferred: 4_225,
@@ -83,10 +82,9 @@ describe("updater service state and commands", () => {
     })
     updater.emit("update-downloaded", { version: "1.2.0" })
 
-    expect(updater.downloadUpdate).toHaveBeenCalledOnce()
+    expect(updater.downloadUpdate).not.toHaveBeenCalled()
     expect(states).toEqual([
       { status: "checking" },
-      { status: "available", version: "1.2.0" },
       {
         status: "downloading",
         version: "1.2.0",
@@ -128,13 +126,12 @@ describe("updater service state and commands", () => {
     vi.useRealTimers()
   })
 
-  it("publishes a user-visible error when a requested download fails", async () => {
+  it("publishes a user-visible error when an automatic download fails", () => {
     const updater = new FakeUpdater()
-    updater.downloadUpdate.mockRejectedValueOnce(new Error("disk full"))
-    const service = createService(updater)
+    const logger = { info: vi.fn(), error: vi.fn() }
+    const service = createService(updater, logger)
     updater.emit("update-available", { version: "2.0.0" })
-
-    await expect(service.download()).rejects.toThrow("disk full")
+    updater.emit("error", new Error("disk full"))
 
     expect(service.getState()).toEqual({
       status: "error",

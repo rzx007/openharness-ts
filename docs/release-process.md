@@ -4,7 +4,7 @@
 
 ## 一句话结论
 
-在 GitHub Actions 页面手动触发 Tag Release 工作流并输入版本号，工作流会自动打 tag、把同一版本写进仓库根目录、Desktop 和 CLI，打出 Windows NSIS 与 Linux AppImage/deb、发布 GitHub Latest Release，并把 `@rzx/ohs` 发到 npm。已安装的 Desktop 会在启动后静默检查这个 Latest Release；发现新版本后弹出应用内确认，用户同意才下载，下载完成后再确认是否立即重启安装。
+在 GitHub Actions 页面手动触发 Tag Release 工作流并输入版本号，工作流会自动打 tag、把同一版本写进仓库根目录、Desktop 和 CLI，打出 Windows NSIS 与 Linux AppImage/deb、发布 GitHub Latest Release，并把 `@rzx/ohs` 发到 npm。已安装的 Desktop 会在启动后静默检查这个 Latest Release；发现新版本后自动下载，标题栏胶囊提示进度，下载完成后可立即重启安装，或等退出时自动安装。
 
 ## 发什么
 
@@ -56,9 +56,8 @@ pnpm --filter @openharness/desktop verify:update-packaging
 打包后的 Windows 和 Linux AppImage 启动后会延迟几秒后台检查 GitHub Latest Release。
 
 - 没有新版本，或检查失败：不打扰用户，只写日志。
-- 发现新版本：弹出“下载更新 / 稍后”。
-- 用户确认后才下载。
-- 下载完成：弹出“立即重启安装 / 稍后”。
+- 发现新版本：后台自动下载，标题栏胶囊显示进度。
+- 下载完成：胶囊变成「重启安装」；用户也可以直接退出，退出时自动安装。
 - 立即安装会先走 Desktop 的强制退出逻辑，避免主窗口被藏到托盘后装不上。
 
 开发模式和 macOS 不检查更新。`apps/desktop/dev-app-update.yml` 只给显式开发测试用。
