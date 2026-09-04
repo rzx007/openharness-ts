@@ -1,5 +1,4 @@
 import {
-  AlertCircle,
   Check,
   ChevronDown,
   ChevronUp,
@@ -28,38 +27,6 @@ import { MessageAttachment } from "./message-attachment"
 
 const collapsibleUserMessageChars = 900
 const collapsibleUserMessageLines = 14
-
-export function RunErrorNotice({ error }: { error?: string }): React.JSX.Element {
-  const detail = error?.trim() || "运行失败，但服务端没有返回具体原因。"
-  const guidance = runFailureGuidance(detail)
-  return (
-    <section
-      role="alert"
-      className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm"
-    >
-      <div className="flex items-start gap-2.5">
-        <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-ui-small font-semibold text-destructive">请求失败</h3>
-          {guidance ? <p className="mt-1 text-xs leading-5 text-foreground">{guidance}</p> : null}
-          <p className="mt-1.5 text-xs leading-5 break-words whitespace-pre-wrap text-ui-muted">
-            {detail}
-          </p>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function runFailureGuidance(error: string): string | null {
-  if (
-    error.includes("not supported when using Codex") ||
-    error.includes("supported API model names")
-  ) {
-    return "当前模型与供应商不匹配，请在输入框右下角重新选择模型。"
-  }
-  return null
-}
 
 export function MessageBlock({
   message,

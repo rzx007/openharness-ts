@@ -12,7 +12,8 @@ import type {
   DesktopSessionPart,
   DesktopSessionRun,
 } from "@shared/session-types"
-import { AssistantMessageActions, MessageBlock, RunErrorNotice } from "./message-block"
+import { AssistantMessageActions, MessageBlock } from "./message-block"
+import { RunErrorNotice } from "./message/run-error-notice"
 
 export function ConversationTranscript({
   messages,

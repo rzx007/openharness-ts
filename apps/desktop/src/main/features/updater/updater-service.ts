@@ -112,11 +112,7 @@ export function createUpdaterService(dependencies: UpdaterServiceDependencies): 
     [
       "error",
       (error: unknown) => {
-        if (
-          userDownloadPending ||
-          state.status === "available" ||
-          state.status === "downloading"
-        ) {
+        if (userDownloadPending || state.status === "available" || state.status === "downloading") {
           publish({
             status: "error",
             version: availableVersion,
