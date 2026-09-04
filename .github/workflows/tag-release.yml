@@ -160,7 +160,7 @@ jobs:
           fi
 
   publish-release:
-    needs: [validate, build-desktop, publish-npm]
+    needs: [validate, build-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
