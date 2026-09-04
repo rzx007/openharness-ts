@@ -31,4 +31,9 @@ describe("command catalog helpers", () => {
     );
     expect(merged.map((entry) => entry.name)).toContain("/skills");
   });
+
+  it("advertises usage in /context argumentHint", () => {
+    const context = BUILTIN_SESSION_COMMANDS.find((entry) => entry.name === "/context");
+    expect(context?.argumentHint).toBe("[preview|status|usage]");
+  });
 });

@@ -183,7 +183,9 @@ export {
   assembleContextUsageSnapshot,
   createTip,
   evaluateTips,
+  formatContextUsageReport,
   messagesToLedgerSegments,
+  toolSchemasToLedgerSegments,
 } from "./context-budget";
 export type {
   AssembleContextUsageInput,

@@ -1,8 +1,16 @@
 import { access } from "node:fs/promises";
 
-import { getCredentialsFilePath, getConfigDir } from "@openharness/core";
+import {
+  assembleContextUsageSnapshot,
+  createTip,
+  formatContextUsageReport,
+  getCredentialsFilePath,
+  getConfigDir,
+  type ContextUsageSnapshot,
+} from "@openharness/core";
 import {
   buildPromptLayers,
+  buildPromptLedgerSegments,
   discoverClaudeMdFiles,
   inspectPersonalPromptFiles,
   listPendingUserProfileUpdates,
@@ -15,6 +23,10 @@ import { loadOutputStyles } from "@openharness/output-styles";
 import { discoverOpenHarnessExtensions } from "@openharness/agent-runtime";
 
 import type { ContextService } from "../settings-api.js";
+import {
+  ContextUsageCache,
+  sharedContextUsageCache,
+} from "../context-usage-cache.js";
 import { openMemoryManager } from "./memory-service.js";
 import { readCurrentSettings, type DaemonSettingsRef } from "./shared.js";
 
@@ -26,7 +38,10 @@ interface ContextStatusRow {
   purpose: string;
 }
 
-export function createDefaultContextService(ref: DaemonSettingsRef): ContextService {
+export function createDefaultContextService(
+  ref: DaemonSettingsRef,
+  cache: ContextUsageCache = sharedContextUsageCache,
+): ContextService {
   return {
     async preview({ cwd }) {
       const settings = await readCurrentSettings(ref);
@@ -176,6 +191,39 @@ export function createDefaultContextService(ref: DaemonSettingsRef): ContextServ
           formatContextStatusTable(rows),
         ].join("\n"),
       };
+    },
+    async usage({ cwd, sessionId, refresh, previousContextWindow }) {
+      if (sessionId && !refresh) {
+        const cached = cache.get(sessionId);
+        if (cached) {
+          const snapshot: ContextUsageSnapshot = { ...cached, source: "session_cache" };
+          return { snapshot, report: formatContextUsageReport(snapshot) };
+        }
+      }
+
+      // Task 5: live reassembly wiring lands in task 6; stub miss/refresh as static_only.
+      const settings = await readCurrentSettings(ref);
+      const segments = await buildPromptLedgerSegments({
+        customPrompt: settings.systemPrompt,
+        cwd,
+        permissionMode: settings.permission.mode,
+        workStyle: settings.workStyle,
+        fastMode: settings.fastMode,
+        effort: settings.effort,
+        passes: settings.passes,
+      });
+      const snapshot = assembleContextUsageSnapshot({
+        segments,
+        model: settings.model,
+        contextWindow: null,
+        source: "static_only",
+        modelSwitch:
+          previousContextWindow != null
+            ? { previousContextWindow }
+            : undefined,
+        extraTips: [createTip("conversation_omitted")],
+      });
+      return { snapshot, report: formatContextUsageReport(snapshot) };
     },
   };
 }

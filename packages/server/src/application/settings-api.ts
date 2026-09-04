@@ -161,6 +161,15 @@ export interface ContextService {
   status(input: {
     cwd: string;
   }): Promise<{ report: string }> | { report: string };
+  usage(input: {
+    cwd: string;
+    sessionId?: string;
+    refresh?: boolean;
+    previousContextWindow?: number;
+  }): Promise<{
+    snapshot: import("@openharness/core").ContextUsageSnapshot;
+    report: string;
+  }>;
 }
 
 export interface DreamStartResult {

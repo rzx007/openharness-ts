@@ -602,6 +602,24 @@ export class OpenHarnessClient {
     return response.report;
   }
 
+  /** `GET /context/usage?cwd=&sessionId=&refresh=` */
+  async getContextUsage(options: {
+    cwd: string;
+    sessionId?: string;
+    refresh?: boolean;
+    signal?: AbortSignal;
+  }): Promise<{ snapshot: unknown; report: string }> {
+    const { signal, refresh, ...rest } = options;
+    const query: Record<string, string | undefined> = {
+      ...rest,
+      ...(refresh !== undefined ? { refresh: refresh ? "true" : "false" } : {}),
+    };
+    return await this.request<{ snapshot: unknown; report: string }>(
+      this.path("/context/usage", query),
+      { signal },
+    );
+  }
+
   /** `POST /sessions/:id/compact` */
   async compactSession(
     sessionId: string,
