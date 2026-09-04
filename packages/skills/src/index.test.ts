@@ -9,6 +9,7 @@ import {
 } from "../src/index.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
 /** 构造一个最小 SkillDefinition（补齐新增必填字段的默认值）。 */
 function makeSkill(partial: Partial<SkillDefinition> & { name: string }): SkillDefinition {
@@ -28,9 +29,18 @@ vi.mock("node:fs/promises", () => ({
   stat: vi.fn(),
 }));
 
+vi.mock("node:os", async () => {
+  const actual = await vi.importActual<typeof import("node:os")>("node:os");
+  return {
+    ...actual,
+    homedir: vi.fn(() => actual.homedir()),
+  };
+});
+
 const mockedReadFile = vi.mocked(fs.readFile);
 const mockedReaddir = vi.mocked(fs.readdir);
 const mockedStat = vi.mocked(fs.stat);
+const mockedHomedir = vi.mocked(os.homedir);
 
 describe("SkillRegistry", () => {
   it("registers and retrieves a skill", () => {
@@ -469,6 +479,7 @@ describe("SkillLoader.discoverMarkdownFiles path-traversal protection", () => {
 describe("findProjectSkillDirs", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    delete process.env.OPENHARNESS_CONFIG_DIR;
   });
 
   it("collects .agents, .openharness-ts, and .claude skill dirs from git root to cwd", async () => {
@@ -491,5 +502,38 @@ describe("findProjectSkillDirs", () => {
       path.join(path.resolve("/repo/packages/app"), ".openharness-ts", "skills"),
       path.join(path.resolve("/repo/packages/app"), ".claude", "skills"),
     ]);
+  });
+
+  it("does not walk past cwd when there is no git root", async () => {
+    mockedStat.mockRejectedValue(new Error("not found"));
+
+    const cwd = path.resolve("/home/user/notes");
+    const dirs = await findProjectSkillDirs(cwd);
+
+    expect(dirs).toEqual([
+      path.join(cwd, ".agents", "skills"),
+      path.join(cwd, ".openharness-ts", "skills"),
+      path.join(cwd, ".claude", "skills"),
+    ]);
+    expect(dirs.some((dir) => dir.includes(path.join("home", "user", ".openharness-ts")))).toBe(
+      false,
+    );
+  });
+
+  it("excludes the personal skills directory even when home is the git root", async () => {
+    const home = path.resolve("/home/user");
+    process.env.OPENHARNESS_CONFIG_DIR = path.join(home, ".openharness-ts");
+    mockedHomedir.mockReturnValue(home);
+    mockedStat.mockImplementation(async (target) => {
+      if (String(target) === path.join(home, ".git")) return {} as any;
+      throw new Error("not found");
+    });
+
+    const dirs = await findProjectSkillDirs(home);
+
+    expect(dirs).not.toContain(path.join(home, ".openharness-ts", "skills"));
+    expect(dirs).not.toContain(path.join(home, ".claude", "skills"));
+    expect(dirs).not.toContain(path.join(home, ".agents", "skills"));
+    expect(dirs).toEqual([]);
   });
 });
