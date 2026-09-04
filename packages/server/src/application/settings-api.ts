@@ -8,8 +8,16 @@ export interface SettingsService {
   patch(
     patch: Record<string, unknown>,
   ):
-    | Promise<{ settings: Record<string, unknown>; restartRuntimes?: boolean }>
-    | { settings: Record<string, unknown>; restartRuntimes?: boolean };
+    | Promise<{
+        settings: Record<string, unknown>;
+        restartRuntimes?: boolean;
+        invalidateRuntimes?: boolean;
+      }>
+    | {
+        settings: Record<string, unknown>;
+        restartRuntimes?: boolean;
+        invalidateRuntimes?: boolean;
+      };
 }
 
 export interface ProviderInfo {

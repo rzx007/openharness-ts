@@ -14,7 +14,17 @@ export interface DaemonControlServiceContext {
     SessionRunEngine,
     "activeRunId" | "hasActiveRunsForCwd" | "hasAnyActiveRuns" | "queuedRunIds" | "stopAndDrain"
   >;
-  agentPool: AgentPool;
+  agentPool: Pick<
+    AgentPool,
+    | "configured"
+    | "size"
+    | "hasActiveWork"
+    | "hasActiveWorkForCwd"
+    | "acquireSession"
+    | "closeAll"
+    | "closeForCwd"
+    | "invalidateWarmAgents"
+  >;
   operationGate: DaemonOperationGate;
   startedAt: number;
   sseClientCount(): number;
@@ -114,6 +124,10 @@ export class DaemonControlService {
 
   async closeRuntimesForCwd(cwd: string): Promise<void> {
     await this.context.agentPool.closeForCwd(cwd);
+  }
+
+  async invalidateRuntimes(): Promise<void> {
+    await this.context.agentPool.invalidateWarmAgents();
   }
 
   async shutdown(): Promise<void> {

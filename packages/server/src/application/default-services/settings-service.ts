@@ -17,18 +17,48 @@ import {
   type DaemonSettingsRef,
 } from "./shared.js";
 
-const RUNTIME_RESTART_KEYS = new Set([
+/** Changing these requires closing all runtimes; blocked while any run is active. */
+const HARD_RUNTIME_RESTART_KEYS = new Set([
   "provider",
   "baseUrl",
   "apiFormat",
   "apiKey",
   "mcpServers",
   "plugins",
+]);
+
+/**
+ * Prompt / turn behavior. Safe to persist while a run is active; warm agents are
+ * invalidated so the next task picks up the new values.
+ */
+const SOFT_RUNTIME_INVALIDATE_KEYS = new Set([
   "maxTurns",
   "effort",
   "fastMode",
   "workStyle",
 ]);
+
+export type SettingsRuntimeImpact = "restart" | "invalidate" | "none";
+
+export function settingsPatchRuntimeImpact(
+  patch: Record<string, unknown>,
+): SettingsRuntimeImpact {
+  const keys = new Set<string>();
+  for (const key of Object.keys(patch)) {
+    if (key === "path" || key === "value") continue;
+    keys.add(key);
+  }
+  if (typeof patch.path === "string" && patch.path.trim()) {
+    keys.add(patch.path.split(".")[0]!);
+  }
+  if ([...keys].some((key) => HARD_RUNTIME_RESTART_KEYS.has(key))) {
+    return "restart";
+  }
+  if ([...keys].some((key) => SOFT_RUNTIME_INVALIDATE_KEYS.has(key))) {
+    return "invalidate";
+  }
+  return "none";
+}
 
 export function createDefaultSettingsService(
   ref: DaemonSettingsRef,
@@ -84,10 +114,12 @@ export function createDefaultSettingsService(
         delete next.provider;
       }
       await saveSettingsAndRefreshRef(ref, next);
-      const restartRuntimes = Object.keys(effectivePatch).some((key) =>
-        RUNTIME_RESTART_KEYS.has(key),
-      );
-      return { settings: sanitizeSettings(next), restartRuntimes };
+      const impact = settingsPatchRuntimeImpact(effectivePatch);
+      return {
+        settings: sanitizeSettings(next),
+        restartRuntimes: impact === "restart",
+        invalidateRuntimes: impact === "invalidate",
+      };
     },
   };
 }

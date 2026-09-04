@@ -35,6 +35,7 @@ function createControl() {
     hasActiveWorkForCwd: vi.fn(() => false),
     closeAll: vi.fn(async () => {}),
     closeForCwd: vi.fn(async () => {}),
+    invalidateWarmAgents: vi.fn(async () => {}),
   };
   const operationGate = new DaemonOperationGate();
   const control = new DaemonControlService({
@@ -76,6 +77,14 @@ describe("DaemonControlService", () => {
       { id: "hook-1", event: "pre_tool_use", type: "command", enabled: true, origin: "runtime" },
     ]);
     expect(agentPool.acquireSession).toHaveBeenCalledWith("s1");
+  });
+
+  it("invalidates warm agents without requiring a global mutation lease", async () => {
+    const { control, agentPool } = createControl();
+
+    await control.invalidateRuntimes();
+
+    expect(agentPool.invalidateWarmAgents).toHaveBeenCalledOnce();
   });
 
   it("closes agents and seals admission even when run draining fails", async () => {

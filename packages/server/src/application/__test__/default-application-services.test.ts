@@ -147,7 +147,7 @@ describe("default daemon application services", () => {
     expect(result.restartRuntimes).toBe(true);
   });
 
-  it("updates work style and requests runtime restart", async () => {
+  it("updates work style and requests idle runtime invalidation", async () => {
     const ref = {
       current: {
         model: "m",
@@ -162,7 +162,8 @@ describe("default daemon application services", () => {
     const result = await settings.patch({ workStyle: "efficient" });
 
     expect(ref.current.workStyle).toBe("efficient");
-    expect(result.restartRuntimes).toBe(true);
+    expect(result.restartRuntimes).toBe(false);
+    expect(result.invalidateRuntimes).toBe(true);
     await expect(settings.patch({ workStyle: "chatty" })).rejects.toThrow("Unknown work style");
   });
 

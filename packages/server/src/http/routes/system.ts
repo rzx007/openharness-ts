@@ -23,6 +23,7 @@ import {
   type AttachmentLimits,
   type ServerCapabilities,
 } from "@openharness/protocol";
+import { settingsPatchRuntimeImpact } from "../../application/default-services/settings-service.js";
 
 export interface SystemRoutesContext {
   version?: string;
@@ -34,6 +35,7 @@ export interface SystemRoutesContext {
     DaemonControlService,
     | "acquireGlobalMutation"
     | "closeAllRuntimes"
+    | "invalidateRuntimes"
     | "runtimeSnapshot"
     | "inspectRun"
     | "listProjectionDiagnostics"
@@ -167,16 +169,44 @@ export function createSystemRoutes(context: SystemRoutesContext): Hono {
       if (!context.settingsService)
         return errorResponse(501, "Settings service is not configured");
       const body = await readJson(c);
+      const impact = settingsPatchRuntimeImpact(
+        body && typeof body === "object" && !Array.isArray(body)
+          ? (body as Record<string, unknown>)
+          : {},
+      );
       const lease = context.control.acquireGlobalMutation();
       if (!lease) {
-        return errorResponse(
-          409,
-          "Cannot update daemon settings while session runs are active",
-        );
+        if (impact === "restart") {
+          return errorResponse(
+            409,
+            "Cannot update daemon settings while session runs are active",
+          );
+        }
+        try {
+          const result = await context.settingsService.patch(body);
+          if (result.restartRuntimes) {
+            return errorResponse(
+              409,
+              "Cannot update daemon settings while session runs are active",
+            );
+          }
+          if (result.invalidateRuntimes) {
+            await context.control.invalidateRuntimes();
+          }
+          return jsonResponse({ settings: result.settings });
+        } catch (error) {
+          return errorResponse(
+            400,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       }
       try {
         const result = await context.settingsService.patch(body);
         if (result.restartRuntimes) await context.control.closeAllRuntimes();
+        else if (result.invalidateRuntimes) {
+          await context.control.invalidateRuntimes();
+        }
         return jsonResponse({ settings: result.settings });
       } catch (error) {
         return errorResponse(
