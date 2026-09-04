@@ -197,6 +197,8 @@ export type {
   ContextUsageTip,
   ContextUsageTipCode,
   ModelSwitchContext,
+  ToolSchemaInput,
+  ToolSchemaKind,
 } from "./context-budget";
 export {
   assertNoRemovedLifecycleToolNames,

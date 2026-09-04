@@ -81,6 +81,13 @@ import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capa
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
+import { sharedContextUsageCache } from "./context-usage-cache.js";
+import {
+  assembleSessionContextUsage,
+  tryAssembleSessionContextUsageLive,
+  type SessionContextUsageAgent,
+} from "./assemble-session-context-usage.js";
+import { bindContextUsageLiveAssembler } from "./context-usage-live-binder.js";
 import {
   createAttachmentAuthorizationSessionResolver,
   createAttachmentOcrService,
@@ -445,6 +452,54 @@ export class DaemonApplication implements DurableAgentApplication {
         lastConsolidatedAt: readLastConsolidatedAt,
         autoDream: executeAutoDream,
       });
+
+      const contextUsageCache = sharedContextUsageCache;
+      const resolveSessionSettings = async (cwd: string) =>
+        options.getSettingsForCwd
+          ? await options.getSettingsForCwd(cwd)
+          : (options.getSettings?.() ?? options.settings);
+      const refreshContextUsage = async (
+        sessionId: string,
+        agent: SessionContextUsageAgent,
+      ) => {
+        const session = store.getSession(sessionId);
+        if (!session) return;
+        const settings = await resolveSessionSettings(session.cwd);
+        if (!settings) return;
+        await assembleSessionContextUsage({
+          sessionId,
+          cwd: session.cwd,
+          model: session.model,
+          settings,
+          agent,
+          cache: contextUsageCache,
+        });
+      };
+      bindContextUsageLiveAssembler(async ({ sessionId, cwd, previousContextWindow }) => {
+        if (!this.agentPool.configured) return null;
+        const session = store.getSession(sessionId);
+        if (!session) return null;
+        const settings = await resolveSessionSettings(session.cwd || cwd);
+        if (!settings) return null;
+        return await tryAssembleSessionContextUsageLive({
+          sessionId,
+          cwd: session.cwd || cwd,
+          model: session.model,
+          settings,
+          cache: contextUsageCache,
+          previousContextWindow,
+          getAgent: async () => {
+            const warm = await this.agentPool.get(sessionId);
+            if (warm) return warm;
+            try {
+              return await this.agentPool.acquireSession(sessionId);
+            } catch {
+              return undefined;
+            }
+          },
+        });
+      });
+
       // 车道轮到这条 run 时，真正 submitMessage 的地方。
       const attachmentRouter = new AttachmentCapabilityRouter({
         resolveReadyContentPath: (assetId) =>
@@ -462,6 +517,8 @@ export class DaemonApplication implements DurableAgentApplication {
         postRunMaintenance,
         attachmentResources: this.attachmentResources,
         attachmentOcrAvailable: true,
+        contextUsageCache,
+        refreshContextUsage,
         routeAttachments: (input) => attachmentRouter.route(input),
         resolveCapabilities: async (session) => {
           const settings = options.getSettingsForCwd
@@ -523,6 +580,8 @@ export class DaemonApplication implements DurableAgentApplication {
         liveChildren: this.liveChildren,
         operationGate: this.operationGate,
         events: this.eventPublisher,
+        contextUsageCache,
+        refreshContextUsage,
       });
       /**
        * 会话服务：
@@ -539,6 +598,7 @@ export class DaemonApplication implements DurableAgentApplication {
         operationGate: this.operationGate,
         events: this.eventPublisher,
         assertReady: () => this.assertReady(),
+        contextUsageCache,
       });
       /**
        * 通道服务：
@@ -785,6 +845,7 @@ export class DaemonApplication implements DurableAgentApplication {
    * 最后放掉主人锁、关 store。中途失败都攒着，尽量拆干净再一起报。
    */
   private async closeWork(): Promise<void> {
+    bindContextUsageLiveAssembler(undefined);
     const failures: unknown[] = [];
     try {
       await this.startupRecovery;

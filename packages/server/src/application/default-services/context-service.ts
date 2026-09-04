@@ -27,6 +27,7 @@ import {
   ContextUsageCache,
   sharedContextUsageCache,
 } from "../context-usage-cache.js";
+import { getBoundContextUsageLiveAssembler } from "../context-usage-live-binder.js";
 import { openMemoryManager } from "./memory-service.js";
 import { readCurrentSettings, type DaemonSettingsRef } from "./shared.js";
 
@@ -41,6 +42,13 @@ interface ContextStatusRow {
 export function createDefaultContextService(
   ref: DaemonSettingsRef,
   cache: ContextUsageCache = sharedContextUsageCache,
+  options: {
+    assembleLive?: (input: {
+      sessionId: string;
+      cwd: string;
+      previousContextWindow?: number;
+    }) => Promise<ContextUsageSnapshot | null>;
+  } = {},
 ): ContextService {
   return {
     async preview({ cwd }) {
@@ -201,7 +209,23 @@ export function createDefaultContextService(
         }
       }
 
-      // Task 5: live reassembly wiring lands in task 6; stub miss/refresh as static_only.
+      if (sessionId) {
+        const assembleLive =
+          options.assembleLive ?? getBoundContextUsageLiveAssembler();
+        if (assembleLive) {
+          const live = await assembleLive({
+            sessionId,
+            cwd,
+            ...(previousContextWindow != null
+              ? { previousContextWindow }
+              : {}),
+          });
+          if (live) {
+            return { snapshot: live, report: formatContextUsageReport(live) };
+          }
+        }
+      }
+
       const settings = await readCurrentSettings(ref);
       const segments = await buildPromptLedgerSegments({
         customPrompt: settings.systemPrompt,

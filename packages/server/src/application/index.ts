@@ -3,6 +3,8 @@ export * from "./default-node-application.js";
 export * from "./default-application-services.js";
 export * from "./settings-api.js";
 export * from "./context-usage-cache.js";
+export * from "./assemble-session-context-usage.js";
+export * from "./context-usage-live-binder.js";
 export * from "./agent/index.js";
 export * from "./control/index.js";
 export * from "./session/index.js";
