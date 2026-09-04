@@ -458,7 +458,7 @@ export class SkillLoader {
  * 返回的目录列表按"低优先级在前、高优先级在后"排序（root 先、cwd 后），
  * 调用方按顺序加载时，cwd 层技能会覆盖 git-root 层的同名技能。
  *
- * 每层收集顺序：.agents/skills → .openharness/skills → .claude/skills
+ * 每层收集顺序：.agents/skills → .openharness-ts/skills → .claude/skills
  * （后者优先级更高）。
  */
 export async function findProjectSkillDirs(cwd: string): Promise<string[]> {
@@ -483,7 +483,7 @@ export async function findProjectSkillDirs(cwd: string): Promise<string[]> {
   const dirs: string[] = [];
   for (const level of levels) {
     dirs.push(join(level, ".agents", "skills"));
-    dirs.push(join(level, ".openharness", "skills"));
+    dirs.push(join(level, ".openharness-ts", "skills"));
     dirs.push(join(level, ".claude", "skills"));
   }
   return dirs;

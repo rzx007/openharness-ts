@@ -43,7 +43,7 @@ describe("createDefaultCommandCatalog", () => {
   it("includes project skills from cwd", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ohs-catalog-project-"));
     try {
-      const skillDir = join(dir, ".openharness", "skills");
+      const skillDir = join(dir, ".openharness-ts", "skills");
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(
         join(skillDir, "ship.md"),

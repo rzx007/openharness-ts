@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { PROJECT_CONFIG_DIR_NAME } from "@openharness/core";
+
 import type { ProjectInitService } from "../settings-api.js";
 
 export function createDefaultProjectInitService(): ProjectInitService {
@@ -13,21 +15,21 @@ export function createDefaultProjectInitService(): ProjectInitService {
           label: "CLAUDE.md",
         },
         {
-          path: join(cwd, ".openharness", "README.md"),
+          path: join(cwd, PROJECT_CONFIG_DIR_NAME, "README.md"),
           content: "# OpenHarness Config\n\nThis directory contains OpenHarness project configuration.\n",
-          label: ".openharness/README.md",
+          label: `${PROJECT_CONFIG_DIR_NAME}/README.md`,
         },
         {
-          path: join(cwd, ".openharness", "memory", "MEMORY.md"),
+          path: join(cwd, PROJECT_CONFIG_DIR_NAME, "memory", "MEMORY.md"),
           content: "# Memory\n\nThis file stores project memory for the AI assistant.\n",
-          label: ".openharness/memory/MEMORY.md",
+          label: `${PROJECT_CONFIG_DIR_NAME}/memory/MEMORY.md`,
         },
       ];
       const dirs = [
-        join(cwd, ".openharness"),
-        join(cwd, ".openharness", "memory"),
-        join(cwd, ".openharness", "plugins"),
-        join(cwd, ".openharness", "skills"),
+        join(cwd, PROJECT_CONFIG_DIR_NAME),
+        join(cwd, PROJECT_CONFIG_DIR_NAME, "memory"),
+        join(cwd, PROJECT_CONFIG_DIR_NAME, "plugins"),
+        join(cwd, PROJECT_CONFIG_DIR_NAME, "skills"),
       ];
       const lines: string[] = ["Initializing OpenHarness project...", ""];
       for (const dir of dirs) {

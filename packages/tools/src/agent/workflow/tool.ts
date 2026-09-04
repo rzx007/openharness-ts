@@ -242,7 +242,7 @@ export function createWorkflowTool(options: WorkflowToolOptions): ToolDefinition
         },
         persist: {
           type: "boolean",
-          description: "Persist workflow run snapshots under the project .openharness/workflows directory. Defaults to true.",
+          description: "Persist workflow run snapshots under the project .openharness-ts/workflows directory. Defaults to true.",
         },
         runId: {
           type: "string",

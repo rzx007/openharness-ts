@@ -345,7 +345,7 @@ describe("programmatic agent SDK", () => {
       const serializedTool = JSON.stringify(rememberTool);
       expect(rememberTool).toBeDefined();
       expect(serializedTool).not.toContain("USER.md");
-      expect(serializedTool).not.toContain(".openharness");
+      expect(serializedTool).not.toContain(".openharness-ts");
       expect(serializedTool).not.toContain(cwd);
     } finally {
       await agent.close();

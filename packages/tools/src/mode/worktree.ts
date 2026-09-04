@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@openharness/core";
+import { PROJECT_CONFIG_DIR_NAME, type ToolDefinition } from "@openharness/core";
 
 export const enterWorktreeTool: ToolDefinition = {
   name: "EnterWorktree",
@@ -34,7 +34,7 @@ export const enterWorktreeTool: ToolDefinition = {
     const slug = branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-|-$/g, "") || "worktree";
     const worktreePath = input.path
       ? resolve(context.cwd, input.path as string)
-      : resolve(topLevel, ".openharness", "worktrees", slug);
+      : resolve(topLevel, PROJECT_CONFIG_DIR_NAME, "worktrees", slug);
 
     const cmd = createBranch
       ? `git worktree add -b "${branch}" "${worktreePath}" ${baseRef}`

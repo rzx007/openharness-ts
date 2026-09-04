@@ -11,6 +11,7 @@ import {
   getCoordinatorUserContext,
 } from "@openharness/coordinator";
 import type { WorkflowRunRepository } from "@openharness/coordinator";
+import { PROJECT_CONFIG_DIR_NAME } from "@openharness/core";
 import type {
   AgentScheduleEffects,
   AgentBackgroundShellHost,
@@ -283,7 +284,7 @@ function coordinatorSystemPrompt(options: {
     .map((name) => ({ name }));
   const context = getCoordinatorUserContext(
     mcpClients,
-    join(options.cwd, ".openharness", "scratchpad"),
+    join(options.cwd, PROJECT_CONFIG_DIR_NAME, "scratchpad"),
     {
       enabled: true,
       hostToolCeiling: options.hostToolCeiling,

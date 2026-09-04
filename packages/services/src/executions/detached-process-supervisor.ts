@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
-import { getTasksDir, type Settings } from "@openharness/core";
+import { getTasksDir, PROJECT_CONFIG_DIR_NAME, type Settings } from "@openharness/core";
 import {
   createProcess,
   createShellProcess,
@@ -665,7 +665,7 @@ function defaultTasksDir(): string {
   try {
     return getTasksDir();
   } catch {
-    return join(process.cwd(), ".openharness", "tasks");
+    return join(process.cwd(), PROJECT_CONFIG_DIR_NAME, "tasks");
   }
 }
 

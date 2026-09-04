@@ -255,9 +255,18 @@ describe("BUNDLED_SKILLS", () => {
     expect(BUNDLED_SKILLS.length).toBeGreaterThan(0);
   });
 
-  it("contains the five first-release skills", () => {
+  it("contains the bundled skills including create-skill", () => {
     const names = BUNDLED_SKILLS.map((s) => s.name).sort();
-    expect(names).toEqual(["commit", "debug", "plan", "review", "test"]);
+    expect(names).toEqual(["commit", "create-skill", "debug", "plan", "review", "test"]);
+  });
+
+  it("create-skill tells the model where to write local skills", () => {
+    const skill = BUNDLED_SKILLS.find((s) => s.name === "create-skill");
+    expect(skill).toBeDefined();
+    expect(skill!.description.toLowerCase()).toMatch(/install|create|write/);
+    expect(skill!.content).toContain("~/.openharness-ts/skills/");
+    expect(skill!.content).toContain(".openharness-ts/skills/");
+    expect(skill!.content).not.toContain(".openharness/skills");
   });
 
   it("every bundled skill has valid fields", () => {
@@ -279,6 +288,14 @@ describe("SkillRegistry.registerBundled + source priority", () => {
     for (const s of BUNDLED_SKILLS) {
       expect(reg.has(s.name)).toBe(true);
     }
+    expect(reg.modelVisibleList()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "create-skill",
+          description: expect.stringMatching(/~\/\.openharness-ts\/skills/),
+        }),
+      ]),
+    );
   });
 
   it("user overrides bundled, project overrides user (last-writer-wins)", () => {
@@ -454,7 +471,7 @@ describe("findProjectSkillDirs", () => {
     vi.resetAllMocks();
   });
 
-  it("collects .agents, .openharness, and .claude skill dirs from git root to cwd", async () => {
+  it("collects .agents, .openharness-ts, and .claude skill dirs from git root to cwd", async () => {
     mockedStat.mockImplementation(async (target) => {
       if (String(target).endsWith(path.join("repo", ".git"))) return {} as any;
       throw new Error("not found");
@@ -465,13 +482,13 @@ describe("findProjectSkillDirs", () => {
 
     expect(dirs).toEqual([
       path.join(path.resolve("/repo"), ".agents", "skills"),
-      path.join(path.resolve("/repo"), ".openharness", "skills"),
+      path.join(path.resolve("/repo"), ".openharness-ts", "skills"),
       path.join(path.resolve("/repo"), ".claude", "skills"),
       path.join(path.resolve("/repo/packages"), ".agents", "skills"),
-      path.join(path.resolve("/repo/packages"), ".openharness", "skills"),
+      path.join(path.resolve("/repo/packages"), ".openharness-ts", "skills"),
       path.join(path.resolve("/repo/packages"), ".claude", "skills"),
       path.join(path.resolve("/repo/packages/app"), ".agents", "skills"),
-      path.join(path.resolve("/repo/packages/app"), ".openharness", "skills"),
+      path.join(path.resolve("/repo/packages/app"), ".openharness-ts", "skills"),
       path.join(path.resolve("/repo/packages/app"), ".claude", "skills"),
     ]);
   });

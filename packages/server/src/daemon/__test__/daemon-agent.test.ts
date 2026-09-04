@@ -261,7 +261,7 @@ describe("createDaemonAgentLoader", () => {
     ]);
     expect(getCoordinatorUserContext).toHaveBeenCalledWith(
       [],
-      expect.stringContaining(".openharness"),
+      expect.stringContaining(".openharness-ts"),
       { enabled: true, hostToolCeiling: ["Bash"] },
     );
   });

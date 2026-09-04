@@ -64,7 +64,7 @@ describe("extractMemories", () => {
 
   it("skips model streaming when an assistant already wrote inside the memory directory", async () => {
     const cwd = resolve("project");
-    const memoryDir = join(cwd, ".openharness", "memory");
+    const memoryDir = join(cwd, ".openharness-ts", "memory");
     const wroteMemory: Message[] = [
       messages[0]!,
       {
@@ -75,7 +75,7 @@ describe("extractMemories", () => {
             type: "tool_use",
             id: "write-memory",
             name: "Write",
-            input: { file_path: join(".openharness", "memory", "manual.md") },
+            input: { file_path: join(".openharness-ts", "memory", "manual.md") },
           },
         ],
       },
@@ -107,7 +107,7 @@ describe("extractMemories", () => {
 
   it("does not let a successful Remember from a previous run suppress extraction", async () => {
     const cwd = resolve("project");
-    const memoryDir = join(cwd, ".openharness", "memory");
+    const memoryDir = join(cwd, ".openharness-ts", "memory");
     const remembered: Message[] = [
       { type: "user", content: "remember this project fact" },
       {
@@ -153,7 +153,7 @@ describe("extractMemories", () => {
 
   it("does not treat a failed Remember or an unrelated successful result as a memory write", async () => {
     const cwd = resolve("project");
-    const memoryDir = join(cwd, ".openharness", "memory");
+    const memoryDir = join(cwd, ".openharness-ts", "memory");
     const failedRemember: Message[] = [
       { type: "user", content: "remember this project fact" },
       {
@@ -209,7 +209,7 @@ describe("extractMemories", () => {
 
   it("skips extraction only after the current run has a matching successful Remember result", async () => {
     const cwd = resolve("project");
-    const memoryDir = join(cwd, ".openharness", "memory");
+    const memoryDir = join(cwd, ".openharness-ts", "memory");
     const successfulRemember: Message[] = [
       { type: "user", content: "remember this project fact" },
       {

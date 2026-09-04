@@ -172,6 +172,67 @@ a fix, especially when the cause isn't obvious.
 - Resist the urge to "fix" code you don't yet understand.
 `;
 
+const CREATE_SKILL = `
+# create-skill
+
+Create or install a local OpenHarness skill by writing a \`SKILL.md\` to disk.
+
+## When to use
+The user asks to create, write, install, or add a local skill; to turn a workflow
+into a reusable skill; or to put a \`SKILL.md\` somewhere this runtime will load it.
+
+This skill only covers **local filesystem install**. It is not a marketplace or
+GitHub installer.
+
+## Ask scope first
+Ask whether the skill is personal (all projects) or project-scoped (this repo).
+Do not guess. Default only if the user already said so.
+
+## Storage Locations
+
+| Type | Path | Scope |
+|------|------|-------|
+| Personal | \`~/.openharness-ts/skills/<skill-name>/\` | Available across all projects for this user |
+| Project | \`<cwd>/.openharness-ts/skills/<skill-name>/\` | Shared with the repository |
+
+The runtime also **scans** \`.agents/skills\` and \`.claude/skills\` (git-root to cwd)
+for compatibility. When *creating* a skill, write to \`.openharness-ts/skills\`
+unless the user explicitly asks for one of those other directories.
+
+Load order is last-writer-wins: bundled < plugin < user < project.
+
+## Directory layout
+
+\`\`\`
+skill-name/
+├── SKILL.md                 # required
+├── scripts/                 # optional
+├── references/              # optional
+└── assets/                  # optional
+\`\`\`
+
+The directory name must match the frontmatter \`name\`. Filename must be exactly
+\`SKILL.md\`.
+
+## SKILL.md structure
+
+\`\`\`markdown
+---
+name: skill-name
+description: What it does and when to use it.
+---
+
+# Skill Name
+
+Instructions the agent should follow when this skill is invoked.
+\`\`\`
+
+Keep \`name\` lowercase with hyphens. Put the trigger phrases in \`description\`.
+After writing the file, tell the user they can invoke it with \`/skill-name\` or
+the \`Skill\` tool. Newly written skills are picked up on the next \`Skill\` /
+\`ListSkills\` call (filesystem refresh).
+`;
+
 /**
  * 随包发布的内置技能集合。
  * 加载顺序最低优先级：bundled < user < project（同名后者覆盖）。
@@ -182,4 +243,9 @@ export const BUNDLED_SKILLS: SkillDefinition[] = [
   bundled("test", "Add or run meaningful tests covering happy path, edges, and error paths; verify by running them.", TEST),
   bundled("plan", "Turn a request into an ordered, verifiable implementation plan with key files and risks.", PLAN),
   bundled("debug", "Systematically reproduce, localize, and fix the root cause of a bug, then add a regression test.", DEBUG),
+  bundled(
+    "create-skill",
+    "Create or install a local skill by writing SKILL.md under ~/.openharness-ts/skills or the project .openharness-ts/skills directory. Use when the user asks to add, write, or install a skill on disk.",
+    CREATE_SKILL,
+  ),
 ];
