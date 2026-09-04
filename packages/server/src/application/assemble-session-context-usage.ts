@@ -207,6 +207,7 @@ export async function tryAssembleSessionContextUsageLive(input: {
   contextWindow?: number | null;
   outputLimit?: number | null;
   memoryReminderText?: string;
+  skillsList?: Array<{ name: string; description: string }>;
   getAgent: () => Promise<SessionContextUsageAgent | undefined>;
 }): Promise<ContextUsageSnapshot | null> {
   let agent: SessionContextUsageAgent | undefined;
@@ -230,6 +231,7 @@ export async function tryAssembleSessionContextUsageLive(input: {
       contextWindow: input.contextWindow,
       outputLimit: input.outputLimit,
       previousContextWindow: input.previousContextWindow,
+      skillsList: input.skillsList,
     });
   } catch {
     return null;

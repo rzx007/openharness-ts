@@ -1,5 +1,6 @@
 import type {
   DesktopContextBucketId,
+  DesktopContextUsageBucket,
   DesktopContextUsageSnapshot,
 } from "@shared/context-usage-types"
 
@@ -42,6 +43,8 @@ export function formatContextTokensSummary(snapshot: DesktopContextUsageSnapshot
   return `~${used} / ${formatContextTokensShort(snapshot.contextWindow)} Tokens`
 }
 
-export function nonEmptyBuckets(snapshot: DesktopContextUsageSnapshot) {
+export function nonEmptyBuckets(
+  snapshot: DesktopContextUsageSnapshot,
+): DesktopContextUsageBucket[] {
   return snapshot.buckets.filter((bucket) => bucket.tokens > 0)
 }

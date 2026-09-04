@@ -58,4 +58,39 @@ describe("ContextService.usage", () => {
     expect(result.snapshot.source).toBe("static_only");
     expect(result.snapshot.tips.some((t) => t.code === "conversation_omitted")).toBe(true);
   });
+
+  it("fills contextWindow from catalog on static_only path", async () => {
+    const contextService = createDefaultContextService(
+      settingsRef({ model: "fixture-model", provider: "openrouter" }),
+      new ContextUsageCache(),
+      {
+        listProviders: async () => [
+          {
+            name: "openrouter",
+            displayName: "OpenRouter",
+            models: [
+              {
+                id: "fixture-model",
+                label: "Fixture",
+                provider: "OpenRouter",
+                providerName: "openrouter",
+                contextWindow: 128_000,
+                outputLimit: 8_192,
+                inputCapabilities: { image: "unknown" },
+              },
+            ],
+          },
+        ],
+      },
+    );
+
+    const result = await contextService.usage({ cwd: process.cwd() });
+
+    expect(result.snapshot.source).toBe("static_only");
+    expect(result.snapshot.contextWindow).toBe(128_000);
+    expect(result.snapshot.outputLimit).toBe(8_192);
+    expect(result.snapshot.percentFull).not.toBeNull();
+    expect(result.snapshot.tips.some((t) => t.code === "no_context_window")).toBe(false);
+    expect(result.snapshot.tips.some((t) => t.code === "conversation_omitted")).toBe(true);
+  });
 });

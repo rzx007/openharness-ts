@@ -82,6 +82,32 @@ describe("assembleSessionContextUsage", () => {
     expect(snapshot.buckets.find((b) => b.id === "conversation")!.tokens).toBeGreaterThan(0);
   });
 
+  it("counts skills bucket tokens when skillsList is provided", async () => {
+    const cache = new ContextUsageCache();
+    const agent = {
+      getHistory: () => [],
+      listModelVisibleTools: () => [],
+    };
+
+    const snapshot = await assembleSessionContextUsage({
+      sessionId: "s-skills",
+      cwd: process.cwd(),
+      model: "test/model",
+      settings: settingsRef().current!,
+      agent,
+      cache,
+      contextWindow: 100_000,
+      skillsList: [
+        {
+          name: "archify",
+          description: "Draw architecture diagrams with validated SVG output",
+        },
+      ],
+    });
+
+    expect(snapshot.buckets.find((b) => b.id === "skills")!.tokens).toBeGreaterThan(0);
+  });
+
   it("invalidates cache on model change", async () => {
     const cache = new ContextUsageCache();
     const snap = assembleContextUsageSnapshot({

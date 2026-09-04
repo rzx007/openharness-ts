@@ -22,12 +22,14 @@ import { getLocalRulesDir, loadFacts, loadLocalRules } from "@openharness/person
 import { loadOutputStyles } from "@openharness/output-styles";
 import { discoverOpenHarnessExtensions } from "@openharness/agent-runtime";
 
-import type { ContextService } from "../settings-api.js";
+import type { ContextService, ModelProviderInfo } from "../settings-api.js";
 import {
   ContextUsageCache,
   sharedContextUsageCache,
 } from "../context-usage-cache.js";
 import { getBoundContextUsageLiveAssembler } from "../context-usage-live-binder.js";
+import { resolveModelContextLimits, type ModelContextLimits } from "../assemble-session-context-usage.js";
+import { createDefaultModelService } from "./model-service.js";
 import { openMemoryManager } from "./memory-service.js";
 import { readCurrentSettings, type DaemonSettingsRef } from "./shared.js";
 
@@ -48,6 +50,11 @@ export function createDefaultContextService(
       cwd: string;
       previousContextWindow?: number;
     }) => Promise<ContextUsageSnapshot | null>;
+    listProviders?: () => Promise<ModelProviderInfo[]> | ModelProviderInfo[];
+    resolveModelLimits?: (input: {
+      model: string;
+      providerHint?: string;
+    }) => Promise<ModelContextLimits> | ModelContextLimits;
   } = {},
 ): ContextService {
   return {
@@ -227,6 +234,19 @@ export function createDefaultContextService(
       }
 
       const settings = await readCurrentSettings(ref);
+      const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
+      const limits = options.resolveModelLimits
+        ? await options.resolveModelLimits({
+            model: settings.model,
+            providerHint: settings.provider,
+          })
+        : await resolveModelContextLimits({
+            model: settings.model,
+            providerHint: settings.provider,
+            listProviders:
+              options.listProviders ??
+              (() => createDefaultModelService({ current: settings }).list()),
+          });
       const segments = await buildPromptLedgerSegments({
         customPrompt: settings.systemPrompt,
         cwd,
@@ -235,11 +255,13 @@ export function createDefaultContextService(
         fastMode: settings.fastMode,
         effort: settings.effort,
         passes: settings.passes,
+        skillsList: skillRegistry.modelVisibleList(),
       });
       const snapshot = assembleContextUsageSnapshot({
         segments,
         model: settings.model,
-        contextWindow: null,
+        contextWindow: limits.contextWindow,
+        outputLimit: limits.outputLimit,
         source: "static_only",
         modelSwitch:
           previousContextWindow != null

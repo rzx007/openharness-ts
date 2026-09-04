@@ -8,6 +8,7 @@ import { fileReadTool } from "@openharness/tools";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
+  discoverOpenHarnessExtensions,
   type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
@@ -469,6 +470,10 @@ export class DaemonApplication implements DurableAgentApplication {
           listProviders: () =>
             createDefaultModelService({ current: settings }).list(),
         });
+      const resolveSessionSkillsList = async (cwd: string, settings: Settings) => {
+        const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
+        return skillRegistry.modelVisibleList();
+      };
       const refreshContextUsage = async (
         sessionId: string,
         agent: SessionContextUsageAgent,
@@ -478,6 +483,7 @@ export class DaemonApplication implements DurableAgentApplication {
         const settings = await resolveSessionSettings(session.cwd);
         if (!settings) return;
         const limits = await resolveSessionModelLimits(session.model, settings);
+        const skillsList = await resolveSessionSkillsList(session.cwd, settings);
         await assembleSessionContextUsage({
           sessionId,
           cwd: session.cwd,
@@ -487,6 +493,7 @@ export class DaemonApplication implements DurableAgentApplication {
           cache: contextUsageCache,
           contextWindow: limits.contextWindow,
           outputLimit: limits.outputLimit,
+          skillsList,
         });
       };
       bindContextUsageLiveAssembler(async ({ sessionId, cwd, previousContextWindow }) => {
@@ -496,15 +503,18 @@ export class DaemonApplication implements DurableAgentApplication {
         const settings = await resolveSessionSettings(session.cwd || cwd);
         if (!settings) return null;
         const limits = await resolveSessionModelLimits(session.model, settings);
+        const sessionCwd = session.cwd || cwd;
+        const skillsList = await resolveSessionSkillsList(sessionCwd, settings);
         return await tryAssembleSessionContextUsageLive({
           sessionId,
-          cwd: session.cwd || cwd,
+          cwd: sessionCwd,
           model: session.model,
           settings,
           cache: contextUsageCache,
           previousContextWindow,
           contextWindow: limits.contextWindow,
           outputLimit: limits.outputLimit,
+          skillsList,
           getAgent: async () => {
             const warm = await this.agentPool.get(sessionId);
             if (warm) return warm;
