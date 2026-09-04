@@ -18,6 +18,8 @@ createDefaultNodeAgent(options)
 
 `QueryEngine`、`RuntimeBuilder`、provider/tool/hook/MCP/sandbox 的组装是内部实现，不是应用入口。
 
+发布包的 peerDependencies 标为 optional，是安装人体工程学；实现已 bundle，不要假设可以替换 `@openharness/core` / `@openharness/tools` 等 peer 实现。细节见 [Agent Framework Capability Boundary](./agent-framework-capability-boundary.md)。
+
 ## 最小运行
 
 ```ts
@@ -163,6 +165,18 @@ const result = await run.result;
 ```ts
 const result = await agent.runMessage("hi");
 ```
+
+## 稳定错误类
+
+以下错误类从 `@openharness/agent-runtime` 与 `@openharness/agent-runtime/kernel` 再导出，可用 `instanceof` 判断（与 `@openharness/core` 内定义为同一引用）：
+
+| 错误类 | 何时抛出 |
+|---|---|
+| `AgentRunNotAcceptingInputError` | run 已关闭 steering / 不再接受输入 |
+| `AgentChildBudgetExceededError` | child 深度、活动数或累计创建数超预算 |
+| `AgentOperationConflictError` | Agent 在非法状态下执行操作（如 closed 后 `submitMessage`） |
+
+不要依赖解析 `error.message` 字符串。workspace 内的 `@openharness/core` 不是独立发布包；外部消费方应只从上述两个 agent-runtime 入口导入。
 
 ## Child Agent
 
