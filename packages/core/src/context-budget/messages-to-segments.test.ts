@@ -28,6 +28,20 @@ describe("messagesToLedgerSegments", () => {
     expect(segments.some((s) => s.bucket === "summary")).toBe(true);
   });
 
+  it("does not classify a compact-looking assistant message without a following boundary", () => {
+    const segments = messagesToLedgerSegments([
+      {
+        type: "assistant",
+        content:
+          "[Conversation compacted: this is ordinary model output, not an actual compact summary]",
+      },
+      { type: "user", content: "continue without a compact boundary" },
+    ]);
+
+    expect(segments.some((s) => s.bucket === "summary")).toBe(false);
+    expect(segments[0]?.bucket).toBe("conversation");
+  });
+
   it("counts image blocks with 3072 mediaTokens", () => {
     const segments = messagesToLedgerSegments([
       {

@@ -41,6 +41,64 @@ function serializeTool(tool: {
 }
 
 describe("assembleSessionContextUsage", () => {
+  it("uses the session agent runtime prompt instead of rebuilding global settings", async () => {
+    const cache = new ContextUsageCache();
+    const agent = {
+      getHistory: () => [],
+      listModelVisibleTools: () => [],
+      getContextUsagePromptSource: () => ({
+        systemPrompt: "COORDINATOR RUNTIME PROMPT\n\nSESSION INSTRUCTIONS",
+      }),
+    };
+
+    const snapshot = await assembleSessionContextUsage({
+      sessionId: "s-runtime-prompt",
+      cwd: process.cwd(),
+      model: "test/model",
+      settings: settingsRef({ systemPrompt: "GLOBAL SETTINGS PROMPT" }).current!,
+      agent,
+      cache,
+      contextWindow: 100_000,
+    });
+
+    expect(snapshot.buckets.find((b) => b.id === "system")!.tokens).toBe(
+      estimateTokens("COORDINATOR RUNTIME PROMPT\n\nSESSION INSTRUCTIONS"),
+    );
+    expect(snapshot.estimatedInputTokens).not.toBe(
+      estimateTokens("GLOBAL SETTINGS PROMPT"),
+    );
+  });
+
+  it("includes the latest live turn memory reminder in the cached snapshot", async () => {
+    const cache = new ContextUsageCache();
+    const reminder = "<system-reminder>\nRELEVANT TURN MEMORY\n</system-reminder>";
+    const agent = {
+      getHistory: () => [],
+      listModelVisibleTools: () => [],
+      getContextUsagePromptSource: () => ({
+        systemPrompt: "SESSION PROMPT",
+        memoryReminderText: reminder,
+      }),
+    };
+
+    const snapshot = await assembleSessionContextUsage({
+      sessionId: "s-memory",
+      cwd: process.cwd(),
+      model: "test/model",
+      settings: settingsRef().current!,
+      agent,
+      cache,
+      contextWindow: 100_000,
+    });
+
+    expect(snapshot.buckets.find((b) => b.id === "conversation")!.tokens).toBe(
+      estimateTokens(reminder),
+    );
+    expect(cache.get("s-memory")?.buckets.find((b) => b.id === "conversation")!.tokens).toBe(
+      estimateTokens(reminder),
+    );
+  });
+
   it("writes usage cache from the same tools list used for the run", async () => {
     const cache = new ContextUsageCache();
     const builtin = {

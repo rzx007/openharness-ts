@@ -85,7 +85,7 @@ import { SessionAttachmentResources } from "./attachment-resource/session-attach
 import { sharedContextUsageCache } from "./context-usage-cache.js";
 import {
   assembleSessionContextUsage,
-  resolveModelContextLimits,
+  resolveSessionModelContextLimits,
   tryAssembleSessionContextUsageLive,
   type SessionContextUsageAgent,
 } from "./assemble-session-context-usage.js";
@@ -461,12 +461,12 @@ export class DaemonApplication implements DurableAgentApplication {
           ? await options.getSettingsForCwd(cwd)
           : (options.getSettings?.() ?? options.settings);
       const resolveSessionModelLimits = async (
-        model: string,
+        session: SessionRecord,
         settings: Settings,
       ) =>
-        await resolveModelContextLimits({
-          model,
-          providerHint: settings.provider,
+        await resolveSessionModelContextLimits({
+          session,
+          settings,
           listProviders: () =>
             createDefaultModelService({ current: settings }).list(),
         });
@@ -482,12 +482,15 @@ export class DaemonApplication implements DurableAgentApplication {
         if (!session) return;
         const settings = await resolveSessionSettings(session.cwd);
         if (!settings) return;
-        const limits = await resolveSessionModelLimits(session.model, settings);
+        const runtime = readSessionRuntimeConfig(session, {
+          provider: settings.provider,
+        });
+        const limits = await resolveSessionModelLimits(session, settings);
         const skillsList = await resolveSessionSkillsList(session.cwd, settings);
         await assembleSessionContextUsage({
           sessionId,
           cwd: session.cwd,
-          model: session.model,
+          model: runtime.model,
           settings,
           agent,
           cache: contextUsageCache,
@@ -502,13 +505,16 @@ export class DaemonApplication implements DurableAgentApplication {
         if (!session) return null;
         const settings = await resolveSessionSettings(session.cwd || cwd);
         if (!settings) return null;
-        const limits = await resolveSessionModelLimits(session.model, settings);
+        const runtime = readSessionRuntimeConfig(session, {
+          provider: settings.provider,
+        });
+        const limits = await resolveSessionModelLimits(session, settings);
         const sessionCwd = session.cwd || cwd;
         const skillsList = await resolveSessionSkillsList(sessionCwd, settings);
         return await tryAssembleSessionContextUsageLive({
           sessionId,
           cwd: sessionCwd,
-          model: session.model,
+          model: runtime.model,
           settings,
           cache: contextUsageCache,
           previousContextWindow,

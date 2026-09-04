@@ -114,6 +114,11 @@ export interface ModelVisibleTool extends ToolDescriptor {
   source: ToolRegistrationSource;
 }
 
+export interface ContextUsagePromptSource {
+  systemPrompt?: string;
+  memoryReminderText?: string;
+}
+
 export interface OpenHarnessAgent {
   readonly id: string;
   readonly state: OpenHarnessAgentState;
@@ -142,6 +147,8 @@ export interface OpenHarnessAgent {
   inspect(): AgentInspection;
   /** Tools currently registered for model calls (schemas + registration source). */
   listModelVisibleTools(): ModelVisibleTool[];
+  /** Prompt source owned by the runtime that performs model calls. */
+  getContextUsagePromptSource?(): ContextUsagePromptSource;
   close(): Promise<void>;
 }
 
@@ -326,6 +333,10 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         source: inspection?.source ?? { kind: "runtime" },
       };
     });
+  }
+
+  getContextUsagePromptSource(): ContextUsagePromptSource {
+    return this.runtime.queryEngine.getContextUsagePromptSource();
   }
 
   close(): Promise<void> {

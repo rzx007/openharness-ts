@@ -54,6 +54,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   const { get, set, projectDetailsCoordinator } = context
   let primaryNavigationGeneration = 0
   let defaultSettingsGeneration = 0
+  let contextUsageGeneration = 0
   let defaultSettingsWrite: Promise<void> = Promise.resolve()
   const advancePrimaryNavigation = (): number => {
     primaryNavigationGeneration += 1
@@ -304,6 +305,10 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async updateSessionModel(sessionId, model) {
+      const previousContextWindow =
+        get().activeSessionId === sessionId
+          ? get().contextUsageSnapshot?.contextWindow
+          : undefined
       const session = await window.desktop.sessions.updateModel({
         sessionId,
         model: model.id,
@@ -322,7 +327,10 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             : state.sessionView,
       }))
       if (get().activeSessionId === sessionId) {
-        void get().refreshContextUsage({ refresh: true })
+        void get().refreshContextUsage({
+          refresh: true,
+          ...(previousContextWindow != null ? { previousContextWindow } : {}),
+        })
       }
     },
 
@@ -771,6 +779,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async refreshContextUsage(options) {
+      const generation = ++contextUsageGeneration
       const state = get()
       const cwd =
         state.sessionView?.session.cwd ??
@@ -784,10 +793,14 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           cwd,
           ...(sessionId ? { sessionId } : {}),
           ...(options?.refresh !== undefined ? { refresh: options.refresh } : {}),
+          ...(options?.previousContextWindow !== undefined
+            ? { previousContextWindow: options.previousContextWindow }
+            : {}),
         })
         const parsed = parseDesktopContextUsageSnapshot(snapshot)
         // Ignore stale responses if the active session changed mid-flight.
         const latest = get()
+        if (generation !== contextUsageGeneration) return
         if ((latest.activeSessionId ?? undefined) !== sessionId) return
         if (parsed) set({ contextUsageSnapshot: parsed })
       } catch {

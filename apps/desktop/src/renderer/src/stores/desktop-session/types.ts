@@ -140,7 +140,10 @@ export interface SessionActions {
   archiveSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
-  refreshContextUsage: (options?: { refresh?: boolean }) => Promise<void>
+  refreshContextUsage: (options?: {
+    refresh?: boolean
+    previousContextWindow?: number
+  }) => Promise<void>
 }
 
 export interface PromptActions {

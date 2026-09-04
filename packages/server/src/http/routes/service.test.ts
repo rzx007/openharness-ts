@@ -74,7 +74,7 @@ describe("user-scoped plugin mutation routes", () => {
 });
 
 describe("GET /context/usage", () => {
-  it("forwards cwd, sessionId, and refresh to ContextService.usage", async () => {
+  it("forwards cwd, sessionId, refresh, and previous window to ContextService.usage", async () => {
     const usage = vi.fn(async () => ({
       snapshot: { source: "static_only", tips: [] },
       report: "usage-report",
@@ -82,7 +82,7 @@ describe("GET /context/usage", () => {
     const routes = createUsageRoutes(usage);
 
     const response = await routes.request(
-      "/context/usage?cwd=C%3A%2Fworkspace&sessionId=s1&refresh=true",
+      "/context/usage?cwd=C%3A%2Fworkspace&sessionId=s1&refresh=true&previousContextWindow=200000",
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -93,6 +93,7 @@ describe("GET /context/usage", () => {
       cwd: "C:/workspace",
       sessionId: "s1",
       refresh: true,
+      previousContextWindow: 200_000,
     });
   });
 

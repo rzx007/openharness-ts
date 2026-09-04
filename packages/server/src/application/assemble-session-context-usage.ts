@@ -11,6 +11,10 @@ import {
   type ToolSchemaInput,
 } from "@openharness/core";
 import { buildPromptLedgerSegments } from "@openharness/prompts";
+import {
+  readSessionRuntimeConfig,
+  type SessionRecord,
+} from "@openharness/protocol";
 
 import type { ContextUsageCache } from "./context-usage-cache.js";
 import type { ModelInfo, ModelProviderInfo } from "./settings-api.js";
@@ -25,6 +29,10 @@ export interface ModelVisibleTool {
 export interface SessionContextUsageAgent {
   getHistory(): Message[];
   listModelVisibleTools(): ModelVisibleTool[];
+  getContextUsagePromptSource?(): {
+    systemPrompt?: string;
+    memoryReminderText?: string;
+  };
 }
 
 export interface AssembleSessionContextUsageInput {
@@ -111,6 +119,21 @@ export async function resolveModelContextLimits(input: {
   }
 }
 
+export async function resolveSessionModelContextLimits(input: {
+  session: SessionRecord;
+  settings: Settings;
+  listProviders: () => Promise<ModelProviderInfo[]> | ModelProviderInfo[];
+}): Promise<ModelContextLimits> {
+  const runtime = readSessionRuntimeConfig(input.session, {
+    provider: input.settings.provider,
+  });
+  return await resolveModelContextLimits({
+    model: runtime.model,
+    providerHint: runtime.provider,
+    listProviders: input.listProviders,
+  });
+}
+
 /** Stable serialization matching model-visible tool schema surface. */
 export function serializeToolSchemaForUsage(tool: {
   name: string;
@@ -148,7 +171,7 @@ export function modelVisibleToolsToSchemaInputs(
 export async function assembleSessionContextUsage(
   input: AssembleSessionContextUsageInput,
 ): Promise<ContextUsageSnapshot> {
-  const promptSegments = await buildPromptLedgerSegments({
+  const rebuiltPromptSegments = await buildPromptLedgerSegments({
     customPrompt: input.settings.systemPrompt,
     cwd: input.cwd,
     permissionMode: input.settings.permission.mode,
@@ -156,9 +179,21 @@ export async function assembleSessionContextUsage(
     fastMode: input.settings.fastMode,
     effort: input.settings.effort,
     passes: input.settings.passes,
-    memoryReminderText: input.memoryReminderText,
     skillsList: input.skillsList,
   });
+  const runtimePrompt = input.agent.getContextUsagePromptSource?.();
+  const promptSegments = promptSegmentsFromRuntime(
+    rebuiltPromptSegments,
+    runtimePrompt?.systemPrompt,
+  );
+  const memoryReminderText =
+    runtimePrompt?.memoryReminderText ?? input.memoryReminderText;
+  if (memoryReminderText?.trim()) {
+    promptSegments.push({
+      bucket: "conversation",
+      text: memoryReminderText.trim(),
+    });
+  }
 
   const toolSegments = toolSchemasToLedgerSegments(
     modelVisibleToolsToSchemaInputs(input.agent.listModelVisibleTools()),
@@ -185,6 +220,23 @@ export async function assembleSessionContextUsage(
 
   input.cache.set(input.sessionId, snapshot);
   return snapshot;
+}
+
+function promptSegmentsFromRuntime(
+  rebuilt: ContextLedgerSegment[],
+  runtimeSystemPrompt: string | undefined,
+): ContextLedgerSegment[] {
+  if (runtimeSystemPrompt === undefined) return rebuilt;
+  const rebuiltPrompt = rebuilt
+    .filter((segment) => segment.bucket !== "conversation")
+    .map((segment) => segment.text)
+    .join("\n\n");
+  if (rebuiltPrompt === runtimeSystemPrompt) {
+    return rebuilt.filter((segment) => segment.bucket !== "conversation");
+  }
+  return runtimeSystemPrompt.trim()
+    ? [{ bucket: "system", text: runtimeSystemPrompt }]
+    : [];
 }
 
 export type AssembleLiveContextUsageInput = {

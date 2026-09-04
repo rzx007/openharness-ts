@@ -23,8 +23,10 @@ function resolveBucket(msg: Message, messages: Message[], index: number): Contex
 
   if (msg.type === "assistant") {
     const content = msg.content;
-    if (content.includes("[Conversation compacted")) return "summary";
-    if (content.startsWith("Summary:")) {
+    if (
+      content.includes("[Conversation compacted") ||
+      content.startsWith("Summary:")
+    ) {
       const next = messages[index + 1];
       if (next?.type === "user") {
         const nextText =

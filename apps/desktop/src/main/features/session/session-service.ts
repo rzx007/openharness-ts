@@ -558,6 +558,9 @@ export class DesktopSessionService {
       cwd,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       ...(input.refresh !== undefined ? { refresh: input.refresh } : {}),
+      ...(input.previousContextWindow !== undefined
+        ? { previousContextWindow: input.previousContextWindow }
+        : {}),
     })
     const snapshot = parseDesktopContextUsageSnapshot(result.snapshot)
     if (!snapshot) {

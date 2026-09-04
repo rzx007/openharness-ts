@@ -607,12 +607,16 @@ export class OpenHarnessClient {
     cwd: string;
     sessionId?: string;
     refresh?: boolean;
+    previousContextWindow?: number;
     signal?: AbortSignal;
   }): Promise<{ snapshot: unknown; report: string }> {
-    const { signal, refresh, ...rest } = options;
+    const { signal, refresh, previousContextWindow, ...rest } = options;
     const query: Record<string, string | undefined> = {
       ...rest,
       ...(refresh !== undefined ? { refresh: refresh ? "true" : "false" } : {}),
+      ...(previousContextWindow !== undefined
+        ? { previousContextWindow: String(previousContextWindow) }
+        : {}),
     };
     return await this.request<{ snapshot: unknown; report: string }>(
       this.path("/context/usage", query),

@@ -357,6 +357,7 @@ export interface GetDesktopContextUsageInput {
   cwd: string
   sessionId?: string
   refresh?: boolean
+  previousContextWindow?: number
 }
 
 export interface DesktopContextUsageResult {

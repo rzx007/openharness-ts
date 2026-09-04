@@ -5,6 +5,7 @@ import type { Settings } from "@openharness/core";
 import {
   assembleSessionContextUsage,
   resolveModelContextLimits,
+  resolveSessionModelContextLimits,
 } from "./assemble-session-context-usage.js";
 import { ContextUsageCache } from "./context-usage-cache.js";
 import type { ModelProviderInfo } from "./settings-api.js";
@@ -25,6 +26,54 @@ function baseSettings(overrides: Partial<Settings> = {}): Settings {
 }
 
 describe("resolveModelContextLimits", () => {
+  it("prefers the session runtime provider when model ids overlap", async () => {
+    const providers: ModelProviderInfo[] = [
+      {
+        name: "global-provider",
+        displayName: "Global",
+        models: [{
+          id: "shared-model",
+          label: "Global model",
+          provider: "Global",
+          providerName: "global-provider",
+          contextWindow: 10_000,
+          inputCapabilities: { image: "unknown" },
+        }],
+      },
+      {
+        name: "session-provider",
+        displayName: "Session",
+        models: [{
+          id: "shared-model",
+          label: "Session model",
+          provider: "Session",
+          providerName: "session-provider",
+          contextWindow: 80_000,
+          inputCapabilities: { image: "unknown" },
+        }],
+      },
+    ];
+
+    const limits = await resolveSessionModelContextLimits({
+      session: {
+        id: "session-provider-test",
+        cwd: process.cwd(),
+        title: "test",
+        model: "shared-model",
+        status: "idle",
+        metadata: {
+          runtime: { model: "shared-model", provider: "session-provider" },
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      settings: baseSettings({ provider: "global-provider" }),
+      listProviders: async () => providers,
+    });
+
+    expect(limits.contextWindow).toBe(80_000);
+  });
+
   it("resolves contextWindow and outputLimit from catalog fixture", async () => {
     const providers: ModelProviderInfo[] = [
       {
