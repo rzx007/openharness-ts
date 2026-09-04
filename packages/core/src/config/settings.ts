@@ -136,7 +136,7 @@ export async function loadSettings(
 }
 
 /**
- * 将设置对象保存为 JSON 文件到用户主目录下的 .openharness 配置文件夹中。
+ * 将设置对象保存为 JSON 文件到用户主目录下的 .openharness-ts 配置文件夹中。
  *
  * @param settings - 要保存的设置对象，将被序列化为格式化的 JSON 字符串。
  * @returns 无返回值（Promise<void>），表示保存操作完成。

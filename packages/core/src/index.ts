@@ -150,6 +150,7 @@ export {
   saveProjectSettings,
 } from "./config/settings";
 export {
+  PROJECT_CONFIG_DIR_NAME,
   resolvePaths,
   getConfigDir,
   getConfigFilePath,

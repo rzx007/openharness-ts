@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
+/** Project-level config directory name, matching the user-level `~/.openharness-ts`. */
+export const PROJECT_CONFIG_DIR_NAME = ".openharness-ts";
+
 export interface ResolvedPaths {
   configDir: string;
   dataDir: string;
@@ -33,7 +36,7 @@ export function resolvePaths(projectRoot?: string): ResolvedPaths {
     sessionsDir: join(dataDir, "sessions"),
     pluginsDir: join(configDir, "plugins"),
     skillsDir: join(configDir, "skills"),
-    memoryDir: join(projectRootResolved, ".openharness", "memory"),
+    memoryDir: join(projectRootResolved, PROJECT_CONFIG_DIR_NAME, "memory"),
     tasksDir: join(dataDir, "tasks"),
     feedbackDir: join(dataDir, "feedback"),
     configFilePath: join(configDir, "settings.json"),
@@ -53,7 +56,7 @@ export function getConfigFilePath(): string {
 }
 
 export function getProjectConfigDir(projectRoot?: string): string {
-  return join(resolve(projectRoot ?? process.cwd()), ".openharness");
+  return join(resolve(projectRoot ?? process.cwd()), PROJECT_CONFIG_DIR_NAME);
 }
 
 export function getProjectSettingsFilePath(projectRoot?: string): string {

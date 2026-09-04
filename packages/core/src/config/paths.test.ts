@@ -2,12 +2,24 @@ import { describe, expect, it } from "vitest";
 import { join } from "node:path";
 
 import {
+  PROJECT_CONFIG_DIR_NAME,
   getInstalledPluginStorePath,
+  getMemoryDir,
   getPluginCacheDir,
   getPluginDataDir,
   getPluginSourcesDir,
+  getProjectConfigDir,
   getProjectMemoryDir,
 } from "./paths";
+
+describe("project config directory", () => {
+  it("uses .openharness-ts as the project-level directory name", () => {
+    const root = join("C:", "work", "alpha");
+    expect(PROJECT_CONFIG_DIR_NAME).toBe(".openharness-ts");
+    expect(getProjectConfigDir(root)).toBe(join(root, ".openharness-ts"));
+    expect(getMemoryDir(root)).toBe(join(root, ".openharness-ts", "memory"));
+  });
+});
 
 describe("getProjectMemoryDir", () => {
   it("stores project memory under data/memory with a project hash", () => {
