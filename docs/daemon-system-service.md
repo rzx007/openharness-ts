@@ -21,7 +21,7 @@ TUI、Web、Desktop、Scheduled Tasks 和 Agent 仍然连接同一个主 daemon�
 - `true`：登录后自动启动，异常退出后自动恢复。
 - `false`：不注册系统启动项。TUI、print 或 Desktop 需要本地 daemon 时仍会按需启动，但操作系统不会在登录或崩溃后恢复它；无人打开应用时，已安排任务也不会执行。
 - 默认值是 `false`。
-- 这是机器级设置，只读取用户目录的 `settings.json`；项目目录里的 `.openharness/settings.json` 不能覆盖它。
+- 这是机器级设置，只读取用户目录的 `settings.json`；项目目录里的 `.openharness-ts/settings.json` 不能覆盖它。
 
 也可以使用命令修改：
 

@@ -305,9 +305,9 @@
 
 ### E.5 Skills 增强 ✅ 完成
 - ✅ frontmatter 补 user-invocable / disable-model-invocation / model / argument-hint。
-- ✅ 内置 bundled skills（commit/review/test/plan/debug，TS 内嵌）；user/project 多源（bundled<user<project）+ 同名覆盖。
+- ✅ 内置 bundled skills（commit/review/test/plan/debug/create-skill，TS 内嵌）；user/project 多源（bundled<user<project）+ 同名覆盖。
 - ✅ user-invocable skill 作 `/<skill>` 斜杠命令（REPL；内置命令优先）；model 可见性过滤（disable-model-invocation 不进 system prompt）。daemon 会加载 skills 供模型/工具使用，但 TUI 侧 `/<skill>` 斜杠路由仍需按 client-local vs server API 分层设计。
-- ✅ project skills **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层各收 `.openharness/skills` + `.claude/skills`，root→cwd 顺序加载（cwd 层最高优先）。
+- ✅ project skills **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层各收 `.openharness-ts/skills` + `.claude/skills`，root→cwd 顺序加载（cwd 层最高优先）。
 - ✅ **路径穿越防护**：`discoverMarkdownFiles` 用 `resolve + sep` 校验每个文件的绝对路径必须在 `dirPath` 内（防 symlink/`..` 逃逸）。
 - ✅ **每命令 model 覆盖**：`/<skill>` 调用时若 `skill.model` 非空，在 `submitMessage` 前
   临时 `setModel(skill.model)`，finally 块恢复原 model（REPL 接线；旧 BackendHost 路径已删除）。

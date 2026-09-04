@@ -64,7 +64,7 @@ ohs sandbox doctor
 
 默认项目模式：
 
-1. `ohs sandbox on` 写入当前工作区的 `.openharness/settings.json`。
+1. `ohs sandbox on` 写入当前工作区的 `.openharness-ts/settings.json`。
 2. CLI/TUI 启动时检查 Docker 可用性与配置镜像。
 3. 镜像缺失且 `autoBuildImage=true` 时，从 `packages/sandbox/Dockerfile` 构建。
 4. 可复用容器名由工作区路径派生，例如 `openharness-sandbox-my-project-<hash>`。

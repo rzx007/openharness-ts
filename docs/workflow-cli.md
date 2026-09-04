@@ -4,7 +4,7 @@
 
 `ohs workflow` 是硬调度器的项目文件命令行入口，用来查看、校验和收口明确保存在项目目录中的 workflow run。它不是 `ohs --tui`，也不通过 HTTP 读取 daemon SQLite。
 
-CLI 明确创建 `FileWorkflowRunRepository`，数据默认在当前项目的 `.openharness/workflows/` 下。跨目录查看时用 `--cwd <dir>` 指向目标项目。daemon 则明确使用 `SessionWorkflowRunRepository` 写统一 SQLite；两者不会自动迁移、合并或互相 fallback。
+CLI 明确创建 `FileWorkflowRunRepository`，数据默认在当前项目的 `.openharness-ts/workflows/` 下。跨目录查看时用 `--cwd <dir>` 指向目标项目。daemon 则明确使用 `SessionWorkflowRunRepository` 写统一 SQLite；两者不会自动迁移、合并或互相 fallback。
 
 ## 常用命令
 
@@ -54,7 +54,7 @@ ohs workflow cancel <runId> --reason "superseded by manual fix"
 
 `ohs serve` 重启时不会假装续跑旧进程里的 provider 调用、detached worker process 或 child session。它会保留 SQLite 中的 session、child session、消息与 timeline，并将遗留 session run 标为 `interrupted`。
 
-daemon 会先取得 SQLite 中遗留 running Workflow 的处理权，再把它收口为 terminal：运行中的 task 为 `killed`，未启动 task 为 `skipped`，并写入 `workflow.workflow_cancelled` 事件。它不会扫描 `.openharness/workflows`，所以 `ohs workflow list/status/cancel` 看到的项目文件运行不属于 daemon recovery。之后应由用户显式启动新的工作；不要把重启后的状态理解为后台仍在继续执行。
+daemon 会先取得 SQLite 中遗留 running Workflow 的处理权，再把它收口为 terminal：运行中的 task 为 `killed`，未启动 task 为 `skipped`，并写入 `workflow.workflow_cancelled` 事件。它不会扫描 `.openharness-ts/workflows`，所以 `ohs workflow list/status/cancel` 看到的项目文件运行不属于 daemon recovery。之后应由用户显式启动新的工作；不要把重启后的状态理解为后台仍在继续执行。
 
 ## Workflow Spec 示例
 
@@ -89,7 +89,7 @@ daemon 会先取得 SQLite 中遗留 running Workflow 的处理权，再把它�
 ohs workflow validate --spec ./workflow.json
 ```
 
-真正启动 workflow 仍由 Coordinator/Leader 调 `Workflow` 工具完成；CLI 当前负责项目文件仓库的“看、验、收口、取消”，不直接替代模型入口提交执行。若 Agent 由 daemon 托管，`Workflow` 工具拿到的是 SQLite repository；若用 standalone Node Agent 并显式注入文件 repository，才会写 `.openharness/workflows`。
+真正启动 workflow 仍由 Coordinator/Leader 调 `Workflow` 工具完成；CLI 当前负责项目文件仓库的“看、验、收口、取消”，不直接替代模型入口提交执行。若 Agent 由 daemon 托管，`Workflow` 工具拿到的是 SQLite repository；若用 standalone Node Agent 并显式注入文件 repository，才会写 `.openharness-ts/workflows`。
 
 `Workflow action: "run"` 默认会快速返回包含 `jobId` 的 Job receipt，并把真实 worker DAG 留在后台继续跑；`jobId` 固定为 `workflow:<runId>`。模型后续使用 `JobRead/JobWait/JobCancel`，不要依赖单次工具调用一直阻塞到全部 task 完成。需要同步等待完整结果时显式传 `waitForCompletion: true`。TUI 的 `/workflow` 是统一 Jobs Panel 的别名；CLI 的 `ohs workflow status <runId>` 只读取项目文件仓库，不等同于读取 daemon 中同名 run。
 

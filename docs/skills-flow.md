@@ -11,7 +11,7 @@ skill 从哪加载、怎么进 system prompt、两条路径分别怎么跑。
 | 组件 | 文件 | 职责 |
 |------|------|------|
 | `SkillRegistry` / `SkillLoader` | `packages/skills/src/index.ts` | 注册表、`parseSkillMarkdown`（frontmatter）、`registerBundled` / `loadFromDirectory`、`modelVisibleList()` |
-| `BUNDLED_SKILLS` | `packages/skills/src/bundled.ts` | 内置 5 个 skill（commit/review/test/plan/debug，TS 内嵌） |
+| `BUNDLED_SKILLS` | `packages/skills/src/bundled.ts` | 内置 skill（commit/review/test/plan/debug/create-skill，TS 内嵌） |
 | 三源加载 | `apps/cli/src/commands/main.ts` `loadSkillsThreeSources` | bundled → user → project，同名覆盖 |
 | `/<skill>` 拦截 | `apps/cli/src/commands/main.ts` `matchUserInvocableSkill` / `buildSkillPrompt` | 用户斜杠路径：匹配 user-invocable skill → 注入内容跑一轮 |
 | 命令目录 | `apps/cli/src/commands/main.ts` `buildSlashCommandList` | 当时将 user-invocable skill 显示为 `/<name>` |
@@ -24,7 +24,7 @@ skill 从哪加载、怎么进 system prompt、两条路径分别怎么跑。
 ```
 ┌──────────────── 加载（三来源，bundled < user < project，同名覆盖） ────────────────────────────────────────┐
 │  registerBundled()      loadFromDirectory(getSkillsDir())   findProjectSkillDirs(cwd)                      │
-│  内置 5 个(TS 内嵌) <  ~/.openharness-ts/skills(用户)   <  git-root→cwd 每层 .openharness/skills          │
+│  内置 bundled(TS 内嵌) <  ~/.openharness-ts/skills(用户)   <  git-root→cwd 每层 .openharness-ts/skills          │
 │  source:"bundled"       source:"user"                        + .claude/skills（cwd 层最高优先）             │
 └───────────────────────────────────────────────────┬──────────────────────────────────────────────────────┘
                                         ▼
@@ -143,7 +143,7 @@ Skill 工具返回 skill.content → 模型据此行事
 ## 已完成的增强（E.5 尾巴）
 
 - ✅ **git-root 向上逐级遍历**：`findProjectSkillDirs(cwd)` 从 cwd 走到 `.git` 根，每层收
-  `.openharness/skills` 和 `.claude/skills`，以 root→cwd 顺序返回（cwd 层优先级最高）。
+  `.openharness-ts/skills` 和 `.claude/skills`，以 root→cwd 顺序返回（cwd 层优先级最高）。
   `loadSkillsThreeSources` 已改用此函数，替代原来只加载 `join(cwd, ...)` 单层的实现。
 - ✅ **路径穿越防护**：`discoverMarkdownFiles` 对每个 entry 用 `path.resolve + path.sep`
   校验绝对路径必须位于 `dirPath` 之内，防止 symlink 或含 `..` 的文件名逃逸到目录外。

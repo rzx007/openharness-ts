@@ -13,7 +13,7 @@
 
 - `SkillDefinition { name, description, content, path, source?, metadata? }`；`parseSkillMarkdown` 只取 name/description。
 - `Skill` 工具（模型调）+ `/skills list|show`（已有）。无 `/<skill>` 直接调用。
-- skills 在 main.ts 的 runRepl/runPrintMode/runBackendHost 从 `getSkillsDir()` + `cwd/.openharness/skills` 加载。
+- skills 在 main.ts 的 runRepl/runPrintMode/runBackendHost 从 `getSkillsDir()` + `cwd/.openharness-ts/skills` 加载。
 - Python frontmatter 字段：name/description/command_name?/display_name?/user_invocable(默认 true)/disable_model_invocation(默认 false)/model?/argument_hint?。
 
 ## 组件
@@ -27,7 +27,7 @@
 - 新建 `packages/skills/src/bundled.ts`：导出 `BUNDLED_SKILLS: SkillDefinition[]`，每个 `source:"bundled"`，content 用 markdown 模板串。
 - 首发 5 个：**commit / review / test / plan / debug**（简洁实用的方法论，对标 Claude Code skill 风格）。
 - `SkillRegistry`/`SkillLoader` 默认注册 bundled（提供 `registerBundled()` 或 loader 默认加载）。
-- **来源优先级**：bundled < user(getSkillsDir) < project(cwd/.openharness/skills + cwd/.claude/skills)——同名后者覆盖前者（register 时覆盖即可，按加载顺序）。
+- **来源优先级**：bundled < user(getSkillsDir) < project(cwd/.openharness-ts/skills + cwd/.claude/skills)——同名后者覆盖前者（register 时覆盖即可，按加载顺序）。
 - 选 TS 内嵌而非 .md 文件：避免 bun-built 后运行时找 .md 路径的脆弱；user/project skills 仍是 SKILL.md 文件（用 parseSkillMarkdown）。
 
 ### c) `/<skill>` 斜杠命令

@@ -63,7 +63,7 @@ Agent runner → 通过 framework child（或显式 external task adapter）真�
 | notification | `packages/coordinator/src/workflow/notification.ts` | `<workflow-notification>` formatter/parser |
 | reconciliation | `packages/coordinator/src/workflow/reconciliation.ts` | changed-file / write-scope overlap 检测、summary、follow-up spec |
 | 公共持久化入口 | `packages/coordinator/src/workflow/index.ts` | 导出 repository contract 与持久运行 API |
-| 文件持久化实现 | `packages/coordinator/src/workflow/store.ts` | `FileWorkflowRunRepository`；`.openharness/workflows/<runId>.json` + `.events.ndjson` |
+| 文件持久化实现 | `packages/coordinator/src/workflow/store.ts` | `FileWorkflowRunRepository`；`.openharness-ts/workflows/<runId>.json` + `.events.ndjson` |
 | daemon 持久化实现 | `packages/server/src/application/workflow/session-workflow-run-repository.ts` | `SessionWorkflowRunRepository`；写入统一 SQLite |
 | Coordinator 模式 | `packages/coordinator/src/coordinator-mode.ts` | `getCoordinatorTools()` 含 `Workflow`；prompt / user context |
 | System prompt | `packages/coordinator/src/index.ts` | `COORDINATOR_SYSTEM_PROMPT` 说明何时用 Workflow vs Agent |
@@ -91,7 +91,7 @@ Leader 不能直接 Read/Bash；简单委托使用 `Agent` + `JobWait`，后续�
 
 ### A1.5. Workflow CLI 管理面
 
-`ohs workflow` 是面向人的项目文件 CLI，不是 Coordinator 模式本身。它明确创建 `FileWorkflowRunRepository`，只读取 `.openharness/workflows/`：
+`ohs workflow` 是面向人的项目文件 CLI，不是 Coordinator 模式本身。它明确创建 `FileWorkflowRunRepository`，只读取 `.openharness-ts/workflows/`：
 
 ```text
 ohs workflow list       # 历史 run 列表，可按状态/时间/reconcile/budget 过滤
@@ -124,7 +124,7 @@ ohs workflow cancel     # stop backing task，并写 terminal snapshot
             → synchronous: formatWorkflowNotification(result)
 ```
 
-`persist` 默认 `true`，但调用方必须显式注入 repository。daemon 注入 `SessionWorkflowRunRepository`，快照进入统一 SQLite；standalone Node Agent 只有显式注入 `FileWorkflowRunRepository` 时才写项目 `.openharness/workflows/`。没有 repository 时，持久化 action 会明确失败，不会创建文件 fallback。
+`persist` 默认 `true`，但调用方必须显式注入 repository。daemon 注入 `SessionWorkflowRunRepository`，快照进入统一 SQLite；standalone Node Agent 只有显式注入 `FileWorkflowRunRepository` 时才写项目 `.openharness-ts/workflows/`。没有 repository 时，持久化 action 会明确失败，不会创建文件 fallback。
 
 常用 input 字段：
 
@@ -235,12 +235,12 @@ createAgentWorkflowRunner()(context)
 | 使用场景 | Repository | 状态放在哪里 |
 |---|---|---|
 | daemon、多客户端、Bot、TUI/Web/Desktop | `SessionWorkflowRunRepository` | 与 Session/Run 相同的 SQLite |
-| 独立项目文件 CLI 或显式 standalone 配置 | `FileWorkflowRunRepository` | `.openharness/workflows/` |
+| 独立项目文件 CLI 或显式 standalone 配置 | `FileWorkflowRunRepository` | `.openharness-ts/workflows/` |
 
 文件实现的目录结构：
 
 ```text
-.openharness/workflows/
+.openharness-ts/workflows/
   <runId>.json           # WorkflowRunSnapshot
   <runId>.events.ndjson  # 一行一个 WorkflowRunEvent
 ```

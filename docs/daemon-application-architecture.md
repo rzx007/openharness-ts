@@ -390,7 +390,7 @@ Workflow tool / daemon command
   -> HTTP client / TUI / Web / Desktop
 ```
 
-`SessionWorkflowRunRepository` 是 daemon 唯一注入的 Workflow 仓库。它保存完整快照、每个 task 的 attempt 和 Workflow 事件；不会读取 `.openharness/workflows`，也不会在启动时迁移旧 JSON。独立 CLI 如果要查看项目文件，必须明确创建 `FileWorkflowRunRepository`，详见 [Workflow CLI](./workflow-cli.md)。
+`SessionWorkflowRunRepository` 是 daemon 唯一注入的 Workflow 仓库。它保存完整快照、每个 task 的 attempt 和 Workflow 事件；不会读取 `.openharness-ts/workflows`，也不会在启动时迁移旧 JSON。独立 CLI 如果要查看项目文件，必须明确创建 `FileWorkflowRunRepository`，详见 [Workflow CLI](./workflow-cli.md)。
 
 Workflow run ID 只能创建一次。scheduler 开始或恢复前必须 claim，意思是先在数据库里取得这次运行的处理权；重复 ID、重复 claim 或已经被其他执行者取得的 run 会直接失败。Daemon 重启不会重放模型或 Tool，而是先 claim 遗留的 running Workflow，再把 running task 记为 killed、未开始 task 记为 skipped，并写入 terminal 状态。
 

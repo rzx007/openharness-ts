@@ -83,7 +83,7 @@
 - `codex` 独立渲染(渲染同 default,留 TODO,与 v0.1.9 一致)。
 - TUI render 分支、TUI 图形化样式选择器 UI。
 - system-prompt 注入(Python 不做)。
-- 项目级 `.openharness/output_styles`(最小版只 user 级 `~/.openharness-ts/output_styles`)。
+- 项目级 `.openharness-ts/output_styles`(最小版只 user 级 `~/.openharness-ts/output_styles`)。
 
 ## 与 Python 的已知差异(刻意)
 

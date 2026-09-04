@@ -23,7 +23,7 @@
 | `workflow/snapshot.ts` | run id、snapshot、summary、snapshot/result 转换 |
 | `workflow/notification.ts` | `<workflow-notification>` formatter/parser |
 | `workflow/reconciliation.ts` | changed-file / write-scope overlap 检测、summary、follow-up spec |
-| `workflow/store.ts` | `.openharness/workflows` 快照 + events；resume/cancel/list |
+| `workflow/store.ts` | `.openharness-ts/workflows` 快照 + events；resume/cancel/list |
 | `coordinator-mode.ts` | `getCoordinatorTools` / prompt / user context |
 | `agent-loader.ts` / `agent-definitions.ts` | frontmatter 加载与 builtin 合并 |
 | `index.ts` | 导出 + `COORDINATOR_SYSTEM_PROMPT` |

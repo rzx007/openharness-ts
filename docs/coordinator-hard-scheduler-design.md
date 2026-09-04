@@ -303,7 +303,7 @@ adapter 里面复用现有：
 等内存版稳定后，再考虑把 workflow run 写入：
 
 ```text
-.openharness/workflows/<runId>.json
+.openharness-ts/workflows/<runId>.json
 ```
 
 这样中断后能恢复：
@@ -390,7 +390,7 @@ adapter 里面复用现有：
 
 交付：
 
-- `.openharness/workflows/<runId>.json`；
+- `.openharness-ts/workflows/<runId>.json`；
 - 保存 task 状态、attempt、taskManagerTaskId、输出摘要；
 - 启动时能识别仍在运行的后台 task；
 - 已完成 task 不重复跑；
@@ -501,7 +501,7 @@ V1 内存调度核心
 - V2.5：已完成。默认工具注册表新增 `Workflow` 工具，Coordinator/Leader 可以一次提交 workflow spec，让代码负责调度顺序、依赖、重试和聚合。
 - V2.6：已完成。增加 smoke 测试，覆盖 `Workflow` 工具 -> scheduler -> agent runner -> framework child spawn/await 的无 daemon 闭环。
 - V2.7：已完成。固定 `<workflow-notification>` envelope，提供 formatter/parser，并让 `Workflow` 工具返回结构化结果。
-- V3.1：已完成。新增 workflow snapshot / store：运行开始、worker 运行中、task terminal、最终完成都会产出快照；`Workflow` 工具默认把 run 写到项目 `.openharness/workflows`。
+- V3.1：已完成。新增 workflow snapshot / store：运行开始、worker 运行中、task terminal、最终完成都会产出快照；`Workflow` 工具默认把 run 写到项目 `.openharness-ts/workflows`。
 - V3.2：已完成。新增恢复入口：scheduler 支持 `initialResults` 续跑；store 支持 `latest/load/resume/resumeLatest`；`Workflow` 工具支持 `action: "status"` 和 `action: "resume"`，恢复时不会重跑已完成 terminal task。
 - V3.3：已完成。running snapshot 会记录 runner 上报的 `taskManagerTaskId` 等 metadata；恢复时 agent runner 会优先等待仍存活的 framework child 或 external task，不可达时才 spawn replacement worker。
 - V4.1：已完成。scheduler 会检测声明了 `writeScope` 的非隔离写任务；重叠 scope 在共享 cwd 下自动串行，不重叠 scope 可以并行；`readOnly: true` 和 `isolate: true` 不参与共享 cwd 写冲突。
@@ -532,7 +532,7 @@ V1 内存调度核心
 - V12.1：已完成基础版。新增 `createWorkflowValidationReport` 和 `Workflow action: "validate"`，可在启动 worker 前 dry-run 展开 DAG、预算 preset 和非隔离写范围冲突。
 - V12.2：已完成基础版。新增 `cancelPersistentWorkflow` 和 `Workflow action: "cancel"`，会停止 backing framework child 或 external task，并把 running task 标记为 killed、未启动 task 标记为 skipped 后持久化 terminal snapshot。
 - V12.3：已完成基础版。内置 workflow templates 增加 `version` 字段，模板输出可明确说明模板版本和含义。
-- V13.1：已完成基础版。新增普通 CLI 管理面 `ohs workflow list/status/validate/template/reconcile/cancel`，对接同一份 `.openharness/workflows` 持久化数据，输出 JSON，方便脚本和后续 TUI/Web 复用。完整用法见 [`workflow-cli.md`](./workflow-cli.md)。
+- V13.1：已完成基础版。新增普通 CLI 管理面 `ohs workflow list/status/validate/template/reconcile/cancel`，对接同一份 `.openharness-ts/workflows` 持久化数据，输出 JSON，方便脚本和后续 TUI/Web 复用。完整用法见 [`workflow-cli.md`](./workflow-cli.md)。
 - V13.2（历史、已被收口）：当时完成过独立 TUI Workflow Runs 管理面板，读取同一份 workflow JSON 状态。该面板现已删除并由统一 Jobs Panel 取代；timeline/filter/reconcile 等 Workflow 领域查询保留在 Workflow 工具和 CLI。
 - V13.3：已完成基础版。持久化 `Workflow action: "run"` 默认 detached 提交，快速返回 running snapshot 和 runId，后台继续调度 worker；不再给 worker wait 隐式套 300s 默认超时，只有显式 `timeoutSeconds` / task timeout 才会判超时。
 - V13.4：已完成基础版。修复 subprocess task-worker 一轮完成后 stdin pipe 未释放导致 child process 不退出、TaskManager task 长时间停留在 running、Workflow awaitTask 卡住的问题；worker 结束时会释放 stdin 并关闭 runtime cleanup。

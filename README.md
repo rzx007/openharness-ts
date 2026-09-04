@@ -204,7 +204,7 @@ ohs plugin uninstall <name>
 # 在 Agent 对话中描述任务内容、时间和项目；Desktop 的【已安排】用于暂停、继续、立即运行、删除和查看历史。
 # 任务由主 daemon 托管并保存到 SQLite；支持一次性时间和 RRULE 重复规则。
 
-# Workflow run 管理（持久化到项目 .openharness/workflows）
+# Workflow run 管理（持久化到项目 .openharness-ts/workflows）
 ohs workflow list [--status running,failed] [--limit 10] [--needs-reconciliation]
 ohs workflow status [runId] [--no-events]
 ohs workflow validate --spec <path>
@@ -263,7 +263,7 @@ TUI 内斜杠命令走 daemon command catalog + client-local UI + template expan
 
 每个 part 都带稳定 ID、顺序和 `pending/running/completed/failed` 状态。客户端 attach 单个 session 时先读取原子 snapshot，再从 snapshot cursor 订阅 SSE 增量，因此切换客户端、重启 TUI 或中途进入会话都能恢复同一份文本和工具状态。
 
-默认用户数据目录是 `~/.openharness-ts/`；旧 `~/.openharness/` 不读取、不迁移。仓库内的 `.openharness/` 仍是项目级配置目录，两者用途不同。
+用户与项目配置目录名均为 `.openharness-ts`：用户级在 `~/`，项目级在仓库根。旧用户目录 `~/.openharness/` 与旧项目目录 `.openharness/` 都不读取、不迁移。本地技能写在 `~/.openharness-ts/skills/<name>/SKILL.md`（用户级）或 `<cwd>/.openharness-ts/skills/<name>/SKILL.md`（项目级）；让模型安装时用 `/create-skill` 或 `Skill` 工具加载 `create-skill`。
 
 历史迁移材料保留在 `docs/superpowers/` 供追溯；其中带“归档”标题的文件描述已经退场的 Ink、BackendHost 或 OHJSON 方案，不能作为当前实现依据。
 
@@ -492,7 +492,7 @@ OpenHarness-ts/
 | `HookExecutor`          | Hook 系统：10 类事件（`session_start/end`、`pre/post_tool_use`、`pre/post_compact`、`user_prompt_submit`、`notification`、`stop`、`subagent_stop`），支持 command/http/prompt/agent 四种类型、priority、matcher、`$ARGUMENTS`                                                                                            |
 | `Swarm`                 | 多 Agent 团队：framework 创建并执行 child agent，daemon 投影 parent task、child session 与 child run。详见 [docs/agent-child-session-flow.md](docs/agent-child-session-flow.md)                                                                                                                                          |
 | `PluginLoader`          | Native Plugin v1 校验、安装状态、版本 cache 和 Skills/Agents/Hooks/MCP 激活；外部 Claude Code 插件由独立 Converter 导入，Runtime 不解析来源格式，Tool 隔离完成前不执行。详见 [docs/plugins-contributions-design.md](docs/plugins-contributions-design.md)             |
-| `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug）；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤 |
+| `SkillRegistry`         | Skill 管理：Markdown + frontmatter 解析（user-invocable/disable-model-invocation/model/argument-hint）；内置 bundled skills（commit/review/test/plan/debug/create-skill）；用户技能 `~/.openharness-ts/skills`，项目技能 `.openharness-ts/skills`；三源加载 bundled<user<project；daemon catalog 将 user-invocable skill 暴露为 template 斜杠（`POST /sessions/:id/commands` 展开后 admit）；model 可见性过滤 |
 | `BridgeManager`         | 会话桥接：多进程间共享会话状态                                                                                                                                                                                                                                                                                           |
 | `PermissionChecker`     | 权限系统：`default / plan / full_auto` 三种模式 + 工具黑白名单 + 路径规则 + 命令拒绝                                                                                                                                                                                                                                     |
 | `DaemonApplication`     | daemon durable application composition：store recovery、run engine、Agent loader/pool、permission、task、projection 与四类 session services                                                                                                                                                                              |

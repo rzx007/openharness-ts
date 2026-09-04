@@ -308,7 +308,7 @@ Read / Write / Edit / Glob / Grep
 
 ```text
 ohs sandbox on
-  → 写入当前 workspace 的 .openharness/settings.json
+  → 写入当前 workspace 的 .openharness-ts/settings.json
   → sandbox.backend=docker
   → sandbox.network.mode=bridge
   → sandbox.docker.reuseContainer=true
