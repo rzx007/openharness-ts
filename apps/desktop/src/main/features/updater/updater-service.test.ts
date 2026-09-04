@@ -27,7 +27,7 @@ describe("updater service startup", () => {
     service.startAfterWindowShown()
 
     expect(updater.autoDownload).toBe(false)
-    expect(updater.autoInstallOnAppQuit).toBe(false)
+    expect(updater.autoInstallOnAppQuit).toBe(true)
     expect(updater.checkForUpdates).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(2_000)
     expect(updater.checkForUpdates).toHaveBeenCalledOnce()

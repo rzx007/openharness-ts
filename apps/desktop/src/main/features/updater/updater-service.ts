@@ -117,7 +117,7 @@ export function createUpdaterService(dependencies: UpdaterServiceDependencies): 
 
   if (enabled) {
     dependencies.updater.autoDownload = false
-    dependencies.updater.autoInstallOnAppQuit = false
+    dependencies.updater.autoInstallOnAppQuit = true
     for (const [event, listener] of listeners) dependencies.updater.on(event, listener)
   }
 

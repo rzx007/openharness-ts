@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu"
 import { shortcutLabel } from "@renderer/components/desktop/desktop-shortcuts"
+import { UpdateStatusCapsule } from "@renderer/components/desktop/update/update-status-capsule"
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopAppInfo } from "@shared/ipc-channels"
@@ -304,6 +305,7 @@ export function TitleBar({
         </nav>
 
         <div className="titlebar-no-drag ml-auto flex h-full items-stretch">
+          <UpdateStatusCapsule />
           <WindowButton label="最小化" onClick={onMinimize}>
             <Minus />
           </WindowButton>

@@ -5,9 +5,8 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopUpdateState } from "@shared/update-types"
-import { UpdateDialog } from "./update-dialog"
 
-describe("UpdateDialog", () => {
+describe("UpdateStatusCapsule", () => {
   let container: HTMLDivElement
   let root: Root
   let emitState: (state: DesktopUpdateState) => void
@@ -31,68 +30,69 @@ describe("UpdateDialog", () => {
     Reflect.set(window, "desktop", { updates })
   })
 
-  afterEach(() => {
-    act(() => root.unmount())
+  afterEach(async () => {
+    await act(async () => root.unmount())
     container.remove()
     vi.clearAllMocks()
+    vi.resetModules()
     Reflect.deleteProperty(window, "desktop")
     Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT")
   })
 
-  it("offers a new version and lets the user defer or start its download", async () => {
-    updates.getState.mockResolvedValue({ status: "available", version: "1.8.0" })
-    await mount()
-
-    expect(document.body.textContent).toContain("1.8.0")
-    expect(findButton("稍后")).not.toBeNull()
-    await click("下载更新")
-    expect(updates.download).toHaveBeenCalledOnce()
-
-    await act(async () => emitState({ status: "available", version: "1.9.0" }))
-    await click("稍后")
-    expect(document.body.textContent).not.toContain("1.9.0")
-  })
-
-  it("shows download progress without another download action", async () => {
+  it("shows download progress without a dialog overlay", async () => {
     updates.getState.mockResolvedValue({
       status: "downloading",
-      version: "2.0.0",
-      percent: 37.6,
-      transferred: 3_760,
-      total: 10_000,
-      bytesPerSecond: 500,
+      version: "1.0.3",
+      percent: 90.4,
+      transferred: 5_200_000,
+      total: 5_800_000,
+      bytesPerSecond: 1_000,
     })
     await mount()
 
-    expect(document.body.textContent).toContain("38%")
-    expect(document.body.textContent).toContain("3.7 KB / 9.8 KB")
-    expect(findButton("下载更新")).toBeNull()
+    expect(container.textContent).toContain("下载中 90%")
+    expect(container.querySelector("[data-slot='alert-dialog'], [data-slot='dialog']")).toBeNull()
+    expect(findButton("关闭")).toBeNull()
   })
 
-  it("offers restart after download and shows user-triggered errors", async () => {
+  it("starts a download from the available capsule and can dismiss it", async () => {
+    updates.getState.mockResolvedValue({ status: "available", version: "1.8.0" })
+    await mount()
+
+    expect(container.textContent).toContain("新版本 1.8.0")
+    await click("新版本 1.8.0")
+    expect(updates.download).toHaveBeenCalledOnce()
+
+    await act(async () => emitState({ status: "available", version: "1.9.0" }))
+    await click("关闭")
+    expect(container.textContent).not.toContain("1.9.0")
+  })
+
+  it("installs a downloaded update from the capsule", async () => {
     updates.getState.mockResolvedValue({ status: "downloaded", version: "2.1.0" })
     await mount()
 
-    await click("立即重启安装")
+    await click("重启安装")
     expect(updates.install).toHaveBeenCalledOnce()
-
-    await act(async () =>
-      emitState({ status: "error", version: "2.1.0", message: "下载文件校验失败" })
-    )
-    expect(document.body.textContent).toContain("下载文件校验失败")
-    expect(findButton("关闭")).not.toBeNull()
   })
 
-  it("unsubscribes from update state changes when unmounted", async () => {
+  it("lets the user dismiss an update error", async () => {
+    updates.getState.mockResolvedValue({
+      status: "error",
+      version: "2.1.0",
+      message: "下载文件校验失败",
+    })
     await mount()
-    act(() => root.unmount())
-    expect(unsubscribe).toHaveBeenCalledOnce()
-    root = createRoot(container)
+
+    expect(container.textContent).toContain("更新失败")
+    await click("关闭")
+    expect(container.textContent).not.toContain("更新失败")
   })
 
   async function mount(): Promise<void> {
+    const { UpdateStatusCapsule } = await import("./update-status-capsule")
     await act(async () => {
-      root.render(createElement(UpdateDialog))
+      root.render(createElement(UpdateStatusCapsule))
     })
   }
 
@@ -106,7 +106,7 @@ describe("UpdateDialog", () => {
 function findButton(label: string): HTMLButtonElement | null {
   return (
     [...document.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent?.trim() === label
+      (button) => button.getAttribute("aria-label") === label || button.textContent?.trim() === label
     ) ?? null
   )
 }
