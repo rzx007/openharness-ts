@@ -164,6 +164,18 @@ const result = await run.result;
 const result = await agent.runMessage("hi");
 ```
 
+## 稳定错误类
+
+以下错误类从 `@openharness/agent-runtime` 与 `@openharness/agent-runtime/kernel` 再导出，可用 `instanceof` 判断（与 `@openharness/core` 内定义为同一引用）：
+
+| 错误类 | 何时抛出 |
+|---|---|
+| `AgentRunNotAcceptingInputError` | run 已关闭 steering / 不再接受输入 |
+| `AgentChildBudgetExceededError` | child 深度、活动数或累计创建数超预算 |
+| `AgentOperationConflictError` | Agent 在非法状态下执行操作（如 closed 后 `submitMessage`） |
+
+不要依赖解析 `error.message` 字符串。workspace 内的 `@openharness/core` 不是独立发布包；外部消费方应只从上述两个 agent-runtime 入口导入。
+
 ## Child Agent
 
 child agent 的 live lifecycle 由 framework 管理。child 继承 root 的 provider/client、权限策略、event sink 与 observation stream，并可覆盖 model、tools、permission mode 和 max turns。
