@@ -149,15 +149,14 @@ jobs:
         run: pnpm --filter @rzx/ohs... build
 
       - name: Publish CLI if this version is new
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Trusted Publishing (OIDC): do not set NODE_AUTH_TOKEN / NPM_TOKEN.
+        # Provenance is generated automatically when publishing via OIDC.
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           if npm view "@rzx/ohs@${VERSION}" version >/dev/null 2>&1; then
             echo "@rzx/ohs@${VERSION} is already on npm; skipping publish."
           else
-            pnpm --filter @rzx/ohs publish --access public --no-git-checks --provenance
+            pnpm --filter @rzx/ohs publish --access public --no-git-checks
           fi
 
   publish-release:

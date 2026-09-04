@@ -2,6 +2,13 @@ import { ChevronDown, Code2, MonitorCog, SlidersHorizontal, TerminalSquare } fro
 import { useEffect, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@renderer/components/ui/dialog"
 import { ScrollArea } from "@renderer/components/ui/scroll-area"
 import {
   Select,
@@ -18,6 +25,7 @@ import { AttachmentStorageSettings } from "./attachment-storage-settings"
 import { AppearanceSettings } from "@renderer/components/appearance/appearance-settings"
 import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
 import type { DesktopNotificationMode, DesktopWorkStyle } from "@shared/settings-types"
+import type { DesktopAppInfo } from "@shared/ipc-channels"
 
 type SettingsContentProps = {
   selectedSection: string
@@ -69,6 +77,21 @@ export function SettingsContent({ selectedSection }: SettingsContentProps): Reac
 }
 
 function GeneralSettings(): React.JSX.Element {
+  const [appInfo, setAppInfo] = useState<DesktopAppInfo | null>(null)
+  const [aboutOpen, setAboutOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.desktop.app.getInfo().then((info) => {
+      if (!cancelled) setAppInfo(info)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const versionLabel = appInfo ? `版本 ${appInfo.version}` : "正在读取版本…"
+
   return (
     <div className="flex flex-col gap-10">
       <SettingsSection title="权限">
@@ -158,14 +181,31 @@ function GeneralSettings(): React.JSX.Element {
         <Separator />
         <SettingRow
           title="关于 OpenHarness"
-          description="版本 1.0.0"
+          description={versionLabel}
           control={
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)}>
               查看详情
             </Button>
           }
         />
       </SettingsSection>
+
+      <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>OpenHarness</DialogTitle>
+            <DialogDescription>面向本地项目和智能代理协作的桌面工作区。</DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-lg bg-muted/55 p-3 text-xs">
+            <dt className="text-muted-foreground">版本</dt>
+            <dd>{appInfo?.version ?? "正在读取…"}</dd>
+            <dt className="text-muted-foreground">运行方式</dt>
+            <dd>
+              {appInfo ? (appInfo.isPackaged ? "桌面安装包" : "开发模式") : "正在读取…"}
+            </dd>
+          </dl>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

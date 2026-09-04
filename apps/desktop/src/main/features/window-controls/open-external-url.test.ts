@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url"
+
 import { describe, expect, it, vi } from "vitest"
 
 import { openUrlInDefaultBrowser } from "./open-external-url"
@@ -16,10 +18,12 @@ describe("openUrlInDefaultBrowser", () => {
   it("opens local file addresses with the default application for that file", async () => {
     const openExternal = vi.fn(async () => undefined)
     const openPath = vi.fn(async () => "")
+    const fileUrl =
+      process.platform === "win32" ? "file:///D:/demo/index.html" : "file:///tmp/demo/index.html"
 
-    await openUrlInDefaultBrowser("file:///D:/demo/index.html", { openExternal, openPath })
+    await openUrlInDefaultBrowser(fileUrl, { openExternal, openPath })
 
-    expect(openPath).toHaveBeenCalledWith("D:\\demo\\index.html")
+    expect(openPath).toHaveBeenCalledWith(fileURLToPath(fileUrl))
     expect(openExternal).not.toHaveBeenCalled()
   })
 

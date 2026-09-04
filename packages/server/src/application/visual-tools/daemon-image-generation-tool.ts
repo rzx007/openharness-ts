@@ -10,7 +10,7 @@ import {
 } from "../attachment-processing/safe-remote-image.js";
 import { createToolAbortScope } from "./tool-abort-scope.js";
 
-const DEFAULT_MODEL = "agnes-image-2.1-flash";
+const DEFAULT_MODEL = "agnes-image-2.5-flash";
 const DEFAULT_BASE_URL = "https://api.agnes-ai.cn/v1";
 const SIZE_VALUES = ["1K", "2K", "3K", "4K"] as const;
 const RATIO_VALUES = ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"] as const;
