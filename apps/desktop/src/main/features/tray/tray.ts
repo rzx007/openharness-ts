@@ -95,27 +95,27 @@ export function destroyTray(): void {
 function createTrayMenu(ctx: AppContext): Electron.Menu {
   return Menu.buildFromTemplate([
     {
-      label: "Show main window",
+      label: "显示主窗口",
       click: () => showMainFromTray(ctx),
     },
     {
-      label: "Show desktop Pet",
+      label: "显示桌面宠物",
       click: () => showPetWindow(ctx),
     },
     {
-      label: "Hide desktop Pet",
+      label: "隐藏桌面宠物",
       click: () => hidePetWindow(ctx),
     },
     { type: "separator" },
     {
-      label: "Restart app",
+      label: "重启应用",
       click: () => {
         app.relaunch({ args: process.argv.slice(1).concat(["--relaunched"]) })
         quitApp()
       },
     },
     {
-      label: "Quit",
+      label: "退出",
       click: () => quitApp(),
     },
   ])
