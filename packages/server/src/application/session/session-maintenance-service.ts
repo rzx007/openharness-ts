@@ -17,6 +17,8 @@ import {
 import { agentMessagesToTranscript } from "../agent/agent-transcript.js";
 import { estimateCostUsd } from "../../shared/usage.js";
 import { ApplicationError } from "../../shared/application-error.js";
+import type { ContextUsageCache } from "../context-usage-cache.js";
+import type { SessionContextUsageAgent } from "../assemble-session-context-usage.js";
 
 export class SessionMaintenanceError extends ApplicationError {
   constructor(
@@ -36,6 +38,11 @@ export interface SessionMaintenanceServiceContext {
   operationGate: Pick<DaemonOperationGate, "enter" | "tryEnterBarrier">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   personalizationUpdater?: (messages: SessionMessageLike[]) => number;
+  contextUsageCache?: Pick<ContextUsageCache, "invalidate">;
+  refreshContextUsage?: (
+    sessionId: string,
+    agent: SessionContextUsageAgent,
+  ) => Promise<void>;
 }
 
 /**
@@ -120,6 +127,12 @@ export class SessionMaintenanceService {
         messages: agentMessagesToTranscript(compacted.history),
       });
       this.context.events.publishSince(before);
+      this.context.contextUsageCache?.invalidate(sessionId);
+      try {
+        await this.context.refreshContextUsage?.(sessionId, agent);
+      } catch {
+        // Best-effort refresh; invalidate already dropped the stale snapshot.
+      }
       return {
         messageCount: compacted.afterMessageCount,
         messages: replaced.messages,

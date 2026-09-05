@@ -4,6 +4,7 @@ export type {
   UserMessage,
   AssistantMessage,
   AssistantMessagePhase,
+  CompactRole,
   ToolResultMessage,
   TextBlock,
   ImageBlock,
@@ -178,6 +179,27 @@ export { AppStateStore } from "./state/state-store";
 
 export { retryWithBackoff } from "./utils/retry";
 export { estimateTokens } from "./utils/token-counter";
+export {
+  assembleContextUsageSnapshot,
+  createTip,
+  evaluateTips,
+  formatContextUsageReport,
+  messagesToLedgerSegments,
+  toolSchemasToLedgerSegments,
+} from "./context-budget";
+export type {
+  AssembleContextUsageInput,
+  ContextBucketId,
+  ContextLedgerSegment,
+  ContextUsageBucket,
+  ContextUsageSnapshot,
+  ContextUsageSource,
+  ContextUsageTip,
+  ContextUsageTipCode,
+  ModelSwitchContext,
+  ToolSchemaInput,
+  ToolSchemaKind,
+} from "./context-budget";
 export {
   assertNoRemovedLifecycleToolNames,
   normalizeToolName,

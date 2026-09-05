@@ -73,6 +73,10 @@ function invariantGuidance(includeBackgroundShell: boolean): string {
     : INVARIANT_GUIDANCE.replace(`${LONG_RUNNING_SHELL_GUIDANCE}\n`, "");
 }
 
+export function resolveInvariantGuidance(includeBackgroundShell: boolean = true): string {
+  return invariantGuidance(includeBackgroundShell);
+}
+
 const BASE_SYSTEM_PROMPT = `${DEFAULT_IDENTITY}\n\n${INVARIANT_GUIDANCE}`;
 
 const MAX_SOUL_CHARS = 12_000;
@@ -758,75 +762,19 @@ export async function buildPromptLayers(
     skillsList?: Array<{ name: string; description: string }>;
   } = {}
 ): Promise<PromptLayers> {
-  const env = await getEnvironmentInfo(options.cwd);
-  const envSection = formatEnvironmentSection(env);
+  const { buildTaggedPromptSegments, taggedSegmentsToLayers } = await import(
+    "./prompt-segments-assembly.js"
+  );
+  const layers = taggedSegmentsToLayers(await buildTaggedPromptSegments(options));
 
-  const stable: string[] = [];
-  const context: string[] = [];
-  const volatile: string[] = [];
-
-  stable.push((await loadSoulMd()) ?? DEFAULT_IDENTITY);
-  stable.push(invariantGuidance(options.includeBackgroundShell !== false));
-
-  stable.push(envSection);
-
-  // Permission-mode guidance (default when unspecified, mirroring Python).
-  stable.push(buildPermissionModeSection(options.permissionMode ?? "default"));
-  stable.push(buildWorkStyleSection(options.workStyle ?? "practical"));
-
-  if (options.fastMode) {
-    stable.push("# Session Mode\nFast mode is enabled. Prefer concise replies, minimal tool use, and quicker progress.");
-  }
-
-  if (options.effort || options.passes) {
-    const parts: string[] = ["# Reasoning Settings"];
-    if (options.effort) parts.push(`- Effort: ${options.effort}`);
-    if (options.passes) parts.push(`- Passes: ${options.passes}`);
-    stable.push(parts.join("\n"));
-  }
-
-  if (options.skillsList && options.skillsList.length > 0) {
-    const lines = [
-      "# Available Skills",
-      "",
-      "The following skills are available via the `skill` tool.",
-      "",
-    ];
-    for (const skill of options.skillsList) {
-      lines.push(`- **${skill.name}**: ${skill.description}`);
-    }
-    stable.push(lines.join("\n"));
-  }
-
-  // Delegation / subagent guidance (on by default, mirroring Python which
-  // always appends it outside coordinator mode).
-  if (options.includeDelegation !== false) {
-    stable.push(buildDelegationSection());
-  }
-
-  if (options.customPrompt?.trim()) {
-    context.push(`# Custom Instructions\n\n${options.customPrompt.trim()}`);
-  }
-
-  const claudeMd = await loadClaudeMdPrompt(env.cwd);
-  if (claudeMd) context.push(claudeMd);
-
-  const userProfile = await loadUserProfile();
-  if (userProfile) volatile.push(userProfile);
-
-  // 个性化环境事实（C.5）：session-end 抽取的 local_rules（SSH 主机/数据
-  // 路径/conda 环境等）注入，与 Python prompts/context.py 同位（CLAUDE.md 后）。
-  const localRules = loadLocalRules();
-  if (localRules) volatile.push(localRules);
-
-  if (options.memoryContent && options.memoryContent.trim()) {
-    volatile.push(`# Project Memory\n\n${options.memoryContent.trim()}`);
+  if (options.memoryContent?.trim()) {
+    layers.volatile.push(`# Project Memory\n\n${options.memoryContent.trim()}`);
   }
 
   return {
-    stable: stable.filter((s) => s.trim()),
-    context: context.filter((s) => s.trim()),
-    volatile: volatile.filter((s) => s.trim()),
+    stable: layers.stable.filter((s) => s.trim()),
+    context: layers.context.filter((s) => s.trim()),
+    volatile: layers.volatile.filter((s) => s.trim()),
   };
 }
 
@@ -835,3 +783,8 @@ export function renderPromptLayers(layers: PromptLayers): string {
     .filter((s) => s.trim())
     .join("\n\n");
 }
+
+export {
+  buildPromptLedgerSegments,
+  type BuildPromptLedgerSegmentsOptions,
+} from "./ledger-segments.js";

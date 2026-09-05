@@ -192,6 +192,7 @@ export class QueryEngine implements IQueryEngine {
   private compactService: CompactService;
   private costTracker: CostTracker;
   private systemPrompt: string | undefined;
+  private lastMemoryReminderText: string | undefined;
   private model: string;
   private maxTurns: number;
   private skillRegistry?: unknown;
@@ -287,9 +288,11 @@ export class QueryEngine implements IQueryEngine {
     memoryContext: string | null,
   ): string | undefined {
     if (!memoryContext || !memoryContext.trim()) {
+      this.lastMemoryReminderText = undefined;
       return this.systemPrompt;
     }
     const reminder = `<system-reminder>\n${memoryContext.trim()}\n</system-reminder>`;
+    this.lastMemoryReminderText = reminder;
     if (this.systemPrompt && this.systemPrompt.trim()) {
       return `${this.systemPrompt}\n\n${reminder}`;
     }
@@ -515,6 +518,22 @@ export class QueryEngine implements IQueryEngine {
   }
 
   /**
+   * Runtime-owned prompt source for context-usage accounting.
+   * The reminder is the exact transient suffix used by the latest submitted turn.
+   */
+  getContextUsagePromptSource(): {
+    systemPrompt?: string;
+    memoryReminderText?: string;
+  } {
+    return {
+      ...(this.systemPrompt ? { systemPrompt: this.systemPrompt } : {}),
+      ...(this.lastMemoryReminderText
+        ? { memoryReminderText: this.lastMemoryReminderText }
+        : {}),
+    };
+  }
+
+  /**
    * 用于手动调用压缩消息历史，以控制上下文长度
    */
   async compact(): Promise<void> {
@@ -532,6 +551,7 @@ export class QueryEngine implements IQueryEngine {
   clear(): void {
     this.messages = [];
     this.costTracker.reset();
+    this.lastMemoryReminderText = undefined;
   }
 
   setSystemPrompt(prompt: string): void {

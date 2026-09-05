@@ -15,6 +15,7 @@ import type {
   DesktopPromptAttachmentInput,
   UploadDesktopAttachmentMemoryInput,
 } from "@shared/attachment-types"
+import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import type { StoreApi } from "zustand"
 import type { ComposerDraftState } from "./composer-draft-state"
 import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
@@ -139,6 +140,10 @@ export interface SessionActions {
   archiveSession: (sessionId: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   startSession: (content: string, options?: SubmitPromptOptions) => Promise<string | null>
+  refreshContextUsage: (options?: {
+    refresh?: boolean
+    previousContextWindow?: number
+  }) => Promise<void>
 }
 
 export interface PromptActions {
@@ -210,6 +215,7 @@ export interface DesktopSessionState
   branches: string[]
   activeSessionId: string | null
   sessionView: DesktopSessionView | null
+  contextUsageSnapshot: DesktopContextUsageSnapshot | null
   applySessionUpdate: (view: DesktopSessionView) => void
 }
 

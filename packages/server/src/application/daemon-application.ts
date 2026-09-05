@@ -8,6 +8,7 @@ import { fileReadTool } from "@openharness/tools";
 import {
   buildChildAgentWorktreeSlug,
   createChildAgentWorktreeManager,
+  discoverOpenHarnessExtensions,
   type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
@@ -81,6 +82,14 @@ import { AttachmentCapabilityRouter } from "./attachment-routing/attachment-capa
 import { resolveRuntimeAttachmentCapabilities } from "./attachment-routing/attachment-capabilities.js";
 import { createDefaultModelService } from "./default-services/model-service.js";
 import { SessionAttachmentResources } from "./attachment-resource/session-attachment-resources.js";
+import { sharedContextUsageCache } from "./context-usage-cache.js";
+import {
+  assembleSessionContextUsage,
+  resolveSessionModelContextLimits,
+  tryAssembleSessionContextUsageLive,
+  type SessionContextUsageAgent,
+} from "./assemble-session-context-usage.js";
+import { bindContextUsageLiveAssembler } from "./context-usage-live-binder.js";
 import {
   createAttachmentAuthorizationSessionResolver,
   createAttachmentOcrService,
@@ -445,6 +454,85 @@ export class DaemonApplication implements DurableAgentApplication {
         lastConsolidatedAt: readLastConsolidatedAt,
         autoDream: executeAutoDream,
       });
+
+      const contextUsageCache = sharedContextUsageCache;
+      const resolveSessionSettings = async (cwd: string) =>
+        options.getSettingsForCwd
+          ? await options.getSettingsForCwd(cwd)
+          : (options.getSettings?.() ?? options.settings);
+      const resolveSessionModelLimits = async (
+        session: SessionRecord,
+        settings: Settings,
+      ) =>
+        await resolveSessionModelContextLimits({
+          session,
+          settings,
+          listProviders: () =>
+            createDefaultModelService({ current: settings }).list(),
+        });
+      const resolveSessionSkillsList = async (cwd: string, settings: Settings) => {
+        const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
+        return skillRegistry.modelVisibleList();
+      };
+      const refreshContextUsage = async (
+        sessionId: string,
+        agent: SessionContextUsageAgent,
+      ) => {
+        const session = store.getSession(sessionId);
+        if (!session) return;
+        const settings = await resolveSessionSettings(session.cwd);
+        if (!settings) return;
+        const runtime = readSessionRuntimeConfig(session, {
+          provider: settings.provider,
+        });
+        const limits = await resolveSessionModelLimits(session, settings);
+        const skillsList = await resolveSessionSkillsList(session.cwd, settings);
+        await assembleSessionContextUsage({
+          sessionId,
+          cwd: session.cwd,
+          model: runtime.model,
+          settings,
+          agent,
+          cache: contextUsageCache,
+          contextWindow: limits.contextWindow,
+          outputLimit: limits.outputLimit,
+          skillsList,
+        });
+      };
+      bindContextUsageLiveAssembler(async ({ sessionId, cwd, previousContextWindow }) => {
+        if (!this.agentPool.configured) return null;
+        const session = store.getSession(sessionId);
+        if (!session) return null;
+        const settings = await resolveSessionSettings(session.cwd || cwd);
+        if (!settings) return null;
+        const runtime = readSessionRuntimeConfig(session, {
+          provider: settings.provider,
+        });
+        const limits = await resolveSessionModelLimits(session, settings);
+        const sessionCwd = session.cwd || cwd;
+        const skillsList = await resolveSessionSkillsList(sessionCwd, settings);
+        return await tryAssembleSessionContextUsageLive({
+          sessionId,
+          cwd: sessionCwd,
+          model: runtime.model,
+          settings,
+          cache: contextUsageCache,
+          previousContextWindow,
+          contextWindow: limits.contextWindow,
+          outputLimit: limits.outputLimit,
+          skillsList,
+          getAgent: async () => {
+            const warm = await this.agentPool.get(sessionId);
+            if (warm) return warm;
+            try {
+              return await this.agentPool.acquireSession(sessionId);
+            } catch {
+              return undefined;
+            }
+          },
+        });
+      });
+
       // 车道轮到这条 run 时，真正 submitMessage 的地方。
       const attachmentRouter = new AttachmentCapabilityRouter({
         resolveReadyContentPath: (assetId) =>
@@ -462,6 +550,8 @@ export class DaemonApplication implements DurableAgentApplication {
         postRunMaintenance,
         attachmentResources: this.attachmentResources,
         attachmentOcrAvailable: true,
+        contextUsageCache,
+        refreshContextUsage,
         routeAttachments: (input) => attachmentRouter.route(input),
         resolveCapabilities: async (session) => {
           const settings = options.getSettingsForCwd
@@ -523,6 +613,8 @@ export class DaemonApplication implements DurableAgentApplication {
         liveChildren: this.liveChildren,
         operationGate: this.operationGate,
         events: this.eventPublisher,
+        contextUsageCache,
+        refreshContextUsage,
       });
       /**
        * 会话服务：
@@ -539,6 +631,7 @@ export class DaemonApplication implements DurableAgentApplication {
         operationGate: this.operationGate,
         events: this.eventPublisher,
         assertReady: () => this.assertReady(),
+        contextUsageCache,
       });
       /**
        * 通道服务：
@@ -785,6 +878,7 @@ export class DaemonApplication implements DurableAgentApplication {
    * 最后放掉主人锁、关 store。中途失败都攒着，尽量拆干净再一起报。
    */
   private async closeWork(): Promise<void> {
+    bindContextUsageLiveAssembler(undefined);
     const failures: unknown[] = [];
     try {
       await this.startupRecovery;

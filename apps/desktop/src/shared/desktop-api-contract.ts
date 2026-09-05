@@ -33,7 +33,9 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
+  GetDesktopContextUsageInput,
 } from "./session-types"
+import type { DesktopContextUsageSnapshot } from "./context-usage-types"
 import type {
   WorkspaceListFilesInput,
   WorkspaceListFilesResult,
@@ -254,6 +256,7 @@ export type DesktopAPI = {
     updatePermissionMode: (
       input: UpdateDesktopSessionPermissionModeInput
     ) => Promise<DesktopSessionRecord>
+    getContextUsage: (input: GetDesktopContextUsageInput) => Promise<DesktopContextUsageSnapshot>
     rename: (input: RenameDesktopSessionInput) => Promise<DesktopSessionRecord>
     setPinned: (input: PinDesktopSessionInput) => Promise<DesktopSessionRecord>
     archive: (sessionId: string) => Promise<DesktopSessionRecord>

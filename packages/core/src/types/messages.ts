@@ -3,9 +3,13 @@ export interface SystemMessage {
   content: string;
 }
 
+export type CompactRole = "summary" | "boundary";
+
 export interface UserMessage {
   type: "user";
   content: string | ContentBlock[];
+  /** 压缩边界标记；不改变发给模型的 content。 */
+  compactRole?: CompactRole;
 }
 
 export interface AssistantMessage {
@@ -13,6 +17,8 @@ export interface AssistantMessage {
   content: string;
   phase?: AssistantMessagePhase;
   toolUses?: ToolUseBlock[];
+  /** 压缩摘要消息；不改变发给模型的 content。 */
+  compactRole?: CompactRole;
 }
 
 export type AssistantMessagePhase = "commentary" | "final_answer";

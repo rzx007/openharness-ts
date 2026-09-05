@@ -530,8 +530,22 @@ export async function dispatchSessionCommand(
       await readPresentation(`context:${cwd}:status`, "Context", async () => await client.getContextStatus({ cwd }));
       return "handled";
     }
+    if (action === "usage") {
+      await readPresentation(
+        `context:${cwd}:usage:${sessionId ?? "none"}`,
+        "Context",
+        async () => {
+          const result = await client.getContextUsage({
+            cwd,
+            ...(sessionId ? { sessionId } : {}),
+          });
+          return result.report;
+        },
+      );
+      return "handled";
+    }
     if (action !== "preview") {
-      emit("Usage: /context [status]");
+      emit("Usage: /context [preview|status|usage]");
       return "handled";
     }
     await readPresentation(`context:${cwd}`, "Context", async () => await client.getContextPreview({ cwd }));

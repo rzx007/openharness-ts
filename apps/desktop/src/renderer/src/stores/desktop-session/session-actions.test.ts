@@ -910,6 +910,90 @@ describe("desktop session actions", () => {
     })
   })
 
+  it("passes the previous context window when refreshing after a session model switch", async () => {
+    const view = emptySessionView("session-model-switch")
+    const previousSnapshot = {
+      model: "old-model",
+      contextWindow: 200_000,
+      estimatedInputTokens: 90_000,
+      percentFull: 0.45,
+      estimator: "heuristic_v1" as const,
+      buckets: [],
+      tips: [],
+      computedAt: new Date().toISOString(),
+      source: "session_cache" as const,
+    }
+    const getContextUsage = vi.fn(async () => previousSnapshot)
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          updateModel: vi.fn(async () => ({
+            ...view.session,
+            model: "small-model",
+            metadata: { runtime: { model: "small-model", provider: "small-provider" } },
+          })),
+          getContextUsage,
+        },
+      },
+    })
+    useDesktopSessionStore.setState({
+      activeSessionId: view.session.id,
+      sessionView: view,
+      sessions: [view.session],
+      contextUsageSnapshot: previousSnapshot,
+    })
+
+    await useDesktopSessionStore.getState().updateSessionModel(view.session.id, {
+      id: "small-model",
+      label: "Small",
+      provider: "Small",
+      providerName: "small-provider",
+    })
+    await vi.waitFor(() => expect(getContextUsage).toHaveBeenCalledOnce())
+
+    expect(getContextUsage).toHaveBeenCalledWith({
+      cwd: view.session.cwd,
+      sessionId: view.session.id,
+      refresh: true,
+      previousContextWindow: 200_000,
+    })
+  })
+
+  it("does not let an older same-session usage refresh overwrite a newer response", async () => {
+    const view = emptySessionView("session-usage-race")
+    const resolvers: Array<(value: unknown) => void> = []
+    const getContextUsage = vi.fn(
+      () => new Promise<unknown>((resolve) => resolvers.push(resolve))
+    )
+    vi.stubGlobal("window", { desktop: { sessions: { getContextUsage } } })
+    useDesktopSessionStore.setState({
+      activeSessionId: view.session.id,
+      sessionView: view,
+      sessions: [view.session],
+    })
+    const snapshot = (model: string, tokens: number) => ({
+      model,
+      contextWindow: 100_000,
+      estimatedInputTokens: tokens,
+      percentFull: tokens / 100_000,
+      estimator: "heuristic_v1" as const,
+      buckets: [],
+      tips: [],
+      computedAt: new Date().toISOString(),
+      source: "live_assembly" as const,
+    })
+
+    const older = useDesktopSessionStore.getState().refreshContextUsage({ refresh: true })
+    const newer = useDesktopSessionStore.getState().refreshContextUsage({ refresh: true })
+    await vi.waitFor(() => expect(getContextUsage).toHaveBeenCalledTimes(2))
+    resolvers[1]!(snapshot("newer", 20))
+    await newer
+    resolvers[0]!(snapshot("older", 10))
+    await older
+
+    expect(useDesktopSessionStore.getState().contextUsageSnapshot?.model).toBe("newer")
+  })
+
   it("keeps the latest permission mode when an older request succeeds late", async () => {
     let resolveFirst!: (value: typeof refreshedBootstrap) => void
     let resolveSecond!: (value: typeof refreshedBootstrap) => void

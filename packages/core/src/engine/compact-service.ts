@@ -20,6 +20,7 @@ import type {
   ToolUseBlock,
   IHookExecutor,
 } from "../index";
+import { DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE } from "../constants/vision-tokens";
 import { estimateTokens } from "../utils/token-counter";
 import {
   boundaryFallsInsideToolGroup as historyBoundaryFallsInsideToolGroup,
@@ -80,9 +81,6 @@ const CONTEXT_COLLAPSE_TAIL_CHARS = 500;
  * estimateTokens 是启发式估算，乘 padding 降低「估少了导致真正超窗」的风险。
  */
 const TOKEN_ESTIMATION_PADDING = 4 / 3;
-/** 单张图片在 token 估算中的默认占用（vision 模型粗略估值）。 */
-const DEFAULT_VISION_IMAGE_TOKEN_ESTIMATE = 3_072;
-
 /**
  * LLM 摘要提示词。
  * 要求模型先写 <analysis>（草稿/推理），再写 <summary>（正式续聊用摘要）；
@@ -569,6 +567,7 @@ export class CompactService {
     const summary: Message = {
       type: "assistant",
       content: `[Conversation compacted: ${compactedCount} messages summarized (${toolResultCount} tool results removed). ${recent.length} recent messages preserved.]`,
+      compactRole: "summary",
     };
 
     const boundary = this.createBoundaryMarker({
@@ -840,6 +839,7 @@ export class CompactService {
     const summary: Message = {
       type: "assistant",
       content: formatted,
+      compactRole: "summary",
     };
 
     // postCount = system + summary + boundary + recent
@@ -1093,7 +1093,7 @@ export class CompactService {
     if (metadata.usedHeadTruncationRetry) {
       lines.push("Note: older context was head-truncated during a PTL retry.");
     }
-    return { type: "user", content: lines.join("\n") };
+    return { type: "user", content: lines.join("\n"), compactRole: "boundary" };
   }
 
   // -------------------------------------------------------------------------

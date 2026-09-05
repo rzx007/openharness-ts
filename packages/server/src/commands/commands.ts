@@ -109,9 +109,9 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
   },
   {
     name: "/context",
-    description: "Show context preview or status table",
+    description: "Show context preview, status table, or usage budget",
     kind: "session",
-    argumentHint: "[status]",
+    argumentHint: "[preview|status|usage]",
     source: "builtin",
   },
   {

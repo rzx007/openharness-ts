@@ -15,6 +15,7 @@ import type {
   Message,
   RuntimeBundle,
   Settings,
+  ToolDescriptor,
   ToolRegistrationSource,
   UsageSnapshot,
 } from "@openharness/core";
@@ -108,6 +109,16 @@ export interface AgentInspection {
   capabilities: AgentCapabilitySnapshot;
 }
 
+/** Model-visible tool schema + registration source (same registry used for sends). */
+export interface ModelVisibleTool extends ToolDescriptor {
+  source: ToolRegistrationSource;
+}
+
+export interface ContextUsagePromptSource {
+  systemPrompt?: string;
+  memoryReminderText?: string;
+}
+
 export interface OpenHarnessAgent {
   readonly id: string;
   readonly state: OpenHarnessAgentState;
@@ -134,6 +145,10 @@ export interface OpenHarnessAgent {
   getUsage(): UsageSnapshot;
   getCapabilities(): AgentCapabilitySnapshot;
   inspect(): AgentInspection;
+  /** Tools currently registered for model calls (schemas + registration source). */
+  listModelVisibleTools(): ModelVisibleTool[];
+  /** Prompt source owned by the runtime that performs model calls. */
+  getContextUsagePromptSource?(): ContextUsagePromptSource;
   close(): Promise<void>;
 }
 
@@ -305,6 +320,23 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
         ? { sandbox: this.runtime.sandboxStatus }
         : {}),
     };
+  }
+
+  listModelVisibleTools(): ModelVisibleTool[] {
+    return this.runtime.toolRegistry.getAll().map((tool) => {
+      const inspection = this.runtime.toolRegistry.inspect(tool.name);
+      return {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        ...(tool.safeToRetry === undefined ? {} : { safeToRetry: tool.safeToRetry }),
+        source: inspection?.source ?? { kind: "runtime" },
+      };
+    });
+  }
+
+  getContextUsagePromptSource(): ContextUsagePromptSource {
+    return this.runtime.queryEngine.getContextUsagePromptSource();
   }
 
   close(): Promise<void> {

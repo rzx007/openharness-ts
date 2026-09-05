@@ -379,6 +379,10 @@ export interface QueryEngine {
     },
   ): AsyncIterable<StreamEvent>;
   getHistory(): Message[];
+  getContextUsagePromptSource(): {
+    systemPrompt?: string;
+    memoryReminderText?: string;
+  };
   compact(): Promise<void>;
   clear(): void;
   setSystemPrompt(prompt: string): void;

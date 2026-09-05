@@ -188,6 +188,31 @@ describe("dispatchSessionCommand", () => {
     expect(getContextStatus).toHaveBeenCalledWith({ cwd: "/tmp/project" });
   });
 
+  it("routes /context usage through the presentation reader", async () => {
+    const getContextUsage = vi.fn(async () => ({
+      snapshot: { source: "static_only" },
+      report: "USAGE REPORT TEXT",
+    }));
+    const client = fakeClient({ getContextUsage });
+    const { host: h, emitted } = host({ client });
+    const reads: Array<{ key: string; title: string; load: () => Promise<string> }> = [];
+    Object.assign(h, {
+      sessionId: "s1",
+      present: vi.fn(),
+      cacheFirstRead: (request: { key: string; title: string; load: () => Promise<string> }) => {
+        reads.push(request);
+      },
+    });
+
+    const outcome = await dispatchSessionCommand({ name: "/context", args: "usage" }, h);
+
+    expect(outcome).toBe("handled");
+    expect(emitted).toHaveLength(0);
+    expect(reads[0]?.key).toBe("context:/tmp/project:usage:s1");
+    await expect(reads[0]!.load()).resolves.toBe("USAGE REPORT TEXT");
+    expect(getContextUsage).toHaveBeenCalledWith({ cwd: "/tmp/project", sessionId: "s1" });
+  });
+
   it("lists Jobs through the unified read surface", async () => {
     const listJobs = vi.fn(async () => [agentJob]);
     const { host: h, emitted } = host({ client: fakeClient({ listJobs }) });

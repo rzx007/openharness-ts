@@ -107,6 +107,8 @@ function ConversationPane({
   const updateSessionPermissionMode = useDesktopSessionStore(
     (state) => state.updateSessionPermissionMode
   )
+  const refreshContextUsage = useDesktopSessionStore((state) => state.refreshContextUsage)
+  const contextUsageSnapshot = useDesktopSessionStore((state) => state.contextUsageSnapshot)
   const interrupt = useDesktopSessionStore((state) => state.interrupt)
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
   const setComposerDraftText = useDesktopSessionStore((state) => state.setComposerDraftText)
@@ -379,6 +381,8 @@ function ConversationPane({
           onSelectModel={(model) => void selectModel(model)}
           onSelectPermissionMode={(permissionMode) => void selectPermissionMode(permissionMode)}
           onTogglePanel={onTogglePanel}
+          contextUsage={contextUsageSnapshot}
+          onOpenContextUsage={() => void refreshContextUsage({ refresh: true })}
         />
       ) : (
         <>
@@ -475,6 +479,7 @@ function ConversationPane({
                 permissionMode={selectedPermissionMode}
                 skillCommands={skillCommands}
                 canSubmit={canSubmit}
+                contextUsage={contextUsageSnapshot}
                 attachments={attachments}
                 attachmentInteractionEnabled={attachmentSupport.interactionEnabled}
                 onDraftChange={setDraft}
@@ -490,6 +495,7 @@ function ConversationPane({
                   void removeAttachment(composerScope, draftId)
                 }}
                 onInterrupt={() => void interrupt()}
+                onOpenContextUsage={() => void refreshContextUsage({ refresh: true })}
                 onSelectModel={(model) => {
                   if (activeSessionId) void updateSessionModel(activeSessionId, model)
                 }}

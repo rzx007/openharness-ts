@@ -5,13 +5,15 @@ import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
 import { PlusMenu } from "@renderer/components/ui/plus-menu"
 import { cn } from "@renderer/lib/utils"
-import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
+import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
+import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
 import { createComposerAttachmentMenuItems } from "./composer-attachment-menu"
 import { ComposerAttachments } from "./composer-attachments"
 import { readComposerDrop } from "./composer-file-input"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
 import type { ComposerSkillCommand } from "./composer-skill-commands"
+import { ContextUsageControl } from "./context-usage-control"
 import { ModelPicker } from "./model-picker"
 import { RichPromptInput } from "./rich-prompt-input"
 import { SkillCommandMenu } from "./skill-command-menu"
@@ -32,6 +34,8 @@ export function Composer({
   textareaClassName,
   rows = 2,
   canSubmit,
+  contextUsage = null,
+  onOpenContextUsage,
   onDraftChange,
   onSubmit,
   onInterrupt,
@@ -62,6 +66,8 @@ export function Composer({
   textareaClassName?: string
   rows?: number
   canSubmit?: boolean
+  contextUsage?: DesktopContextUsageSnapshot | null
+  onOpenContextUsage?: () => void
   onDraftChange: (value: string) => void
   onSubmit: () => void
   onInterrupt?: () => void
@@ -177,6 +183,7 @@ export function Composer({
           </PopoverContent>
         </Popover>
         <div className="ml-auto flex min-w-0 items-center gap-1">
+          <ContextUsageControl snapshot={contextUsage} onOpen={onOpenContextUsage} />
           <ModelPicker
             open={activePicker === "model"}
             onOpenChange={(open) => setActivePicker(open ? "model" : null)}

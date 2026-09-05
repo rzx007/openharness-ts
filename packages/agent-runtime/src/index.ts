@@ -6,6 +6,7 @@ export {
   AgentOperationConflictError,
   type AgentCompactResult,
   type AgentInspection,
+  type ModelVisibleTool,
   type OpenHarnessAgent,
   type OpenHarnessAgentOptions,
   type OpenHarnessAgentState,
