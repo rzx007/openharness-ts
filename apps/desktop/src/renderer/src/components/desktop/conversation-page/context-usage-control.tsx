@@ -33,7 +33,7 @@ export function ContextUsageControl({
         {snapshot ? (
           <ContextUsageTray snapshot={snapshot} />
         ) : (
-          <div className="w-64 px-2 py-3 text-xs text-muted-foreground">正在加载 Context…</div>
+          <div className="w-64 px-2 py-3 text-xs text-muted-foreground">正在加载上下文…</div>
         )}
       </PopoverContent>
     </Popover>

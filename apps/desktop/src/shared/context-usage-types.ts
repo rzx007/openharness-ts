@@ -14,8 +14,18 @@ export interface DesktopContextUsageBucket {
   tokens: number
 }
 
+export type DesktopContextUsageTipCode =
+  | "near_full"
+  | "overflow_after_model_switch"
+  | "static_tools_heavy"
+  | "conversation_omitted"
+  | "partial_sources"
+  | "media_unestimated"
+  | "no_context_window"
+  | "stale_or_rebuilt"
+
 export interface DesktopContextUsageTip {
-  code: string
+  code: DesktopContextUsageTipCode | (string & {})
   message: string
 }
 

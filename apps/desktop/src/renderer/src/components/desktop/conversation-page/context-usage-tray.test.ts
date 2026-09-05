@@ -28,7 +28,7 @@ const base: DesktopContextUsageSnapshot = {
 }
 
 describe("ContextUsageTray", () => {
-  it("hides zero-token buckets in the tray list", () => {
+  it("hides zero-token buckets and shows Chinese labels", () => {
     const html = renderToStaticMarkup(
       createElement(ContextUsageTray, {
         snapshot: {
@@ -40,15 +40,27 @@ describe("ContextUsageTray", () => {
         },
       })
     )
-    expect(html).toContain("System prompt")
-    expect(html).not.toContain("Tool definitions")
+    expect(html).toContain("系统提示")
+    expect(html).not.toContain("工具定义")
+    expect(html).not.toContain("System prompt")
   })
 
-  it("renders title, percent full, token totals, and tips", () => {
+  it("renders Chinese title, percent, token totals, and tips", () => {
     const html = renderToStaticMarkup(createElement(ContextUsageTray, { snapshot: base }))
-    expect(html).toContain("Context")
-    expect(html).toContain("0% Full")
-    expect(html).toContain("~100 / 100K Tokens")
-    expect(html).toContain("Context is nearly full.")
+    expect(html).toContain("上下文")
+    expect(html).toContain("0% 已用")
+    expect(html).toContain("约 100 / 100K Tokens")
+    expect(html).toContain("上下文接近满额")
+  })
+
+  it("omits dash percent when context window is missing", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContextUsageTray, {
+        snapshot: { ...base, percentFull: null, contextWindow: null },
+      })
+    )
+    expect(html).not.toContain("—")
+    expect(html).toContain("占用明细")
+    expect(html).toContain("约 100 Tokens")
   })
 })

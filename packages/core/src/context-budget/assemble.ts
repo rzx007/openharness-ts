@@ -8,14 +8,14 @@ import type {
 } from "./types.js";
 
 const BUCKET_ORDER: readonly { id: ContextBucketId; label: string }[] = [
-  { id: "system", label: "System prompt" },
-  { id: "tools", label: "Tool definitions" },
-  { id: "rules", label: "Rules" },
-  { id: "skills", label: "Skills" },
-  { id: "mcp", label: "MCP & dynamic tools" },
-  { id: "subagents", label: "Subagent definitions" },
-  { id: "summary", label: "Summarized conversation" },
-  { id: "conversation", label: "Conversation" },
+  { id: "system", label: "系统提示" },
+  { id: "tools", label: "工具定义" },
+  { id: "rules", label: "规则" },
+  { id: "skills", label: "技能" },
+  { id: "mcp", label: "MCP 与动态工具" },
+  { id: "subagents", label: "子代理定义" },
+  { id: "summary", label: "对话摘要" },
+  { id: "conversation", label: "对话" },
 ];
 
 function segmentTokens(text: string, mediaTokens?: number): number {

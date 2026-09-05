@@ -1,22 +1,15 @@
 import type { ContextUsageTip, ContextUsageTipCode } from "./types.js";
 
 const TIP_MESSAGES: Record<ContextUsageTipCode, string> = {
-  near_full:
-    "Context is nearly full. Consider running /compact or starting a new conversation.",
+  near_full: "上下文接近满额，建议执行 /compact 或新开对话。",
   overflow_after_model_switch:
-    "Estimated input exceeds the current model context window after a model switch. Consider compacting first.",
-  static_tools_heavy:
-    "Tool and MCP definitions use a large share of the context window.",
-  conversation_omitted:
-    "Conversation usage was not included in this snapshot.",
-  partial_sources:
-    "Some context sources could not be read; the snapshot may be incomplete.",
-  media_unestimated:
-    "Some media could not be estimated and may be undercounted.",
-  no_context_window:
-    "The current model has no context window metadata; percentage cannot be calculated.",
-  stale_or_rebuilt:
-    "The usage snapshot was rebuilt and may differ from the previous cache.",
+    "换模型后估算占用已超过当前窗宽，建议先压缩再继续。",
+  static_tools_heavy: "工具与 MCP 定义占用了较大比例的上下文。",
+  conversation_omitted: "本次快照未计入对话占用。",
+  partial_sources: "部分上下文来源读取失败，快照可能不完整。",
+  media_unestimated: "部分媒体无法估值，占用可能被低估。",
+  no_context_window: "当前模型没有上下文窗宽元数据，无法计算百分比。",
+  stale_or_rebuilt: "占用快照已重建，可能与上一份缓存不同。",
 };
 
 export function createTip(code: ContextUsageTipCode): ContextUsageTip {

@@ -182,8 +182,7 @@ export function Composer({
             />
           </PopoverContent>
         </Popover>
-        <div className="ml-auto flex min-w-0 items-center gap-1">
-          <ContextUsageControl snapshot={contextUsage} onOpen={onOpenContextUsage} />
+        <div className="ml-auto flex min-w-0 items-center gap-0.5">
           <ModelPicker
             open={activePicker === "model"}
             onOpenChange={(open) => setActivePicker(open ? "model" : null)}
@@ -199,6 +198,7 @@ export function Composer({
           <ComposerIconButton label="语音输入">
             <Mic />
           </ComposerIconButton>
+          <ContextUsageControl snapshot={contextUsage} onOpen={onOpenContextUsage} />
           <ComposerSendButton
             sending={sending}
             running={running}

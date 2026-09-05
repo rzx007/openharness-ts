@@ -2,6 +2,8 @@ import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 
 import {
   CONTEXT_BUCKET_COLORS,
+  contextBucketLabelZh,
+  contextTipMessageZh,
   formatContextPercentFull,
   formatContextTokensShort,
   formatContextTokensSummary,
@@ -16,21 +18,26 @@ export function ContextUsageTray({
   const visibleBuckets = nonEmptyBuckets(snapshot)
   const total = visibleBuckets.reduce((sum, bucket) => sum + bucket.tokens, 0)
   const overflow = snapshot.percentFull != null && snapshot.percentFull > 1
+  const percentFullLabel = formatContextPercentFull(snapshot.percentFull)
 
   return (
-    <div className="flex w-72 flex-col gap-3 p-1 text-sm" role="dialog" aria-label="Context">
+    <div className="flex w-72 flex-col gap-3 p-1 text-sm" role="dialog" aria-label="上下文">
       <div className="px-1.5 pt-1">
-        <h2 className="text-sm font-medium text-foreground">Context</h2>
+        <h2 className="text-sm font-medium text-foreground">上下文</h2>
         <div className="mt-1 flex items-baseline justify-between gap-2">
-          <span
-            className={
-              overflow
-                ? "text-sm font-medium text-destructive"
-                : "text-sm font-medium text-foreground"
-            }
-          >
-            {formatContextPercentFull(snapshot.percentFull)}
-          </span>
+          {percentFullLabel != null ? (
+            <span
+              className={
+                overflow
+                  ? "text-sm font-medium text-destructive"
+                  : "text-sm font-medium text-foreground"
+              }
+            >
+              {percentFullLabel}
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">占用明细</span>
+          )}
           <span className="text-xs tabular-nums text-muted-foreground">
             {formatContextTokensSummary(snapshot)}
           </span>
@@ -38,7 +45,7 @@ export function ContextUsageTray({
       </div>
 
       <div
-        className="mx-1.5 flex h-2 overflow-hidden rounded-full bg-muted"
+        className="mx-1.5 flex h-1.5 overflow-hidden rounded-full bg-muted"
         aria-hidden={visibleBuckets.length === 0}
       >
         {visibleBuckets.map((bucket) => {
@@ -46,7 +53,7 @@ export function ContextUsageTray({
           return (
             <div
               key={bucket.id}
-              title={bucket.label}
+              title={contextBucketLabelZh(bucket.id, bucket.label)}
               style={{
                 width: `${widthPct}%`,
                 backgroundColor: CONTEXT_BUCKET_COLORS[bucket.id],
@@ -65,7 +72,9 @@ export function ContextUsageTray({
               style={{ backgroundColor: CONTEXT_BUCKET_COLORS[bucket.id] }}
               aria-hidden
             />
-            <span className="min-w-0 flex-1 truncate text-foreground">{bucket.label}</span>
+            <span className="min-w-0 flex-1 truncate text-foreground">
+              {contextBucketLabelZh(bucket.id, bucket.label)}
+            </span>
             <span className="tabular-nums text-muted-foreground">
               {formatContextTokensShort(bucket.tokens)}
             </span>
@@ -77,7 +86,7 @@ export function ContextUsageTray({
         <ul className="flex flex-col gap-1.5 border-t border-border px-1.5 pt-2 pb-1">
           {snapshot.tips.map((tip) => (
             <li key={tip.code} className="text-xs leading-snug text-muted-foreground">
-              {tip.message}
+              {contextTipMessageZh(tip.code, tip.message)}
             </li>
           ))}
         </ul>
