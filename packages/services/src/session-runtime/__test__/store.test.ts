@@ -1763,6 +1763,42 @@ describe("SessionStore", () => {
     );
   });
 
+  it("keeps part.updated payload text stable after a later delta mutates the live row", () => {
+    withStore((store) => {
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const message = store.createMessage({
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+      });
+      store.upsertMessagePart({
+        id: "p1",
+        sessionId: "s1",
+        messageId: message.id,
+        type: "text",
+        status: "running",
+        text: "",
+      });
+      store.appendMessagePartDelta({
+        sessionId: "s1",
+        messageId: message.id,
+        partId: "p1",
+        field: "text",
+        delta: "Building",
+      });
+
+      const updated = store
+        .listEvents()
+        .filter((event) => event.type === "session.message.part.updated")
+        .at(-1);
+      const part = updated?.payload.part as { text?: string } | undefined;
+      expect(part?.text).toBe("");
+      expect(store.listMessageParts("s1")).toMatchObject([
+        { id: "p1", text: "Building" },
+      ]);
+    });
+  });
+
   it("does not mutate live text when transient cursor allocation fails", () => {
     withStore(
       (store) => {

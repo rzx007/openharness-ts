@@ -2809,7 +2809,7 @@ export class SessionStore {
     this.appendEventInMemory({
       type: "session.message.part.updated",
       sessionId: input.sessionId,
-      payload: { part: row },
+      payload: { part: clone(row) },
     });
     this.save();
     return clone(row);
