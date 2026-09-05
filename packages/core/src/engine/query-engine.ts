@@ -36,7 +36,7 @@ import {
 } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
-import { validateToolInput } from "./tool-input-schema";
+import { normalizeToolInput, validateToolInput } from "./tool-input-schema";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
@@ -657,6 +657,8 @@ export class QueryEngine implements IQueryEngine {
         };
         continue;
       }
+
+      toolUse.input = normalizeToolInput(tool.inputSchema, toolUse.input) as Record<string, unknown>;
 
       const validationError = validateToolInput(
         tool.inputSchema,

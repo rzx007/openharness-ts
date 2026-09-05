@@ -1,3 +1,51 @@
+const PROPERTY_ALIASES: Record<string, readonly string[]> = {
+  file_path: ["path", "filePath"],
+  path: ["file_path", "filePath"],
+  content: ["contents"],
+  contents: ["content"],
+  old_string: ["oldString"],
+  new_string: ["newString"],
+  replace_all: ["replaceAll"],
+};
+
+export function normalizeToolInput(
+  schema: Record<string, unknown> | undefined,
+  input: unknown,
+): unknown {
+  if (!schema || !isRecord(input)) return input;
+
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const propertyNames = Object.keys(properties);
+  if (propertyNames.length === 0) return input;
+
+  const normalized: Record<string, unknown> = { ...input };
+  const copiedFrom = new Set<string>();
+
+  for (const key of propertyNames) {
+    if (Object.prototype.hasOwnProperty.call(normalized, key)) continue;
+    const aliases = PROPERTY_ALIASES[key];
+    if (!aliases) continue;
+    for (const alias of aliases) {
+      if (Object.prototype.hasOwnProperty.call(normalized, alias)) {
+        normalized[key] = normalized[alias];
+        copiedFrom.add(alias);
+        break;
+      }
+    }
+  }
+
+  if (copiedFrom.size === 0) return input;
+
+  if (schema.additionalProperties === false) {
+    const known = new Set(propertyNames);
+    for (const alias of copiedFrom) {
+      if (!known.has(alias)) delete normalized[alias];
+    }
+  }
+
+  return normalized;
+}
+
 export function validateToolInput(
   schema: Record<string, unknown> | undefined,
   input: unknown,
