@@ -17,7 +17,7 @@
 ## 不要把这些加回 `dependencies`
 
 - 渲染层 UI 包（`react`、`lucide-react`、`@lobehub/icons`、`streamdown`…）。窗口页面已经在 `out/renderer`。
-- `@openharness/server` 以及其它 workspace 包。放进 production 依赖后，builder 会顺着链接扫完整棵 monorepo，又回到“搜索 node modules 停很久”。
+- `@openharness/server`、`@openharness/core` 以及其它 workspace 包。放进 production 依赖后，builder 会顺着链接扫完整棵 monorepo，又回到“搜索 node modules 停很久”；主进程还会按 CJS `require` 外置加载，而 workspace 包的 `exports` 通常只有 `import`，会直接炸成 `ERR_PACKAGE_PATH_NOT_EXPORTED`。
 - Tailwind / lightningcss 的全平台可选二进制。它们是构建工具，不是运行时。
 
 以后主进程如果真的要运行时 `require` 某个 npm 包，再把它放进 `dependencies`，并确认 Vite 没有把它打进 bundle（原生模块用 `externalizeDeps.include`）。

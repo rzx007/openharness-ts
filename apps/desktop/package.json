@@ -28,7 +28,6 @@
   },
   "dependencies": {
     "@arcships/light-ocr": "0.5.7",
-    "@openharness/core": "workspace:*",
     "better-sqlite3": "^13.0.2",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.3.9",
