@@ -49,5 +49,8 @@ function preview(path: string): WorkspaceReadFileResult {
     size: content.length,
     binary: false,
     content,
+    scope: "project",
+    relativePath: path,
+    rootLabel: "",
   }
 }

@@ -18,6 +18,8 @@ export interface WorkspaceReadFileInput {
   path: string
 }
 
+export type WorkspaceFileScope = "project" | "extra-root"
+
 export interface WorkspaceReadFileResult {
   path: string
   name: string
@@ -25,6 +27,9 @@ export interface WorkspaceReadFileResult {
   size: number
   binary: boolean
   content: string | null
+  scope: WorkspaceFileScope
+  relativePath: string
+  rootLabel: string
 }
 
 export interface WorkspaceRevealPathInput {

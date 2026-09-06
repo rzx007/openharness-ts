@@ -1,16 +1,26 @@
-import { readdir, readFile, stat } from "node:fs/promises"
-import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path"
+import { readdir, readFile, realpath, stat } from "node:fs/promises"
+import { homedir } from "node:os"
+import { basename, extname, join, posix, relative, resolve, sep, win32 } from "node:path"
 import { clipboard, shell } from "electron"
 
 import type {
   WorkspaceCopyPathInput,
   WorkspaceFileEntry,
+  WorkspaceFileScope,
   WorkspaceListFilesInput,
   WorkspaceListFilesResult,
   WorkspaceReadFileInput,
   WorkspaceReadFileResult,
   WorkspaceRevealPathInput,
 } from "../../../shared/workspace-types"
+
+import { buildOutsideProjectRoot } from "../session/outside-project-workspace"
+import {
+  classifyWorkspacePath,
+  isPathInside,
+  type WorkspaceAllowedRoots,
+  type WorkspacePathClassification,
+} from "./workspace-path"
 
 const ignoredDirectories = new Set([
   ".git",
@@ -27,6 +37,12 @@ const maxFileBytes = 1_250_000
 const textDecoder = new TextDecoder("utf-8", { fatal: false })
 
 class WorkspaceService {
+  private allowedRoots: { configDir: string; documentsPath: string } | null = null
+
+  configureAllowedRoots(input: { configDir: string; documentsPath: string }): void {
+    this.allowedRoots = input
+  }
+
   async listFiles(input: WorkspaceListFilesInput): Promise<WorkspaceListFilesResult> {
     const rootPath = await resolveDirectory(input.rootPath)
     const entries: WorkspaceFileEntry[] = []
@@ -69,40 +85,86 @@ class WorkspaceService {
   }
 
   async readFile(input: WorkspaceReadFileInput): Promise<WorkspaceReadFileResult> {
-    const rootPath = await resolveDirectory(input.rootPath)
-    const absolutePath = resolveInsideRoot(rootPath, input.path)
-    const info = await stat(absolutePath)
+    const resolved = await this.resolveAllowedFile(input.rootPath, input.path)
+    const info = await stat(resolved.absolutePath)
     if (!info.isFile()) throw new Error("只能预览文件。")
     if (info.size > maxFileBytes) {
-      return toReadResult(input.path, info.size, true, null)
+      return toReadResult(resolved.classification, info.size, true, null)
     }
 
-    const buffer = await readFile(absolutePath)
+    const buffer = await readFile(resolved.absolutePath)
     const binary = isLikelyBinary(buffer)
-    return toReadResult(input.path, info.size, binary, binary ? null : textDecoder.decode(buffer))
+    return toReadResult(
+      resolved.classification,
+      info.size,
+      binary,
+      binary ? null : textDecoder.decode(buffer)
+    )
   }
 
   async revealPath(input: WorkspaceRevealPathInput): Promise<void> {
-    const rootPath = await resolveDirectory(input.rootPath)
-    const absolutePath = resolveInsideRoot(rootPath, input.path)
-    const info = await stat(absolutePath)
+    const resolved = await this.resolveAllowedFile(input.rootPath, input.path)
+    const info = await stat(resolved.absolutePath)
 
     if (info.isDirectory()) {
-      const error = await shell.openPath(absolutePath)
+      const error = await shell.openPath(resolved.absolutePath)
       if (error) throw new Error(error)
       return
     }
 
-    shell.showItemInFolder(absolutePath)
+    shell.showItemInFolder(resolved.absolutePath)
   }
 
   async copyPath(input: WorkspaceCopyPathInput): Promise<string> {
-    const rootPath = await resolveDirectory(input.rootPath)
-    const absolutePath = resolveInsideRoot(rootPath, input.path)
-    const text = input.absolute ? absolutePath : toRelativeProjectPath(rootPath, absolutePath)
+    const resolved = await this.resolveAllowedFile(input.rootPath, input.path)
+    const text = input.absolute ? resolved.absolutePath : resolved.classification.relativePath
     clipboard.writeText(text)
     return text
   }
+
+  private async resolveAllowedFile(
+    projectRoot: string,
+    rawPath: string
+  ): Promise<{ absolutePath: string; classification: WorkspacePathClassification }> {
+    const rootPath = await resolveDirectory(projectRoot)
+    const classification = classifyWorkspacePath(rawPath, this.rootsFor(rootPath), { win32, posix })
+    if (!classification) throw new Error("文件必须位于当前项目目录内。")
+
+    const candidate =
+      classification.kind === "project"
+        ? join(rootPath, ...classification.relativePath.split("/"))
+        : classification.tabPath.replace(/\//g, win32.sep)
+    let absolutePath: string
+    try {
+      absolutePath = await realpath(candidate)
+    } catch {
+      throw new Error("无法预览。")
+    }
+
+    if (!stillInsideAllowedRoot(absolutePath, classification, rootPath, this.rootsFor(rootPath))) {
+      throw new Error("文件必须位于当前项目目录内。")
+    }
+    return { absolutePath, classification }
+  }
+
+  private rootsFor(projectRoot: string): WorkspaceAllowedRoots {
+    const configDir =
+      this.allowedRoots?.configDir ??
+      process.env.OPENHARNESS_CONFIG_DIR ??
+      join(homedir(), ".openharness-ts")
+    const documentsPath = this.allowedRoots?.documentsPath ?? ""
+    return {
+      projectRoot,
+      configDir,
+      skillsDir: join(configDir, "skills"),
+      userProfilePath: join(configDir, "USER.md"),
+      outsideProjectRoot: documentsPath ? buildOutsideProjectRoot(documentsPath) : "",
+    }
+  }
+}
+
+function toRelativeProjectPath(rootPath: string, absolutePath: string): string {
+  return relative(rootPath, absolutePath).split(sep).join("/")
 }
 
 async function resolveDirectory(value: unknown): Promise<string> {
@@ -113,23 +175,21 @@ async function resolveDirectory(value: unknown): Promise<string> {
   return path
 }
 
-function resolveInsideRoot(rootPath: string, relativePath: string): string {
-  if (typeof relativePath !== "string" || !relativePath.trim()) throw new Error("文件路径不能为空。")
-  const normalizedInput = relativePath.replace(/\\/g, "/").replace(/^\/+/, "")
-  const absolutePath = resolve(rootPath, normalizedInput)
-  const relativePathFromRoot = relative(rootPath, absolutePath)
-  if (
-    relativePathFromRoot === "" ||
-    relativePathFromRoot.startsWith("..") ||
-    isAbsolute(relativePathFromRoot)
-  ) {
-    throw new Error("文件必须位于当前项目目录内。")
-  }
-  return absolutePath
-}
-
-function toRelativeProjectPath(rootPath: string, absolutePath: string): string {
-  return relative(rootPath, absolutePath).split(sep).join("/")
+function stillInsideAllowedRoot(
+  absolutePath: string,
+  classification: WorkspacePathClassification,
+  projectRoot: string,
+  roots: WorkspaceAllowedRoots
+): boolean {
+  const checkRoot =
+    classification.kind === "project"
+      ? projectRoot
+      : classification.rootLabel === "个人配置"
+        ? classification.relativePath === "USER.md"
+          ? roots.userProfilePath
+          : roots.skillsDir
+        : roots.outsideProjectRoot
+  return isPathInside(absolutePath, checkRoot, win32) || isPathInside(absolutePath, checkRoot, posix)
 }
 
 function isLikelyBinary(buffer: Buffer): boolean {
@@ -138,18 +198,21 @@ function isLikelyBinary(buffer: Buffer): boolean {
 }
 
 function toReadResult(
-  path: string,
+  classification: WorkspacePathClassification,
   size: number,
   binary: boolean,
   content: string | null
 ): WorkspaceReadFileResult {
   return {
-    path,
-    name: basename(path),
-    language: languageFromPath(path),
+    path: classification.tabPath,
+    name: basename(classification.tabPath),
+    language: languageFromPath(classification.tabPath),
     size,
     binary,
     content,
+    scope: classification.kind as WorkspaceFileScope,
+    relativePath: classification.relativePath,
+    rootLabel: classification.rootLabel,
   }
 }
 

@@ -6,7 +6,8 @@
  */
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
-import { resolve } from "node:path"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import { promisify } from "node:util"
 
 import {
@@ -77,6 +78,7 @@ import {
   isOutsideProjectWorkspacePath,
   removeEmptyOutsideProjectWorkspace,
 } from "./outside-project-workspace"
+import { workspaceService } from "../workspace/workspace-service"
 import { resolveDesktopRuntimeSnapshot } from "./runtime-selection"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
 
@@ -98,6 +100,10 @@ export class DesktopSessionService {
    * 设置里没有可用模型时，会把解析出的默认 model/provider 写回 daemon。
    */
   async bootstrap(): Promise<DesktopBootstrapData> {
+    workspaceService.configureAllowedRoots({
+      configDir: process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness-ts"),
+      documentsPath: app.getPath("documents"),
+    })
     const client = await this.getClient()
     const [settings, providers, allSessions, projectRecords, capabilities] = await Promise.all([
       client.getSettings(),
