@@ -78,6 +78,7 @@ import type {
 import type {
   DesktopSettingsSnapshot,
   UpdateDesktopDefaultOpenerInput,
+  UpdateDesktopDefaultTerminalShellInput,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "./settings-types"
@@ -224,6 +225,7 @@ export const IpcChannels = {
   settingsUpdateWorkStyle: "settings:update-work-style",
   settingsUpdateNotificationMode: "settings:update-notification-mode",
   settingsUpdateDefaultOpener: "settings:update-default-opener",
+  settingsUpdateDefaultTerminalShell: "settings:update-default-terminal-shell",
 } as const
 
 export const IpcEvents = {
@@ -314,6 +316,10 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.settingsUpdateDefaultOpener]: {
     args: [input: UpdateDesktopDefaultOpenerInput]
+    result: DesktopSettingsSnapshot
+  }
+  [IpcChannels.settingsUpdateDefaultTerminalShell]: {
+    args: [input: UpdateDesktopDefaultTerminalShellInput]
     result: DesktopSettingsSnapshot
   }
 

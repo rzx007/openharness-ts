@@ -16,7 +16,7 @@ export interface DesktopPreferences {
   defaultTerminalShellId?: string
 }
 
-type DesktopPreferencesPatch = Partial<DesktopPreferences> & {
+type DesktopPreferencesPatch = Omit<Partial<DesktopPreferences>, "defaultTerminalShellId"> & {
   defaultTerminalShellId?: string | null
 }
 

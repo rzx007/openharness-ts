@@ -206,6 +206,9 @@ export const desktopAPI = {
     updateDefaultOpener: (
       input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultOpener]["args"][0]
     ) => invoke(IpcChannels.settingsUpdateDefaultOpener, input),
+    updateDefaultTerminalShell: (
+      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultTerminalShell]["args"][0]
+    ) => invoke(IpcChannels.settingsUpdateDefaultTerminalShell, input),
   },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>

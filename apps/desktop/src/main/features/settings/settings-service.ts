@@ -5,9 +5,11 @@ import {
   isDesktopNotificationMode,
   isDesktopWorkStyle,
   normalizeDefaultOpenerId,
+  normalizeDefaultTerminalShellId,
 } from "../../../shared/settings-types"
 import type {
   UpdateDesktopDefaultOpenerInput,
+  UpdateDesktopDefaultTerminalShellInput,
   UpdateDesktopNotificationModeInput,
   DesktopSettingsSnapshot,
   UpdateDesktopWorkStyleInput,
@@ -49,6 +51,14 @@ export class DesktopSettingsService {
       throw new Error("打开方式不能为空。")
     }
     const preferences = patchDesktopPreferences({ defaultOpenerId })
+    return snapshotWithPreferences(preferences)
+  }
+
+  async updateDefaultTerminalShell(
+    input: UpdateDesktopDefaultTerminalShellInput
+  ): Promise<DesktopSettingsSnapshot> {
+    const defaultTerminalShellId = normalizeDefaultTerminalShellId(input.defaultTerminalShellId)
+    const preferences = patchDesktopPreferences({ defaultTerminalShellId })
     return snapshotWithPreferences(preferences)
   }
 }
