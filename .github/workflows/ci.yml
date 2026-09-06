@@ -35,3 +35,22 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Notify by email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          secure: true
+          from: OpenHarness CI <${{ secrets.SMTP_USER }}>
+          to: ${{ secrets.NOTIFY_TO }}
+          subject: "[CI] ${{ github.repository }} ${{ job.status }} (#${{ github.run_number }})"
+          body: |
+            Repository: ${{ github.repository }}
+            Ref: ${{ github.ref }}
+            Status: ${{ job.status }}
+            Actor: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

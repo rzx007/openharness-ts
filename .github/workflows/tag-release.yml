@@ -205,3 +205,28 @@ jobs:
           EOF
           )"
           fi
+
+  notify:
+    needs: [validate, build-desktop, publish-npm, publish-release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify by email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          secure: true
+          from: OpenHarness Release <${{ secrets.SMTP_USER }}>
+          to: ${{ secrets.NOTIFY_TO }}
+          subject: "[Release] ${{ github.repository }} ${{ needs.publish-release.result }} v${{ inputs.version }} (#${{ github.run_number }})"
+          body: |
+            Version: ${{ inputs.version }}
+            validate: ${{ needs.validate.result }}
+            build-desktop: ${{ needs.build-desktop.result }}
+            publish-npm: ${{ needs.publish-npm.result }}
+            publish-release: ${{ needs.publish-release.result }}
+            Actor: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
