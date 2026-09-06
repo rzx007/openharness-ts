@@ -63,4 +63,54 @@ describe("desktop preferences", () => {
 
     expect(getDesktopPreferences()).toEqual({ notificationMode: "when_unfocused" })
   })
+
+  it("reads a valid default opener id without dropping notification mode", async () => {
+    await writeFile(
+      join(userDataPath, "desktop-preferences.json"),
+      JSON.stringify({ notificationMode: "always", defaultOpenerId: "vscode" }),
+      "utf8"
+    )
+    const { getDesktopPreferences } = await import("./desktop-preferences")
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "always",
+      defaultOpenerId: "vscode",
+    })
+  })
+
+  it("treats blank default opener ids as missing", async () => {
+    await writeFile(
+      join(userDataPath, "desktop-preferences.json"),
+      JSON.stringify({ notificationMode: "never", defaultOpenerId: "   " }),
+      "utf8"
+    )
+    const { getDesktopPreferences } = await import("./desktop-preferences")
+    expect(getDesktopPreferences()).toEqual({ notificationMode: "never" })
+  })
+
+  it("keeps defaultOpenerId when patching notification mode", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences } = await import("./desktop-preferences")
+    patchDesktopPreferences({ defaultOpenerId: "cursor" })
+    patchDesktopPreferences({ notificationMode: "always" })
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "always",
+      defaultOpenerId: "cursor",
+    })
+  })
+
+  it("keeps notification mode when patching defaultOpenerId", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences } = await import("./desktop-preferences")
+    patchDesktopPreferences({ notificationMode: "never" })
+    patchDesktopPreferences({ defaultOpenerId: "vscode" })
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "never",
+      defaultOpenerId: "vscode",
+    })
+  })
+
+  it("throws when the preferences file cannot be written", async () => {
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(join(userDataPath, "desktop-preferences.json"))
+    const { patchDesktopPreferences } = await import("./desktop-preferences")
+    expect(() => patchDesktopPreferences({ defaultOpenerId: "vscode" })).toThrow()
+  })
 })

@@ -5,11 +5,13 @@ import { app } from "electron"
 
 import {
   isDesktopNotificationMode,
+  normalizeDefaultOpenerId,
   type DesktopNotificationMode,
 } from "../../../shared/settings-types"
 
 export interface DesktopPreferences {
   notificationMode: DesktopNotificationMode
+  defaultOpenerId?: string
 }
 
 const defaults: DesktopPreferences = {
@@ -22,10 +24,12 @@ export function getDesktopPreferences(): DesktopPreferences {
 
   try {
     const raw = JSON.parse(readFileSync(filePath, "utf8")) as Partial<DesktopPreferences>
+    const defaultOpenerId = normalizeDefaultOpenerId(raw.defaultOpenerId)
     return {
       notificationMode: isDesktopNotificationMode(raw.notificationMode)
         ? raw.notificationMode
         : defaults.notificationMode,
+      ...(defaultOpenerId ? { defaultOpenerId } : {}),
     }
   } catch {
     return defaults
@@ -34,14 +38,14 @@ export function getDesktopPreferences(): DesktopPreferences {
 
 export function patchDesktopPreferences(patch: Partial<DesktopPreferences>): DesktopPreferences {
   const next = { ...getDesktopPreferences(), ...patch }
-
-  try {
-    writeFileSync(getDesktopPreferencesPath(), JSON.stringify(next, null, 2), "utf8")
-  } catch (error) {
-    console.warn("[settings] failed to persist desktop preferences", error)
+  const defaultOpenerId = normalizeDefaultOpenerId(next.defaultOpenerId)
+  const persisted: DesktopPreferences = {
+    notificationMode: next.notificationMode,
+    ...(defaultOpenerId ? { defaultOpenerId } : {}),
   }
 
-  return next
+  writeFileSync(getDesktopPreferencesPath(), JSON.stringify(persisted, null, 2), "utf8")
+  return persisted
 }
 
 export function getDesktopPreferencesPath(): string {

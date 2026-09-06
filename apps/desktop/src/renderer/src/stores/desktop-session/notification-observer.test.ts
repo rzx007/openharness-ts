@@ -14,6 +14,7 @@ describe("notifyForSessionViewChange", () => {
   const snapshot = vi.fn<() => Promise<DesktopSettingsSnapshot>>(async () => ({
     workStyle: "practical" as const,
     notificationMode: "when_unfocused" as const,
+    defaultOpenerId: null,
   }))
 
   beforeEach(() => {
@@ -78,6 +79,7 @@ describe("notifyForSessionViewChange", () => {
     snapshot.mockResolvedValueOnce({
       workStyle: "practical",
       notificationMode: "never",
+      defaultOpenerId: null,
     })
 
     await notifyForSessionViewChange({
@@ -92,6 +94,7 @@ describe("notifyForSessionViewChange", () => {
     snapshot.mockResolvedValueOnce({
       workStyle: "practical",
       notificationMode: "always",
+      defaultOpenerId: null,
     })
 
     await notifyForSessionViewChange({
