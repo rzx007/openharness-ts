@@ -14,6 +14,7 @@ import { AttachmentGroup } from "@renderer/components/ui/attachment"
 import { cn } from "@renderer/lib/utils"
 import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import type { DesktopSessionPart } from "@shared/session-types"
+import { routeChangedFileClick, toProjectRelativePath } from "@shared/workspace-open-path"
 
 import {
   buildAssistantContent,
@@ -400,7 +401,11 @@ function ChangedFilesSummary({
   const fileKey = useMemo(
     () =>
       files
-        .map((file) => normalizeReviewPath(toProjectRelativePath(file.path, selectedProjectPath)))
+        .map((file) =>
+          normalizeReviewPath(
+            toProjectRelativePath(file.path, selectedProjectPath) ?? file.path
+          )
+        )
         .join("\n"),
     [files, selectedProjectPath]
   )
@@ -446,7 +451,11 @@ function ChangedFilesSummary({
     () =>
       files.map((file) => {
         const stats =
-          gitStatsByPath[normalizeReviewPath(toProjectRelativePath(file.path, selectedProjectPath))]
+          gitStatsByPath[
+            normalizeReviewPath(
+              toProjectRelativePath(file.path, selectedProjectPath) ?? file.path
+            )
+          ]
         return stats ? { ...file, ...stats, hasStats: true } : file
       }),
     [files, gitStatsByPath, selectedProjectPath]
@@ -477,7 +486,11 @@ function ChangedFilesSummary({
           <button
             key={file.path}
             type="button"
-            onClick={() => (canOpenReview ? onOpenReview(file.path) : onOpenFile(file.path))}
+            onClick={() =>
+              routeChangedFileClick(file.path, selectedProjectPath, canOpenReview) === "review"
+                ? onOpenReview(file.path)
+                : onOpenFile(file.path)
+            }
             className="flex h-11 w-full items-center gap-3 px-4 text-left transition-colors hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
           >
             <span className="min-w-0 flex-1 truncate text-sm text-ui-muted">{file.path}</span>
@@ -517,17 +530,4 @@ function LineStats({
 
 function normalizeReviewPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").toLocaleLowerCase()
-}
-
-function toProjectRelativePath(path: string, projectPath: string | undefined): string {
-  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
-  const normalizedPath = withoutLocation.replace(/\\/g, "/")
-  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
-  if (/^[a-z]:\//i.test(normalizedPath)) {
-    if (!normalizedProject) return normalizedPath
-    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
-    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return normalizedPath
-    return normalizedPath.slice(normalizedProject.length + 1)
-  }
-  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
 }

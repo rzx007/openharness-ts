@@ -34,6 +34,7 @@ import type {
   DesktopGitFileStatus,
 } from "@shared/git-types"
 import type { DesktopSessionView } from "@shared/session-types"
+import { toProjectRelativePath } from "@shared/workspace-open-path"
 
 type LoadState = "idle" | "loading" | "ready" | "error"
 type DiffState = "idle" | "loading" | "ready" | "error"
@@ -143,6 +144,7 @@ export function ReviewTool({
     const path = openRequest.path
       ? toProjectRelativePath(openRequest.path, selectedProjectPath)
       : null
+    if (openRequest.path && !path) return
     const timer = window.setTimeout(() => {
       if (path) setActivePath(path)
       if (!changes?.files.length || (path && !changes.files.some((file) => file.path === path))) {
@@ -654,17 +656,4 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error)
     return error.message.replace(/^Error invoking remote method '[^']+': /, "")
   return String(error)
-}
-
-function toProjectRelativePath(path: string, projectPath: string | undefined): string | null {
-  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
-  const normalizedPath = withoutLocation.replace(/\\/g, "/")
-  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
-  if (/^[a-z]:\//i.test(normalizedPath)) {
-    if (!normalizedProject) return null
-    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
-    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return null
-    return normalizedPath.slice(normalizedProject.length + 1)
-  }
-  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { toProjectRelativePath } from "./workspace-open-path"
+import { routeChangedFileClick, toProjectRelativePath } from "./workspace-open-path"
 
 const project = "E:/code/openharness-ts"
 
@@ -32,5 +32,21 @@ describe("toProjectRelativePath", () => {
     expect(
       toProjectRelativePath("/Users/ruanz/.openharness-ts/skills/show-me/SKILL.md", project)
     ).toBe("Users/ruanz/.openharness-ts/skills/show-me/SKILL.md")
+  })
+})
+
+describe("routeChangedFileClick", () => {
+  it("opens review for /src/foo.ts when git is available", () => {
+    expect(routeChangedFileClick("/src/foo.ts", "E:/code/openharness-ts", true)).toBe("review")
+  })
+
+  it("opens preview for an extra-root Windows skill path", () => {
+    expect(
+      routeChangedFileClick(
+        "C:\\Users\\ruanz\\.openharness-ts\\skills\\show-me\\SKILL.md",
+        "E:/code/openharness-ts",
+        true
+      )
+    ).toBe("preview")
   })
 })

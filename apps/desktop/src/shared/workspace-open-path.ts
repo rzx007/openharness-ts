@@ -16,6 +16,15 @@ export function toProjectRelativePath(
   return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
 }
 
+export function routeChangedFileClick(
+  path: string,
+  projectPath: string | undefined,
+  canOpenReview: boolean
+): "review" | "preview" {
+  if (canOpenReview && toProjectRelativePath(path, projectPath)) return "review"
+  return "preview"
+}
+
 function stripExtendedPrefix(path: string): string {
   return path.replace(/^\/\/\?\//, "")
 }
