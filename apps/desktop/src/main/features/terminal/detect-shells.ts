@@ -61,17 +61,7 @@ function detectWindowsShells(ops: DetectShellOps): DetectedTerminalShell[] {
     undefined
   if (cmd) shells.push({ id: "cmd", label: "命令提示符", command: cmd })
 
-  const programFiles = ops.env.ProgramFiles ?? "C:\\Program Files"
-  const programFilesX86 = ops.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)"
-  const gitBash = firstExisting(
-    [
-      ops.joinPath(programFiles, "Git", "bin", "bash.exe"),
-      ops.joinPath(programFilesX86, "Git", "bin", "bash.exe"),
-      ops.joinPath(programFiles, "Git", "usr", "bin", "bash.exe"),
-      ops.joinPath(programFilesX86, "Git", "usr", "bin", "bash.exe"),
-    ],
-    ops.fileExists
-  )
+  const gitBash = firstExisting(gitBashCandidates(ops), ops.fileExists)
   if (gitBash) shells.push({ id: "git-bash", label: "Git Bash", command: gitBash })
 
   return shells
@@ -87,6 +77,14 @@ function detectPosixShells(
     if (ops.fileExists(path)) shells.push({ id: name, label: name, command: path })
   }
   return shells
+}
+
+function gitBashCandidates(ops: DetectShellOps): string[] {
+  const roots = ["C:\\Program Files", "C:\\Program Files (x86)", "D:\\Program Files", "D:\\Program Files (x86)"]
+  return [
+    ...roots.map((root) => ops.joinPath(root, "Git", "bin", "bash.exe")),
+    ...roots.map((root) => ops.joinPath(root, "Git", "usr", "bin", "bash.exe")),
+  ]
 }
 
 function findOnPath(executable: string, ops: DetectShellOps): string | undefined {
