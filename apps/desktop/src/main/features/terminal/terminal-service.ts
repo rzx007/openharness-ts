@@ -10,6 +10,9 @@ import type {
 } from "@openharness/terminal"
 
 import { IpcEvents } from "../../../shared/ipc-channels"
+import { getDesktopPreferences } from "../settings/desktop-preferences"
+import { applyPreferredTerminalShell } from "./apply-preferred-shell"
+import { listDetectedTerminalShells, resolvePreferredTerminalShell } from "./detect-shells"
 import { desktopSessionService } from "../session/session-service"
 
 interface TerminalSubscription {
@@ -24,7 +27,12 @@ class DesktopTerminalService {
     input: TerminalCreateRequest
   ): Promise<TerminalSessionInfo> {
     this.ensureSubscription(webContents)
-    return await withDaemonRetry((client) => client.createTerminal(input))
+    const preferred = resolvePreferredTerminalShell(
+      getDesktopPreferences().defaultTerminalShellId ?? null,
+      listDetectedTerminalShells()
+    )
+    const next = applyPreferredTerminalShell(input, preferred)
+    return await withDaemonRetry((client) => client.createTerminal(next))
   }
 
   async write(webContents: WebContents, input: TerminalWriteRequest): Promise<void> {
