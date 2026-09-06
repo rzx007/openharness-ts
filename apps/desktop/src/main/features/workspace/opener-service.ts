@@ -6,6 +6,7 @@ import { promisify } from "node:util"
 import { app, shell } from "electron"
 
 import type { WorkspaceOpener } from "../../../shared/workspace-types"
+import { resolveSpawnInvocation } from "./resolve-spawn-invocation"
 import { resolveWorkspaceOpenTarget } from "./workspace-path"
 import { workspaceService } from "./workspace-service"
 
@@ -359,7 +360,14 @@ async function launchOpener(
   }
 
   const args = plan.args.map((arg) => arg.replaceAll(placeholder, launchPath))
-  await spawnDetached(plan.command, args, folderPath)
+  const invocation = resolveSpawnInvocation({
+    platform: process.platform,
+    kind: opener.kind,
+    command: plan.command,
+    args,
+    cwd: folderPath,
+  })
+  await spawnDetached(invocation.command, invocation.args, folderPath, opener.kind === "terminal")
 }
 
 function resolveLaunchPath(
@@ -375,13 +383,18 @@ function resolveLaunchPath(
   return target.path
 }
 
-function spawnDetached(command: string, args: string[], cwd?: string): Promise<void> {
+function spawnDetached(
+  command: string,
+  args: string[],
+  cwd?: string,
+  hideWindowsConsole = false
+): Promise<void> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd,
       detached: true,
       stdio: "ignore",
-      windowsHide: false,
+      windowsHide: hideWindowsConsole,
     })
     child.once("error", reject)
     child.unref()
