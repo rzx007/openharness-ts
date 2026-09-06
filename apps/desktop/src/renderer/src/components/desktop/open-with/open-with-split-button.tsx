@@ -28,7 +28,7 @@ export function OpenWithSplitButton({
     if (!folderPath || opening) return
     setOpening(true)
     try {
-      await launchWorkspaceOpener({ openerId, path: folderPath, persist: true })
+      await launchWorkspaceOpener({ openerId, path: folderPath })
     } catch {
       // Launch failures are surfaced by the OS; keep the selected opener.
     } finally {
