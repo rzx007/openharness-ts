@@ -72,11 +72,7 @@ export function DefaultOpenerControl(): React.JSX.Element {
           if (typeof value === "string" && value) update(value)
         }}
       >
-        <SelectTrigger
-          aria-label="默认文件打开目标"
-          disabled={disabled}
-          className="min-w-36"
-        >
+        <SelectTrigger aria-label="默认文件打开目标" disabled={disabled} className="min-w-36">
           <SelectValue>
             {empty ? (
               "未找到可用的打开方式"

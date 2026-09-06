@@ -25,9 +25,12 @@ describe("resolveSelectedOpener", () => {
 
   it("falls back to cursor then vscode then the first opener", () => {
     expect(resolveSelectedOpener(openers, "gone")?.id).toBe("cursor")
-    expect(resolveSelectedOpener(openers.filter((item) => item.id !== "cursor"), null)?.id).toBe(
-      "vscode"
-    )
+    expect(
+      resolveSelectedOpener(
+        openers.filter((item) => item.id !== "cursor"),
+        null
+      )?.id
+    ).toBe("vscode")
     expect(
       resolveSelectedOpener(
         openers.filter((item) => item.id !== "cursor" && item.id !== "vscode"),
