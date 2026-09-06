@@ -78,6 +78,8 @@ interface RunTask {
 interface SessionLane {
   active?: RunTask;
   queue: RunTask[];
+  /** Queued tasks spliced out while a promote steer is still in flight. */
+  inFlightPromotions: Set<RunTask>;
 }
 
 export class SessionRunCoordinator {
@@ -144,8 +146,10 @@ export class SessionRunCoordinator {
       return { promoted: false, reason: "queued_run_changed" };
     }
     const queuedTask = lane.queue.splice(queuedIndex, 1)[0]!;
+    lane.inFlightPromotions.add(queuedTask);
     const steered = this.steer(sessionId, input, { recoverRejected: false });
     if (!steered.merged || steered.activeRunId !== expectedActiveRunId) {
+      lane.inFlightPromotions.delete(queuedTask);
       this.restoreQueuedTask(lane, queuedTask, queuedIndex);
       return { promoted: false, reason: "active_run_changed" };
     }
@@ -156,6 +160,9 @@ export class SessionRunCoordinator {
             `Steer was delivered to an unexpected run: ${receipt.runId}`,
           );
         }
+        if (!lane.inFlightPromotions.delete(queuedTask)) {
+          throw new RunInterruptedError("Queued run interrupted");
+        }
         this.rejectQueuedTask(
           queuedTask,
           "Queued run promoted into the active run",
@@ -163,6 +170,10 @@ export class SessionRunCoordinator {
         return receipt;
       })
       .catch((error) => {
+        if (!lane.inFlightPromotions.delete(queuedTask)) {
+          // Session interrupt already cancelled this promotion; do not restore.
+          throw error;
+        }
         this.restoreQueuedTask(lane, queuedTask, queuedIndex);
         throw error;
       });
@@ -179,7 +190,10 @@ export class SessionRunCoordinator {
     const lane = this.lanes.get(sessionId);
     if (!lane) return { queuedRunIds: [], interrupted: false };
 
-    const queuedRunIds = lane.queue.map((task) => task.runId);
+    const queuedRunIds = [
+      ...lane.queue.map((task) => task.runId),
+      ...[...lane.inFlightPromotions].map((task) => task.runId),
+    ];
     for (const task of lane.queue.splice(0)) {
       const message = reason ?? "Queued run interrupted";
       const error = new RunInterruptedError(message);
@@ -187,6 +201,10 @@ export class SessionRunCoordinator {
       this.rejectSteers(task, error);
       task.reject(error);
     }
+    for (const task of lane.inFlightPromotions) {
+      this.rejectQueuedTask(task, reason ?? "Queued run interrupted");
+    }
+    lane.inFlightPromotions.clear();
 
     const activeRunId = lane.active?.runId;
     if (lane.active) {
@@ -241,6 +259,17 @@ export class SessionRunCoordinator {
       };
     }
 
+    for (const task of lane.inFlightPromotions) {
+      if (task.runId !== runId) continue;
+      lane.inFlightPromotions.delete(task);
+      this.rejectQueuedTask(task, reason ?? "Queued run interrupted");
+      return {
+        ...(lane.active ? { activeRunId: lane.active.runId } : {}),
+        queuedRunIds: [runId],
+        interrupted: true,
+      };
+    }
+
     return {
       ...(lane.active ? { activeRunId: lane.active.runId } : {}),
       queuedRunIds: [],
@@ -256,19 +285,29 @@ export class SessionRunCoordinator {
     const lane = this.lanes.get(sessionId);
     if (!lane) return { queuedRunIds: [], interrupted: false };
     const queuedIndex = lane.queue.findIndex((task) => task.runId === runId);
-    if (queuedIndex < 0) {
+    if (queuedIndex >= 0) {
+      const [task] = lane.queue.splice(queuedIndex, 1);
+      if (task) this.rejectQueuedTask(task, reason ?? "Queued run interrupted");
       return {
         ...(lane.active ? { activeRunId: lane.active.runId } : {}),
-        queuedRunIds: [],
-        interrupted: false,
+        queuedRunIds: [runId],
+        interrupted: true,
       };
     }
-    const [task] = lane.queue.splice(queuedIndex, 1);
-    if (task) this.rejectQueuedTask(task, reason ?? "Queued run interrupted");
+    for (const task of lane.inFlightPromotions) {
+      if (task.runId !== runId) continue;
+      lane.inFlightPromotions.delete(task);
+      this.rejectQueuedTask(task, reason ?? "Queued run interrupted");
+      return {
+        ...(lane.active ? { activeRunId: lane.active.runId } : {}),
+        queuedRunIds: [runId],
+        interrupted: true,
+      };
+    }
     return {
       ...(lane.active ? { activeRunId: lane.active.runId } : {}),
-      queuedRunIds: [runId],
-      interrupted: true,
+      queuedRunIds: [],
+      interrupted: false,
     };
   }
 
@@ -277,14 +316,21 @@ export class SessionRunCoordinator {
   }
 
   queuedRunIds(sessionId: string): string[] {
-    return [...(this.lanes.get(sessionId)?.queue ?? [])].map(
-      (task) => task.runId,
-    );
+    const lane = this.lanes.get(sessionId);
+    if (!lane) return [];
+    return [
+      ...lane.queue.map((task) => task.runId),
+      ...[...lane.inFlightPromotions].map((task) => task.runId),
+    ];
   }
 
   hasWork(sessionId: string): boolean {
     const lane = this.lanes.get(sessionId);
-    return !!lane?.active || (lane?.queue.length ?? 0) > 0;
+    return (
+      !!lane?.active ||
+      (lane?.queue.length ?? 0) > 0 ||
+      (lane?.inFlightPromotions.size ?? 0) > 0
+    );
   }
 
   sessionIds(): string[] {
@@ -294,7 +340,7 @@ export class SessionRunCoordinator {
   private getLane(sessionId: string): SessionLane {
     let lane = this.lanes.get(sessionId);
     if (!lane) {
-      lane = { queue: [] };
+      lane = { queue: [], inFlightPromotions: new Set() };
       this.lanes.set(sessionId, lane);
     }
     return lane;
@@ -377,7 +423,9 @@ export class SessionRunCoordinator {
         if (lane.active === task) lane.active = undefined;
         const next = lane.queue.shift();
         if (next) this.startTask(lane, next);
-        else if (!lane.active) this.lanes.delete(task.sessionId);
+        else if (!lane.active && lane.inFlightPromotions.size === 0) {
+          this.lanes.delete(task.sessionId);
+        }
       }
     })();
   }
