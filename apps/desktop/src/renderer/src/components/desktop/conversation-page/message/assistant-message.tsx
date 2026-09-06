@@ -56,7 +56,7 @@ export function AssistantMessage({
   if (parts.length === 0) return <span className="text-xs text-ui-muted">正在生成回复...</span>
 
   return (
-    <div className="group/assistant min-w-0 space-y-4">
+    <div className="group/assistant min-w-0 space-y-3">
       {blocks.map((block, index) => {
         if (block.type === "tool-group") {
           return <ToolActivityGroup key={block.id} tools={block.tools} />
