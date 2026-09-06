@@ -1,14 +1,12 @@
 import {
   Archive,
   Bell,
-  ChevronDown,
   CircleDot,
   Clock3,
   FolderClosed,
   FolderOpen,
   FolderSync,
   GitPullRequest,
-  Grid2X2,
   MessageSquarePlus,
   Moon,
   MoreHorizontal,
@@ -75,7 +73,6 @@ type SidebarProps = {
 
 const secondaryNavigation = [
   { icon: GitPullRequest, label: "拉取请求" },
-  { icon: Grid2X2, label: "站点" },
   { icon: Clock3, label: "已安排" },
   { icon: PlugZap, label: "插件" },
 ]
@@ -187,8 +184,7 @@ export function Sidebar({
             type="button"
             className="flex h-8 items-center gap-1 rounded-md px-1.5 text-base font-semibold hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
-            OpenHarness
-            <ChevronDown className="size-3.5 text-sidebar-muted" />
+            OpenHarness-ts
           </button>
           <div className="ml-auto flex items-center gap-0.5">
             <Button
