@@ -1,4 +1,4 @@
-import { ChevronDown, Code2, MonitorCog, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { ChevronDown, MonitorCog, SlidersHorizontal, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card"
@@ -22,6 +22,8 @@ import { Separator } from "@renderer/components/ui/separator"
 import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
 import { AttachmentStorageSettings } from "./attachment-storage-settings"
+import { DefaultOpenerControl } from "./default-opener-control"
+import { errorMessage } from "./settings-error-message"
 import { AppearanceSettings } from "@renderer/components/appearance/appearance-settings"
 import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
 import type { DesktopNotificationMode, DesktopWorkStyle } from "@shared/settings-types"
@@ -130,7 +132,7 @@ function GeneralSettings(): React.JSX.Element {
         <SettingRow
           title="默认文件打开目标"
           description="选择打开代码文件和文件夹时使用的应用"
-          control={<SettingSelect icon={<Code2 />} label="VS Code" />}
+          control={<DefaultOpenerControl />}
         />
         <Separator />
         <SettingRow
@@ -349,14 +351,6 @@ function NotificationModeControl(): React.JSX.Element {
       ) : null}
     </div>
   )
-}
-
-function errorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error)
-  if (raw.includes("Cannot update daemon settings while session runs are active")) {
-    return "当前有任务正在运行。请等待任务结束或停止任务后，再修改该设置。"
-  }
-  return raw.replace(/^Error invoking remote method '[^']+': (?:Error|OpenHarnessApiError): /, "")
 }
 
 function SettingsSection({
