@@ -72,6 +72,46 @@ describe("classifyWorkspacePath", () => {
     })
   })
 
+  it("keeps a POSIX skill relative path when win32.resolve has no drive letter", () => {
+    const linuxLikeWin32 = {
+      ...win32,
+      resolve: (...segments: string[]) => win32.resolve(...segments).replace(/^[a-zA-Z]:/, ""),
+    }
+    const tmpRoots = {
+      projectRoot: "/tmp/openharness-workspace-project",
+      configDir: "/tmp/openharness-workspace-h1YEt7",
+      skillsDir: "/tmp/openharness-workspace-h1YEt7/skills",
+      userProfilePath: "/tmp/openharness-workspace-h1YEt7/USER.md",
+      outsideProjectRoot: "/tmp/openharness-workspace-docs/OpenHarness",
+    }
+
+    expect(
+      classifyWorkspacePath(
+        "/tmp/openharness-workspace-h1YEt7/skills/show-me/SKILL.md",
+        tmpRoots,
+        { win32: linuxLikeWin32, posix }
+      )
+    ).toMatchObject({
+      kind: "extra-root",
+      relativePath: "skills/show-me/SKILL.md",
+      rootLabel: "个人配置",
+    })
+  })
+
+  it("classifies POSIX skill paths against POSIX roots", () => {
+    expect(
+      classifyWorkspacePath(
+        "/Users/ruanz/.openharness-ts/skills/show-me/SKILL.md",
+        posixRoots,
+        { win32, posix }
+      )
+    ).toMatchObject({
+      kind: "extra-root",
+      relativePath: "skills/show-me/SKILL.md",
+      rootLabel: "个人配置",
+    })
+  })
+
   it("does not classify /etc/passwd as extra-root", () => {
     expect(classifyWorkspacePath("/etc/passwd", posixRoots, { win32, posix })?.kind).not.toBe(
       "extra-root"

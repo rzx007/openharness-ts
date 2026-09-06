@@ -140,7 +140,7 @@ function collectAbsoluteCandidates(
 ): string[] {
   const candidates: string[] = []
   const withoutExtended = stripExtendedPrefix(path)
-  if (pathOps.win32.isAbsolute(withoutExtended) || pathOps.win32.isAbsolute(path)) {
+  if (looksWindowsAbsolute(withoutExtended) || looksWindowsAbsolute(path)) {
     candidates.push(pathOps.win32.resolve(withoutExtended))
   }
 
@@ -150,7 +150,7 @@ function collectAbsoluteCandidates(
     for (const root of extraMappingRoots(roots)) {
       if (!root) continue
       const drive = pathOps.win32.parse(pathOps.win32.resolve(root)).root
-      if (!drive) continue
+      if (!isWindowsDriveRoot(drive)) continue
       candidates.push(pathOps.win32.resolve(drive, posixForm.replace(/^\//, "")))
     }
   }
@@ -249,6 +249,10 @@ function normalizeComparable(path: string, pathApi: PathFlavor): string {
 
 function looksWindowsAbsolute(path: string): boolean {
   return isWindowsAbsolutePath(toForwardSlashes(stripExtendedPrefix(path)))
+}
+
+function isWindowsDriveRoot(root: string): boolean {
+  return /^[a-zA-Z]:[\\/]?$/.test(root)
 }
 
 function isWindowsAbsolutePath(path: string): boolean {
