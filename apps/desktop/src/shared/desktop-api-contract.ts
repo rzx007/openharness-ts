@@ -85,6 +85,7 @@ import type {
 } from "./plugin-types"
 import type {
   DesktopSettingsSnapshot,
+  UpdateDesktopDefaultOpenerInput,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "./settings-types"
@@ -212,6 +213,9 @@ export type DesktopAPI = {
     updateWorkStyle: (input: UpdateDesktopWorkStyleInput) => Promise<DesktopSettingsSnapshot>
     updateNotificationMode: (
       input: UpdateDesktopNotificationModeInput
+    ) => Promise<DesktopSettingsSnapshot>
+    updateDefaultOpener: (
+      input: UpdateDesktopDefaultOpenerInput
     ) => Promise<DesktopSettingsSnapshot>
   }
   plugins: {

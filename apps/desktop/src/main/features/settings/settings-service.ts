@@ -4,21 +4,21 @@ import {
   buildDesktopSettingsSnapshot,
   isDesktopNotificationMode,
   isDesktopWorkStyle,
+  normalizeDefaultOpenerId,
 } from "../../../shared/settings-types"
 import type {
+  UpdateDesktopDefaultOpenerInput,
   UpdateDesktopNotificationModeInput,
   DesktopSettingsSnapshot,
   UpdateDesktopWorkStyleInput,
 } from "../../../shared/settings-types"
+import type { DesktopPreferences } from "./desktop-preferences"
 import { desktopSessionService } from "../session/session-service"
 import { getDesktopPreferences, patchDesktopPreferences } from "./desktop-preferences"
 
 export class DesktopSettingsService {
   snapshot(): Promise<DesktopSettingsSnapshot> {
-    const preferences = getDesktopPreferences()
-    return withDaemonRetry(async (client) =>
-      buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
-    )
+    return snapshotWithPreferences(getDesktopPreferences())
   }
 
   async updateWorkStyle(input: UpdateDesktopWorkStyleInput): Promise<DesktopSettingsSnapshot> {
@@ -38,10 +38,30 @@ export class DesktopSettingsService {
       throw new Error("未知的通知设置，请选择从不、仅失去焦点时或始终。")
     }
     const preferences = patchDesktopPreferences({ notificationMode: input.notificationMode })
-    return withDaemonRetry(async (client) => {
-      const settings = await client.getSettings()
-      return buildDesktopSettingsSnapshot(settings, preferences)
-    })
+    return snapshotWithPreferences(preferences)
+  }
+
+  async updateDefaultOpener(
+    input: UpdateDesktopDefaultOpenerInput
+  ): Promise<DesktopSettingsSnapshot> {
+    const defaultOpenerId = normalizeDefaultOpenerId(input.defaultOpenerId)
+    if (!defaultOpenerId) {
+      throw new Error("打开方式不能为空。")
+    }
+    const preferences = patchDesktopPreferences({ defaultOpenerId })
+    return snapshotWithPreferences(preferences)
+  }
+}
+
+async function snapshotWithPreferences(
+  preferences: DesktopPreferences
+): Promise<DesktopSettingsSnapshot> {
+  try {
+    return await withDaemonRetry(async (client) =>
+      buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
+    )
+  } catch {
+    return buildDesktopSettingsSnapshot({}, preferences)
   }
 }
 

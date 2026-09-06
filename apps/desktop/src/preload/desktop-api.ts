@@ -203,6 +203,9 @@ export const desktopAPI = {
     updateNotificationMode: (
       input: IpcInvokeMap[typeof IpcChannels.settingsUpdateNotificationMode]["args"][0]
     ) => invoke(IpcChannels.settingsUpdateNotificationMode, input),
+    updateDefaultOpener: (
+      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultOpener]["args"][0]
+    ) => invoke(IpcChannels.settingsUpdateDefaultOpener, input),
   },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>

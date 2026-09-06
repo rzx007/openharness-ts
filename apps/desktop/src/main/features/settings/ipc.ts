@@ -1,5 +1,6 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
+  UpdateDesktopDefaultOpenerInput,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "../../../shared/settings-types"
@@ -25,6 +26,11 @@ export const settingsIpcContribution: IpcContribution = {
           desktopSettingsService.updateNotificationMode(
             input as UpdateDesktopNotificationModeInput
           ),
+      },
+      {
+        channel: IpcChannels.settingsUpdateDefaultOpener,
+        handler: (_event, input) =>
+          desktopSettingsService.updateDefaultOpener(input as UpdateDesktopDefaultOpenerInput),
       },
     ]
   },
