@@ -8,6 +8,7 @@ describe("buildDesktopSettingsSnapshot", () => {
       workStyle: "practical",
       notificationMode: "when_unfocused",
       defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
   })
 
@@ -16,6 +17,7 @@ describe("buildDesktopSettingsSnapshot", () => {
       workStyle: "efficient",
       notificationMode: "when_unfocused",
       defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
   })
 
@@ -24,6 +26,7 @@ describe("buildDesktopSettingsSnapshot", () => {
       workStyle: "practical",
       notificationMode: "when_unfocused",
       defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
   })
 
@@ -44,6 +47,7 @@ describe("buildDesktopSettingsSnapshot", () => {
       workStyle: "practical",
       notificationMode: "when_unfocused",
       defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
   })
 
@@ -57,5 +61,29 @@ describe("buildDesktopSettingsSnapshot", () => {
     expect(buildDesktopSettingsSnapshot({}, { defaultOpenerId: "   " })).toMatchObject({
       defaultOpenerId: null,
     })
+  })
+
+  it("defaults defaultTerminalShellId to null", () => {
+    expect(buildDesktopSettingsSnapshot({})).toEqual({
+      workStyle: "practical",
+      notificationMode: "when_unfocused",
+      defaultOpenerId: null,
+      defaultTerminalShellId: null,
+    })
+  })
+
+  it("preserves a valid default terminal shell id", () => {
+    expect(
+      buildDesktopSettingsSnapshot({}, { defaultTerminalShellId: "  pwsh  " })
+    ).toMatchObject({ defaultTerminalShellId: "pwsh" })
+  })
+
+  it("treats system and blank terminal shell ids as missing", () => {
+    expect(
+      buildDesktopSettingsSnapshot({}, { defaultTerminalShellId: "system" })
+    ).toMatchObject({ defaultTerminalShellId: null })
+    expect(
+      buildDesktopSettingsSnapshot({}, { defaultTerminalShellId: "   " })
+    ).toMatchObject({ defaultTerminalShellId: null })
   })
 })

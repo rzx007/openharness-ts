@@ -15,6 +15,7 @@ describe("notifyForSessionViewChange", () => {
     workStyle: "practical" as const,
     notificationMode: "when_unfocused" as const,
     defaultOpenerId: null,
+    defaultTerminalShellId: null,
   }))
 
   beforeEach(() => {
@@ -80,6 +81,7 @@ describe("notifyForSessionViewChange", () => {
       workStyle: "practical",
       notificationMode: "never",
       defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
 
     await notifyForSessionViewChange({
@@ -95,6 +97,7 @@ describe("notifyForSessionViewChange", () => {
       workStyle: "practical",
       notificationMode: "always",
       defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
 
     await notifyForSessionViewChange({

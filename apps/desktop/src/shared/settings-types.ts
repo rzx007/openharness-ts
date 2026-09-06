@@ -5,6 +5,7 @@ export interface DesktopSettingsSnapshot {
   workStyle: DesktopWorkStyle
   notificationMode: DesktopNotificationMode
   defaultOpenerId: string | null
+  defaultTerminalShellId: string | null
 }
 
 export interface UpdateDesktopWorkStyleInput {
@@ -19,15 +20,30 @@ export interface UpdateDesktopDefaultOpenerInput {
   defaultOpenerId: string
 }
 
+export interface UpdateDesktopDefaultTerminalShellInput {
+  defaultTerminalShellId: string | null
+}
+
 export function normalizeDefaultOpenerId(value: unknown): string | null {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
 
+export function normalizeDefaultTerminalShellId(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === "system") return null
+  return trimmed
+}
+
 export function buildDesktopSettingsSnapshot(
   settings: Record<string, unknown>,
-  preferences: Partial<{ notificationMode: unknown; defaultOpenerId: unknown }> = {}
+  preferences: Partial<{
+    notificationMode: unknown
+    defaultOpenerId: unknown
+    defaultTerminalShellId: unknown
+  }> = {}
 ): DesktopSettingsSnapshot {
   return {
     workStyle: isDesktopWorkStyle(settings.workStyle) ? settings.workStyle : "practical",
@@ -35,6 +51,7 @@ export function buildDesktopSettingsSnapshot(
       ? preferences.notificationMode
       : "when_unfocused",
     defaultOpenerId: normalizeDefaultOpenerId(preferences.defaultOpenerId),
+    defaultTerminalShellId: normalizeDefaultTerminalShellId(preferences.defaultTerminalShellId),
   }
 }
 

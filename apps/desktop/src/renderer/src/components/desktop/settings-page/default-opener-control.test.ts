@@ -112,5 +112,6 @@ function settingsSnapshot(defaultOpenerId: string | null): DesktopSettingsSnapsh
     workStyle: "practical",
     notificationMode: "when_unfocused",
     defaultOpenerId,
+    defaultTerminalShellId: null,
   }
 }
