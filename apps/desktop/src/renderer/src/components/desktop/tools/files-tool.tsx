@@ -99,6 +99,7 @@ export function FilesTool({
   const treePanelRef = usePanelRef()
   const restoredProjectRef = useRef<string | null>(null)
   const handledOpenRequestRef = useRef<number | null>(null)
+  const resolvedOpenRequestPathRef = useRef<string | null>(null)
   const attemptedPreviewPathRef = useRef<string | null>(null)
 
   const fileEntries = useMemo(() => {
@@ -168,7 +169,7 @@ export function FilesTool({
 
   const openFile = async (
     path: string,
-    options: { requireListedFile?: boolean } = {}
+    options: { requireListedFile?: boolean; fromOpenRequest?: boolean } = {}
   ): Promise<void> => {
     if (!selectedProject?.path) return
     const requireListedFile = options.requireListedFile ?? true
@@ -176,20 +177,28 @@ export function FilesTool({
     const entry = fileEntries.get(normalizedPath)
     if (requireListedFile && (!entry || entry.type !== "file")) return
 
+    const listed = entry?.type === "file"
     onActivePathChange(normalizedPath)
-    onOpenFileStart(normalizedPath)
+    if (listed) onOpenFileStart(normalizedPath)
     onLoadingPathChange(normalizedPath)
     setError(null)
+    let resultPath: string | undefined
     try {
       const result = await window.desktop.workspace.readFile({
         rootPath: selectedProject.path,
         path: normalizedPath,
       })
+      resultPath = result.path
+      onActivePathChange(result.path)
+      onOpenFileStart(result.path)
       onFileOpened(toFileViewerTab(result))
+      if (options.fromOpenRequest) resolvedOpenRequestPathRef.current = result.path
     } catch (readError) {
       setError(errorMessage(readError))
     } finally {
-      onLoadingPathChange((current) => (current === normalizedPath ? null : current))
+      onLoadingPathChange((current) =>
+        current === normalizedPath || current === resultPath ? null : current
+      )
     }
   }
 
@@ -211,10 +220,11 @@ export function FilesTool({
   useEffect(() => {
     if (!openRequest || loadState !== "ready" || handledOpenRequestRef.current === openRequest.id)
       return
-    const path = toProjectRelativePath(openRequest.path, selectedProject?.path)
     handledOpenRequestRef.current = openRequest.id
+    resolvedOpenRequestPathRef.current = null
+    const requestedPath = openRequest.path.trim()
     const timer = window.setTimeout(() => {
-      if (path) void openFile(path, { requireListedFile: false })
+      if (requestedPath) void openFile(requestedPath, { requireListedFile: false, fromOpenRequest: true })
     }, 0)
     return () => window.clearTimeout(timer)
   }, [fileEntries, loadState, openRequest, selectedProject?.path])
@@ -314,7 +324,12 @@ export function FilesTool({
   return (
     <section className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/45 px-2.5">
-        <FileBreadcrumb projectName={selectedProject.name} path={activePath ?? "/"} />
+        <FileBreadcrumb
+          projectName={selectedProject.name}
+          path={activeTab?.preview.relativePath ?? activePath ?? "/"}
+          scope={activeTab?.preview.scope}
+          rootLabel={activeTab?.preview.rootLabel}
+        />
         {activeIsMarkdown && (
           <Button
             type="button"
@@ -407,8 +422,7 @@ export function FilesTool({
               searchMatchIndex={visibleSearchIndex}
               searchMatches={searchMatches}
               targetLine={
-                openRequest &&
-                toProjectRelativePath(openRequest.path, selectedProject?.path) === activePath
+                openRequest && resolvedOpenRequestPathRef.current === activePath
                   ? openRequest.line
                   : undefined
               }
@@ -437,7 +451,7 @@ export function FilesTool({
               <ProjectFileTree
                 rootPath={selectedProject.path}
                 paths={treePaths}
-                selectedPath={activePath}
+                selectedPath={activeTab?.preview.scope === "extra-root" ? null : activePath}
                 onSelect={(path) => void openFile(path)}
                 onOpenHtmlInBrowser={onOpenHtmlInBrowser}
                 onActionError={(actionError) => setError(errorMessage(actionError))}
@@ -453,10 +467,15 @@ export function FilesTool({
 function FileBreadcrumb({
   projectName,
   path,
+  scope,
+  rootLabel,
 }: {
   projectName: string
   path: string
+  scope?: WorkspaceReadFileResult["scope"]
+  rootLabel?: string
 }): React.JSX.Element {
+  const rootName = scope === "extra-root" && rootLabel ? rootLabel : projectName
   const normalizedPath = path.trim() || "/"
   const segments = normalizedPath === "/" ? [] : normalizedPath.split("/").filter(Boolean)
 
@@ -465,8 +484,8 @@ function FileBreadcrumb({
       aria-label="文件路径"
       className="text-ui-small flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-ui-muted"
     >
-      <span className="max-w-40 shrink-0 truncate text-ui-foreground" title={projectName}>
-        {projectName}
+      <span className="max-w-40 shrink-0 truncate text-ui-foreground" title={rootName}>
+        {rootName}
       </span>
       {segments.length === 0 ? (
         <>
@@ -884,19 +903,6 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error)
     return error.message.replace(/^Error invoking remote method '[^']+': /, "")
   return String(error)
-}
-
-function toProjectRelativePath(path: string, projectPath: string | undefined): string | null {
-  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
-  const normalizedPath = withoutLocation.replace(/\\/g, "/")
-  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
-  if (/^[a-z]:\//i.test(normalizedPath)) {
-    if (!normalizedProject) return null
-    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
-    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return null
-    return normalizedPath.slice(normalizedProject.length + 1)
-  }
-  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
 }
 
 function toFileViewerTab(preview: WorkspaceReadFileResult): FileViewerTab {

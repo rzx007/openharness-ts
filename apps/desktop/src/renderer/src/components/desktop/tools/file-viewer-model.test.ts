@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { isHtmlPath, shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
+import { canOpenHtmlInBrowser, isHtmlPath, shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
 
 describe("isHtmlPath", () => {
   it("recognizes HTML and HTM extensions without case sensitivity", () => {
@@ -21,6 +21,14 @@ describe("shouldOfferHtmlBrowserOpen", () => {
 
   it("does not offer browser rendering for a non-HTML file", () => {
     expect(shouldOfferHtmlBrowserOpen("report.ts", lines(5_001))).toBe(false)
+  })
+})
+
+describe("canOpenHtmlInBrowser", () => {
+  it("hides the browser action for extra-root previews", () => {
+    expect(canOpenHtmlInBrowser("extra-root")).toBe(false)
+    expect(canOpenHtmlInBrowser("project")).toBe(true)
+    expect(canOpenHtmlInBrowser(undefined)).toBe(true)
   })
 })
 

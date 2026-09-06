@@ -24,6 +24,7 @@ import {
   selectActiveWorkspaceProject,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
+import { prepareFileOpenRequest } from "./file-open-request"
 import {
   readPersistedUtilityFileTabs,
   writePersistedUtilityFileTabs,
@@ -135,41 +136,26 @@ export function UtilityPanel({
 
   useEffect(() => {
     if (!fileOpenRequest || handledFileRequestId === fileOpenRequest.id) return
-    const relativePath = toRelativeWorkspacePath(fileOpenRequest.path, selectedProjectPath)
+    const prepared = prepareFileOpenRequest(fileOpenRequest.path, selectedProjectPath)
+    if (prepared.placeholderPath) return
     const timer = window.setTimeout(() => {
       setHandledFileRequestId(fileOpenRequest.id)
-      if (!relativePath) {
-        setTabs((current) =>
-          current.some((tab) => tab.id === filesTabId || tab.tool === "files")
-            ? current
-            : [...current, { id: filesTabId, tool: "files", title: utilityToolMeta.files.label }]
-        )
+      setTabs((current) => {
+        const existing = current.find((tab) => tab.id === filesTabId || tab.tool === "files")
+        if (existing) {
+          setActiveTabId(existing.id)
+          return current
+        }
         setActiveTabId(filesTabId)
-        return
-      }
-      const id = fileTabId(relativePath, selectedProjectPath)
-      setTabs((current) =>
-        placeFileTab(current, {
-          id,
-          tool: "files",
-          title: fileNameFromPath(relativePath),
-          filePath: relativePath,
-          fileIcon: getFileIcon(relativePath),
-          projectPath: selectedProjectPath,
-        })
-      )
-      setFileProjectPath(selectedProjectPath ?? null)
-      setActiveTabId(id)
-      setActiveFilePath(relativePath)
+        return [...current, { id: filesTabId, tool: "files", title: utilityToolMeta.files.label }]
+      })
     }, 0)
     return () => window.clearTimeout(timer)
   }, [
     fileOpenRequest,
     handledFileRequestId,
     selectedProjectPath,
-    setActiveFilePath,
     setActiveTabId,
-    setFileProjectPath,
     setHandledFileRequestId,
     setTabs,
   ])
@@ -348,8 +334,10 @@ export function UtilityPanel({
       setFileTabs(nextStoredFileTabs)
       setActiveFilePath(nextActivePath)
       persistFileTabs(
-        nextFileTabs.map((tab) => tab.preview.path),
-        nextActivePath
+        nextFileTabs.filter((tab) => tab.preview.scope !== "extra-root").map((tab) => tab.preview.path),
+        nextActivePath && nextFileTabs.some((tab) => tab.preview.path === nextActivePath && tab.preview.scope !== "extra-root")
+          ? nextActivePath
+          : null
       )
     }
 
@@ -399,8 +387,14 @@ export function UtilityPanel({
     if (tab.filePath) {
       setActiveFilePath(tab.filePath)
       persistFileTabs(
-        visibleFileTabs.map((item) => item.preview.path),
-        tab.filePath
+        visibleFileTabs
+          .filter((item) => item.preview.scope !== "extra-root")
+          .map((item) => item.preview.path),
+        visibleFileTabs.some(
+          (item) => item.preview.path === tab.filePath && item.preview.scope !== "extra-root"
+        )
+          ? tab.filePath
+          : null
       )
     }
   }
@@ -444,9 +438,12 @@ export function UtilityPanel({
     setActiveFilePath(nextFileTab.preview.path)
     persistFileTabs(
       nextTabs
-        .filter((tab) => (tab.projectPath ?? null) === nextProject)
+        .filter(
+          (tab) =>
+            (tab.projectPath ?? null) === nextProject && tab.preview.scope !== "extra-root"
+        )
         .map((tab) => tab.preview.path),
-      nextFileTab.preview.path
+      nextFileTab.preview.scope === "extra-root" ? null : nextFileTab.preview.path
     )
   }
 
@@ -689,17 +686,4 @@ function terminalTabId(terminalId: string): string {
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path
-}
-
-function toRelativeWorkspacePath(path: string, projectPath: string | undefined): string | null {
-  const withoutLocation = path.trim().replace(/:(\d+)(?::\d+)?$/, "")
-  const normalizedPath = withoutLocation.replace(/\\/g, "/")
-  const normalizedProject = projectPath?.replace(/\\/g, "/").replace(/\/$/, "")
-  if (/^[a-z]:\//i.test(normalizedPath)) {
-    if (!normalizedProject) return null
-    const projectPrefix = `${normalizedProject.toLocaleLowerCase()}/`
-    if (!normalizedPath.toLocaleLowerCase().startsWith(projectPrefix)) return null
-    return normalizedPath.slice(normalizedProject.length + 1)
-  }
-  return normalizedPath.replace(/^\.\//, "").replace(/^\//, "")
 }
