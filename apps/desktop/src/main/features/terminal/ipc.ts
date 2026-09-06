@@ -6,6 +6,7 @@ import type {
   DesktopTerminalWriteInput,
 } from "../../../shared/terminal-types"
 import type { IpcContribution } from "../../core/ipc/types"
+import { listDetectedTerminalShells, toPublicTerminalShells } from "./detect-shells"
 import { desktopTerminalService } from "./terminal-service"
 
 export const terminalIpcContribution: IpcContribution = {
@@ -40,6 +41,10 @@ export const terminalIpcContribution: IpcContribution = {
       {
         channel: IpcChannels.terminalList,
         handler: (event) => desktopTerminalService.list(event.sender),
+      },
+      {
+        channel: IpcChannels.terminalListShells,
+        handler: () => toPublicTerminalShells(listDetectedTerminalShells()),
       },
     ]
   },

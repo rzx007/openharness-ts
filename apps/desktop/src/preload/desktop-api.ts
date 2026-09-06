@@ -152,6 +152,7 @@ export const desktopAPI = {
       invoke(IpcChannels.terminalRead, input),
     kill: (terminalId: string) => invoke(IpcChannels.terminalKill, terminalId),
     list: () => invoke(IpcChannels.terminalList),
+    listShells: () => invoke(IpcChannels.terminalListShells),
     onEvent: (listener: (event: DesktopTerminalEvent) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, value: DesktopTerminalEvent): void =>
         listener(value)

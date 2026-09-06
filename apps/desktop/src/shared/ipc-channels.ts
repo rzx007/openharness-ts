@@ -40,6 +40,7 @@ import type {
   WorkspaceOpener,
 } from "./workspace-types"
 import type {
+  DesktopDetectedTerminalShell,
   DesktopTerminalCreateInput,
   DesktopTerminalReadInput,
   DesktopTerminalReadResult,
@@ -197,6 +198,7 @@ export const IpcChannels = {
   terminalRead: "terminal:read",
   terminalKill: "terminal:kill",
   terminalList: "terminal:list",
+  terminalListShells: "terminal:list-shells",
 
   scheduleStatus: "schedule:status",
   scheduleList: "schedule:list",
@@ -541,6 +543,10 @@ export interface IpcInvokeMap {
   [IpcChannels.terminalList]: {
     args: []
     result: DesktopTerminalRecord[]
+  }
+  [IpcChannels.terminalListShells]: {
+    args: []
+    result: DesktopDetectedTerminalShell[]
   }
   [IpcChannels.scheduleStatus]: { args: []; result: DesktopScheduledStatus }
   [IpcChannels.scheduleList]: { args: []; result: DesktopScheduledTask[] }

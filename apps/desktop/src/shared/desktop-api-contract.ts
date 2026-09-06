@@ -47,6 +47,7 @@ import type {
   WorkspaceOpener,
 } from "./workspace-types"
 import type {
+  DesktopDetectedTerminalShell,
   DesktopTerminalCreateInput,
   DesktopTerminalEvent,
   DesktopTerminalReadInput,
@@ -188,6 +189,7 @@ export type DesktopAPI = {
     read: (input: DesktopTerminalReadInput) => Promise<DesktopTerminalReadResult>
     kill: (terminalId: string) => Promise<void>
     list: () => Promise<DesktopTerminalRecord[]>
+    listShells: () => Promise<DesktopDetectedTerminalShell[]>
     onEvent: (listener: (event: DesktopTerminalEvent) => void) => () => void
   }
   schedules: {

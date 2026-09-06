@@ -8,6 +8,8 @@ import type {
   TerminalWriteRequest,
 } from "@openharness/terminal"
 
+export type DesktopDetectedTerminalShell = { id: string; label: string }
+
 export type DesktopTerminalCreateInput = TerminalCreateRequest
 export type DesktopTerminalRecord = TerminalSessionInfo
 export type DesktopTerminalWriteInput = TerminalWriteRequest
