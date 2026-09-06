@@ -1,3 +1,6 @@
+import { realpath, stat } from "node:fs/promises"
+import { join, posix, sep, win32 } from "node:path"
+
 export type WorkspaceFileScope = "project" | "extra-root"
 
 export type WorkspacePathClassification = {
@@ -44,6 +47,61 @@ export function isPathInside(candidate: string, root: string, pathApi: PathFlavo
       relativePath !== ".." &&
       !pathApi.isAbsolute(relativePath) &&
       !relativePath.includes(`..${pathApi.sep}`))
+  )
+}
+
+export async function resolveWorkspaceOpenTarget(
+  path: string,
+  rootPath: string | undefined,
+  roots: WorkspaceAllowedRoots
+): Promise<{ path: string; isDirectory: boolean }> {
+  if (typeof path !== "string" || !path.trim()) throw new Error("路径不能为空。")
+  if (typeof rootPath !== "string" || !rootPath.trim()) throw new Error("项目路径不能为空。")
+
+  const classification = classifyWorkspacePath(path, { ...roots, projectRoot: rootPath }, {
+    win32,
+    posix,
+  })
+  if (!classification) throw new Error("文件必须位于当前项目目录内。")
+
+  const candidate =
+    classification.kind === "project"
+      ? join(rootPath, ...classification.relativePath.split("/").filter(Boolean))
+      : classification.tabPath.replace(/\//g, sep)
+  let absolutePath: string
+  try {
+    absolutePath = await realpath(candidate)
+  } catch {
+    throw new Error("无法预览。")
+  }
+
+  const rootsWithProject = { ...roots, projectRoot: rootPath }
+  if (!stillInsideAllowedRoot(absolutePath, classification, rootPath, rootsWithProject, { win32, posix })) {
+    throw new Error("文件必须位于当前项目目录内。")
+  }
+
+  const info = await stat(absolutePath)
+  return { path: absolutePath, isDirectory: info.isDirectory() }
+}
+
+export function stillInsideAllowedRoot(
+  absolutePath: string,
+  classification: WorkspacePathClassification,
+  projectRoot: string,
+  roots: WorkspaceAllowedRoots,
+  pathOps: WorkspacePathOps
+): boolean {
+  const checkRoot =
+    classification.kind === "project"
+      ? projectRoot
+      : classification.rootLabel === "个人配置"
+        ? classification.relativePath === "USER.md"
+          ? roots.userProfilePath
+          : roots.skillsDir
+        : roots.outsideProjectRoot
+  return (
+    isPathInside(absolutePath, checkRoot, pathOps.win32) ||
+    isPathInside(absolutePath, checkRoot, pathOps.posix)
   )
 }
 

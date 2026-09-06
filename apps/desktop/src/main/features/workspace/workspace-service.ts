@@ -17,7 +17,7 @@ import type {
 import { buildOutsideProjectRoot } from "../session/outside-project-workspace"
 import {
   classifyWorkspacePath,
-  isPathInside,
+  stillInsideAllowedRoot,
   type WorkspaceAllowedRoots,
   type WorkspacePathClassification,
 } from "./workspace-path"
@@ -133,7 +133,7 @@ class WorkspaceService {
     const candidate =
       classification.kind === "project"
         ? join(rootPath, ...classification.relativePath.split("/"))
-        : classification.tabPath.replace(/\//g, win32.sep)
+        : classification.tabPath.replace(/\//g, sep)
     let absolutePath: string
     try {
       absolutePath = await realpath(candidate)
@@ -141,10 +141,19 @@ class WorkspaceService {
       throw new Error("无法预览。")
     }
 
-    if (!stillInsideAllowedRoot(absolutePath, classification, rootPath, this.rootsFor(rootPath))) {
+    if (
+      !stillInsideAllowedRoot(absolutePath, classification, rootPath, this.rootsFor(rootPath), {
+        win32,
+        posix,
+      })
+    ) {
       throw new Error("文件必须位于当前项目目录内。")
     }
     return { absolutePath, classification }
+  }
+
+  allowedRootsFor(projectRoot: string): WorkspaceAllowedRoots {
+    return this.rootsFor(projectRoot)
   }
 
   private rootsFor(projectRoot: string): WorkspaceAllowedRoots {
@@ -173,23 +182,6 @@ async function resolveDirectory(value: unknown): Promise<string> {
   const info = await stat(path)
   if (!info.isDirectory()) throw new Error("项目路径不是目录。")
   return path
-}
-
-function stillInsideAllowedRoot(
-  absolutePath: string,
-  classification: WorkspacePathClassification,
-  projectRoot: string,
-  roots: WorkspaceAllowedRoots
-): boolean {
-  const checkRoot =
-    classification.kind === "project"
-      ? projectRoot
-      : classification.rootLabel === "个人配置"
-        ? classification.relativePath === "USER.md"
-          ? roots.userProfilePath
-          : roots.skillsDir
-        : roots.outsideProjectRoot
-  return isPathInside(absolutePath, checkRoot, win32) || isPathInside(absolutePath, checkRoot, posix)
 }
 
 function isLikelyBinary(buffer: Buffer): boolean {
