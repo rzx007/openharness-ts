@@ -4,7 +4,7 @@ import { useState } from "react"
 
 import { OpenerIcon } from "@renderer/components/desktop/open-with/opener-icon"
 import {
-  launchWorkspaceOpener,
+  launchProjectFolderOpener,
   useWorkspaceOpeners,
 } from "@renderer/components/desktop/open-with/use-workspace-openers"
 import {
@@ -28,7 +28,7 @@ export function OpenWithSplitButton({
     if (!folderPath || opening) return
     setOpening(true)
     try {
-      await launchWorkspaceOpener({ openerId, path: folderPath })
+      await launchProjectFolderOpener(openerId, folderPath)
     } catch {
       // Launch failures are surfaced by the OS; keep the selected opener.
     } finally {

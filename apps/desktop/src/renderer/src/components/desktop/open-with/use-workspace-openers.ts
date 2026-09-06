@@ -71,6 +71,13 @@ export async function launchWorkspaceOpener(input: {
   })
 }
 
+export async function launchProjectFolderOpener(
+  openerId: string,
+  folderPath: string
+): Promise<void> {
+  await launchWorkspaceOpener({ openerId, path: folderPath, rootPath: folderPath })
+}
+
 function loadOpeners(): Promise<WorkspaceOpener[]> {
   if (cachedOpeners) return Promise.resolve(cachedOpeners)
   if (!inflight) {

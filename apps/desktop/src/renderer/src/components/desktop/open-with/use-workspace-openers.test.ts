@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { launchWorkspaceOpener } from "./use-workspace-openers"
+import { launchProjectFolderOpener, launchWorkspaceOpener } from "./use-workspace-openers"
 
 describe("launchWorkspaceOpener", () => {
   const openWith = vi.fn(async () => undefined)
@@ -29,5 +29,14 @@ describe("launchWorkspaceOpener", () => {
     })
     expect(updateDefaultOpener).not.toHaveBeenCalled()
     expect(localStorage.getItem("openharness.desktop.open-with.v1")).toBeNull()
+  })
+
+  it("opens a project folder with the folder as both path and rootPath", async () => {
+    await launchProjectFolderOpener("vscode", "E:/code/app")
+    expect(openWith).toHaveBeenCalledWith({
+      openerId: "vscode",
+      path: "E:/code/app",
+      rootPath: "E:/code/app",
+    })
   })
 })
