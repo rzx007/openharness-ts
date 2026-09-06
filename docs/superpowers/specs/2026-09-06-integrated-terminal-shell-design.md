@@ -34,25 +34,34 @@
 
 - 文件：`userData/desktop-preferences.json`
 - 字段：`defaultTerminalShellId`，字符串或省略。文件里没有该字段时不要写成 `null`
-- 选「系统默认」、没这项设置、空串、只含空白、值为 `system`、文件里不是字符串、文件损坏：都当成「系统默认」，文件里省略该字段。非空字符串都算合法 id，不做「是不是已知 Shell」校验
+- 选「系统默认」、没这项设置、空串、只含空白、值为 `system`、文件里不是字符串、文件损坏：都当成「系统默认」，文件里省略该字段
+- 规范化之后、且不是 `system` 的非空字符串才是可持久化 id。不做「是不是已知 / 已装 Shell」校验
 - 选了具体 Shell：写下它的 id（见下表）。保存的是 id，不是某次扫到的完整路径
 
 `DesktopPreferences` 必须同时读回 `notificationMode`、`defaultOpenerId`、`defaultTerminalShellId`。任何一次 `patchDesktopPreferences` 都不能丢掉另外两个字段。
 
-改通知或打开目标不得抹掉 Shell；改 Shell 也不得抹掉另外两项。从具体 Shell 改回「系统默认」时，必须从文件里去掉 `defaultTerminalShellId`，不能留下旧 id。实现上 `patch` 不能只做 `{ ...旧对象, ...补丁 }` 就完事：补丁里要把该字段清掉时，写盘结果里不能再出现它。
+改通知或打开目标不得抹掉 Shell；改 Shell 也不得抹掉另外两项。从具体 Shell 改回「系统默认」时，必须从文件里去掉 `defaultTerminalShellId`，不能留下旧 id，也不能写成 `"defaultTerminalShellId": null`。
+
+清字段沿用 `defaultOpenerId` 的做法：IPC 的 `null` / `system` / 空白先规范化成「省略」，再重建要写盘的对象（规范化后为空的字段直接不写）。不要把 `null` 并进对象再 `JSON.stringify`。不要新发明一套 delete API。`Partial<DesktopPreferences>` 区分不了「这次不改」和「删掉 optional 字段」，所以更新函数必须按「规范化后再决定写不写该键」来做，不能只做 `{ ...旧对象, ...补丁 }`。
 
 `DesktopSettingsSnapshot` 增加 `defaultTerminalShellId: string | null`（系统默认时为 `null`）。  
 `buildDesktopSettingsSnapshot` 的本机偏好参数要能接收 `defaultTerminalShellId`。工作风格仍来自 daemon。
 
 新增 IPC：`settings:update-default-terminal-shell`。  
 入参类型 `UpdateDesktopDefaultTerminalShellInput`：`{ defaultTerminalShellId: string | null }`。  
-主进程先 `trim`（`null` 保持 `null`）。`null`、空串、`system` 都表示「系统默认」，写盘时省略字段。其它非空字符串原样写入，写盘时不检查「现在还装不装得上」。
+主进程先 `trim`（`null` 保持 `null`）。`null`、空串、`system` 都表示「系统默认」，写盘时省略字段。规范化之后且不是 `system` 的非空字符串原样写入，写盘时不检查「现在还装不装得上」。
 
 **写成功的标准是本机文件写成功。** `patchDesktopPreferences` 写盘失败必须让这次 IPC 抛错，不能只 `console.warn` 还返回新对象。daemon 只用来拼 snapshot 里的工作风格；它挂了不能把已经写成功的本机默认说成失败。此时仍返回 snapshot：本机三项用文件里的值，`workStyle` 回落 `practical`。
 
 渲染进程通过 `window.desktop.settings.updateDefaultTerminalShell` 保存。
 
-读列表用新 IPC：`terminal:list-shells`。返回本机已检测到的 `{ id, label }[]`，**不含**「系统默认」，**不含**可执行文件路径。设置页自己把「系统默认」插在第一项，对应 snapshot 的 `null`。
+读列表用新 IPC：`terminal:list-shells`。
+
+- 内部检测项是 `{ id, label, command }`，`command` 是可交给 PTY 的可执行文件路径
+- IPC / preload / 合约只暴露 `{ id, label }[]`，剥掉 `command`
+- 列表**不含**「系统默认」
+- `resolvePreferredTerminalShell` 只吃内部列表，不读渲染进程传来的路径
+- 设置页自己把「系统默认」插在第一项，对应 snapshot 的 `null`
 
 ## 谁读、谁写
 
@@ -62,6 +71,7 @@
 | 桌面主进程 `terminal.create`（本地且调用方没带 `shell`） | 是，当场解析成路径或省略 | 否 |
 | 渲染进程 `terminal-tool` 创建 / 重启 | 否 | 否 |
 | 侧边栏 | 否 | 否 |
+| session 元数据里可能仍有旧的 `defaultShell` | 否（创建路径忽略） | 否 |
 
 不把窗口内 `CustomEvent` 当主路径。也不要求多窗口一起变。
 
@@ -74,9 +84,9 @@
 | 系统 | id | 显示名 | 怎么算「已装」 |
 |---|---|---|---|
 | Windows | `pwsh` | PowerShell 7 | PATH 上有 `pwsh.exe` |
-| Windows | `powershell` | Windows PowerShell | 常见安装路径或 PATH 上有 `powershell.exe` |
+| Windows | `powershell` | Windows PowerShell | `%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` 存在，或 PATH 上有 `powershell.exe` |
 | Windows | `cmd` | 命令提示符 | `ComSpec` / `COMSPEC` 指向的文件存在，或 PATH 上有 `cmd.exe` |
-| Windows | `git-bash` | Git Bash | 和右上角打开方式同一套 Git 路径：`Git\\git-bash.exe`、`Git\\bin\\bash.exe`（Program Files / Program Files (x86)） |
+| Windows | `git-bash` | Git Bash | 存在可给 PTY 用的 `Git\\bin\\bash.exe` 或 `Git\\usr\\bin\\bash.exe`（Program Files / Program Files (x86)）。判断「装了 Git」可以顺带看 opener 用的 `git-bash.exe`，但**填进 `shell` 的必须是 `bash.exe`**。只有启动器、没有 `bash.exe` 时不要列出该项，更不要把 `git-bash.exe` 交给 PTY（那是带窗口的启动器，打开方式还会再包一层 `cmd /c start`） |
 | macOS | `zsh` | zsh | `/bin/zsh` 存在 |
 | macOS | `bash` | bash | `/bin/bash` 存在 |
 | Linux | `bash` | bash | `/bin/bash` 存在 |
@@ -86,6 +96,8 @@
 
 不把 `$SHELL` 额外加成一项。系统默认的自动挑选仍由 daemon 现有 `resolveDefaultShell` 负责。
 
+选「系统默认」可以和列表里任何一项都不同：macOS / Linux 的 `$SHELL` 可能是 fish 或 Homebrew zsh，和 `/bin/zsh`、`/bin/bash` 不是同一个文件。Windows 上已装 PowerShell 7 时，「系统默认」和列表第一项 `pwsh` 行为相同，这是预期，不是 bug。Git Bash 只出现在检测表里，自动挑选永远不会选它；只有用户显式选中才会用。不要因此去改 `resolveDefaultShell` 或把 `$SHELL` 加进列表。
+
 ## 新开终端怎么用这个值
 
 生效范围：桌面里用户新开的**本地**集成终端。沙箱、Agent 终端、Bash 工具不读这项。
@@ -94,32 +106,39 @@
 
 桌面主进程在 `terminal.create` 里补 `shell`：
 
-1. 调用方已经带了非空 `shell` → 照用不改
+1. 调用方已经带了非空 `shell` → 照用不改。这只保留给「已经自己指定了可执行文件」的调用方；本次不收紧 IPC 白名单。当前唯一的渲染进程调用方（`terminal-tool`）必须不传 `shell`，也不再读 `project.defaultShell`
 2. `runtime` 不是 `local` → 不补
 3. 偏好里没有 `defaultTerminalShellId`，或规范化后是系统默认 → 不传 `shell`，daemon 走 `resolveDefaultShell`
-4. 有具体 id → 当场再扫一遍本机；命中则把可执行文件路径填进 `shell`
+4. 有具体 id → 用内部检测列表做 `resolvePreferredTerminalShell`；命中则把该项的 `command`（可执行文件路径）填进 `shell`
 5. 以前存过的 id 此刻扫不到（例如卸了 Git）→ 当成系统默认，不拦创建
 
-解析函数 `resolvePreferredTerminalShell` 输入是「偏好 id + 当前检测结果」，输出是 `string | undefined`（`undefined` 表示不要往 create 里塞 `shell`）。设置页不调用这条解析来起进程；它只用来创建终端。
+`shell` 只能是可执行文件路径。daemon 固定 `spawn(shell, [])`，且不在本次改动范围。不要把 `--login`、`-i`、`--cd=` 拼进 `shell` 字符串，也不要为 Git Bash 去改 daemon。
+
+解析函数 `resolvePreferredTerminalShell` 输入是「偏好 id + 内部检测结果」，输出是 `string | undefined`（`undefined` 表示不要往 create 里塞 `shell`）。设置页不调用这条解析来起进程；它只用来创建终端。
 
 设置页 Select 的选中项：
 
 1. `defaultTerminalShellId` 能在检测列表里找到 → 用这一项
-2. 否则用「系统默认」（`null` / 哨兵 `system` 仅存在于 UI，不写进偏好文件）
+2. 否则用「系统默认」
 
-本机偏好还没读回来时，不要先闪「PowerShell」再跳到真实默认。等偏好读完再定选中项；列表可以先出来。
+`SelectItem` 和受控 `value` 必须用非空哨兵 `system`（现有 Base UI Select 的 `value` 是 `string`，`null` 和空串都不能当选项值）。snapshot / IPC / 文件仍是 `null`。未读完偏好时学默认打开目标，显示「正在读取…」，不要用 `null` 或 `""` 当选项值，也不要先闪「PowerShell」。
+
+等偏好读完再定选中项；列表可以先出来。
 
 ## 设置页 UI
 
-把写死的 `SettingSelect`（`TerminalSquare` + 「PowerShell」）换成真正的下拉，交互对齐「工作风格 / 通知 / 默认文件打开目标」：
+对标 `DefaultOpenerControl`：抽出独立控件（例如 `default-terminal-shell-control.tsx`），`settings-content.tsx` 只替换占位。不要把读写逻辑堆进整页。
+
+交互对齐「默认文件打开目标」：
 
 - 打开页时读 snapshot（本机字段不依赖 daemon）+ `list-shells`
-- 第一项「系统默认」；后面是检测列表
-- 选一项就保存。选「系统默认」走 `defaultTerminalShellId: null`
+- 第一项「系统默认」，`SelectItem` value 为 `system`；后面是检测列表
+- 选一项就保存。选「系统默认」走 `updateDefaultTerminalShell({ defaultTerminalShellId: null })`
 - 加载中或保存中禁用
 - 失败则回到改之前的选项，控件右侧用同一套红色说明（`settings-error-message`）
 - 检测失败或列表为空：仍能选「系统默认」，不要整页报死，也不假装还能选 PowerShell
 - 不给每个 Shell 配系统图标；触发按钮继续用现有终端图标即可
+- 用 jsdom + `createRoot` 测这个独立控件，风格跟 `default-opener-control.test.ts` 一样
 
 ## 侧边栏
 
@@ -143,10 +162,14 @@
 1. **本机偏好**：能读写合法 `defaultTerminalShellId`；`null` / `system` / 空 / 只含空白 / 坏文件都回落到系统默认（文件省略字段）。改 Shell 不影响 `notificationMode` 和 `defaultOpenerId`；改另外两项不影响已保存的 Shell。从具体 id 改回系统默认后，文件里不能再出现该字段。写盘失败要抛错。
 2. **检测**：Windows / macOS / Linux 只返回存在的项；「系统默认」不进检测列表；不返回路径给渲染进程合约。
 3. **创建补全**：本地 + 已选 id → 带上对应路径；本地 + 系统默认 / 未知 id → 不带 `shell`；调用方已带 `shell` → 不覆盖；非本地 → 不补。
-4. **设置页**：能保存具体 id 和回到系统默认；Select 的 value 在 id 失效时是系统默认；保存失败回退。
-5. **创建终端**：`terminal-tool` 不再因 `project.defaultShell` 传 `shell`。
-6. **侧边栏**：没有「设置默认 Shell」菜单项和对话框。
-7. **snapshot 形状**：更新这些会立刻红的精确比对 / 字面量（与默认打开目标同一批测试文件），旧偏好没有该字段时 snapshot 为 `null`。
+4. **设置页控件**（`default-terminal-shell-control`，jsdom + `createRoot`）：能保存具体 id 和回到系统默认（IPC 传 `null`）；Select 的 value 在 id 失效时是 `system`；保存失败回退。
+5. **创建入参**：把「要不要带 `shell`」从 `terminal-tool` 抽成纯函数（或删除该分支后断言入参构造不再读 `project.defaultShell`）。不要挂载整棵 `TerminalTool` / xterm。
+6. **侧边栏**：断言菜单数据 / 文案不再出现「设置默认 Shell」，不要要求挂载整棵 Sidebar。
+7. **snapshot 形状**：旧偏好没有该字段时 snapshot 为 `null`。会立刻红的精确比对 / 字面量至少包括：
+   - `apps/desktop/src/main/features/settings/settings-service.test.ts`（`toEqual` 现为 `workStyle` + `notificationMode` + `defaultOpenerId`）
+   - `apps/desktop/src/renderer/src/components/desktop/settings-page/default-opener-control.test.ts`（`settingsSnapshot()` 必须满足 `DesktopSettingsSnapshot`）
+   - `apps/desktop/src/renderer/src/stores/desktop-session/notification-observer.test.ts`（多处 snapshot 字面量）
+   - `apps/desktop/src/main/features/settings/desktop-preferences.test.ts`
 
 验证时跑桌面相关测试、改动文件的 lint 和类型检查。
 
@@ -155,8 +178,8 @@
 - `apps/desktop/src/shared/settings-types.ts` — snapshot 增加字段；`UpdateDesktopDefaultTerminalShellInput`；规范化函数；`buildDesktopSettingsSnapshot` 带上新字段
 - `apps/desktop/src/main/features/settings/desktop-preferences.ts` — 三字段一起读回；支持清掉 `defaultTerminalShellId`；写失败抛错
 - `apps/desktop/src/main/features/settings/settings-service.ts` 与 IPC / preload / 合约 / `ipc-channels.ts` — 新增更新接口；snapshot 本机字段不依赖 daemon
-- `apps/desktop/src/main/features/terminal/detect-shells.ts` — 检测列表与 `resolvePreferredTerminalShell`；IPC `terminal:list-shells`
+- `apps/desktop/src/main/features/terminal/detect-shells.ts` — 内部 `{ id, label, command }` 检测与 `resolvePreferredTerminalShell`；IPC `terminal:list-shells` 只返回 `{ id, label }`
 - `apps/desktop/src/main/features/terminal/terminal-service.ts` — 本地 create 且未带 `shell` 时按偏好补路径
-- `apps/desktop/src/renderer/src/components/desktop/settings-page/settings-content.tsx` — 换成真实下拉
+- `apps/desktop/src/renderer/src/components/desktop/settings-page/default-terminal-shell-control.tsx` — 真实下拉；`settings-content.tsx` 只替换占位
 - `apps/desktop/src/renderer/src/components/desktop/tools/terminal/terminal-tool.tsx` — 去掉 `project.defaultShell`
 - `apps/desktop/src/renderer/src/components/desktop/layout/main-layout/sidebar.tsx` — 拿掉按项目设置 Shell 的菜单和对话框
