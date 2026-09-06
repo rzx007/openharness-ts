@@ -1,4 +1,4 @@
-import { ChevronDown, MonitorCog, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { ChevronDown, MonitorCog, SlidersHorizontal } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card"
@@ -23,6 +23,7 @@ import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
 import { AttachmentStorageSettings } from "./attachment-storage-settings"
 import { DefaultOpenerControl } from "./default-opener-control"
+import { DefaultTerminalShellControl } from "./default-terminal-shell-control"
 import { errorMessage } from "./settings-error-message"
 import { AppearanceSettings } from "@renderer/components/appearance/appearance-settings"
 import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
@@ -144,7 +145,7 @@ function GeneralSettings(): React.JSX.Element {
         <SettingRow
           title="集成终端 Shell"
           description="选择新终端默认打开的 Shell"
-          control={<SettingSelect icon={<TerminalSquare />} label="PowerShell" />}
+          control={<DefaultTerminalShellControl />}
         />
         <Separator />
         <SettingRow
