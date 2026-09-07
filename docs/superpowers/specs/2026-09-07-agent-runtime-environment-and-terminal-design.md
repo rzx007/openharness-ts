@@ -300,20 +300,20 @@ Desktop 内部的环境类型使用 `local | docker`。协议层只在边界处�
 
 如果旧容器无法安全验证所有权或检测到其他 daemon 正在使用，启动失败并保持 fail-closed。系统不创建带 config hash 后缀的第二个容器。
 
-### 5.4 后续实时切换
+### 5.4 可选的未来实时切换
 
-第三期如果增加无需重启的切换，仍采用单版本策略：
+第三阶段 3A 不实现无需重启的切换。当前继续使用“设置原子保存，重启后按最新配置创建环境”的简单模型。
 
-1. 获取 workspace owner 的独占 mutation barrier；
-2. 把环境置为 `draining`，阻止新 run、终端和子 Agent；
-3. 等待或要求用户关闭全部 lease 和 activeJobs；
-4. 在 barrier 内再次检查引用；
-5. 持久化 `switching` 状态和目标配置 hash；
-6. 停止旧环境并创建最新环境；
-7. 健康探测成功后提交 `ready`；
-8. 失败时记录 `unavailable`，保持 fail-closed，不恢复旧版本容器。
+确定性恢复只依赖一个提交点：
 
-daemon 重启时根据持久化状态继续完成替换或标记失败。内存活动指针不能作为唯一提交依据。
+```text
+settings 原子 rename 前崩溃 → 重启后读取完整旧配置
+settings 原子 rename 后崩溃 → 重启后读取完整新配置
+```
+
+daemon 重启后结合当前 Settings 与 Docker owner/config labels 清理或重建资源，不持久化 `draining`、`switching`、source/target hash 或 affected owner 快照。
+
+如果未来有明确用户价值再增加热切换，仍须保持单版本策略、设置提交前不静默终止终端或后台任务、设置提交后失败不回滚旧容器。该能力单独设计和实施，不能成为 3A 安全清理的前置条件。
 
 ## 6. 环境信息
 
@@ -537,12 +537,11 @@ daemon 持有唯一 `ExecutionEnvironmentManager`。Agent Runtime、Agent Termin
 
 ```text
 environmentId
-state: preparing | ready | draining | switching | unavailable | stopped | failed
+state: preparing | ready | failed | stopped
 workspaceOwnerId
 configHash
 containerId
 leases
-activeJobs: Map<jobId, ownerLeaseId>
 ```
 
 ### 10.2 Workspace Owner
@@ -564,23 +563,26 @@ activeJobs: Map<jobId, ownerLeaseId>
 - 根 Agent Runtime；
 - 共享环境的子 Agent Runtime；
 - Agent Terminal；
-- 跟随 Agent 环境的用户终端。
+- 跟随 Agent 环境的用户终端；
+- 后台任务。
 
-后台进程记录为 `activeJobs`，每项保存创建者 lease/runtime ID。release 必须幂等，只能清理该 owner 创建的进程。关闭一个终端只释放自己的 lease，不能停止其他终端或 Agent 使用的环境。
+后台任务在进程结束前独立持有 background lease。release 必须幂等，只能清理该 owner 创建的进程。关闭一个终端只释放自己的 lease，不能停止其他终端、后台任务或 Agent 使用的环境。
 
-环境只有在 lease 为零且 activeJobs 已清理后才能释放。可复用容器释放环境句柄时保留容器，但必须停止本次 Runtime 启动的残留进程；临时容器在最后一个 lease 释放后停止并删除。
+环境只有在 lease 为零后才能释放。可复用容器释放环境句柄时保留容器，但必须停止本次 Runtime 启动的残留进程；临时容器在最后一个 lease 释放后停止并删除。
 
 ### 10.4 daemon 崩溃恢复
 
-OHS 为容器和每个容器内 exec 写入 owner、environmentId、runtimeId/jobId 与配置 hash 标记。daemon 启动时执行 orphan reconciliation：
+OHS 为容器和每个容器内 exec 写入 installation、daemon owner ID + generation、workspace owner、environmentId、runtimeId/jobId 与配置 hash 标记。installation ID 从规范化数据目录稳定派生，不新建数据库记录。
 
-- 删除确认属于本 daemon 用户且没有存续会话的临时容器；
-- 清理可复用容器中已失去 owner 的旧进程组；
+daemon 启动时在对外 ready 前执行 orphan reconciliation：
+
+- 删除确认属于当前 installation、且由旧 daemon 实例遗留的临时容器；
+- 清理可复用容器中属于旧 daemon owner ID + generation 的进程组；
 - 不接管 hash 不匹配的旧环境；
 - 无法验证所有权的容器只报告冲突，不停止或删除；
-- 从持久化 `switching` 状态恢复为最新配置或明确 `unavailable`。
+- 每次环境 acquire 都按当前最新 Settings 解析配置，hash 不匹配时仅在完整所有权验证后按单版本规则替换。
 
-第一期不实现共享终端和内存 lease，因此由单个 Agent Runtime 独占环境并在 daemon 启动时清理可确认的孤儿容器。完整 lease 持久化与精确进程恢复在第三期完成。
+内存 lease 不做崩溃恢复。临时环境依赖内存 lease，daemon 重启后不接管；复用容器可以保留，但旧 daemon exec 必须清理。正常关闭会删除 `application_owner` 行，因此判断 daemon 实例必须同时比较随机 owner ID 和 generation，不能只比较 generation。
 
 ## 11. 交互终端
 
@@ -842,15 +844,22 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 
 ### 18.3 第三期：生命周期加固
 
-- 无需重启的 draining/switching 环境切换；
-- mutation barrier、持久切换状态和 daemon 重启恢复；
-- 容器与 exec owner 标记、orphan reconciliation；
-- Native Plugin Tool 环境化后按能力重新启用；
-- Skill 删除、重命名和热刷新完整语义；
-- 工作区引用统计和独立清理入口；
-- 各平台真实 Docker E2E 接入 CI。
+第三期继续拆成独立子阶段，避免把环境安全、插件执行、危险目录删除和 CI runner 差异绑成一次改造。
 
-第三期仍使用单一最新容器版本，不增加旧配置恢复或多版本并存。
+3A 先完成最小生命周期安全闭环：
+
+- Settings 使用同目录临时文件和原子 rename；
+- 容器与 exec 写入可验证 installation、workspace、environment 和 daemon 复合身份；
+- daemon ready 前执行保守 orphan reconciliation；
+- 真实 Docker E2E 覆盖临时容器、复用容器旧 exec、未知所有权和单版本替换。
+
+其余能力分别规划：
+
+- 3B：Native Plugin Tool 环境化后按能力重新启用；
+- 3C：Skill 变更感知、工作区引用统计和独立清理入口；
+- 3D：在确实具有对应 Docker daemon 的 runner 上接入跨平台真实 E2E。
+
+无需重启的热切换暂缓，待出现明确用户价值后单独设计。第三期仍使用单一最新容器版本，不增加旧配置恢复、多版本并存或持久 lease。
 
 ## 19. 验收与测试分层
 
@@ -872,7 +881,7 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 - 配置指纹包含规范化受管挂载；
 - 同一 owner 的容器身份不包含 hash，过期版本不会并存；
 - 工具执行域缺失时默认 environment，Docker 中无环境能力则不注册；
-- Environment Manager 的 owner、lease、activeJobs 和状态迁移；
+- Environment Manager 的 owner、Agent/Terminal/background lease 和状态迁移；
 - 项目外根会话、fork、非隔离 child 和 worktree child 的 owner 规则；
 - 隔离 worktree 创建失败返回 `isolation_unavailable`。
 
@@ -884,11 +893,12 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 - 项目外用户终端和 Agent Terminal 能创建；
 - 关闭单个终端只释放自己的 lease；
 - 第一阶段设置保存后标记需重启，运行环境不伪装成已切换；
+- 用户级和项目级 Settings 原子保存，故障只留下完整旧文件或完整新文件；
 - 重启后旧会话和新会话都使用最新配置；
 - 过期的已验证 OHS 容器被最新配置替换，不产生第二个版本；
 - 无法验证 owner 的同名容器不删除并导致 fail-closed；
-- 第三阶段切换先进入 draining 并阻止新工作；
-- daemon 在 switching 状态崩溃后恢复到最新环境或 unavailable；
+- daemon 启动时只删除当前 installation 的旧临时容器，只清理旧 daemon 复合身份的 exec；
+- settings rename 前后崩溃时分别读取完整旧配置或完整新配置，不依赖持久切换状态；
 - 显式宿主终端打开时不能删除其工作区；
 - Native Plugin Tool 在第一期 Docker 模式不注册；
 - `ImageToText(image_path)` 不调用宿主 readFile；
