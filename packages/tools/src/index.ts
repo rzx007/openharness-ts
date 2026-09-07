@@ -18,6 +18,7 @@ export {
   buildUnifiedDiff,
   computeFileChange,
   computeToolDiff,
+  createEnvironmentFileSystem,
   fileEditTool,
   fileReadTool,
   fileWriteTool,

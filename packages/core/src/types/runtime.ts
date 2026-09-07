@@ -418,6 +418,7 @@ export interface QueryEngineOptions {
   compactKeepRecent?: number;
   skillRegistry?: unknown;
   memoryRetriever?: MemoryRetriever;
+  executionEnvironment?: import("@openharness/environment").ExecutionEnvironmentHandle;
 }
 
 export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";

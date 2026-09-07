@@ -38,6 +38,7 @@ import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import type { AgentDefinition } from "@openharness/coordinator";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import type { ResolvedAgentCapabilities } from "./capability-resolution.js";
 
@@ -77,6 +78,7 @@ interface OpenHarnessRuntimeOptions {
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
   capabilities?: ResolvedAgentCapabilities;
+  executionEnvironment?: ExecutionEnvironmentHandle;
 }
 
 /**
@@ -137,7 +139,8 @@ export async function createOpenHarnessRuntime(
   options: OpenHarnessRuntimeOptions,
 ): Promise<RuntimeBundle> {
   const { settings } = options;
-  const cwd = options.cwd ?? process.cwd();
+  const hostCwd = options.cwd ?? process.cwd();
+  const cwd = options.executionEnvironment?.workspace.executionRoot ?? hostCwd;
   const configuration = options.configuration;
   const storage = options.credentialStorage ?? new CredentialStorage();
 
@@ -215,6 +218,7 @@ export async function createOpenHarnessRuntime(
   const permissionChecker = new PermissionChecker({
     mode,
     cwd,
+    pathStyle: options.executionEnvironment?.info.pathStyle,
     allowedTools:
       effectiveAllowed.kind === "only" ? [...effectiveAllowed.names] : [],
     deniedTools: [...effectiveDenied],
@@ -225,7 +229,7 @@ export async function createOpenHarnessRuntime(
   });
 
   const hookExecutor = new HookExecutor({
-    cwd,
+    cwd: hostCwd,
     sessionId: options.sessionId,
     settings,
   });
@@ -238,7 +242,8 @@ export async function createOpenHarnessRuntime(
     configuration.systemPrompt ??
     (await buildRuntimeSystemPrompt({
       customPrompt: settings.systemPrompt,
-      cwd,
+      cwd: hostCwd,
+      environmentInfo: options.executionEnvironment?.info,
       permissionMode: mode,
       workStyle: settings.workStyle,
       fastMode: configuration.fastMode ?? settings.fastMode,
@@ -256,6 +261,7 @@ export async function createOpenHarnessRuntime(
     cwd,
     sessionId: options.sessionId,
     settings,
+    executionEnvironment: options.executionEnvironment,
     skillRegistry: options.skillRegistry,
   };
 
@@ -279,12 +285,26 @@ export async function createOpenHarnessRuntime(
     .setQueryEngine(queryEngine)
     .build(settings);
 
-  await attachSandboxRuntime(
-    bundle,
-    cwd,
-    options.sandboxReporter,
-    options.sessionId,
-  );
+  if (options.executionEnvironment) {
+    bundle.sandboxStatus = options.executionEnvironment.info.kind === "docker"
+      ? {
+          state: "active",
+          enabled: true,
+          active: true,
+          backend: "docker",
+          containerCwd: options.executionEnvironment.workspace.executionRoot,
+          networkMode: options.executionEnvironment.info.networkMode,
+        }
+      : { state: "off", enabled: false, active: false };
+    bundle.addCleanup(() => options.executionEnvironment?.release());
+  } else {
+    await attachSandboxRuntime(
+      bundle,
+      hostCwd,
+      options.sandboxReporter,
+      options.sessionId,
+    );
+  }
   return bundle;
 }
 

@@ -4,6 +4,7 @@ import { platform, machine, homedir, hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { getConfigDir, resolveGitRepository } from "@openharness/core";
 import type { WorkStyle } from "@openharness/core";
+import type { EffectiveEnvironmentInfo } from "@openharness/environment";
 import { loadLocalRules } from "@openharness/personalization";
 import {
   describeHostShellLauncher,
@@ -287,6 +288,38 @@ export function formatEnvironmentSection(env: EnvironmentInfo): string {
     for (const rule of env.shellCommandRules) lines.push(`- ${rule}`);
   }
 
+  return lines.join("\n");
+}
+
+export function formatEffectiveEnvironmentSection(
+  env: EffectiveEnvironmentInfo,
+): string {
+  const lines = [
+    "# Execution Environment",
+    `- Runtime: ${env.kind}`,
+    `- Host OS: ${env.hostOs}`,
+    `- Execution OS: ${env.executionOs}`,
+    `- Shell: ${env.shell}`,
+    `- Shell dialect: ${env.shellDialect}`,
+    `- Path style: ${env.pathStyle}`,
+    `- Working directory: ${env.cwd}`,
+    `- Home directory: ${env.homeDir}`,
+    `- Temporary directory: ${env.tempDir}`,
+    `- Network: ${env.networkMode}`,
+  ];
+  if (env.mounts.length > 0) {
+    lines.push("", "## Mounts");
+    for (const mount of env.mounts) {
+      lines.push(`- ${mount.path}: ${mount.mode} (${mount.purpose})`);
+    }
+  }
+  if (env.git?.repository) {
+    lines.push(`- Git: yes${env.git.branch ? ` (branch: ${env.git.branch})` : ""}`);
+  }
+  if (env.limitations.length > 0) {
+    lines.push("", "## Environment Limitations");
+    for (const limitation of env.limitations) lines.push(`- ${limitation}`);
+  }
   return lines.join("\n");
 }
 
@@ -738,6 +771,7 @@ export async function buildRuntimeSystemPrompt(
     /** Whether to mention background-shell and job tools in invariant guidance. */
     includeBackgroundShell?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
+    environmentInfo?: EffectiveEnvironmentInfo;
   } = {}
 ): Promise<string> {
   return renderPromptLayers(await buildPromptLayers(options));
@@ -756,10 +790,13 @@ export async function buildPromptLayers(
     includeDelegation?: boolean;
     includeBackgroundShell?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
+    environmentInfo?: EffectiveEnvironmentInfo;
   } = {}
 ): Promise<PromptLayers> {
-  const env = await getEnvironmentInfo(options.cwd);
-  const envSection = formatEnvironmentSection(env);
+  const promptCwd = options.cwd ?? process.cwd();
+  const envSection = options.environmentInfo
+    ? formatEffectiveEnvironmentSection(options.environmentInfo)
+    : formatEnvironmentSection(await getEnvironmentInfo(promptCwd));
 
   const stable: string[] = [];
   const context: string[] = [];
@@ -808,7 +845,7 @@ export async function buildPromptLayers(
     context.push(`# Custom Instructions\n\n${options.customPrompt.trim()}`);
   }
 
-  const claudeMd = await loadClaudeMdPrompt(env.cwd);
+  const claudeMd = await loadClaudeMdPrompt(promptCwd);
   if (claudeMd) context.push(claudeMd);
 
   const userProfile = await loadUserProfile();
