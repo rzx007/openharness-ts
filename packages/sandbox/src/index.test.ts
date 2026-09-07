@@ -35,6 +35,7 @@ import {
   getActiveSandboxSession,
   isSandboxSessionActive,
   setActiveSandboxSession,
+  acquireSandboxSessionAlias,
   toContainerWorkspacePath,
 } from "./index.js";
 
@@ -557,6 +558,26 @@ describe("docker backend argv builders", () => {
     });
 
     expect(argv[argv.indexOf("-w") + 1]).toBe("/workspace/src");
+  });
+
+  it("keeps a shared session alias until its final reference releases", () => {
+    const cwd = resolve("D:/shared-repo");
+    const session = {
+      backend: "docker" as const,
+      cwd,
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+    };
+    setActiveSandboxSession(session, { cwd, sessionId: "root" });
+
+    const first = acquireSandboxSessionAlias({ cwd, sourceSessionId: "root", targetSessionId: "child" });
+    const second = acquireSandboxSessionAlias({ cwd, sourceSessionId: "root", targetSessionId: "child" });
+    expect(getActiveSandboxSession({ cwd, sessionId: "child" })).toBe(session);
+    first();
+    expect(getActiveSandboxSession({ cwd, sessionId: "child" })).toBe(session);
+    second();
+    expect(getActiveSandboxSession({ cwd, sessionId: "child" })).toBeNull();
   });
 
   it("builds a Docker PTY target with separate host and execution cwd", () => {

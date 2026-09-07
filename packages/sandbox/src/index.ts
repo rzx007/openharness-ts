@@ -102,6 +102,7 @@ export type { DockerBuildArgsOptions, DockerExecArgsOptions, DockerRunArgsOption
 export type { DockerPtyTargetOptions } from "./docker-backend.js";
 export {
   getActiveSandboxSession,
+  acquireSandboxSessionAlias,
   isSandboxSessionActive,
   setActiveSandboxSession,
   stopActiveSandboxSession,

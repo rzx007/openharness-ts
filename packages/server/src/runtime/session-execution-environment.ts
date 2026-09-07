@@ -10,6 +10,7 @@ import type { SessionRecord } from "@openharness/protocol";
 import {
   createDesktopManagedMounts,
   createExecutionEnvironment,
+  acquireSandboxSessionAlias,
   dockerSandboxConfigHash,
   type ExecutionEnvironmentManager,
   resolveExecutionEnvironmentConfig,
@@ -43,7 +44,7 @@ export function createSessionEnvironmentAcquirer(input: {
     const skillsRoot = getSkillsDir();
     const configHash = environmentConfigHash(config, owner.hostRoot, skillsRoot, settings);
 
-    return input.manager.acquire({
+    const lease = await input.manager.acquire({
       ownerId: owner.ownerId,
       configHash,
       consumer,
@@ -64,6 +65,22 @@ export function createSessionEnvironmentAcquirer(input: {
         };
       },
     });
+    if (lease.info?.kind !== "docker" || session.id === owner.rootSessionId) return lease;
+    const releaseAlias = acquireSandboxSessionAlias({
+      cwd: owner.hostRoot,
+      sourceSessionId: owner.rootSessionId,
+      targetSessionId: session.id,
+    });
+    let released = false;
+    return {
+      ...lease,
+      release: async () => {
+        if (released) return;
+        released = true;
+        releaseAlias();
+        await lease.release();
+      },
+    };
   };
 }
 
