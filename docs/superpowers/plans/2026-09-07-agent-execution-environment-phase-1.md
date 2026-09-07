@@ -26,7 +26,7 @@
 - `packages/environment/src/index.ts`：环境契约公共导出。
 - `packages/environment/src/types.test.ts`：工作区绑定和环境信息的不变量测试。
 - `packages/sandbox/src/execution-config.ts`：Desktop/CLI 环境配置解析与校验。
-- `packages/sandbox/src/execution-config.test.ts`：surface、优先级和版本 2 配置测试。
+- `packages/sandbox/src/execution-config.test.ts`：surface、优先级和当前配置结构测试。
 - `packages/sandbox/src/execution-environment.ts`：Local/Docker 第一阶段环境句柄。
 - `packages/sandbox/src/execution-environment.test.ts`：环境创建顺序、信息与 fail-closed 测试。
 - `packages/tools/src/file/environment-path.ts`：文件工具的执行路径解析适配。
@@ -56,7 +56,7 @@
 - `packages/tools/src/file/read.ts`、`write.ts`、`edit.ts`、`glob.ts`、`grep.ts`：消费环境文件能力。
 - `packages/tools/src/file/__test__/operations.test.ts`、`read.test.ts`、`edit.test.ts`、`glob.test.ts`：容器路径契约测试。
 - `packages/permissions/src/index.ts`：按 execution path 裁决，并携带可选 host path。
-- `packages/permissions/src/index.test.ts`：版本 2 pathRules 路径域与审批路径测试。
+- `packages/permissions/src/index.test.ts`：当前 pathRules 路径域与审批路径测试。
 - `packages/permissions/package.json`：增加环境契约依赖。
 - `packages/prompts/src/index.ts`：接收已经探测的环境信息。
 - `packages/prompts/src/index.test.ts`：本机/Docker 环境段测试。
@@ -182,7 +182,7 @@ git add packages/environment pnpm-lock.yaml
 git commit -m "feat(environment): define execution environment contracts"
 ```
 
-## 任务 2：实现版本 2 受管环境配置解析
+## 任务 2：实现受管环境配置解析
 
 **文件：**
 
@@ -194,7 +194,7 @@ git commit -m "feat(environment): define execution environment contracts"
 - 修改：`packages/sandbox/package.json`
 - 修改：`pnpm-lock.yaml`
 
-- [ ] **步骤 1：编写 surface 和版本测试**
+- [ ] **步骤 1：编写 surface 和配置结构测试**
 
 ```ts
 it("maps the Desktop Docker choice to fail-closed Docker", () => {
@@ -229,11 +229,16 @@ it("keeps advanced CLI SRT configuration valid", () => {
   })).toMatchObject({ mode: "legacy_srt", backend: "srt" });
 });
 
-it("rejects settings files outside schema version 2", async () => {
-  await expect(loadSettingsFile(fileWith({ _formatVersion: 1 })))
-    .rejects.toMatchObject({ code: "unsupported_settings_version" });
+it("loads the current schema without a version marker", async () => {
   await expect(loadSettingsFile(fileWith({ sandbox: { enabled: false } })))
-    .rejects.toMatchObject({ code: "unsupported_settings_version" });
+    .resolves.toMatchObject({ sandbox: { enabled: false } });
+});
+
+it("rejects version markers and deprecated fields", async () => {
+  await expect(loadSettingsFile(fileWith({ _formatVersion: 1 })))
+    .rejects.toMatchObject({ code: "invalid_settings_field" });
+  await expect(loadSettingsFile(fileWith({ sandbox: { runtime: "docker" } })))
+    .rejects.toMatchObject({ code: "invalid_settings_field" });
 });
 ```
 
@@ -270,7 +275,7 @@ export function resolveExecutionEnvironmentConfig(input: {
 
 `cli_advanced` 继续返回现有 Sandbox/SRT 策略所需信息，不能被 Desktop 限制误伤。
 
-Settings 加载器只接受 `_formatVersion: 2`。删除 `sandbox.runtime` 等废弃字段处理；版本 1、缺少版本和废弃字段返回包含配置路径的结构化错误，不自动改写文件。
+Settings 加载器不读取或写入版本字段。`_formatVersion`、`sandbox.runtime` 和其他未知字段返回包含配置路径的 `invalid_settings_field`，不自动改写文件。
 
 - [ ] **步骤 4：增加 Terminal 设置并验证深合并**
 
@@ -285,7 +290,7 @@ export interface Settings {
 }
 ```
 
-为 `DEFAULT_SETTINGS` 增加 `terminal: { dockerShell: "/bin/sh" }`，并像 Sandbox 一样合并用户、项目、环境变量和 CLI 层，避免浅合并丢失另一个 Shell。`saveSettings` 和 `saveProjectSettings` 始终写入 `_formatVersion: 2`。
+为 `DEFAULT_SETTINGS` 增加 `terminal: { dockerShell: "/bin/sh" }`，并像 Sandbox 一样合并用户、项目、环境变量和 CLI 层，避免浅合并丢失另一个 Shell。`saveSettings` 和 `saveProjectSettings` 只写当前 Settings 字段，不附加版本标记。
 
 - [ ] **步骤 5：运行配置相关测试**
 

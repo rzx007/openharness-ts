@@ -240,9 +240,9 @@ resolveExecutionEnvironmentConfig({
 
 ### 4.5 Settings Schema
 
-用户级和项目级 Settings 文件统一要求 `_formatVersion: 2`。保存时始终写入版本 2；读取版本 1、缺少版本或包含废弃字段时直接返回带文件路径的 `unsupported_settings_version` 或 `invalid_settings_field`，不做自动迁移、别名转换或旧字段回退。
+Settings 文件不保存 `_formatVersion`。用户级和项目级配置直接按当前字段结构校验；出现 `_formatVersion`、`sandbox.runtime` 或其他废弃/未知字段时，返回带文件路径的 `invalid_settings_field`。
 
-用户需要自行删除旧配置并由 OHS 生成新文件，或按照错误提示手动改成版本 2。Session metadata 不保存环境配置，因此不存在 Session 环境迁移。
+不做自动迁移、别名转换或旧字段回退。用户需要自行删除不符合当前结构的配置并由 OHS 重新生成，或按照错误提示手动修改。Session metadata 不保存环境配置。
 
 ### 4.6 Terminal 协议兼容
 
@@ -483,7 +483,7 @@ interface ResolvedEnvironmentPath {
 
 Docker 模式的权限判断以规范化 `executionPath` 为主。审批 UI 首先显示容器路径；存在安全映射时，可以同时显示宿主路径，二者必须指向同一文件。
 
-版本 2 的 pathRules 使用以下路径规则：
+当前 Settings 结构中的 pathRules 使用以下路径规则：
 
 - 相对规则始终相对工作区，Docker 中归一化到 `/workspace`；
 - 本机环境允许当前平台的宿主绝对路径；
@@ -849,7 +849,7 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 ### 19.1 单元测试
 
 - 配置优先级覆盖五层来源；
-- `_formatVersion: 2` 正常加载，版本 1、缺失版本和废弃字段明确失败；
+- 当前 Settings 字段结构正常加载，`_formatVersion`、废弃字段和未知字段明确失败；
 - `desktop_managed` 拒绝 SRT/extraMounts，`cli_advanced` 保持 SRT 能力；
 - SRT 配置在 Desktop 显示不支持，不能静默变成本机；
 - `ProjectRecord.defaultShell` 只作为本机 Shell；
