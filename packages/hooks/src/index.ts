@@ -294,9 +294,11 @@ export class HookExecutor implements IHookExecutor {
         });
         let output = "";
         const stop = proc.onOutput((chunk) => { output += new TextDecoder().decode(chunk); });
+        const stopErrors = proc.onErrorOutput?.((chunk) => { output += new TextDecoder().decode(chunk); });
         proc.end();
         const result = await proc.wait();
         stop();
+        stopErrors?.();
         const success = result.exitCode === 0;
         return {
           blocked: blockOnFailure && !success,

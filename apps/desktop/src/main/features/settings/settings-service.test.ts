@@ -107,4 +107,22 @@ describe("DesktopSettingsService.updateAgentEnvironment", () => {
       .rejects.toThrow("WSL is not installed")
     expect(patchSettings).not.toHaveBeenCalled()
   })
+
+  it("rejects WSL on macOS and Linux without probing", async () => {
+    const patchSettings = vi.fn()
+    const preflightWsl = vi.fn(async () => {})
+    const service = new DesktopSettingsService({
+      daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
+      refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
+      preflightWsl,
+      platform: "darwin",
+      getPreferences: preferences,
+      patchPreferences: vi.fn(),
+    })
+
+    await expect(service.updateAgentEnvironment({ environment: "wsl" }))
+      .rejects.toThrow("WSL 仅可在 Windows 上使用")
+    expect(preflightWsl).not.toHaveBeenCalled()
+    expect(patchSettings).not.toHaveBeenCalled()
+  })
 })

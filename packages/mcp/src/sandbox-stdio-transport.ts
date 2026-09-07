@@ -183,15 +183,18 @@ function adaptEnvironmentProcess(process: EnvironmentProcess): ChildProcess {
   mutable.killed = false;
   child.kill = (() => { mutable.killed = true; void process.signal("terminate"); return true; }) as ChildProcess["kill"];
   const stop = process.onOutput((chunk) => stdout.write(chunk));
+  const stopErrors = process.onErrorOutput?.((chunk) => stderr.write(chunk));
   queueMicrotask(() => child.emit("spawn"));
   void process.wait().then((result) => {
     stop();
+    stopErrors?.();
     mutable.exitCode = result.exitCode;
     stdout.end();
     stderr.end();
     child.emit("close", result.exitCode, result.signal ?? null);
   }).catch((error) => {
     stop();
+    stopErrors?.();
     child.emit("error", error);
     child.emit("close", 1, null);
   });

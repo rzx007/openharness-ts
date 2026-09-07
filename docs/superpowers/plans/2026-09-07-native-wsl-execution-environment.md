@@ -63,19 +63,19 @@
 
 **文件：** core/sandbox 配置、tools/mcp/prompts/hooks/services 残留、CLI sandbox 命令、package manifests、lockfile、测试与 README。
 
-- [ ] 写失败测试：公开设置不再接受 Docker backend、docker 配置和 `dockerShell`；SRT policy/config 仍可用。
-- [ ] 删除 Docker 环境变量、DockerFileOperations、Docker PTY、runtime 状态和工具声明中的 Docker kind。
-- [ ] 逐包清理依赖，只移除 Docker 用途；保留 SRT/policy/host process 消费者。
-- [ ] 运行依赖审计、全仓类型检查和非前端测试。
-- [ ] 提交 `chore(runtime): remove Docker runtime surface`。
+- [x] 写失败测试：公开设置不再接受 Docker backend、docker 配置和 `dockerShell`；SRT policy/config 仍可用。
+- [x] 删除 Docker 环境变量、DockerFileOperations、Docker PTY、runtime 状态和工具声明中的 Docker kind。
+- [x] 逐包清理依赖，只移除 Docker 用途；保留 SRT/policy/host process 消费者。
+- [x] 运行依赖审计、全仓类型检查和非前端测试。
+- [x] 提交 `chore(runtime): remove Docker runtime surface`。
 
 ### 任务 7：文档与真实 WSL 验收
 
 **文件：** `packages/sandbox/e2e/wsl.e2e.test.ts`、sandbox scripts、runtime acceptance、sandbox flow/design、安全边界、CLI README。
 
-- [ ] E2E 验证 uname、环境变量、退出码、带空格路径、文件、glob/grep、Ctrl-C 和 resize；无 WSL 时明确 skip。
-- [ ] 验证盘符项目与 Skill 路径映射；验证 WSL UNC 项目返回不支持。
-- [ ] 验证 WSL 会话中的 `attachment://` 仍走宿主控制面。
-- [ ] 更新文档，明确 WSL 不是安全沙箱、SRT 仍独立存在。
-- [ ] 全仓类型检查、非前端测试、可用的 WSL E2E 和 `rg` 残留复盘。
-- [ ] 提交 `docs(runtime): finish Native and WSL migration`。
+- [x] E2E 验证 uname、环境变量、退出码、带空格路径、文件、glob/grep、Ctrl-C 和 resize；无 WSL 时明确 skip。
+- [x] 验证盘符项目与 Skill 路径映射；验证 WSL UNC 项目返回不支持。
+- [x] 验证 WSL 会话中的 `attachment://` 仍走宿主控制面。
+- [x] 更新文档，明确 WSL 不是安全沙箱、SRT 仍独立存在。
+- [x] 全仓类型检查、非前端测试、可用的 WSL E2E 和 `rg` 残留复盘。
+- [x] 提交 `docs(runtime): finish Native and WSL migration`。

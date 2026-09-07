@@ -25,6 +25,7 @@ const HARD_RUNTIME_RESTART_KEYS = new Set([
   "apiKey",
   "mcpServers",
   "plugins",
+  "agentEnvironment",
 ]);
 
 /**
@@ -70,6 +71,7 @@ export function createDefaultSettingsService(
     },
     async patch(patch) {
       await readCurrentSettings(ref);
+      assertCurrentEnvironmentPatch(patch);
       if (
         "workStyle" in patch &&
         patch.workStyle !== "practical" &&
@@ -87,6 +89,7 @@ export function createDefaultSettingsService(
           patch.path,
           coerced,
         );
+        assertCurrentEnvironmentPatch(effectivePatch);
       }
 
       const next = mergeSettingsPatch(ref.current, effectivePatch);
@@ -122,6 +125,30 @@ export function createDefaultSettingsService(
       };
     },
   };
+}
+
+function assertCurrentEnvironmentPatch(patch: Record<string, unknown>): void {
+  const path = typeof patch.path === "string" ? patch.path : undefined;
+  if (path && [
+    "sandbox.backend",
+    "sandbox.docker",
+    "sandbox.runtime",
+    "terminal.dockerShell",
+  ].some((field) => path === field || path.startsWith(`${field}.`))) {
+    throw new Error(`Unsupported removed runtime setting: ${path}`);
+  }
+  const sandbox = isRecord(patch.sandbox) ? patch.sandbox : undefined;
+  for (const field of ["backend", "docker", "runtime"]) {
+    if (sandbox && field in sandbox) throw new Error(`Unsupported removed runtime setting: sandbox.${field}`);
+  }
+  const terminal = isRecord(patch.terminal) ? patch.terminal : undefined;
+  if (terminal && "dockerShell" in terminal) throw new Error("Unsupported removed runtime setting: terminal.dockerShell");
+  if (patch.agentEnvironment !== undefined) {
+    if (!isRecord(patch.agentEnvironment) ||
+      (patch.agentEnvironment.kind !== "native" && patch.agentEnvironment.kind !== "wsl")) {
+      throw new Error("agentEnvironment.kind must be native or wsl");
+    }
+  }
 }
 
 async function resolveProviderModelSelection(input: {

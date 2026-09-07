@@ -1,4 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { posix, win32 } from "node:path";
 import { promisify } from "node:util";
 
@@ -7,6 +10,7 @@ import type {
   ResolvedEnvironmentPath,
   WorkspaceBinding,
 } from "@openharness/environment";
+import { signalProcessTree } from "./process-control.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -97,15 +101,60 @@ export function spawnWslProcess(input: {
   cwd: string;
   env?: Record<string, string>;
   stdio?: import("node:child_process").StdioOptions;
+  signal?: AbortSignal;
 }): ChildProcess {
   if (input.argv.length === 0) throw new Error("WSL process requires a non-empty argv");
   const envArgs = Object.entries(input.env ?? {}).map(([key, value]) => `${key}=${value}`);
   const executionArgv = envArgs.length > 0 ? ["/usr/bin/env", ...envArgs, ...input.argv] : input.argv;
-  return spawn("wsl.exe", ["--cd", input.cwd, "--exec", ...executionArgv], {
+  const cancelHostPath = input.signal
+    ? win32.join(tmpdir(), `openharness-wsl-cancel-${randomUUID()}`)
+    : undefined;
+  const supervisedArgv = cancelHostPath
+    ? ["/bin/sh", "-c", WSL_CANCEL_SUPERVISOR, "openharness-wsl", hostPathToWslPath(cancelHostPath), ...executionArgv]
+    : executionArgv;
+  const child = spawn("wsl.exe", ["--cd", input.cwd, "--exec", ...supervisedArgv], {
     windowsHide: true,
     stdio: input.stdio ?? ["pipe", "pipe", "pipe"],
   });
+  if (input.signal && cancelHostPath) {
+    let fallback: ReturnType<typeof setTimeout> | undefined;
+    const abort = () => {
+      try { writeFileSync(cancelHostPath, "cancel", "utf8"); } catch { signalProcessTree(child, "SIGTERM"); }
+      fallback = setTimeout(() => signalProcessTree(child, "SIGKILL"), 3_000);
+      fallback.unref?.();
+    };
+    if (input.signal.aborted) abort();
+    else input.signal.addEventListener("abort", abort, { once: true });
+    const cleanup = () => {
+      input.signal?.removeEventListener("abort", abort);
+      if (fallback) clearTimeout(fallback);
+      try { unlinkSync(cancelHostPath); } catch { /* no marker was created or WSL removed it */ }
+    };
+    child.once("close", cleanup);
+    child.once("error", cleanup);
+  }
+  return child;
 }
+
+const WSL_CANCEL_SUPERVISOR = `
+cancel_file=$1
+shift
+/usr/bin/setsid "$@" &
+child_pid=$!
+while kill -0 "$child_pid" 2>/dev/null; do
+  if [ -f "$cancel_file" ]; then
+    kill -TERM -- "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null
+    wait "$child_pid" 2>/dev/null
+    rm -f -- "$cancel_file"
+    exit 143
+  fi
+  /bin/sleep 0.05
+done
+wait "$child_pid"
+status=$?
+rm -f -- "$cancel_file"
+exit "$status"
+`;
 
 async function defaultWslProbe(): Promise<WslProbeResult> {
   try {

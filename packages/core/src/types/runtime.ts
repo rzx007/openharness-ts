@@ -435,12 +435,9 @@ export interface RuntimeSandboxStatus {
   platform?: string;
   reason?: string;
   degraded?: boolean;
-  containerName?: string;
-  containerCwd?: string;
   networkMode?: string;
   dns?: string[];
   proxy?: "configured" | "not configured";
-  reuseContainer?: boolean;
 }
 
 export class RuntimeBundle {

@@ -19,9 +19,9 @@ OpenHarness 是一套可长期保存运行状态的 Agent 应用。CLI、TUI、W
 - ✅ **Channels Agent 桥接** — `MessageBus` 双队列 + `ChannelManager`（fail-closed ACL 集中过滤）+ `DurableChannelBridge` 接 daemon；`ohs channels serve` 长驻模式跑通飞书对话（文本 + @bot 过滤）。Telegram/Discord/Slack、媒体、长消息分片待补。详见 [docs/channels-flow.md](docs/channels-flow.md)
 - ✅ **TUI 前端** — opentui + React 19 终端 UI（Bun 运行时）：经 `@openharness/client` attach daemon，Markdown 渲染 + 代码块语法高亮、output style 热切换（minimal 极简工具行）、tool 行分组折叠、Edit/Write 权限框 unified diff 预览（`[y]`本次/`[a]`整个会话/`[n]`拒绝）。统一 Jobs Panel 展示和控制 Terminal、后台 shell、child Agent、dream 与 Workflow；Workflow Steps 在所选 Workflow Job 的详情中展示，不再保留独立的后台 Task/Swarm/Workflow Runs 执行面板
 - 🟢 **Daemon Application** — 主线具备 `ohs serve` / `ohs daemon start/status/stop`、Hono HTTP API、durable session/transcript、SSE、单 session 串行 run lane、持久化 PermissionBroker、child durable projection 和共享 `@openharness/client` reducer。`DaemonApplication` 集中组装 durable 应用，HTTP server 只负责 transport；`AgentPool` 按 session 缓存真实 `OpenHarnessAgent`。权威导览见 [docs/daemon-application-architecture.md](docs/daemon-application-architecture.md)，framework 见 [docs/agent-runtime-framework-architecture.md](docs/agent-runtime-framework-architecture.md)，客户端同步见 [docs/client-sync-flow.md](docs/client-sync-flow.md)。
-- ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 连接同一个终端；支持多终端、输出快照恢复、右键菜单、每项目默认 shell、REST/SSE 传输、对话卡片挂接和沙箱终端 MVP。模型用 `TerminalOpen` 创建持久终端，后续统一通过 `JobList/Read/Wait/Send/Cancel` 观察和控制。完整功能、权限和生命周期见 [docs/desktop-terminal-pty-design.md](docs/desktop-terminal-pty-design.md)。
+- ✅ **Terminal** — daemon 统一持有终端 runtime，Desktop 右侧 Panel 与 Agent 终端跟随同一个 Native/WSL 会话环境；支持多终端、输出快照恢复、REST/SSE 传输和对话卡片挂接。模型用 `TerminalOpen` 创建持久终端，后续统一通过 `JobList/Read/Wait/Send/Cancel` 观察和控制。
 - ✅ **记忆体系** — 四层：工具输出预算 / 每轮 checkpoint / 持久记忆（`/remember` LLM 提取 + personalization 环境事实抽取自动注入 prompt）/ `/dream` 梦境整合（备份+锁+回滚）。详见 [docs/memory-system.md](docs/memory-system.md)
-- 🟡 **可用但仍在收口** — `sandbox`（Bash / MCP stdio / hooks / LSP 等进程入口走 SRT/Docker；Docker active 时 Read/Write/Edit/Glob/Grep 进入容器文件操作；Docker 整棵进程停止和真实 E2E 已补，CI 中 Docker 实跑仍待接入）
+- ✅ **Native / WSL 运行环境** — Desktop 在本机运行，Windows 可选择 WSL；Bash、文件工具、后台任务、MCP stdio 和终端共享同一环境。可选 SRT 作为独立的本机权限边界。
 - 🔴 **尚未复刻** — `ohmo`（个人助理 + 多渠道网关）
 - ⛔ **不在复刻范围** — `autopilot`（仓库级自动驾驶 + dashboard）
 
@@ -177,18 +177,13 @@ ohs provider add <name> -k <key> [-m <model>] [-b <base-url>] [--use]
 ohs provider edit <name> [-k <key>] [-m <model>] [-b <base-url>]
 ohs provider remove <name>
 
-# Sandbox
-ohs sandbox on                         # project-local Docker sandbox, network=bridge, reuse=on
-ohs sandbox on --net none              # offline sandbox
-ohs sandbox on --no-reuse              # temporary container per session
-ohs sandbox on --global                # write global user config instead of project config
-ohs sandbox on --backend srt           # use Anthropic Sandbox Runtime
-ohs sandbox on --net proxy --proxy http://host.docker.internal:7890
-ohs sandbox off
-ohs sandbox clean                       # remove current project reusable container
-ohs sandbox rebuild                     # recreate reusable container after config changes
-ohs sandbox status                      # show config scope, reusable container, image, and config hash
-ohs sandbox doctor                      # status plus backend availability checks
+# 本机 SRT Sandbox
+ohs sandbox enable
+ohs sandbox enable --global
+ohs sandbox enable --fail-open
+ohs sandbox disable
+ohs sandbox status
+ohs sandbox check
 
 # MCP server 配置（写入 settings.mcpServers）
 ohs mcp list
@@ -304,7 +299,7 @@ OpenHarness-ts/
 │   ├── output-styles/        # 输出格式化
 │   ├── keybindings/          # 键盘快捷键
 │   ├── vim/                  # Vim 模态编辑
-│   ├── sandbox/              # 沙箱执行（SRT/Docker MVP）
+│   ├── sandbox/              # Native/WSL 环境适配与本机 SRT 权限边界
 │   └── voice/                # 语音输入（placeholder）
 ├── turbo.json                # Turborepo 配置
 ├── vitest.config.ts          # 测试配置
@@ -688,19 +683,18 @@ ohs --tui  (或其它 client attach)
 
 配置文件路径：`~/.openharness-ts/settings.json`（首次运行无需手动创建，使用默认值即可）
 
-Sandbox 推荐用子命令切换，不必手写配置：
+SRT Sandbox 推荐用子命令切换，不必手写配置：
 
 ```bash
-ohs sandbox on      # 默认写入项目配置：Docker + bridge 网络 + 复用容器
-ohs sandbox off
-ohs sandbox clean
-ohs sandbox rebuild
+ohs sandbox enable
+ohs sandbox disable
 ohs sandbox status
+ohs sandbox check
 ```
 
 ```json
 {
-  "_formatVersion": 1,
+  "agentEnvironment": { "kind": "native" },
   "provider": "openrouter",
   "model": "minimax/minimax-m2.5:free",
   "apiFormat": "openai",

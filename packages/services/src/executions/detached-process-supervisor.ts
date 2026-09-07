@@ -719,8 +719,10 @@ function adaptEnvironmentProcess(process: EnvironmentProcess): ChildProcess {
     return true;
   }) as ChildProcess["kill"];
   const stop = process.onOutput((chunk) => stdout.write(chunk));
+  const stopErrors = process.onErrorOutput?.((chunk) => stderr.write(chunk));
   void process.wait().then((result) => {
     stop();
+    stopErrors?.();
     mutable.exitCode = result.exitCode;
     stdout.end();
     stderr.end();
@@ -728,6 +730,7 @@ function adaptEnvironmentProcess(process: EnvironmentProcess): ChildProcess {
     child.emit("exit", result.exitCode, result.signal ?? null);
   }).catch((error) => {
     stop();
+    stopErrors?.();
     stdout.end();
     stderr.end();
     child.emit("error", error);

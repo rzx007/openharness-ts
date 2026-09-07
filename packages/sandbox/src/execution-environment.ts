@@ -79,10 +79,10 @@ function createWslProcessExecutor(input: CreateExecutionEnvironmentInput, depend
   const run = dependencies.spawnWslProcess ?? spawnWslProcess;
   return {
     async execShell(command, options = {}) {
-      return adaptChildProcess(run({ argv: ["/bin/sh", "-lc", command], cwd: options.cwd ?? input.binding.executionRoot, env: options.env }));
+      return adaptChildProcess(run({ argv: ["/bin/sh", "-lc", command], cwd: options.cwd ?? input.binding.executionRoot, env: options.env, signal: options.signal }));
     },
     async execProcess(argv, options = {}) {
-      return adaptChildProcess(run({ argv, cwd: options.cwd ?? input.binding.executionRoot, env: options.env }));
+      return adaptChildProcess(run({ argv, cwd: options.cwd ?? input.binding.executionRoot, env: options.env, signal: options.signal }));
     },
   };
 }
@@ -133,15 +133,37 @@ function createLocalProcessExecutor(input: CreateExecutionEnvironmentInput, depe
 
 function adaptChildProcess(child: ChildProcess): EnvironmentProcess {
   const listeners = new Set<(chunk: Uint8Array) => void>();
-  const emit = (chunk: Buffer) => { for (const listener of listeners) listener(chunk); };
-  child.stdout?.on("data", emit); child.stderr?.on("data", emit);
+  const errorListeners = new Set<(chunk: Uint8Array) => void>();
+  const pending: Uint8Array[] = [];
+  const pendingErrors: Uint8Array[] = [];
+  const emit = (chunk: Buffer) => {
+    if (listeners.size === 0) {
+      pending.push(chunk);
+      return;
+    }
+    for (const listener of listeners) listener(chunk);
+  };
+  const emitError = (chunk: Buffer) => {
+    if (errorListeners.size === 0) { pendingErrors.push(chunk); return; }
+    for (const listener of errorListeners) listener(chunk);
+  };
+  child.stdout?.on("data", emit); child.stderr?.on("data", emitError);
   const result = new Promise<{ exitCode: number | null; signal?: string }>((resolveResult, reject) => {
     child.once("error", reject);
     child.once("close", (exitCode, signal) => resolveResult({ exitCode, ...(signal ? { signal } : {}) }));
   });
   return {
     ...(child.pid ? { pid: child.pid } : {}), write: (data) => { child.stdin?.write(data); },
-    end: () => { child.stdin?.end(); }, onOutput(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    end: () => { child.stdin?.end(); }, onOutput(listener) {
+      listeners.add(listener);
+      for (const chunk of pending.splice(0)) listener(chunk);
+      return () => listeners.delete(listener);
+    },
+    onErrorOutput(listener) {
+      errorListeners.add(listener);
+      for (const chunk of pendingErrors.splice(0)) listener(chunk);
+      return () => errorListeners.delete(listener);
+    },
     wait: () => result, async signal(signal) { signalProcessTree(child, signal === "interrupt" ? "SIGINT" : "SIGKILL"); },
   };
 }

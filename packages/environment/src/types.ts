@@ -48,6 +48,7 @@ export interface EnvironmentProcess {
   write(data: string | Uint8Array): void;
   end(): void;
   onOutput(listener: (chunk: Uint8Array) => void): () => void;
+  onErrorOutput?(listener: (chunk: Uint8Array) => void): () => void;
   wait(): Promise<EnvironmentProcessResult>;
   signal(signal: "interrupt" | "terminate"): Promise<void>;
 }

@@ -128,7 +128,7 @@ export class WslFileOperations implements FileOperations {
 
   async readBytes(path: string): Promise<Uint8Array> {
     const result = await this.run(["/bin/cat", "--", path], undefined, true);
-    if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.bytes));
+    if (result.exitCode !== 0) throw new Error(result.output || `Cannot read file: ${path}`);
     return result.bytes;
   }
 
@@ -140,7 +140,7 @@ export class WslFileOperations implements FileOperations {
     const result = await this.run([
       "/bin/sh", "-c", 'mkdir -p -- "$(dirname -- "$1")" && cat > "$1"', "ohs-write", path,
     ], content, true);
-    if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.bytes));
+    if (result.exitCode !== 0) throw new Error(result.output || `Cannot write file: ${path}`);
   }
 
   async glob(basePath: string, pattern: string, limit: number): Promise<string[]> {
@@ -187,19 +187,23 @@ export class WslFileOperations implements FileOperations {
       cwd: this.environment.workspace.executionRoot,
     });
     const chunks: Uint8Array[] = [];
+    const errors: Uint8Array[] = [];
     const stop = process.onOutput((chunk) => chunks.push(chunk));
+    const stopErrors = process.onErrorOutput?.((chunk) => errors.push(chunk));
     if (stdin) process.write(stdin);
     process.end();
     try {
       const result = await process.wait();
       const bytes = concatBytes(chunks);
+      const error = new TextDecoder("utf-8").decode(concatBytes(errors));
       return {
         exitCode: result.exitCode ?? 1,
-        output: binary ? "" : new TextDecoder().decode(bytes),
+        output: binary ? error : new TextDecoder().decode(bytes) || error,
         bytes,
       };
     } finally {
       stop();
+      stopErrors?.();
     }
   }
 }

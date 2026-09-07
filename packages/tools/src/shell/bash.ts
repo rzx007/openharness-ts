@@ -149,6 +149,9 @@ async function executeInEnvironment(
     const stopListening = process.onOutput((chunk) => {
       output = (output + new TextDecoder().decode(chunk)).slice(-12_000);
     });
+    const stopErrors = process.onErrorOutput?.((chunk) => {
+      output = (output + new TextDecoder().decode(chunk)).slice(-12_000);
+    });
     try {
       const result = await process.wait();
       const formatted = formatOutput(output, 12_000);
@@ -170,6 +173,7 @@ async function executeInEnvironment(
       };
     } finally {
       stopListening();
+      stopErrors?.();
     }
   } catch (error) {
     return {

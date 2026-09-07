@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAttachmentReadTool } from "../attachment-read-tool.js";
 
 describe("attachment Read tool", () => {
-  it("delegates local paths and authorizes attachment paths against the root", async () => {
+  it("keeps attachment URIs on the host control plane for WSL sessions", async () => {
     const defaultExecute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "local" }] }));
     const readText = vi.fn(async () => ({
       content: "two\nthree", startLine: 2, endLine: 3, hasMore: true,
@@ -23,7 +23,7 @@ describe("attachment Read tool", () => {
       .resolves.toMatchObject({ content: [{ text: "local" }] });
     const result = await tool.execute(
       { file_path: "attachment://att-1/notes.txt", offset: 2, limit: 2 },
-      { cwd: "C:/work", sessionId: "child" },
+      { cwd: "/mnt/c/work", sessionId: "child", environment: { info: { kind: "wsl" } } } as any,
     );
     expect((result.content[0] as { text: string }).text).toBe("2: two\n3: three\nhas_more: true");
     expect(readText).toHaveBeenCalledWith(expect.objectContaining({
