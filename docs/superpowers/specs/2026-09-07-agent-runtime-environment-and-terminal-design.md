@@ -1,6 +1,6 @@
 # Agent 运行环境与集成终端设计
 
-> 状态：第二期统一终端体验已实现并通过本机真实 Docker PTY 验证；第三期未开始
+> 状态：第三期 3A 生命周期安全闭环已实现；3B–3D 未开始
 >
 > 日期：2026-09-07
 >
@@ -840,18 +840,20 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 - [x] Docker PTY 覆盖输入、实时输出、resize、Ctrl-C、EOF 和 terminate；
 - [x] 非隔离子 Session 通过引用计数 alias 使用根 Session 的活动容器。
 
-第二期 lease 只存在于 daemon 内存中。运行中切换、持久 lease 和 daemon 崩溃恢复仍属于第三期。
+第二期 lease 只存在于 daemon 内存中。第三期 3A 不恢复内存 lease，而是在 daemon 启动时清理可确认的旧临时容器和旧 exec。
 
 ### 18.3 第三期：生命周期加固
 
 第三期继续拆成独立子阶段，避免把环境安全、插件执行、危险目录删除和 CI runner 差异绑成一次改造。
 
-3A 先完成最小生命周期安全闭环：
+3A 最小生命周期安全闭环：
 
-- Settings 使用同目录临时文件和原子 rename；
-- 容器与 exec 写入可验证 installation、workspace、environment 和 daemon 复合身份；
-- daemon ready 前执行保守 orphan reconciliation；
-- 真实 Docker E2E 覆盖临时容器、复用容器旧 exec、未知所有权和单版本替换。
+- [x] Settings 使用同目录临时文件和原子 rename；
+- [x] installation ID 从规范化数据目录派生，不新增数据库记录；
+- [x] 容器与 exec 写入可验证 installation、workspace、environment 和 daemon 复合身份；
+- [x] daemon ready 前执行保守 orphan reconciliation；
+- [x] 临时容器不接管，复用容器只清理旧 daemon exec；
+- [x] 真实 Docker E2E 覆盖临时容器、复用容器旧 exec 和未知所有权。
 
 其余能力分别规划：
 

@@ -409,8 +409,7 @@ for environment_file in /proc/[0-9]*/environ; do
   environment_id=$(read_env "$environment_file" OPENHARNESS_ENVIRONMENT_ID)
   execution_kind=$(read_env "$environment_file" OPENHARNESS_EXECUTION_KIND)
   execution_id=$(read_env "$environment_file" OPENHARNESS_EXECUTION_ID)
-  pid=\${environment_file#/proc/}
-  pid=\${pid%/environ}
+  pid=$(basename "$(dirname "$environment_file")")
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$daemon_owner" "$daemon_generation" "$environment_id" "$execution_kind" "$execution_id"
 done
 `.trim();
