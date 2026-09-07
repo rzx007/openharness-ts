@@ -36,7 +36,7 @@ describe("LocalTerminalProvider", () => {
 
     const info = await provider.create({
       scope: { kind: "session", sessionId: "s1" },
-      runtime: "sandbox",
+        runtime: "environment",
       cols: 100,
       rows: 30,
     });

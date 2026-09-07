@@ -1,6 +1,6 @@
 import type { JobStatus } from "./job.js";
 
-export type TerminalRuntime = "local" | "sandbox";
+export type TerminalRuntime = "local" | "environment";
 export type TerminalSessionStatus = JobStatus;
 export type TerminalSource = "user" | "agent";
 export type TerminalSignal = "interrupt" | "eof" | "terminate";

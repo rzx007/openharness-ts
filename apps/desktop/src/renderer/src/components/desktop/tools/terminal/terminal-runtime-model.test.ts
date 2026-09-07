@@ -5,23 +5,23 @@ import { resolveTerminalCreateTarget } from "./terminal-runtime-model"
 describe("resolveTerminalCreateTarget", () => {
   const session = { id: "s1", projectId: undefined }
 
-  it("uses a session-scoped Docker terminal by default", () => {
+  it("uses the session execution environment by default", () => {
     expect(resolveTerminalCreateTarget({
       agentEnvironment: "docker",
       session,
       explicitHost: false,
     })).toEqual({
-      runtime: "sandbox",
+      runtime: "environment",
       scope: { kind: "session", sessionId: "s1" },
     })
   })
 
-  it("uses local runtime for local environments and explicit host requests", () => {
+  it("uses the environment for native sessions and local only for explicit host requests", () => {
     expect(resolveTerminalCreateTarget({
       agentEnvironment: "local",
       session,
       explicitHost: false,
-    })).toMatchObject({ runtime: "local" })
+    })).toMatchObject({ runtime: "environment" })
     expect(resolveTerminalCreateTarget({
       agentEnvironment: "docker",
       session,

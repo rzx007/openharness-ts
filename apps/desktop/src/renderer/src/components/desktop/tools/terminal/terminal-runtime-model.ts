@@ -8,14 +8,11 @@ export function resolveTerminalCreateTarget(input: {
   explicitHost: boolean
 }): Pick<DesktopTerminalCreateInput, "runtime" | "scope"> {
   return {
-    runtime:
-      input.explicitHost || input.agentEnvironment !== "docker"
-        ? "local"
-        : "sandbox",
+    runtime: input.explicitHost ? "local" : "environment",
     scope: { kind: "session", sessionId: input.session.id },
   }
 }
 
 export function terminalRuntimeLabel(runtime: DesktopTerminalCreateInput["runtime"]): string {
-  return runtime === "sandbox" ? "Docker 终端" : "本机终端"
+  return runtime === "environment" ? "环境终端" : "本机终端"
 }

@@ -98,7 +98,7 @@ maybeDescribe("Docker PTY shared environment e2e", () => {
     try {
       const terminal = await provider.create({
         scope: { kind: "session", sessionId },
-        runtime: "sandbox",
+        runtime: "environment",
         cols: 100,
         rows: 30,
       });
@@ -134,7 +134,7 @@ maybeDescribe("Docker PTY shared environment e2e", () => {
       });
       const terminateTerminal = await provider.create({
         scope: { kind: "session", sessionId },
-        runtime: "sandbox",
+        runtime: "environment",
         cols: 100,
         rows: 30,
       });

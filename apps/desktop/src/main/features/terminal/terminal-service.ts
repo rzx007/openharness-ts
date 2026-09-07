@@ -14,6 +14,7 @@ import { getDesktopPreferences } from "../settings/desktop-preferences"
 import { applyPreferredTerminalShell } from "./apply-preferred-shell"
 import { listDetectedTerminalShells, resolvePreferredTerminalShell } from "./detect-shells"
 import { desktopSessionService } from "../session/session-service"
+import { desktopSettingsService } from "../settings/settings-service"
 
 interface TerminalSubscription {
   controller: AbortController
@@ -31,7 +32,8 @@ class DesktopTerminalService {
       getDesktopPreferences().defaultTerminalShellId ?? null,
       listDetectedTerminalShells()
     )
-    const next = applyPreferredTerminalShell(input, preferred)
+    const settings = await desktopSettingsService.snapshot()
+    const next = applyPreferredTerminalShell(input, preferred, settings.agentEnvironment === "local")
     return await withDaemonRetry((client) => client.createTerminal(next))
   }
 

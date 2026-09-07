@@ -453,7 +453,7 @@ export function decodeTerminalSessionInfo(value: unknown): TerminalSessionInfo {
   }
   optionalString(terminal, "projectId", "terminal");
   optionalString(terminal, "sessionId", "terminal");
-  enumField(terminal, "runtime", "terminal", ["local", "sandbox"] as const);
+  enumField(terminal, "runtime", "terminal", ["local", "environment"] as const);
   enumField(terminal, "source", "terminal", ["user", "agent"] as const);
   enumField(terminal, "status", "terminal", ["running", "stopping", "completed", "killed", "failed"] as const);
   numberField(terminal, "cols", "terminal");

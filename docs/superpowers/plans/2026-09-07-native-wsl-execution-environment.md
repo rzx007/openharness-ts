@@ -33,11 +33,11 @@
 
 **文件：** protocol terminal/serialization、terminal-node target/provider、server daemon terminal、Desktop main terminal service/`apply-preferred-shell`、renderer terminal model/tool 与对应测试。
 
-- [ ] 写失败测试：WSL 用户终端与 Agent Terminal 使用相同 execution cwd；Desktop 不注入 PowerShell；input/resize/Ctrl-C 进入 WSL PTY。
-- [ ] 收敛 `runtime: local | sandbox` 与 `explicitHost`，默认终端跟随环境。
-- [ ] node-pty 启动 `wsl.exe`；WSL 使用默认 shell，Native 用户终端继续使用 Shell 设置。
-- [ ] 运行 protocol、terminal-node、server 和 Desktop terminal model 测试。
-- [ ] 提交 `feat(terminal): follow Native or WSL session environment`。
+- [x] 写失败测试：WSL 用户终端与 Agent Terminal 使用相同 execution cwd；Desktop 不注入 PowerShell；input/resize/Ctrl-C 进入 WSL PTY。
+- [x] 收敛 `runtime: local | sandbox` 与 `explicitHost`，默认终端跟随环境。
+- [x] node-pty 启动 `wsl.exe`；WSL 使用默认 shell，Native 用户终端继续使用 Shell 设置。
+- [x] 运行 protocol、terminal-node、server 和 Desktop terminal model 测试。
+- [x] 提交 `feat(terminal): follow Native or WSL session environment`。
 
 ### 任务 4：切换全局设置和 Desktop 产品表面
 

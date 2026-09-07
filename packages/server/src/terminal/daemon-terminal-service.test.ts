@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DaemonTerminalService } from "./daemon-terminal-service.js";
 
 describe("DaemonTerminalService scoped environments", () => {
-  it("opens a projectless Docker terminal through a terminal lease", async () => {
+  it("opens a projectless terminal through its execution environment", async () => {
     const session = { id: "outside-1", cwd: process.cwd(), status: "idle" } as any;
     const signal = vi.fn(async () => {});
     const targetClose = vi.fn(async () => {});
@@ -13,7 +13,7 @@ describe("DaemonTerminalService scoped environments", () => {
       args: ["exec", "-it", "container", "/bin/sh", "-i"],
       hostCwd: process.cwd(),
       executionCwd: "/workspace",
-      shell: "/bin/sh",
+      shell: undefined,
       signal,
       close: targetClose,
     }));
@@ -34,7 +34,7 @@ describe("DaemonTerminalService scoped environments", () => {
 
     const terminal = await service.create({
       scope: { kind: "session", sessionId: session.id },
-      runtime: "sandbox",
+        runtime: "environment",
       cols: 100,
       rows: 30,
     });
@@ -46,7 +46,7 @@ describe("DaemonTerminalService scoped environments", () => {
     );
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/workspace",
-      shell: "/bin/sh",
+      shell: undefined,
       owner: { kind: "terminal", id: terminal.id },
     }));
     expect(terminal).toMatchObject({
@@ -110,7 +110,7 @@ describe("DaemonTerminalService scoped environments", () => {
 
     expect(terminal).toMatchObject({
       source: "agent",
-      runtime: "sandbox",
+      runtime: "environment",
       scope: { kind: "session", sessionId: session.id },
       cwd: "/workspace",
     });

@@ -128,7 +128,7 @@ export class DaemonTerminalService {
     return {
       open: async (input) => await this.create({
         scope: { kind: "session", sessionId: rootSession.id },
-        runtime: "sandbox",
+        runtime: "environment",
         cols: input.cols ?? 100,
         rows: input.rows ?? 30,
         name: input.name ?? "Agent terminal",
@@ -215,7 +215,7 @@ export class DaemonTerminalService {
     try {
       const target = await lease.terminal.prepare({
         cwd: lease.workspace.executionRoot,
-        shell: input.shell ?? settings.terminal?.dockerShell,
+        shell: input.shell,
         owner: { kind: "terminal", id: terminalId },
         cols: input.cols,
         rows: input.rows,
