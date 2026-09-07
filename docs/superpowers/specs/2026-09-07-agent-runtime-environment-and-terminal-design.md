@@ -36,6 +36,8 @@ Docker 模式只把明确允许的宿主目录挂载进容器。当前阶段允�
 8. 用户集成终端默认跟随 Agent 环境，同时允许用户显式打开宿主终端。
 9. 项目外会话仍有独立受管工作区，不存在“无 cwd 的 Agent Runtime”。
 10. 用户级 Skill 目录当前采用读写挂载；这是明确接受的持久化风险，后续再收紧。
+11. 每个工作区同一时间只保留最新配置对应的容器，不支持多版本容器并存。
+12. 功能分期交付；尚未接入执行环境的模型工具在 Docker 模式下先禁用。
 
 ## 3. 术语与边界
 
@@ -88,6 +90,59 @@ ExecutionEnvironment
 
 `LocalEnvironment` 和 `DockerEnvironment` 实现同一契约。Agent 核心和业务工具不能散落 `if local`、`if docker`，也不能直接拼接 `docker exec`。未来增加 WSL、SSH 或远程容器时，应增加执行环境实现。
 
+执行环境契约不直接包含 Git、Skill Registry、会话存储等宿主控制面职责。它只提供运行工作负载所需的进程、文件、路径、终端和环境事实能力。
+
+### 3.7 包职责与依赖方向
+
+新增 `@openharness/environment` 作为纯契约包，不依赖 Node、Docker、Tools、Terminal 或 Agent Runtime：
+
+| 包 | 职责 |
+|---|---|
+| `@openharness/environment` | 环境接口、环境信息、WorkspaceBinding、路径结果、lease 类型 |
+| `@openharness/sandbox` | Local/Docker 的进程、文件、路径、挂载和低层 Docker 执行实现 |
+| `@openharness/terminal-node` | 本机 PTY、Docker PTY、终端会话输入输出和信号 |
+| `@openharness/server` | Environment Manager、容器所有权、设置应用、恢复和服务端校验 |
+| `@openharness/tools` | 把 Bash、文件和其他工具适配到环境能力，不管理环境生命周期 |
+| `@openharness/prompts` | 将 EffectiveEnvironmentInfo 格式化给模型 |
+| `@openharness/agent-runtime` | 获取环境能力、组装 Agent、注入提示词、释放 runtime lease |
+
+依赖方向固定为：
+
+```text
+environment ← sandbox
+environment ← terminal-node
+environment ← tools
+
+server → environment + sandbox + terminal-node
+agent-runtime → environment
+prompts → environment
+```
+
+`sandbox` 不依赖 `tools` 或 `terminal-node`，避免形成循环依赖。Docker PTY 由 `terminal-node` 使用 `sandbox` 暴露的低层 Docker exec 描述实现；Environment Manager 在 server 中组装最终能力。
+
+### 3.8 工具执行域
+
+每个模型可调用工具必须注册执行域：
+
+```ts
+type ToolExecutionDomain = "environment" | "control_plane";
+```
+
+缺少声明时默认按 `environment` 处理。Docker 模式下，无法使用环境能力的 `environment` 工具不注册给模型。
+
+| 工具类型 | 执行域 | Docker 规则 |
+|---|---|---|
+| Bash、后台 Shell、文件工具、LSP、MCP stdio | environment | 必须进入当前 Docker 环境 |
+| Agent Terminal | environment | 第二期接入 Docker PTY；第一期禁用 |
+| Native Plugin Tool | environment | 第一、二期禁用；后续接入环境后再启用 |
+| `ImageToText(image_path)` | environment | 文件必须通过环境文件能力读取 |
+| `ImageToText(assetId)`、附件读取 | control_plane | 只允许当前会话已授权的不可变附件 |
+| ImageGeneration | control_plane | 不接受任意宿主文件路径；结果进入附件服务 |
+| Skill、ListSkills | control_plane | 宿主加载元数据，路径通过当前环境呈现 |
+| WebSearch、WebFetch | control_plane | 受权限与有效网络策略控制，不获得宿主文件能力 |
+
+Runtime 创建时枚举全部模型可见工具并验证执行域，避免靠手写 fail-closed 清单遗漏新工具。
+
 ## 4. 配置模型
 
 ### 4.1 复用现有 Sandbox 配置
@@ -137,35 +192,58 @@ Docker Agent Terminal：Agent 显式请求的 /bin/sh 或 /bin/bash
                      > /bin/sh
 ```
 
-Agent 在 Docker 中不能请求宿主可执行文件。其他 Shell 路径只有通过容器内存在性检查和允许列表后才能使用。
+Agent 在 Docker 中不能请求宿主可执行文件。本阶段 Docker 交互终端只允许 `/bin/sh` 和 `/bin/bash`，不提供自定义 Shell 允许列表。
 
-### 4.3 Session 环境快照
+### 4.3 单一最新配置
 
-新增会话运行元数据：
+不保存可恢复的 Session 环境版本，也不允许同一 workspace owner 同时运行多个配置版本。会话每次创建或恢复 Runtime 时，都使用当时解析出的最新有效配置。
+
+容器 label 保存 `executionConfigHash` 只用于判断现有容器是否过期，不作为历史配置快照。配置变化后，旧容器必须在没有使用者时被最新容器替换。
+
+因此：
+
+- 旧会话恢复时使用最新配置；
+- 不为旧会话重建旧镜像、旧网络或旧挂载；
+- 不需要在 Session metadata 持久化环境配置或 hash；
+- 同一 owner 的容器名称不包含 config hash；
+- 配置变化需要重启应用/daemon，第一期不支持运行中热切换。
+
+### 4.4 解析入口与优先级
+
+环境解析使用唯一入口：
 
 ```ts
-metadata.runtime.executionEnvironment?: "local" | "docker";
-metadata.runtime.executionConfigHash?: string;
+resolveExecutionEnvironmentConfig({
+  surface: "desktop_managed" | "cli_advanced",
+  cwd,
+  overrides,
+})
 ```
 
-新会话创建时保存当时解析出的环境类型和配置指纹。已有会话缺少该字段时，在第一次 warm 前按当前有效设置解析并写入快照。
-
-全局默认设置变化只影响之后创建的会话。已有会话保留自己的快照，直到用户明确执行“使用当前默认环境重新启动会话”。
-
-### 4.4 配置优先级
-
-环境解析使用唯一入口 `resolveExecutionEnvironmentConfig()`，优先级由低到高为：
+优先级由低到高为：
 
 1. 默认值；
 2. 用户级 `settings.json`；
 3. 项目级 `settings.json`，项目外会话跳过；
-4. 会话环境快照或会话级覆盖；
-5. `OPENHARNESS_SANDBOX_*` 环境变量；
-6. CLI 显式覆盖。
+4. `OPENHARNESS_SANDBOX_*` 环境变量；
+5. CLI 显式覆盖。
 
-进程环境变量和 CLI 覆盖属于运行时运维控制，可以暂时覆盖会话快照，但不得静默改写持久化快照。
+本阶段不提供 Session 级环境覆盖。
 
-### 4.5 协议兼容
+`desktop_managed` 只接受 local 或 docker，强制 fail-closed，并拒绝 SRT、`extraMounts`、Docker Socket 和 privileged 配置。`cli_advanced` 保留现有 SRT 与 extraMounts 能力，不享受本文的 Desktop 受管隔离承诺。
+
+已有用户配置为 `sandbox.enabled=true, backend="srt"` 时，Desktop 显示“高级 CLI 沙箱配置不受 Desktop 支持”，不创建 Agent Runtime。用户选择“本机”或“Docker”后，Desktop 才写入对应的受管配置；不能把 SRT 静默解释为本机。
+
+### 4.5 旧配置兼容
+
+- 现有 `sandbox.enabled=false` 映射为 local；
+- 现有 `sandbox.enabled=true, backend="docker"` 映射为 docker，并在 Desktop 使用时强制 `failIfUnavailable=true`；
+- 现有 `sandbox.enabled=true, backend="srt"` 按第 4.4 节显示不支持状态；
+- `ProjectRecord.defaultShell` 保留为项目级本机 Shell；
+- 不写入 Session 环境快照，因此不需要迁移历史 Session metadata；
+- Settings 文件格式版本只有在实际新增 `terminal` 字段不兼容时才升级，否则保持现有版本并使用缺省值。
+
+### 4.6 Terminal 协议兼容
 
 Terminal 协议现有 `runtime: "local" | "sandbox"` 保持兼容：
 
@@ -174,12 +252,12 @@ Terminal 协议现有 `runtime: "local" | "sandbox"` 保持兼容：
 
 Desktop 内部的环境类型使用 `local | docker`。协议层只在边界处完成 `docker → sandbox` 映射，不能把二者作为两套独立配置。
 
-## 5. 环境创建与切换事务
+## 5. 环境创建与配置生效
 
 ### 5.1 新会话
 
 ```text
-解析候选配置
+按 surface 解析最新配置
     ↓
 校验挂载与 Docker 配置
     ↓
@@ -189,8 +267,6 @@ Desktop 内部的环境类型使用 `local | docker`。协议层只在边界处�
     ↓
 生成 EffectiveEnvironmentInfo
     ↓
-保存 Session 环境快照
-    ↓
 发布环境句柄并创建 Agent
 ```
 
@@ -198,43 +274,66 @@ Desktop 内部的环境类型使用 `local | docker`。协议层只在边界处�
 
 ### 5.2 修改全局默认环境
 
-设置页切换全局默认值时：
+第一期采用“保存后重启生效”，不实现运行中热切换：
 
 1. 归一化候选设置；
-2. 校验 Docker CLI、daemon、镜像、挂载和保留路径；
-3. 准备并探测候选环境；
+2. 以 `desktop_managed` 规则校验 Docker CLI、daemon、镜像、挂载和保留路径；
+3. 执行不会创建长期容器的预检；
 4. 使用临时文件加原子 rename 保存设置；
-5. 发布新的全局默认值；
-6. 关闭仅用于预检的候选环境。
+5. UI 标记“需要重启”；
+6. 重启时关闭旧 Runtime，按最新配置重建环境。
 
-失败时保留旧设置，并在 UI 显示具体原因。已有会话和终端不会迁移。
+预检或保存失败时保留旧设置，并在 UI 显示具体原因。设置保存成功到应用重启之前，UI 必须同时展示“当前运行环境”和“重启后的目标环境”，不能假装旧 Runtime 已经切换。
 
-### 5.3 重新启动已有会话
+### 5.3 单版本替换
 
-只有会话没有活跃工作负载时才能切换。活跃工作负载包括：
+同一个 workspace owner 只允许存在一个 OHS 受管容器。daemon 重启并发现容器配置 hash 过期时：
 
-- 正在执行的 Agent run；
-- 后台 Shell；
-- Agent Terminal；
-- 跟随 Agent 环境的用户终端；
-- 共享该环境的子 Agent。
+1. 验证容器名称和 OHS owner label；
+2. 确认没有仍在运行的旧 daemon 实例持有该容器；
+3. 停止并删除旧容器；
+4. 用最新配置创建同名容器；
+5. 健康探测成功后发布环境句柄。
 
-显式宿主终端不占用 Docker 环境，因此不阻止切换。
+删除旧容器会清除容器内部未挂载的数据。设置页在保存可能导致重建的配置前明确提示；`/workspace` 和用户级 Skill 是宿主挂载，不随容器删除。
 
-切换顺序为：准备并探测目标环境 → 原子更新会话快照和活动环境指针 → 释放旧环境。发布前失败时继续使用旧环境；发布后清理失败只记录清理错误，不能把新环境回滚成不一致状态。
+如果旧容器无法安全验证所有权或检测到其他 daemon 正在使用，启动失败并保持 fail-closed。系统不创建带 config hash 后缀的第二个容器。
 
-### 5.4 可复用容器配置不匹配
+### 5.4 后续实时切换
 
-配置指纹不匹配时返回 `rebuild_required`，不复用旧容器，也不静默删除。Desktop 显示旧容器与新配置不一致，并提供明确的“重建沙箱”操作。
+第三期如果增加无需重启的切换，仍采用单版本策略：
 
-重建前必须确认该容器没有环境 lease 或活跃工作负载。重建只删除 OHS 通过名称和 label 双重验证的目标容器。
+1. 获取 workspace owner 的独占 mutation barrier；
+2. 把环境置为 `draining`，阻止新 run、终端和子 Agent；
+3. 等待或要求用户关闭全部 lease 和 activeJobs；
+4. 在 barrier 内再次检查引用；
+5. 持久化 `switching` 状态和目标配置 hash；
+6. 停止旧环境并创建最新环境；
+7. 健康探测成功后提交 `ready`；
+8. 失败时记录 `unavailable`，保持 fail-closed，不恢复旧版本容器。
+
+daemon 重启时根据持久化状态继续完成替换或标记失败。内存活动指针不能作为唯一提交依据。
 
 ## 6. 环境信息
+
+宿主控制面和 Agent 执行面不能共用一个含义模糊的 cwd。环境句柄内部保存双路径绑定：
+
+```ts
+interface WorkspaceBinding {
+  hostRoot: string;
+  executionRoot: string;
+}
+```
+
+- `hostRoot` 只提供给项目存储、Git/worktree、Skill 发现、Desktop 打开文件等宿主基础设施；
+- `executionRoot` 提供给 Agent、ToolContext、Shell、文件工具和终端；
+- 本机环境两者相同；
+- Docker 环境分别是宿主绝对路径和 `/workspace`。
 
 环境信息来自已启动并验证的环境：
 
 ```ts
-EffectiveEnvironmentInfo {
+interface EffectiveEnvironmentInfo {
   kind: "local" | "docker";
   hostOs: string;
   executionOs: string;
@@ -294,7 +393,7 @@ Agent 系统提示词和全部工具必须绑定同一个 `ExecutionEnvironment`
 用结构化类型代替内部原始 `-v` 字符串：
 
 ```ts
-ManagedMount {
+interface ManagedMount {
   purpose: "workspace" | "user_skills";
   source: string;
   target: "/workspace" | "/opt/openharness/skills";
@@ -368,6 +467,32 @@ Read、Write、Edit、Glob 和 Grep 通过 `ExecutionEnvironment.fileOperations`
 
 无法映射的容器路径不提供宿主“打开文件”操作。权限批准不能自动创建新挂载。
 
+### 8.4 权限与旧路径规则
+
+文件工具先由执行环境解析出结构化路径，再交给 PermissionChecker：
+
+```ts
+interface ResolvedEnvironmentPath {
+  executionPath: string;
+  hostPath?: string;
+  mountPurpose: "workspace" | "user_skills" | "unmounted";
+  mountMode?: "ro" | "rw";
+}
+```
+
+Docker 模式的权限判断以规范化 `executionPath` 为主。审批 UI 首先显示容器路径；存在安全映射时，可以同时显示宿主路径，二者必须指向同一文件。
+
+现有 pathRules 按以下方式兼容：
+
+- 相对规则始终相对工作区，Docker 中归一化到 `/workspace`；
+- 位于当前 workspace hostRoot 内的宿主绝对规则映射到 `/workspace`；
+- 位于用户 Skill hostRoot 内的宿主绝对规则映射到 `/opt/openharness/skills`；
+- 无法映射到有效挂载的宿主绝对规则在 Docker 模式不生效，并产生配置诊断；
+- deny 规则优先于 allow 规则；
+- “当前 cwd 自动允许”指 executionRoot，不能用宿主 cwd 绕过。
+
+diff 生成应通过环境文件能力读取旧内容；宿主控制面只负责展示和批准，不能再绕过环境直接读取任意输入路径。
+
 ## 9. Skill 访问与路径
 
 ### 9.1 加载和挂载
@@ -394,8 +519,9 @@ Plugin Skill 的 Markdown 正文仍可由宿主返回；附带引用和脚本在
 ### 9.3 运行中变更
 
 - 已有文件的修改通过 bind mount 立即对容器可见；
-- Skill 工具每次调用前刷新磁盘定义；
-- ListSkills 每次调用前刷新目录清单；
+- Skill 与 ListSkills 每次调用前从不可变 bundled/plugin 基线重新构建 Registry，再扫描用户和项目目录，不能复制包含旧文件的共享 Registry；
+- 来源优先级固定为 `bundled < plugin < user < project`，同名时后者覆盖前者；
+- 删除和重命名 Skill 后，下一次 Skill/ListSkills 调用不能残留旧定义；
 - 系统提示词中的 Skill 摘要在 Agent Runtime 创建时生成，新建或删除 Skill 后需重建 Runtime 才更新；
 - Skill 内容更新不要求重建 Docker 容器；
 - Skill 根路径或挂载配置变化按配置指纹处理。
@@ -410,12 +536,12 @@ daemon 持有唯一 `ExecutionEnvironmentManager`。Agent Runtime、Agent Termin
 
 ```text
 environmentId
-state: preparing | ready | draining | stopped | failed
+state: preparing | ready | draining | switching | unavailable | stopped | failed
 workspaceOwnerId
 configHash
 containerId
 leases
-activeJobs
+activeJobs: Map<jobId, ownerLeaseId>
 ```
 
 ### 10.2 Workspace Owner
@@ -428,7 +554,7 @@ activeJobs
 - 非隔离子 Agent：继承父环境；
 - 隔离 worktree 子 Agent：以自己的 worktree 路径形成新 owner。
 
-同一 owner 与同一 `configHash` 只创建一个环境记录。
+同一 owner 只创建一个环境记录和一个受管容器。`configHash` 不参与容器名称；发现 hash 不同意味着原容器过期，按第 5.3 节替换，不能并行创建第二个版本。
 
 ### 10.3 Lease 规则
 
@@ -439,9 +565,21 @@ activeJobs
 - Agent Terminal；
 - 跟随 Agent 环境的用户终端。
 
-后台进程记录为 `activeJobs`，由创建它的 Runtime 管理。关闭一个终端只释放自己的 lease，不能停止其他终端或 Agent 使用的环境。
+后台进程记录为 `activeJobs`，每项保存创建者 lease/runtime ID。release 必须幂等，只能清理该 owner 创建的进程。关闭一个终端只释放自己的 lease，不能停止其他终端或 Agent 使用的环境。
 
 环境只有在 lease 为零且 activeJobs 已清理后才能释放。可复用容器释放环境句柄时保留容器，但必须停止本次 Runtime 启动的残留进程；临时容器在最后一个 lease 释放后停止并删除。
+
+### 10.4 daemon 崩溃恢复
+
+OHS 为容器和每个容器内 exec 写入 owner、environmentId、runtimeId/jobId 与配置 hash 标记。daemon 启动时执行 orphan reconciliation：
+
+- 删除确认属于本 daemon 用户且没有存续会话的临时容器；
+- 清理可复用容器中已失去 owner 的旧进程组；
+- 不接管 hash 不匹配的旧环境；
+- 无法验证所有权的容器只报告冲突，不停止或删除；
+- 从持久化 `switching` 状态恢复为最新配置或明确 `unavailable`。
+
+第一期不实现共享终端和内存 lease，因此由单个 Agent Runtime 独占环境并在 daemon 启动时清理可确认的孤儿容器。完整 lease 持久化与精确进程恢复在第三期完成。
 
 ## 11. 交互终端
 
@@ -476,12 +614,17 @@ Docker 交互终端必须使用真实 PTY/TTY 通道，不能用普通 stdin/std
 
 ### 11.4 Terminal 协议的项目外支持
 
-`TerminalCreateRequest` 和 `TerminalSessionInfo` 的 `projectId` 改为可选。创建请求必须能由以下任一作用域解析：
+`TerminalCreateRequest` 使用显式判别作用域：
 
-```text
-项目终端：projectId
-会话终端：sessionId
+```ts
+type TerminalScope =
+  | { kind: "project"; projectId: string }
+  | { kind: "session"; sessionId: string };
 ```
+
+`TerminalSessionInfo.projectId` 改为可选，并始终保存 scope 和解析后的 sessionId/projectId。
+
+兼容旧请求时：只有 projectId 时解释为 project scope；同时出现 projectId 和 sessionId 时，必须验证 Session 确实属于该 Project 且 cwd 一致，否则拒绝。新客户端只能发送一种判别作用域。
 
 服务端从 ProjectStore 或 SessionStore 解析可信 cwd，不信任渲染进程任意提供的 cwd。若请求同时携带 cwd，只允许它等于解析后的 cwd。
 
@@ -514,14 +657,16 @@ Docker 只把该 `xN` 目录挂载为 `/workspace`，不能挂载整个 Document
 
 ### 12.3 子 Agent
 
-非隔离子 Agent 继承父 cwd、workspaceOwnerId 和执行环境。隔离子 Agent 获得新的 Git worktree 时，使用该 worktree 作为 workspace，并取得新的环境 owner；无法创建 worktree 时按现有 child environment 规则共享父工作区。
+非隔离子 Agent 继承父 cwd、workspaceOwnerId 和执行环境。
+
+明确请求隔离的子 Agent 只有在成功创建独立 Git worktree 后才启动，并以该 worktree 建立新的 environment owner。不是 Git 仓库、worktree 创建失败或环境准备失败时返回 `isolation_unavailable`，不静默降级为共享父工作区。调用方可以另行发起非隔离子 Agent，但不能把失败的隔离请求自动改成非隔离。
 
 ### 12.4 清理
 
 - 会话创建失败时，只删除本次刚分配且仍为空的目录；
 - 归档会话不删除工作区；
 - 删除一个 fork 不删除共享工作区；
-- 删除根会话时，只要仍有 fork、子会话或活跃环境引用，就不能删除工作区；
+- 删除根会话时，只要仍有 fork、子会话、Agent Runtime、后台任务、Agent Terminal、用户沙箱终端或显式宿主终端引用该 cwd，就不能删除工作区；
 - 默认删除会话不删除非空工作区；
 - 删除工作区是独立操作，显示绝对路径并请求用户确认。
 
@@ -537,7 +682,7 @@ Docker 模式下，未指定路径的文件请求默认以 `/workspace` 为范�
 2. 在 `/workspace` 查找；
 3. 明确说明实际查找范围是 Docker 工作区。
 
-当前版本不支持临时或动态挂载宿主桌面等额外目录。用户明确要求访问未挂载宿主目录时，Agent说明该目录在当前沙箱不可见，并提示用户把所需文件复制到工作区或切换到本机环境。
+当前版本不支持临时或动态挂载宿主桌面等额外目录。用户明确要求访问未挂载宿主目录时，Agent 说明该目录在当前沙箱不可见，并提示用户把所需文件复制到工作区或切换到本机环境。
 
 权限批准不能让容器访问未挂载目录，也不会动态重建容器。
 
@@ -556,7 +701,9 @@ Docker 环境不可用、配置不匹配或环境句柄失效时，以下入口�
 - 子 Agent 和计划任务恢复后发起的工作负载；
 - 用户级 Skill 脚本。
 
-失败结果应包含环境类型、失败阶段和可操作原因，不启动对应宿主进程。显式选择的宿主终端不属于 Docker fail-closed 范围。
+上述清单用于说明现有入口，真正的完整性由工具执行域注册检查保证：所有 `environment` 工具都必须取得当前环境能力，否则不向模型注册。新增工具不会因为忘记更新清单而自动获得宿主执行权限。
+
+`control_plane` 工具只能使用第 3.8 节声明的数据范围和独立权限策略。附件 ID、Skill 元数据或远程生成服务不能接受任意宿主路径。失败结果应包含环境类型、失败阶段和可操作原因，不启动对应宿主进程。显式选择的宿主终端不属于 Docker fail-closed 范围。
 
 ## 15. 当前实现与差距
 
@@ -584,8 +731,13 @@ Docker 环境不可用、配置不匹配或环境句柄失效时，以下入口�
 9. Skill file/root 当前返回宿主路径。
 10. `extraMounts` 仍可直接形成任意 `-v` 参数。
 11. Docker 配置目前允许不可用时降级宿主。
-12. 会话元数据没有 executionEnvironment 快照和 config hash。
-13. 项目外 fork 会共享 cwd，但旧验收没有区分根会话和派生会话。
+12. Native Plugin Tool Host 仍可直接在宿主启动进程。
+13. `ImageToText(image_path)` 仍可能直接读取宿主路径。
+14. 工具定义还没有强制执行域元数据和注册检查。
+15. ToolContext cwd、宿主 Git/Skill cwd 和容器 cwd 尚未通过 WorkspaceBinding 分离。
+16. PermissionChecker 仍按宿主路径处理文件参数和 pathRules。
+17. 项目外 fork 会共享 cwd，但现有模型没有持久 workspaceOwnerId。
+18. 可复用容器和 exec 缺少完整 owner 标记及 daemon orphan reconciliation。
 
 ## 16. 目标行为矩阵
 
@@ -599,10 +751,13 @@ Docker 环境不可用、配置不匹配或环境句柄失效时，以下入口�
 | 默认用户终端 | 配置的本机 Shell | 配置的容器 Shell |
 | 显式宿主终端 | 配置的本机 Shell | 配置的本机 Shell |
 | 用户级 Skill | 宿主 Skill 目录 | `/opt/openharness/skills` rw |
+| Native Plugin Tool | 宿主 Plugin Host | 第一期禁用，后续接入环境执行 |
+| ImageToText 路径输入 | 宿主文件能力 | 通过环境文件能力读取容器路径 |
+| 附件 ID 与 ImageGeneration | 受控宿主服务 | 受控宿主服务，不接受任意宿主路径 |
 | 项目外根会话 | 独立受管 cwd | 独立 cwd → `/workspace` |
 | 项目外 fork | 继承源 cwd | 共享源环境 owner |
 | 非隔离子 Agent | 继承父环境 | 继承父环境 |
-| 隔离 worktree 子 Agent | 独立 worktree | 独立 worktree 环境 |
+| 隔离 worktree 子 Agent | 成功创建独立 worktree 后运行 | 成功创建独立 worktree 和环境后运行；失败则拒绝 |
 | Git worktree 管理 | 宿主基础设施 | 宿主基础设施 |
 | Desktop/daemon | 宿主 | 宿主 |
 
@@ -630,42 +785,108 @@ Docker 沙箱
 └─ 在本机打开
 ```
 
-配置不匹配：
+第一期保存设置后：
 
 ```text
-现有沙箱与当前配置不一致，需要重建后才能使用。重建会清除容器内部未挂载的数据，但不会删除工作区和用户级 Skill 文件。
+设置已保存，重启 OpenHarness 后生效。若现有沙箱配置已经过期，重启时将使用最新配置重建；容器内部未挂载的数据会被清除。
 ```
 
-## 18. 验收与测试分层
+第一期 Docker 模式的终端区域显示：
 
-### 18.1 单元测试
+```text
+Docker 交互终端将在下一阶段提供。当前可显式打开本机终端；Agent Terminal 在 Docker 模式下不可用。
+```
 
-- 配置优先级覆盖所有六层来源；
+## 18. 分期实现
+
+### 18.1 第一期：安全执行闭环
+
+目标是让所有仍可调用的 Agent 本地工作负载可靠地留在 Docker 中。设置变化重启后生效。
+
+- 建立 `@openharness/environment` 契约和 WorkspaceBinding；
+- `agent-runtime` 改为接收环境能力，并在环境 ready 后构建提示词；
+- 设置页接入 local/docker，使用 `desktop_managed` 配置解析；
+- 所有 Docker 平台统一 `/workspace`；
+- 挂载 workspace 和用户级 Skills，拒绝 extraMounts、Docker Socket 和 privileged；
+- Shell、后台任务、文件工具、Hook、Cron、LSP 和 MCP stdio 接入环境；
+- 文件工具直接接受容器路径，PermissionChecker 使用结构化环境路径；
+- Skill file/root 使用环境路径呈现；
+- `ImageToText(image_path)` 接入环境文件能力；
+- 工具注册增加 execution domain，无法环境化的 Native Plugin Tool 与 Agent Terminal 在 Docker 模式下禁用；
+- 默认用户终端暂不进入 Docker，界面明确标记为本机终端；
+- Docker 不可用或配置不合法时 fail-closed；
+- 项目外会话支持 Docker Shell 和文件能力；
+- 配置变化要求重启，只保留最新容器版本。
+
+第一期不引入共享终端 lease、Docker PTY、Session 环境快照、运行中热切换或多配置容器。
+
+### 18.2 第二期：统一终端体验
+
+- 实现 Docker PTY；
+- Agent Terminal 跟随 Agent 环境；
+- 默认用户终端跟随 Agent 环境；
+- Terminal 协议支持 project/session 判别作用域；
+- 项目外用户终端和 Agent Terminal；
+- Environment Manager、workspace owner 和内存 lease；
+- 同一环境内多个终端共享单个容器；
+- 关闭终端、Agent 和后台进程时按 owner 安全清理。
+
+### 18.3 第三期：生命周期加固
+
+- 无需重启的 draining/switching 环境切换；
+- mutation barrier、持久切换状态和 daemon 重启恢复；
+- 容器与 exec owner 标记、orphan reconciliation；
+- Native Plugin Tool 环境化后按能力重新启用；
+- Skill 删除、重命名和热刷新完整语义；
+- 工作区引用统计和独立清理入口；
+- 各平台真实 Docker E2E 接入 CI。
+
+第三期仍使用单一最新容器版本，不增加旧配置恢复或多版本并存。
+
+## 19. 验收与测试分层
+
+### 19.1 单元测试
+
+- 配置优先级覆盖五层来源；
+- `desktop_managed` 拒绝 SRT/extraMounts，`cli_advanced` 保持旧能力；
+- 旧 SRT 配置在 Desktop 显示不支持，不能静默变成本机；
 - 旧 `ProjectRecord.defaultShell` 只作为本机 Shell；
-- 旧会话缺少环境字段时生成一次快照；
 - `local/docker` 与 Terminal `local/sandbox` 映射唯一；
+- WorkspaceBinding 分离 hostRoot 和 executionRoot；
 - `/workspace`、Skills、相对路径、`..` 和符号链接边界；
+- pathRules 的相对、可映射绝对和不可映射绝对规则；
 - Skill file/root 对用户级、项目级、Bundled 和未挂载 Plugin 的呈现；
+- Skill Registry 删除、重命名和 `bundled < plugin < user < project` 覆盖；
 - `extraMounts` 在 Desktop 模式被拒绝；
 - 保留挂载目标、Docker Socket 和 privileged 配置被拒绝；
 - 配置指纹包含规范化受管挂载；
+- 同一 owner 的容器身份不包含 hash，过期版本不会并存；
+- 工具执行域缺失时默认 environment，Docker 中无环境能力则不注册；
 - Environment Manager 的 owner、lease、activeJobs 和状态迁移；
-- 项目外根会话、fork、非隔离 child 和 worktree child 的 owner 规则。
+- 项目外根会话、fork、非隔离 child 和 worktree child 的 owner 规则；
+- 隔离 worktree 创建失败返回 `isolation_unavailable`。
 
-### 18.2 协议与服务集成测试
+### 19.2 协议与服务集成测试
 
-- TerminalCreateRequest 支持 projectId 或 sessionId 作用域；
+- 新 TerminalCreateRequest 只接受 project 或 session 判别作用域；
+- 兼容请求同时包含 projectId/sessionId 时验证关联和 cwd；
 - 服务端拒绝与项目或会话不一致的 cwd；
 - 项目外用户终端和 Agent Terminal 能创建；
 - 关闭单个终端只释放自己的 lease；
-- 全局默认设置只影响新会话；
-- 会话环境切换在活跃工作存在时被拒绝；
-- 候选环境准备或设置保存失败时保留旧环境；
-- `rebuild_required` 不复用、不删除错误容器；
+- 第一阶段设置保存后标记需重启，运行环境不伪装成已切换；
+- 重启后旧会话和新会话都使用最新配置；
+- 过期的已验证 OHS 容器被最新配置替换，不产生第二个版本；
+- 无法验证 owner 的同名容器不删除并导致 fail-closed；
+- 第三阶段切换先进入 draining 并阻止新工作；
+- daemon 在 switching 状态崩溃后恢复到最新环境或 unavailable；
+- 显式宿主终端打开时不能删除其工作区；
+- Native Plugin Tool 在第一期 Docker 模式不注册；
+- `ImageToText(image_path)` 不调用宿主 readFile；
+- attachment/ImageGeneration control-plane 工具不能读取任意宿主路径；
 - Skill/ListSkills 的刷新时机符合第 9.3 节；
-- 每个 fail-closed 入口都断言没有调用宿主 spawn。
+- 从完整模型可见工具注册表断言所有 environment 工具 fail-closed，而不是维护手写测试名单。
 
-### 18.3 真实 Docker E2E
+### 19.3 真实 Docker E2E
 
 - Windows、Linux 和 macOS 支持环境中的容器 cwd 都是 `/workspace`；
 - Bash、文件工具、Agent Terminal 和默认用户终端使用同一 container ID；
@@ -673,17 +894,19 @@ Docker 沙箱
 - 工作区和用户 Skill 的写入同步到宿主；
 - 未挂载宿主目录不可见；
 - 用户 Skill 目录不存在时能安全创建并挂载；
-- 配置 hash 不匹配返回 `rebuild_required`；
+- 配置 hash 不匹配时旧容器被最新版本替换，且不存在第二个 owner 容器；
 - Docker PTY 支持交互、resize、Ctrl-C、EOF 和 terminate；
 - 关闭一个终端不影响 Agent 或其他终端；
 - 最后一个临时环境 lease 释放后容器被删除；
 - 可复用容器保留，但本 Runtime 的残留进程被清理；
 - 项目外根会话挂载自己的 xN，fork 共享，独立根会话不共享；
+- 隔离 worktree 创建失败时没有共享父工作区的 child 被启动；
+- daemon 重启后清理可确认的孤儿临时容器和旧进程；
 - Docker 不可用时所有受管入口 fail-closed。
 
 仅在具有对应平台和 Docker daemon 的 CI Job 中运行真实 E2E；其他环境明确 skip，不把 skip 计为通过证据。
 
-## 19. 不在本阶段范围内
+## 20. 不在本阶段范围内
 
 - 动态挂载桌面、下载目录或其他任意宿主目录；
 - Desktop 受管环境中的 `extraMounts`；
@@ -695,3 +918,6 @@ Docker 沙箱
 - 把 Desktop、daemon 或完整 Agent 控制程序迁入 Docker；
 - 为项目外工作区自动初始化 Git 仓库；
 - Desktop 的 SRT 环境选项。
+- Session 历史环境配置快照；
+- 同一 workspace owner 的多版本容器并存；
+- 恢复旧会话创建时使用的旧镜像、网络或挂载配置。
