@@ -6,6 +6,7 @@ import type {
 } from "@openharness/core";
 import {
   QueryEngine,
+  resolveToolExecution,
   RuntimeBuilder,
   RuntimeBundle,
   ToolRegistrationError,
@@ -202,6 +203,7 @@ export async function createOpenHarnessRuntime(
     baseToolRegistry,
     effectiveAllowed,
     effectiveDenied,
+    options.executionEnvironment,
   );
 
   const mode = configuration.permissionMode ?? settings.permission.mode;
@@ -401,6 +403,7 @@ class RuntimeToolRegistry implements IToolRegistry {
     private readonly inner: IToolRegistry,
     private readonly allowedTools: ToolLimit,
     private readonly deniedTools: ReadonlySet<string>,
+    private readonly environment?: ExecutionEnvironmentHandle,
   ) {}
 
   register(tool: ToolDefinition, source?: Parameters<IToolRegistry["register"]>[1]): void {
@@ -417,11 +420,11 @@ class RuntimeToolRegistry implements IToolRegistry {
 
   get(name: string): ToolDefinition | undefined {
     const tool = this.inner.get(name);
-    return tool && this.isVisible(tool.name) ? tool : undefined;
+    return tool && this.isVisible(tool) ? tool : undefined;
   }
 
   getAll(): ToolDefinition[] {
-    return this.inner.getAll().filter((tool) => this.isVisible(tool.name));
+    return this.inner.getAll().filter((tool) => this.isVisible(tool));
   }
 
   has(name: string): boolean {
@@ -429,17 +432,26 @@ class RuntimeToolRegistry implements IToolRegistry {
   }
 
   inspect(name: string) {
-    return this.isVisible(name) ? this.inner.inspect(name) : undefined;
+    const tool = this.inner.get(name);
+    return tool && this.isVisible(tool) ? this.inner.inspect(name) : undefined;
   }
 
   internalRegistry(): IToolRegistry {
     return this.inner;
   }
 
-  private isVisible(name: string): boolean {
-    if (this.deniedTools.has(name)) return false;
+  private isVisible(tool: ToolDefinition): boolean {
+    if (this.deniedTools.has(tool.name)) return false;
+    const execution = resolveToolExecution(tool);
+    const environmentKind = this.environment?.info.kind ?? "local";
+    if (!(execution.supportedEnvironments ?? ["local"]).includes(environmentKind)) {
+      return false;
+    }
+    if (execution.network && this.environment?.info.networkMode === "none") {
+      return false;
+    }
     return (
-      this.allowedTools.kind === "all" || this.allowedTools.names.has(name)
+      this.allowedTools.kind === "all" || this.allowedTools.names.has(tool.name)
     );
   }
 }

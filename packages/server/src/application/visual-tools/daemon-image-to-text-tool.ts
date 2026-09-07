@@ -1,5 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, resolve } from "node:path";
+import { extname } from "node:path";
 import type {
   Settings,
   ToolContext,
@@ -29,6 +28,10 @@ export function createDaemonImageToTextTool(options: {
 }): ToolDefinition {
   return {
     name: "ImageToText",
+    execution: {
+      domain: "control_plane",
+      supportedEnvironments: ["local", "docker"],
+    },
     description:
       "Describe an image or extract visible text. Accepts an authorized daemon attachment, a local image path, or a public HTTP(S) image URL.",
     inputSchema: {
@@ -56,10 +59,13 @@ export function createDaemonImageToTextTool(options: {
       if (!context.settings) {
         return errorResult("ImageToText is unavailable because runtime settings are missing.", "policy");
       }
+      if (parsed.imageUrl && context.environment?.info.networkMode === "none") {
+        return errorResult("ImageToText URL access is disabled by the execution environment network policy.", "policy");
+      }
 
       let imageBlock: Record<string, unknown>;
       try {
-        imageBlock = await buildImageBlock(parsed, context.settings.apiFormat);
+        imageBlock = await buildImageBlock(parsed, context.settings.apiFormat, context);
       } catch (error) {
         return errorResult(safeMessage(error), "command");
       }
@@ -131,7 +137,7 @@ interface ParsedVisionInput {
   prompt: string;
 }
 
-function parseVisionInput(input: Record<string, unknown>, cwd: string): ParsedVisionInput | string {
+function parseVisionInput(input: Record<string, unknown>, _cwd: string): ParsedVisionInput | string {
   const allowed = new Set(["image_path", "image_url", "prompt"]);
   const unknown = Object.keys(input).filter((key) => !allowed.has(key));
   if (unknown.length > 0) return `ImageToText does not accept: ${unknown.join(", ")}.`;
@@ -150,7 +156,7 @@ function parseVisionInput(input: Record<string, unknown>, cwd: string): ParsedVi
     }
   }
   return {
-    ...(rawPath ? { imagePath: resolveImagePath(rawPath, cwd) } : {}),
+    ...(rawPath ? { imagePath: rawPath } : {}),
     ...(imageUrl ? { imageUrl } : {}),
     prompt: typeof input.prompt === "string" && input.prompt.trim()
       ? input.prompt.trim()
@@ -158,17 +164,10 @@ function parseVisionInput(input: Record<string, unknown>, cwd: string): ParsedVi
   };
 }
 
-function resolveImagePath(rawPath: string, cwd: string): string {
-  const normalized = process.platform === "win32"
-    ? rawPath.replace(/^\/mnt\/([a-zA-Z])(?:\/(.*))?$/, (_match, drive: string, rest?: string) =>
-        rest ? `${drive.toUpperCase()}:\\${rest.replace(/\//g, "\\")}` : `${drive.toUpperCase()}:\\`)
-    : rawPath;
-  return isAbsolute(normalized) ? normalized : resolve(cwd, normalized);
-}
-
 async function buildImageBlock(
   input: ParsedVisionInput,
   apiFormat: Settings["apiFormat"],
+  context: ToolContext,
 ): Promise<Record<string, unknown>> {
   if (input.imageUrl) {
     return apiFormat === "anthropic"
@@ -176,10 +175,15 @@ async function buildImageBlock(
       : { type: "image_url", image_url: { url: input.imageUrl } };
   }
 
-  const imagePath = input.imagePath!;
-  const mediaType = MEDIA_TYPES[extname(imagePath).toLowerCase()];
+  if (!context.environment) {
+    throw new Error("ImageToText image_path requires an active execution environment.");
+  }
+  const resolved = await context.environment.paths.resolve(input.imagePath!, "read");
+  const mediaType = MEDIA_TYPES[extname(resolved.executionPath).toLowerCase()];
   if (!mediaType) throw new Error("ImageToText only supports jpg, jpeg, png, gif, and webp files.");
-  const data = (await readFile(imagePath)).toString("base64");
+  const data = Buffer.from(
+    await context.environment.files.readBytes(resolved.executionPath),
+  ).toString("base64");
   return apiFormat === "anthropic"
     ? { type: "image", source: { type: "base64", media_type: mediaType, data } }
     : { type: "image_url", image_url: { url: `data:${mediaType};base64,${data}` } };

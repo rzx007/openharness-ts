@@ -16,6 +16,7 @@ export async function activateNativePluginTools(
   plugin: LoadedNativePlugin,
   context: {
     cwd: string;
+    environmentKind?: "local" | "docker";
     toolRegistry: IToolRegistry;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
     onLog?: (message: string) => void;
@@ -29,6 +30,21 @@ export async function activateNativePluginTools(
 ): Promise<NativeToolActivationResult> {
   if (!plugin.components.tools?.value?.length) {
     return { pluginId: plugin.manifest.id, state: "inactive", toolNames: [], diagnostics: [] };
+  }
+  if (context.environmentKind === "docker") {
+    return {
+      pluginId: plugin.manifest.id,
+      state: "inactive",
+      toolNames: [],
+      diagnostics: [{
+        severity: "warning",
+        phase: "activate",
+        code: "native_tools_unavailable_in_docker",
+        message: "Native Plugin Tools are unavailable in the Docker execution environment.",
+        pluginId: plugin.manifest.id,
+        component: "tools",
+      }],
+    };
   }
   const toolNames: string[] = [];
   const runtimeStatus = beginNativeToolRuntimeStatus(plugin.manifest.id, plugin.root);

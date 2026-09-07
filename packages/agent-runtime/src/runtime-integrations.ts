@@ -1,6 +1,7 @@
 import type { McpServerConfig, RuntimeBundle, Settings } from "@openharness/core";
 import { McpClientManager } from "@openharness/mcp";
 import { appendUserProfileUpdate } from "@openharness/prompts";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 
 import type {
   OpenHarnessAgentExtension,
@@ -24,6 +25,7 @@ export interface InstallRuntimeIntegrationsOptions {
   extensions?: OpenHarnessAgentExtension[];
   mcpServers?: Record<string, McpServerConfig>;
   memory?: AgentMemoryRuntime;
+  executionEnvironment?: ExecutionEnvironmentHandle;
 }
 
 /** Install integrations that need a fully constructed RuntimeBundle. */
@@ -34,6 +36,7 @@ export async function installRuntimeIntegrations(
   const memory = options.memory;
   await configureDiscoveredExtensions(options.discovery, {
     cwd: options.cwd,
+    environmentKind: options.executionEnvironment?.info.kind,
     toolRegistry: runtime.toolRegistry,
     hookExecutor: runtime.hookExecutor,
     addCleanup: (cleanup, cleanupSync) => runtime.addCleanup(cleanup, cleanupSync),
@@ -63,7 +66,10 @@ export async function installRuntimeIntegrations(
     sessionId: options.sessionId,
   });
   runtime.addCleanup(() => mcpManager.disconnectAll());
-  const mcpServers = options.mcpServers ?? options.discovery.mcpServers;
+  const mcpServers = selectMcpServersForEnvironment(
+    options.mcpServers ?? options.discovery.mcpServers,
+    options.executionEnvironment?.info,
+  );
   if (Object.keys(mcpServers).length > 0) {
     await mcpManager.connectAll(mcpServers);
   }
@@ -77,7 +83,20 @@ export async function installRuntimeIntegrations(
   try {
     for (const tool of mcpManager.getAsToolDefinitions()) {
       const serverName = mcpToolOwners.get(tool.name);
-      runtime.toolRegistry.register(tool, {
+      const server = serverName ? mcpServers[serverName] : undefined;
+      runtime.toolRegistry.register({
+        ...tool,
+        execution: server?.type === "http" || server?.type === "sse"
+          ? {
+              domain: "control_plane",
+              supportedEnvironments: ["local", "docker"],
+              network: true,
+            }
+          : {
+              domain: "environment",
+              supportedEnvironments: ["local", "docker"],
+            },
+      }, {
         kind: "mcp",
         ...(serverName ? { id: serverName } : {}),
       });
@@ -111,4 +130,17 @@ export async function installRuntimeIntegrations(
   );
 
   return () => mcpManager.getConnections();
+}
+
+export function selectMcpServersForEnvironment(
+  servers: Record<string, McpServerConfig>,
+  environment?: Pick<ExecutionEnvironmentHandle["info"], "kind" | "networkMode">,
+): Record<string, McpServerConfig> {
+  if (!environment || environment.kind === "local") return servers;
+  return Object.fromEntries(
+    Object.entries(servers).filter(([, server]) =>
+      environment.networkMode !== "none" &&
+      (server.type === "http" || server.type === "sse")
+    ),
+  );
 }

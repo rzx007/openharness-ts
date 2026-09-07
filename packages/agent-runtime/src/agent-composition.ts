@@ -184,6 +184,7 @@ async function composeOpenHarnessAgentInternal(
     extensions: options.extensions,
     mcpServers: options.mcpServers,
     memory: environment.memory,
+    executionEnvironment,
   });
   const session = createAgentSession({
     queryEngine: runtime.queryEngine,

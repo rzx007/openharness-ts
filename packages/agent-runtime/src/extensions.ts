@@ -89,6 +89,7 @@ export async function configureDiscoveredExtensions(
   discovery: OpenHarnessExtensionDiscovery,
   context: {
     cwd: string;
+    environmentKind?: "local" | "docker";
     toolRegistry: IToolRegistry;
     hookExecutor: IHookExecutor;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
@@ -99,6 +100,7 @@ export async function configureDiscoveredExtensions(
     for (const hook of plugin.components.hooks?.value ?? []) context.hookExecutor.register(hook);
     const activation = await activateNativePluginTools(plugin, {
       cwd: context.cwd,
+      environmentKind: context.environmentKind,
       toolRegistry: context.toolRegistry,
       addCleanup: (cleanup, cleanupSync) => context.addCleanup(cleanup, cleanupSync),
       onLog: (message) => process.stderr.write(`${message}\n`),

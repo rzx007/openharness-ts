@@ -85,12 +85,21 @@ export interface ToolExecutionResult extends ToolResult {
   toolAttemptId?: string;
 }
 
+export interface ToolExecutionSpec {
+  domain: "environment" | "control_plane";
+  supportedEnvironments?: Array<"local" | "docker">;
+  /** Whether this control-plane tool needs outbound network access. */
+  network?: boolean;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   /** Automatic retry is forbidden unless this is explicitly true. */
   safeToRetry?: boolean;
+  /** Where this tool actually runs. Omission is fail-closed to local execution. */
+  execution?: ToolExecutionSpec;
   execute: (
     input: Record<string, unknown>,
     context: ToolContext,
@@ -103,6 +112,7 @@ export interface ToolDescriptor {
   readonly description: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
   readonly safeToRetry?: boolean;
+  readonly execution?: ToolExecutionSpec;
 }
 
 export interface ToolRegistrationSource {
