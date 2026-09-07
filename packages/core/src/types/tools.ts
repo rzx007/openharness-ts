@@ -3,6 +3,7 @@ import type { Settings } from "./settings";
 import type { AgentExecutionContext, AgentScheduleEffects } from "./runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 
 export interface McpAuthConfigureInput {
   serverName: string;
@@ -37,6 +38,8 @@ export interface AgentBackgroundShellHost {
 
 export interface ToolContext {
   cwd: string;
+  /** Effective execution environment. Runtime-owned contexts always provide it. */
+  environment?: ExecutionEnvironmentHandle;
   sessionId?: string;
   /** Stable model-issued tool call identity. Retries of the same call reuse this value. */
   toolCallId?: string;

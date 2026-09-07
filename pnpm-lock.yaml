@@ -653,6 +653,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/jobs':
         specifier: workspace:*
         version: link:../jobs
@@ -768,6 +771,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1094,6 +1100,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/jobs':
         specifier: workspace:*
         version: link:../jobs

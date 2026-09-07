@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@openharness/core";
-import { fallbackGrep, fileOperationsFor } from "../file/operations.js";
-import { resolveToolPath } from "../file/path.js";
+import { fileOperationsFor } from "../file/operations.js";
+import { resolveToolPathInContext } from "../file/environment-path.js";
 import { sandboxPathError } from "../file/sandbox-guard.js";
 
 export const grepTool: ToolDefinition = {
@@ -32,13 +32,13 @@ export const grepTool: ToolDefinition = {
   async execute(input, context) {
     const pattern = input.pattern as string;
     const cwd = context.cwd ?? process.cwd();
-    const basePath = resolveToolPath((input.path as string) ?? cwd, cwd);
+    const basePath = await resolveToolPathInContext((input.path as string) ?? cwd, context, "read");
     const include = input.include as string | undefined;
     const caseSensitive = (input.caseSensitive as boolean) ?? true;
     const limit = (input.limit as number) ?? 200;
 
     try {
-      const sandboxError = await sandboxPathError(basePath, cwd, "read", context.settings);
+      const sandboxError = await sandboxPathError(basePath, cwd, "read", context.settings, context.environment);
       if (sandboxError) {
         return {
           content: [{ type: "text", text: sandboxError }],
@@ -47,30 +47,11 @@ export const grepTool: ToolDefinition = {
       }
 
       const operations = fileOperationsFor(context);
-      const rgResult = await operations.grep(basePath, pattern, {
+      const results = await operations.grep(basePath, pattern, {
         include,
         caseSensitive,
         limit,
       });
-      if (rgResult !== null) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: rgResult.length > 0 ? rgResult.join("\n") : "(no matches)",
-            },
-          ],
-        };
-      }
-
-      const results = await fallbackGrep(
-        basePath,
-        pattern,
-        include,
-        caseSensitive,
-        limit,
-        operations,
-      );
       return {
         content: [
           {

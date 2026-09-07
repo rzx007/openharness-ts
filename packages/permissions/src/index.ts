@@ -6,7 +6,7 @@ import type {
   PermissionSettings,
   PathRuleConfig,
 } from "@openharness/core";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, posix, relative, resolve } from "node:path";
 
 export type {
   PermissionMode,
@@ -55,6 +55,7 @@ export interface PermissionCheckOptions {
   /** When provided, only these local read-only names retain implicit trust. */
   trustedLocalReadOnlyToolNames?: string[];
   cwd?: string;
+  pathStyle?: "windows" | "posix";
 }
 
 export class PermissionChecker implements IPermissionChecker {
@@ -68,13 +69,21 @@ export class PermissionChecker implements IPermissionChecker {
   private untrustedToolNames: Set<string>;
   private trustedLocalReadOnlyToolNames: Set<string> | undefined;
   private cwd: string | undefined;
+  private pathStyle: "windows" | "posix";
 
   constructor(options: PermissionCheckOptions) {
     this.mode = options.mode;
     this.rules = options.rules ?? [];
     this.allowedTools = new Set(options.allowedTools ?? []);
     this.deniedTools = new Set(options.deniedTools ?? []);
+    this.pathStyle = options.pathStyle ?? (process.platform === "win32" ? "windows" : "posix");
     this.pathRules = options.pathRules ?? [];
+    if (
+      this.pathStyle === "posix" &&
+      this.pathRules.some((rule) => /^[a-zA-Z]:[\\/]/.test(rule.pattern))
+    ) {
+      throw new Error("invalid_execution_path_rule: Windows absolute paths are not valid in a POSIX environment");
+    }
     this.deniedCommands = options.deniedCommands ?? [];
     this.autoApproveTools = new Set(options.autoApproveTools ?? []);
     this.untrustedToolNames = new Set(options.untrustedToolNames ?? []);
@@ -82,7 +91,9 @@ export class PermissionChecker implements IPermissionChecker {
       ? new Set(options.trustedLocalReadOnlyToolNames)
       : undefined;
     const cwd = options.cwd;
-    this.cwd = typeof cwd === "string" && cwd ? resolve(cwd) : undefined;
+    this.cwd = typeof cwd === "string" && cwd
+      ? this.pathStyle === "posix" ? posix.resolve(cwd) : resolve(cwd)
+      : undefined;
   }
 
   async checkTool(
@@ -175,7 +186,7 @@ export class PermissionChecker implements IPermissionChecker {
       !this.untrustedToolNames.has(toolName) &&
       (!this.trustedLocalReadOnlyToolNames ||
         this.trustedLocalReadOnlyToolNames.has(toolName)) &&
-      isLocalReadOnlyToolAllowed(toolName, input, this.cwd)
+      isLocalReadOnlyToolAllowed(toolName, input, this.cwd, this.pathStyle)
     ) {
       return {
         action: "allow",
@@ -222,12 +233,20 @@ function isLocalReadOnlyToolAllowed(
   toolName: string,
   input: Record<string, unknown>,
   cwd: string | undefined,
+  pathStyle: "windows" | "posix",
 ): boolean {
   if (!cwd || !LOCAL_READ_ONLY_TOOLS.has(toolName)) return false;
   const path = readToolPathInput(input);
   if (!path)
     return toolName === "Glob" || toolName === "Grep" || toolName === "Lsp";
-  return isWithinCwd(resolve(cwd, path), cwd);
+  return pathStyle === "posix"
+    ? isWithinPosixCwd(posix.resolve(cwd, path), cwd)
+    : isWithinCwd(resolve(cwd, path), cwd);
+}
+
+function isWithinPosixCwd(target: string, cwd: string): boolean {
+  const rel = posix.relative(cwd, target);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !posix.isAbsolute(rel));
 }
 
 function isWithinCwd(target: string, cwd: string): boolean {

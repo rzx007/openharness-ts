@@ -21,6 +21,30 @@ async function withTempCwd(
 }
 
 describe("PermissionChecker", () => {
+  it("treats POSIX cwd paths in the execution namespace", async () => {
+    const checker = new PermissionChecker({
+      mode: "default",
+      cwd: "/workspace",
+      pathStyle: "posix",
+    });
+
+    await expect(
+      checker.checkTool("Read", { file_path: "/workspace/src/app.ts" }),
+    ).resolves.toMatchObject({ action: "allow" });
+    await expect(
+      checker.checkTool("Read", { file_path: "/etc/passwd" }),
+    ).resolves.toMatchObject({ action: "ask" });
+  });
+
+  it("rejects Windows absolute path rules in a POSIX environment", () => {
+    expect(() => new PermissionChecker({
+      mode: "default",
+      cwd: "/workspace",
+      pathStyle: "posix",
+      pathRules: [{ pattern: "D:\\code\\*", allow: true }],
+    })).toThrow("invalid_execution_path_rule");
+  });
+
   it("allows all tools in full_auto mode", async () => {
     const checker = new PermissionChecker({
       mode: "full_auto",

@@ -1,4 +1,5 @@
 import { loadSettings, type Settings } from "@openharness/core";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import {
   resolveSandboxPolicy,
   validateSandboxPath,
@@ -28,7 +29,18 @@ export async function sandboxPathError(
   cwd: string,
   operation: SandboxOperation,
   settingsOverride?: Settings,
+  environment?: ExecutionEnvironmentHandle,
 ): Promise<string | undefined> {
+  if (environment) {
+    const result = await environment.paths.resolve(filePath, operation);
+    if (result.mountPurpose === "unmounted") {
+      return `Sandbox: path is outside the mounted execution roots: ${result.executionPath}`;
+    }
+    if (operation === "write" && result.mountMode === "ro") {
+      return `Sandbox: path is on a read-only mount: ${result.executionPath}`;
+    }
+    return undefined;
+  }
   const result = await sandboxPathDecision(filePath, cwd, operation, settingsOverride);
   if (!result) return undefined;
   return result.allowed ? undefined : `Sandbox: ${result.reason}`;

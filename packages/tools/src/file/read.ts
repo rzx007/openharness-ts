@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
-import { resolveToolPath } from "./path.js";
+import { resolveToolPathInContext } from "./environment-path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
 import { fileOperationsFor } from "./operations.js";
 
@@ -25,8 +25,8 @@ export const fileReadTool: ToolDefinition = {
     const limit = (input.limit as number) ?? 2000;
 
     try {
-      const filePath = resolveToolPath(rawPath, cwd);
-      const sandboxError = await sandboxPathError(filePath, cwd, "read", context.settings);
+      const filePath = await resolveToolPathInContext(rawPath, context, "read");
+      const sandboxError = await sandboxPathError(filePath, cwd, "read", context.settings, context.environment);
       if (sandboxError) {
         return {
           content: [{ type: "text", text: sandboxError }],
