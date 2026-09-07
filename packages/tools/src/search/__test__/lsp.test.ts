@@ -7,7 +7,7 @@ function context() {
     cwd: "/workspace",
     environment: {
       workspace: {
-        kind: "docker",
+        kind: "wsl",
         hostRoot: "D:\\repo",
         executionRoot: "/workspace",
       },

@@ -147,6 +147,41 @@ describe("default daemon application services", () => {
     expect(result.restartRuntimes).toBe(true);
   });
 
+  it("persists agent environment changes as a daemon-restart setting", async () => {
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "anthropic" as const,
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        agentEnvironment: { kind: "native" as const },
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    const result = await settings.patch({ agentEnvironment: { kind: "wsl" } });
+
+    expect(ref.current.agentEnvironment).toEqual({ kind: "wsl" });
+    expect(result.restartRuntimes).toBe(true);
+  });
+
+  it("rejects removed Docker settings before they are persisted", async () => {
+    const ref = {
+      current: {
+        model: "m", apiFormat: "anthropic" as const, maxTurns: 50,
+        permission: { mode: "default" as const }, agentEnvironment: { kind: "native" as const },
+      },
+    };
+    const settings = createDefaultSettingsService(ref);
+
+    await expect(settings.patch({ sandbox: { backend: "docker" } }))
+      .rejects.toThrow("Unsupported removed runtime setting: sandbox.backend");
+    await expect(settings.patch({ path: "terminal.dockerShell", value: "/bin/sh" }))
+      .rejects.toThrow("Unsupported removed runtime setting: terminal.dockerShell");
+    await expect(settings.patch({ agentEnvironment: { kind: "docker" } }))
+      .rejects.toThrow("agentEnvironment.kind must be native or wsl");
+  });
+
   it("updates work style and requests idle runtime invalidation", async () => {
     const ref = {
       current: {

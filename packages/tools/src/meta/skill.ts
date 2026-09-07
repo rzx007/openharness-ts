@@ -72,7 +72,11 @@ export const listSkillsTool: ToolDefinition = {
 };
 
 async function resolveSkillRegistry(
-  context: { cwd: string; skillRegistry?: unknown },
+  context: {
+    cwd: string;
+    skillRegistry?: unknown;
+    environment?: { workspace: { hostRoot: string } };
+  },
   options: { refreshFilesystem?: boolean } = {},
 ) {
   const sharedRegistry = context.skillRegistry as SkillRegistryInstance | undefined;
@@ -86,7 +90,9 @@ async function resolveSkillRegistry(
   return createSkillRegistrySnapshot({
     baseline,
     userDir: getSkillsDir(),
-    projectDirs: await findProjectSkillDirs(context.cwd),
+    projectDirs: await findProjectSkillDirs(
+      context.environment?.workspace?.hostRoot ?? context.cwd,
+    ),
   });
 }
 

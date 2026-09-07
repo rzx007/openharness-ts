@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { Settings } from "@openharness/core";
 import type {
   ExecutionEnvironmentConsumer,
-  ExecutionEnvironmentLease,
+  ExecutionEnvironmentHandle,
 } from "@openharness/environment";
 import type {
   SessionExecutionRecord,
@@ -102,13 +102,13 @@ export interface BackgroundShellServiceContext {
     session: SessionRecord,
     settings: Settings,
     consumer: ExecutionEnvironmentConsumer,
-  ): Promise<ExecutionEnvironmentLease>;
+  ): Promise<ExecutionEnvironmentHandle>;
 }
 
 /** Shared background-shell creation and control for HTTP and model-tool callers. */
 export class BackgroundShellService {
   private readonly environmentLeases = new Map<string, {
-    lease: ExecutionEnvironmentLease;
+    lease: ExecutionEnvironmentHandle;
     unsubscribe: () => void;
   }>();
 
@@ -256,7 +256,7 @@ export class BackgroundShellService {
     this.context.events.publishSince(eventCursor);
     eventCursor = this.context.events.checkpoint();
     let task: DetachedProcessExecution;
-    let environmentLease: ExecutionEnvironmentLease | undefined;
+    let environmentLease: ExecutionEnvironmentHandle | undefined;
     try {
       if (this.context.acquireEnvironment) {
         const session = this.context.store.getSession(scope.sessionId);
@@ -276,6 +276,9 @@ export class BackgroundShellService {
         cwd: scope.cwd,
         sessionId: scope.sessionId,
         ...(input.settings ? { settings: input.settings } : {}),
+        ...(environmentLease ? {
+          processExecutor: bindEnvironmentProcessExecutor(environmentLease),
+        } : {}),
       });
     } catch (error) {
       await environmentLease?.release();
@@ -354,7 +357,7 @@ export class BackgroundShellService {
   private trackEnvironmentLease(
     manager: ProcessSupervisor,
     task: DetachedProcessExecution,
-    lease: ExecutionEnvironmentLease,
+    lease: ExecutionEnvironmentHandle,
   ): void {
     const releaseIfTerminal = (execution: DetachedProcessExecution) => {
       if (execution.id !== task.id) return;
@@ -395,6 +398,16 @@ export class BackgroundShellService {
     if (!cwd) throw new BackgroundShellError(400, "cwd or sessionId is required");
     return { cwd, ...(input.sessionId ? { sessionId: input.sessionId } : {}) };
   }
+}
+
+function bindEnvironmentProcessExecutor(environment: ExecutionEnvironmentHandle) {
+  const cwd = environment.workspace.executionRoot;
+  return {
+    execShell: (command: string, options = {}) =>
+      environment.process.execShell(command, { ...options, cwd }),
+    execProcess: (argv: string[], options = {}) =>
+      environment.process.execProcess(argv, { ...options, cwd }),
+  } satisfies typeof environment.process;
 }
 
 function shellRequestFingerprint(input: {

@@ -50,7 +50,7 @@ function fakeClient(responseText: string): {
 }
 
 describe("HookExecutor", () => {
-  it("fails closed for a blocking command hook when strict Docker sandbox is unavailable", async () => {
+  it("fails closed for a blocking command hook when strict SRT is unavailable", async () => {
     const executor = new HookExecutor({
       cwd: process.cwd(),
       sessionId: "strict-hook",
@@ -59,7 +59,7 @@ describe("HookExecutor", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
     });
     const result = await executor.executeCommand(
@@ -71,7 +71,7 @@ describe("HookExecutor", () => {
     );
     expect(result).toEqual({
       blocked: true,
-      reason: "Docker sandbox session is not running",
+      reason: expect.any(String),
     });
   });
 

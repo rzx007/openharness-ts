@@ -41,11 +41,11 @@ describe("resolveSandboxPolicy", () => {
   it("distinguishes best-effort, required, and read-only policies", () => {
     const bestEffort = resolveSandboxPolicy({
       cwd: ".",
-      config: { enabled: true, backend: "docker", failIfUnavailable: false },
+      config: { enabled: true, failIfUnavailable: false },
     });
     const required = resolveSandboxPolicy({
       cwd: ".",
-      config: { enabled: true, backend: "docker", failIfUnavailable: true },
+      config: { enabled: true, failIfUnavailable: true },
     });
     const readOnly = resolveSandboxPolicy({
       cwd: ".",
@@ -136,7 +136,7 @@ describe("process policy and failure classification", () => {
           apiFormat: "openai",
           maxTurns: 1,
           permission: { mode: "default" },
-          sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+          sandbox: { enabled: true, failIfUnavailable: true },
         },
       },
     );

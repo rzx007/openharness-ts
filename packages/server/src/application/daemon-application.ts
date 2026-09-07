@@ -13,11 +13,6 @@ import {
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import {
-  ExecutionEnvironmentManager,
-  type DockerReconciliationReport,
-  type ReconcileDockerOrphansInput,
-} from "@openharness/sandbox";
-import {
   readSessionRuntimeConfig,
   type AttachmentLimits,
   type SessionRecord,
@@ -50,7 +45,6 @@ import { DaemonJobService } from "../jobs/daemon-job-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
 import { DaemonTerminalService } from "../terminal/daemon-terminal-service.js";
 import { createSessionEnvironmentAcquirer } from "../runtime/session-execution-environment.js";
-import { deriveInstallationId } from "../runtime/installation-id.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
@@ -133,9 +127,6 @@ export interface DaemonApplicationOptions {
   ownerHeartbeatMs?: number;
   ownerStaleAfterMs?: number;
   ownerProcessAlive?: (pid: number) => boolean;
-  reconcileDockerOrphans?(
-    input: ReconcileDockerOrphansInput,
-  ): Promise<DockerReconciliationReport>;
 }
 
 /**
@@ -192,7 +183,6 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
   private readonly attachmentResources: SessionAttachmentResources;
-  private readonly environmentManager = new ExecutionEnvironmentManager();
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -221,11 +211,6 @@ export class DaemonApplication implements DurableAgentApplication {
       canTakeOver: (current) =>
         !(options.ownerProcessAlive ?? isProcessAlive)(current.pid),
     });
-    const daemonIdentity = {
-      installationId: deriveInstallationId(dirname(store.path)),
-      daemonOwnerId: this.ownerLease.ownerId,
-      daemonGeneration: this.ownerLease.generation,
-    };
     this.ownerHeartbeat = setInterval(() => {
       try {
         this.ownerLease = store.heartbeatApplicationOwner(this.ownerLease);
@@ -303,11 +288,7 @@ export class DaemonApplication implements DurableAgentApplication {
         }),
       );
       const acquireSessionEnvironment = options.executionSurface === "desktop_managed"
-        ? createSessionEnvironmentAcquirer({
-            manager: this.environmentManager,
-            store,
-            daemonIdentity,
-          })
+        ? createSessionEnvironmentAcquirer()
         : undefined;
       this.terminals = new DaemonTerminalService(store, {
         getSettingsForCwd: async (cwd) =>
@@ -879,28 +860,10 @@ export class DaemonApplication implements DurableAgentApplication {
        * 4. 提供后台进程相关的查询和操作接口
        */
       // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
-      const environmentRecovery = options.reconcileDockerOrphans
-        ? options.reconcileDockerOrphans({
-            installationId: daemonIdentity.installationId,
-            daemon: {
-              ownerId: daemonIdentity.daemonOwnerId,
-              generation: daemonIdentity.daemonGeneration,
-            },
-          }).then((report) => {
-            for (const diagnostic of report.diagnostics) {
-              options.log({
-                level: diagnostic.code === "ownership_unverified" ? "warn" : "error",
-                event: "environment.docker_reconciliation",
-                error: diagnostic.message,
-              });
-            }
-          })
-        : Promise.resolve();
-      this.startupRecovery = environmentRecovery
-        .then(() => Promise.all([
+      this.startupRecovery = Promise.all([
           this.attachments.recover(),
           this.backgroundShells.reconcileActiveTasks(DAEMON_RESTART_TASK_REASON),
-        ]))
+        ])
         .then(() => recoverInterruptedWorkflows({ workflows: this.workflows }))
         .then(
           () => {
@@ -966,11 +929,6 @@ export class DaemonApplication implements DurableAgentApplication {
     }
     try {
       await closeExecutionRuntimes();
-    } catch (error) {
-      failures.push(error);
-    }
-    try {
-      await this.environmentManager.dispose();
     } catch (error) {
       failures.push(error);
     }

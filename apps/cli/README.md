@@ -8,7 +8,7 @@ OpenHarness-ts 终端 CLI：在终端里跑 AI Agent。默认进入交互式 TUI
 
 - Node.js >= 20
 - 交互式 TUI：额外安装 [Bun](https://bun.sh)
-- 可选：Docker（启用 sandbox 时）
+- 可选：SRT（启用本机 sandbox 时）；Windows 可选择 WSL 作为 Agent 运行环境
 
 ## 安装
 
@@ -88,7 +88,7 @@ ohs auth status
 ohs provider list|use|add|edit|remove
 ohs mcp list|add|remove
 ohs plugin list|install|uninstall|enable|disable
-ohs sandbox on|off|status|doctor
+ohs sandbox enable|disable|status|check
 ohs daemon start|status|stop|install|uninstall
 ohs config show
 ohs config set <key> <value>

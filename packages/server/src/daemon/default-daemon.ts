@@ -34,15 +34,18 @@ export async function startOpenHarnessDaemon(
       return await loadSettings({});
     },
   };
+  const startupAgentEnvironment = settingsRef.current.agentEnvironment;
   return await startOpenHarnessServer({
     ...options,
     settings: settingsRef.current,
     getSettings: () => settingsRef.current,
-    getSettingsForCwd: async (cwd) =>
-      await loadSettings(undefined, {
+    getSettingsForCwd: async (cwd) => ({
+      ...(await loadSettings(undefined, {
         includeProject: true,
         projectRoot: cwd,
-      }),
+      })),
+      agentEnvironment: startupAgentEnvironment,
+    }),
     services: {
       commandCatalog: createDefaultCommandCatalog(() => settingsRef.current),
       ...createDefaultApplicationServices(settingsRef),

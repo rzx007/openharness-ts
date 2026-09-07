@@ -84,12 +84,14 @@ describe("daemon settings", () => {
   it("loads the current schema without a version marker", async () => {
     writeFileSync(join(configDir, "settings.json"), JSON.stringify({
       sandbox: { enabled: false },
+      agentEnvironment: { kind: "wsl" },
       terminal: { localShell: "powershell.exe" },
     }));
 
     expect(await loadSettings()).toMatchObject({
       sandbox: { enabled: false },
-      terminal: { localShell: "powershell.exe", dockerShell: "/bin/sh" },
+      agentEnvironment: { kind: "wsl" },
+      terminal: { localShell: "powershell.exe" },
     });
   });
 
@@ -137,23 +139,18 @@ describe("daemon settings", () => {
     expect(readdirSync(projectConfigDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
-  it("deep-merges local and Docker terminal shell preferences", async () => {
+  it("loads the local terminal shell preference", async () => {
     const projectRoot = join(configDir, "terminal-project");
     const projectConfigDir = join(projectRoot, ".openharness-ts");
     mkdirSync(projectConfigDir, { recursive: true });
     writeFileSync(join(configDir, "settings.json"), JSON.stringify({
       terminal: { localShell: "powershell.exe" },
     }));
-    writeFileSync(join(projectConfigDir, "settings.json"), JSON.stringify({
-      terminal: { dockerShell: "/bin/bash" },
-    }));
+    writeFileSync(join(projectConfigDir, "settings.json"), JSON.stringify({}));
 
     expect(
       (await loadSettings(undefined, { includeProject: true, projectRoot }))
         .terminal,
-    ).toEqual({
-      localShell: "powershell.exe",
-      dockerShell: "/bin/bash",
-    });
+    ).toEqual({ localShell: "powershell.exe" });
   });
 });

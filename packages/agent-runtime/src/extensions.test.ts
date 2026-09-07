@@ -497,15 +497,15 @@ describe("installed Native Tool activation", () => {
     expect(getNativeToolRuntimeSnapshot(discovery.plugins[0]!.root)).toMatchObject({ state: "inactive", hostCount: 0 });
   });
 
-  it("does not start a native Tool host for Docker execution", async () => {
-    const cwd = join(tempRoot, "docker-tool-workspace");
+  it("does not start a native Tool host for WSL execution", async () => {
+    const cwd = join(tempRoot, "wsl-tool-workspace");
     writeProjectToolPlugin(cwd);
     const discovery = await discoverOpenHarnessExtensions(cwd, BASE_SETTINGS);
     const registry = new ToolRegistry();
 
     const activations = await configureDiscoveredExtensions(discovery, {
       cwd,
-      environmentKind: "docker",
+      environmentKind: "wsl",
       toolRegistry: registry,
       hookExecutor: { register: vi.fn() } as any,
       addCleanup: vi.fn(),
@@ -514,7 +514,7 @@ describe("installed Native Tool activation", () => {
     expect(activations).toEqual([expect.objectContaining({
       state: "inactive",
       toolNames: [],
-      diagnostics: [expect.objectContaining({ code: "native_tools_unavailable_in_docker" })],
+      diagnostics: [expect.objectContaining({ code: "native_tools_unavailable_in_environment" })],
     })]);
     expect(registry.has("InstalledPluginEcho")).toBe(false);
     expect(getNativeToolRuntimeSnapshot(discovery.plugins[0]!.root)).toMatchObject({

@@ -1,6 +1,6 @@
 export type DesktopWorkStyle = "practical" | "efficient"
 export type DesktopNotificationMode = "never" | "when_unfocused" | "always"
-export type DesktopAgentEnvironment = "local" | "docker" | "unsupported_srt"
+export type DesktopAgentEnvironment = "native" | "wsl"
 
 export interface DesktopSettingsSnapshot {
   workStyle: DesktopWorkStyle
@@ -9,6 +9,7 @@ export interface DesktopSettingsSnapshot {
   restartRequired: boolean
   defaultOpenerId: string | null
   defaultTerminalShellId: string | null
+  wslSupported?: boolean
 }
 
 export interface UpdateDesktopWorkStyleInput {
@@ -20,7 +21,7 @@ export interface UpdateDesktopNotificationModeInput {
 }
 
 export interface UpdateDesktopAgentEnvironmentInput {
-  environment: "local" | "docker"
+  environment: "native" | "wsl"
 }
 
 export interface UpdateDesktopDefaultOpenerInput {
@@ -51,23 +52,23 @@ export function buildDesktopSettingsSnapshot(
     defaultOpenerId: unknown
     defaultTerminalShellId: unknown
   }> = {},
-  options: Partial<{ restartRequired: boolean }> = {}
+  options: Partial<{ restartRequired: boolean; wslSupported: boolean }> = {}
 ): DesktopSettingsSnapshot {
   return {
     workStyle: isDesktopWorkStyle(settings.workStyle) ? settings.workStyle : "practical",
     notificationMode: isDesktopNotificationMode(preferences.notificationMode)
       ? preferences.notificationMode
       : "when_unfocused",
-    agentEnvironment: resolveDesktopAgentEnvironment(settings.sandbox),
+    agentEnvironment: resolveDesktopAgentEnvironment(settings.agentEnvironment),
     restartRequired: options.restartRequired ?? false,
     defaultOpenerId: normalizeDefaultOpenerId(preferences.defaultOpenerId),
     defaultTerminalShellId: normalizeDefaultTerminalShellId(preferences.defaultTerminalShellId),
+    wslSupported: options.wslSupported ?? false,
   }
 }
 
 function resolveDesktopAgentEnvironment(value: unknown): DesktopAgentEnvironment {
-  if (!isRecord(value) || value.enabled !== true) return "local"
-  return value.backend === "docker" ? "docker" : "unsupported_srt"
+  return isRecord(value) && value.kind === "wsl" ? "wsl" : "native"
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

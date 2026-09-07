@@ -52,7 +52,7 @@
 | 请求字段严格校验，错误返回固定形状 | [requests.test.ts](../packages/protocol/src/requests.test.ts)、[serialization.test.ts](../packages/protocol/src/serialization.test.ts)、[routes.test.ts](../packages/server/src/http/routes/__test__/routes.test.ts) |
 | snapshot 包含 Attempt/Task 等完整状态，SSE cursor 可回放和重连 | [http.test.ts](../packages/server/src/http/__test__/http.test.ts)、[reducer.test.ts](../packages/client/src/state/__test__/reducer.test.ts) |
 | client HTTP 封装不会偷偷改变请求或响应 | [http-client.test.ts](../packages/client/src/transport/__test__/http-client.test.ts) |
-| 浏览器 client 不依赖 Node polyfill | [browser-client Vite 配置](../tests/browser-client/vite.config.ts) |
+| 浏览器 client 不依赖 Node polyfill | [根测试脚本](../package.json) 中的 `test:client-browser` |
 
 对应契约：[Protocol Contract](./protocol-contract.md)、[Client Sync Flow](./client-sync-flow.md)。
 

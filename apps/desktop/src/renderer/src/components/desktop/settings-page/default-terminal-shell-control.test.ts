@@ -135,7 +135,7 @@ function settingsSnapshot(defaultTerminalShellId: string | null): DesktopSetting
   return {
     workStyle: "practical",
     notificationMode: "when_unfocused",
-    agentEnvironment: "local",
+    agentEnvironment: "native",
     restartRequired: false,
     defaultOpenerId: null,
     defaultTerminalShellId,

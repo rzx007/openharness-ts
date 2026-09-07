@@ -237,8 +237,8 @@ function numberValue(value: unknown, fallback: number): number {
 
 function readRuntime(value: unknown): TerminalRuntime {
   if (value === undefined || value === "local") return "local";
-  if (value === "sandbox") return "sandbox";
-  throw new DaemonTerminalError(400, "runtime must be local or sandbox.");
+  if (value === "environment") return "environment";
+  throw new DaemonTerminalError(400, "runtime must be local or environment.");
 }
 
 function readSource(value: unknown): "user" | "agent" | undefined {

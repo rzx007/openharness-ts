@@ -33,7 +33,7 @@ describe("resolveToolPathInContext", () => {
       cwd: "/workspace",
       environment: {
         workspace: {
-          kind: "docker",
+          kind: "wsl",
           hostRoot: "D:\\code\\ohs",
           executionRoot: "/workspace",
         },

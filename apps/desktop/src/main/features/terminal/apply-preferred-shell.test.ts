@@ -14,13 +14,13 @@ describe("applyPreferredTerminalShell", () => {
     expect(applyPreferredTerminalShell(base, "C:\\Pwsh\\pwsh.exe").shell).toBe("C:\\Pwsh\\pwsh.exe")
   })
 
-  it("does not override an explicit shell or non-local runtime", () => {
+  it("does not override an explicit shell or a disabled environment preference", () => {
     expect(
       applyPreferredTerminalShell({ ...base, shell: "C:\\Custom\\bash.exe" }, "C:\\Pwsh\\pwsh.exe")
         .shell
     ).toBe("C:\\Custom\\bash.exe")
     expect(
-      applyPreferredTerminalShell({ ...base, runtime: "sandbox" }, "C:\\Pwsh\\pwsh.exe").shell
+      applyPreferredTerminalShell({ ...base, runtime: "environment" }, "C:\\Pwsh\\pwsh.exe", false).shell
     ).toBeUndefined()
   })
 

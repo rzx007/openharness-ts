@@ -1,4 +1,4 @@
-export type ExecutionEnvironmentKind = "local" | "docker";
+export type ExecutionEnvironmentKind = "local" | "wsl";
 
 export interface WorkspaceBinding {
   kind: ExecutionEnvironmentKind;
@@ -48,6 +48,7 @@ export interface EnvironmentProcess {
   write(data: string | Uint8Array): void;
   end(): void;
   onOutput(listener: (chunk: Uint8Array) => void): () => void;
+  onErrorOutput?(listener: (chunk: Uint8Array) => void): () => void;
   wait(): Promise<EnvironmentProcessResult>;
   signal(signal: "interrupt" | "terminate"): Promise<void>;
 }
@@ -149,31 +150,11 @@ export interface ExecutionEnvironmentHandle {
   release(): Promise<void>;
 }
 
-export interface ExecutionEnvironmentDaemonIdentity {
-  installationId: string;
-  daemonOwnerId: string;
-  daemonGeneration: number;
-}
-
-export interface ExecutionEnvironmentIdentity
-  extends ExecutionEnvironmentDaemonIdentity {
-  environmentId: string;
-  workspaceOwnerId: string;
-  configHash: string;
-}
-
 export type ExecutionEnvironmentConsumerKind = "agent" | "terminal" | "background";
 
 export interface ExecutionEnvironmentConsumer {
   kind: ExecutionEnvironmentConsumerKind;
   id: string;
-}
-
-export interface ExecutionEnvironmentLease extends ExecutionEnvironmentHandle {
-  readonly environmentId: string;
-  readonly ownerId: string;
-  readonly leaseId: string;
-  readonly consumer: ExecutionEnvironmentConsumer;
 }
 
 export type ToolExecutionDomain = "environment" | "control_plane";
@@ -184,12 +165,14 @@ export function createWorkspaceBinding(
   if (!binding.hostRoot.trim() || !binding.executionRoot.trim()) {
     throw new Error("Workspace roots must be non-empty");
   }
-  if (binding.kind === "docker") {
+  if (binding.kind === "wsl") {
     if (
       !binding.executionRoot.startsWith("/") ||
       binding.executionRoot.includes("\\")
     ) {
-      throw new Error("Docker execution root must be an absolute POSIX path");
+      throw new Error(
+        "WSL execution root must be an absolute POSIX path",
+      );
     }
   } else if (
     comparableLocalPath(binding.hostRoot) !==

@@ -138,55 +138,6 @@ const createEchoAgent: CreateDaemonAgent = async (context) => {
 };
 
 describe("DaemonApplication", () => {
-  it("does not become ready before managed Docker orphan reconciliation finishes", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "openharness-environment-recovery-"));
-    const store = new SessionStore({ path: join(dir, "store.db") });
-    let finishReconciliation!: () => void;
-    const waitForReconciliation = new Promise<void>((resolve) => {
-      finishReconciliation = resolve;
-    });
-    const reconcileDockerOrphans = vi.fn(async () => {
-      await waitForReconciliation;
-      return { actions: [], diagnostics: [] };
-    });
-    const application = new DaemonApplication({
-      store,
-      executionSurface: "desktop_managed",
-      settings: {
-        model: "test",
-        apiFormat: "openai",
-        maxTurns: 1,
-        permission: { mode: "default" },
-      },
-      createAgent: createEchoAgent,
-      reconcileDockerOrphans,
-      ownerId: "daemon-recovery-test",
-      log: () => {},
-    });
-    try {
-      expect(() => application.sessions.createSession({
-        cwd: process.cwd(),
-        model: "test",
-      })).toThrow("not ready");
-      expect(reconcileDockerOrphans).toHaveBeenCalledWith(expect.objectContaining({
-        installationId: expect.any(String),
-        daemon: expect.objectContaining({ ownerId: "daemon-recovery-test" }),
-      }));
-
-      finishReconciliation();
-      await application.ready();
-      expect(application.sessions.createSession({
-        cwd: process.cwd(),
-        model: "test",
-      })).toBeDefined();
-    } finally {
-      finishReconciliation();
-      await application.close().catch(() => {});
-      store.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   it("lets a real child Agent read its root attachment without authorizing another session", async () => {
     const dir = mkdtempSync(join(tmpdir(), "openharness-child-attachment-"));
     const store = new SessionStore({ path: join(dir, "store.db") });

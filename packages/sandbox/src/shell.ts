@@ -3,10 +3,9 @@ import { resolve } from "node:path";
 import { loadSettings, type Settings } from "@openharness/core";
 import type { EnvironmentExecutionOwner } from "@openharness/environment";
 import { getSrtAvailability } from "./availability.js";
-import { SandboxUnavailableError } from "./docker-backend.js";
+import { SandboxUnavailableError } from "./errors.js";
 import { bindProcessAbortSignal } from "./process-control.js";
 import { resolveSandboxPolicy } from "./policy.js";
-import { getActiveSandboxSession } from "./session.js";
 import { wrapCommandForSrt } from "./srt-adapter.js";
 import type { SandboxPolicy } from "./types.js";
 
@@ -20,7 +19,7 @@ export interface CreateShellProcessOptions {
   stdio?: StdioOptions;
   signal?: AbortSignal;
   detached?: boolean;
-  /** Host-only shell policy. Docker always uses /bin/sh; SRT follows the host platform. */
+  /** Host shell selection policy. */
   hostShell?: "preferred" | "system";
 }
 
@@ -41,7 +40,7 @@ export async function createProcess(
     sessionId: options.sessionId,
     settings,
   });
-  return createResolvedProcess(argv, argv, options, settings, policy);
+  return createResolvedProcess(argv, options, settings, policy);
 }
 
 export type HostShellLauncher =
@@ -71,7 +70,6 @@ export async function createShellProcess(
     : undefined;
   return createResolvedProcess(
     options.hostShell === "system" ? resolveSystemShellArgv(command) : resolveShellArgv(command),
-    resolveContainerShellArgv(command),
     options,
     settings,
     policy,
@@ -86,7 +84,6 @@ function resolveSystemShellArgv(command: string): string[] {
 
 async function createResolvedProcess(
   hostArgv: string[],
-  containerArgv: string[],
   options: CreateProcessOptions,
   settings: Settings,
   policy: SandboxPolicy,
@@ -95,28 +92,6 @@ async function createResolvedProcess(
   const sandbox = policy.config;
   const spawnLocal = () => spawnHostOverride?.() ?? spawnHost(hostArgv, options);
   if (!sandbox.enabled) return spawnLocal();
-
-  if (sandbox.backend === "docker") {
-    const session = getActiveSandboxSession({
-      cwd: policy.scope.cwd,
-      sessionId: policy.scope.sessionId,
-    });
-    if (session?.backend === "docker" && session.active && session.execCommand) {
-      return session.execCommand(containerArgv, {
-        cwd: options.cwd,
-        settings,
-        env: options.env,
-        owner: options.owner,
-        stdio: options.stdio,
-        signal: options.signal,
-        detached: options.detached,
-      });
-    }
-    if (sandbox.failIfUnavailable) {
-      throw new SandboxUnavailableError("Docker sandbox session is not running");
-    }
-    return spawnLocal();
-  }
 
   const availability = getSrtAvailability(policy.config);
   if (!availability.available) {
@@ -134,10 +109,6 @@ async function createResolvedProcess(
   return child;
 }
 
-/** Linux container shell — used for docker exec, independent of host platform. */
-export function resolveContainerShellArgv(command: string): string[] {
-  return ["/bin/sh", "-c", command];
-}
 
 export function resolveHostShellLauncher(): HostShellLauncher {
   return detectHostShell();
@@ -161,7 +132,7 @@ export function describeHostShellLauncher(shell: HostShellLauncher = resolveHost
  * - Windows：优先 bash.exe（非 login `-c`），否则 PowerShell / cmd
  * - POSIX：`/bin/sh -c`
  *
- * 探测结果进程内缓存；docker 路径请用 {@link resolveContainerShellArgv}。
+ * 探测结果进程内缓存。
  */
 export function resolveShellArgv(command: string): string[] {
   const shell = detectHostShell();

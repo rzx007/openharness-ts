@@ -87,7 +87,7 @@ export interface ToolExecutionResult extends ToolResult {
 
 export interface ToolExecutionSpec {
   domain: "environment" | "control_plane";
-  supportedEnvironments?: Array<"local" | "docker">;
+  supportedEnvironments?: Array<"local" | "wsl">;
   /** Whether this control-plane tool needs outbound network access. */
   network?: boolean;
 }

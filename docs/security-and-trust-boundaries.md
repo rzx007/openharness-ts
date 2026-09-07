@@ -62,12 +62,12 @@ Permission 决定“允许不允许做”，不保证操作成功，也不证明
 
 ## Sandbox
 
-Sandbox 把模型发起的文件和进程工作限制在受控环境中。当前可以使用 SRT 或 Docker 后端，具体覆盖 Bash、MCP stdio、hooks、LSP 和文件工具取决于启动配置。
+运行环境决定模型发起的文件和进程在 Native 还是 WSL 中执行；可选 SRT 为 Native 进程增加本机权限边界。Docker Agent Runtime 已移除，WSL 本身不等于安全沙箱。
 
-- Sandbox 不是 Permission 的替代品：即使容器里安全，也可能不应执行删除操作。
+- Sandbox 不是 Permission 的替代品：即使 SRT 已启用，也可能不应执行删除操作。
 - Permission 也不是 Sandbox：批准 Bash 不应该自动获得宿主全部文件和网络。
 - Terminal、child worktree 和后台进程必须由宿主显式提供能力，Kernel 不创建隐藏后门。
-- 配置只接受当前 `sandbox.backend` 等字段，不接受旧 `sandbox.runtime`。
+- 运行位置使用 `agentEnvironment.kind = native | wsl`；`sandbox` 只保留 SRT 配置，不接受 backend、Docker 或旧 runtime 字段。
 
 详细行为见 [Sandbox Runtime Flow](./sandbox-runtime-flow.md)。
 

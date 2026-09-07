@@ -3,17 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { DaemonTerminalService } from "./daemon-terminal-service.js";
 
 describe("DaemonTerminalService scoped environments", () => {
-  it("opens a projectless Docker terminal through a terminal lease", async () => {
+  it("opens a projectless terminal through its execution environment", async () => {
     const session = { id: "outside-1", cwd: process.cwd(), status: "idle" } as any;
     const signal = vi.fn(async () => {});
     const targetClose = vi.fn(async () => {});
     const leaseRelease = vi.fn(async () => {});
     const prepare = vi.fn(async () => ({
-      command: "docker",
-      args: ["exec", "-it", "container", "/bin/sh", "-i"],
+      command: "wsl.exe",
+      args: ["--cd", "/mnt/d/workspace"],
       hostCwd: process.cwd(),
       executionCwd: "/workspace",
-      shell: "/bin/sh",
+      shell: undefined,
       signal,
       close: targetClose,
     }));
@@ -27,14 +27,14 @@ describe("DaemonTerminalService scoped environments", () => {
       getProject: () => undefined,
       getSession: (id: string) => id === session.id ? session : undefined,
     } as any, {
-      getSettingsForCwd: async () => ({ terminal: { dockerShell: "/bin/sh" } } as any),
+      getSettingsForCwd: async () => ({ terminal: {} } as any),
       acquireEnvironment,
       spawnPty: vi.fn(() => pty.value),
     });
 
     const terminal = await service.create({
       scope: { kind: "session", sessionId: session.id },
-      runtime: "sandbox",
+        runtime: "environment",
       cols: 100,
       rows: 30,
     });
@@ -46,7 +46,7 @@ describe("DaemonTerminalService scoped environments", () => {
     );
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/workspace",
-      shell: "/bin/sh",
+      shell: undefined,
       owner: { kind: "terminal", id: terminal.id },
     }));
     expect(terminal).toMatchObject({
@@ -81,7 +81,7 @@ describe("DaemonTerminalService scoped environments", () => {
   it("opens an Agent Terminal for a projectless session in its environment", async () => {
     const session = { id: "outside-agent", cwd: process.cwd(), status: "idle" } as any;
     const prepare = vi.fn(async () => ({
-      command: "docker",
+      command: "wsl.exe",
       args: ["exec", "-it"],
       hostCwd: process.cwd(),
       executionCwd: "/workspace",
@@ -94,7 +94,7 @@ describe("DaemonTerminalService scoped environments", () => {
       getProject: () => undefined,
       getSession: () => session,
     } as any, {
-      getSettingsForCwd: async () => ({ terminal: { dockerShell: "/bin/sh" } } as any),
+      getSettingsForCwd: async () => ({ terminal: {} } as any),
       acquireEnvironment: async () => ({
         workspace: { executionRoot: "/workspace" },
         terminal: { prepare },
@@ -110,7 +110,7 @@ describe("DaemonTerminalService scoped environments", () => {
 
     expect(terminal).toMatchObject({
       source: "agent",
-      runtime: "sandbox",
+      runtime: "environment",
       scope: { kind: "session", sessionId: session.id },
       cwd: "/workspace",
     });

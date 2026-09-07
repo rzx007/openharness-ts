@@ -84,27 +84,27 @@ describe("formatEnvironmentSection", () => {
 });
 
 describe("effective execution environment prompt", () => {
-  it("uses Docker facts instead of probing the Windows host", async () => {
+  it("uses WSL facts instead of probing the Windows host", async () => {
     const environmentInfo: EffectiveEnvironmentInfo = {
-      kind: "docker",
+      kind: "wsl",
       hostOs: "Windows",
       executionOs: "Linux",
       shell: "/bin/sh",
       shellDialect: "posix",
       pathStyle: "posix",
-      cwd: "/workspace",
-      homeDir: "/root",
+      cwd: "/mnt/d/workspace",
+      homeDir: "/home",
       tempDir: "/tmp",
       mounts: [
-        { path: "/workspace", mode: "rw", purpose: "workspace" },
+        { path: "/mnt/d/workspace", mode: "rw", purpose: "workspace" },
         {
-          path: "/opt/openharness/skills",
+          path: "/mnt/c/Users/me/.openharness-ts/skills",
           mode: "rw",
           purpose: "user_skills",
         },
       ],
-      networkMode: "none",
-      limitations: ["Host paths outside mounts are unavailable"],
+      networkMode: "host",
+      limitations: [],
     };
 
     const prompt = await buildRuntimeSystemPrompt({
@@ -114,8 +114,8 @@ describe("effective execution environment prompt", () => {
 
     expect(prompt).toContain("Execution OS: Linux");
     expect(prompt).toContain("Shell: /bin/sh");
-    expect(prompt).toContain("Working directory: /workspace");
-    expect(prompt).toContain("/opt/openharness/skills: rw");
+    expect(prompt).toContain("Working directory: /mnt/d/workspace");
+    expect(prompt).toContain("/mnt/c/Users/me/.openharness-ts/skills: rw");
     expect(prompt).not.toContain(`Working directory: ${process.cwd()}`);
   });
 });
