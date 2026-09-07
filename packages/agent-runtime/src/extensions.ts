@@ -14,7 +14,11 @@ import {
   verifyInstalledNativePlugin,
   type LoadedNativePlugin,
 } from "@openharness/plugins";
-import { SkillLoader, SkillRegistry, findProjectSkillDirs } from "@openharness/skills";
+import {
+  createSkillRegistrySnapshot,
+  SkillRegistry,
+  findProjectSkillDirs,
+} from "@openharness/skills";
 import { activateNativePluginTools, type NativeToolActivationResult } from "./native-tools/activate.js";
 
 export interface ExtensionToolRegistry {
@@ -45,8 +49,6 @@ export async function discoverOpenHarnessExtensions(
   settings: Settings,
   options: { pluginsEnabled?: boolean } = {},
 ): Promise<OpenHarnessExtensionDiscovery> {
-  const skillRegistry = new SkillRegistry();
-  skillRegistry.registerBundled();
   const plugins: LoadedNativePlugin[] = [];
   const warnings: string[] = [];
   const installedPlugins = (settings.plugins?.enabled ?? true) && (options.pluginsEnabled ?? true)
@@ -61,13 +63,12 @@ export async function discoverOpenHarnessExtensions(
     const loaded = await loadNativePlugin(verified.plugin);
     plugins.push(loaded);
     warnings.push(...loaded.diagnostics.map((item) => `${record.id}: ${item.message}`));
-    for (const skill of loaded.components.skills?.value ?? []) skillRegistry.register(skill);
   }
-  const loader = new SkillLoader(skillRegistry);
-  await loader.loadFromDirectory(getSkillsDir(), { source: "user", recursive: true });
-  for (const directory of await findProjectSkillDirs(cwd)) {
-    await loader.loadFromDirectory(directory, { source: "project", recursive: true });
-  }
+  const skillRegistry = await createSkillRegistrySnapshot({
+    plugins: plugins.flatMap((plugin) => plugin.components.skills?.value ?? []),
+    userDir: getSkillsDir(),
+    projectDirs: await findProjectSkillDirs(cwd),
+  });
   const agentDefinitions = plugins.flatMap((plugin) => plugin.components.agents?.value ?? []);
   const pluginMcpServers: Record<string, McpServerConfig> = {};
   for (const plugin of plugins) {

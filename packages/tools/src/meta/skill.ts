@@ -29,7 +29,7 @@ export const skillTool: ToolDefinition = {
       };
     }
     return {
-      content: [{ type: "text", text: formatLoadedSkill(skill) }],
+      content: [{ type: "text", text: formatLoadedSkill(skill, context) }],
     };
   },
 };
@@ -78,20 +78,16 @@ async function resolveSkillRegistry(
   const sharedRegistry = context.skillRegistry as SkillRegistryInstance | undefined;
   if (sharedRegistry && !options.refreshFilesystem) return sharedRegistry;
 
-  const { SkillRegistry, SkillLoader, findProjectSkillDirs } = await import("@openharness/skills");
+  const { createSkillRegistrySnapshot, findProjectSkillDirs } = await import("@openharness/skills");
   const { getSkillsDir } = await import("@openharness/core");
-  const registry = new SkillRegistry();
-  if (sharedRegistry) {
-    for (const skill of sharedRegistry.getAll()) registry.register(skill);
-  } else {
-    registry.registerBundled();
-  }
-  const loader = new SkillLoader(registry);
-  await loader.loadFromDirectory(getSkillsDir(), { source: "user", recursive: true });
-  for (const directory of await findProjectSkillDirs(context.cwd)) {
-    await loader.loadFromDirectory(directory, { source: "project", recursive: true });
-  }
-  return registry;
+  const baseline = sharedRegistry?.getAll().filter((skill) =>
+    skill.source === "plugin" || !skill.path
+  ) ?? [];
+  return createSkillRegistrySnapshot({
+    baseline,
+    userDir: getSkillsDir(),
+    projectDirs: await findProjectSkillDirs(context.cwd),
+  });
 }
 
 function parseVisibility(value: unknown): SkillVisibility {
@@ -130,15 +126,30 @@ function formatSkillList(skills: readonly SkillDefinition[], visibility: SkillVi
   ].join("\n");
 }
 
-function formatLoadedSkill(skill: SkillDefinition): string {
-  const skillFile = skill.path || "(embedded)";
-  const skillRoot = skill.path ? dirname(skill.path) : "(embedded)";
+function formatLoadedSkill(
+  skill: SkillDefinition,
+  context: Parameters<ToolDefinition["execute"]>[1],
+): string {
+  const embedded = !skill.path;
+  const skillFile = embedded
+    ? "(embedded)"
+    : context.environment?.paths.presentHostPath(skill.path) ??
+      (context.environment ? "(unavailable in this environment)" : skill.path);
+  const skillRoot = embedded
+    ? "(embedded)"
+    : context.environment?.paths.presentHostPath(dirname(skill.path)) ??
+      (context.environment ? "(unavailable in this environment)" : dirname(skill.path));
+  const unavailable = !embedded && context.environment &&
+    (skillFile.startsWith("(unavailable") || skillRoot.startsWith("(unavailable"));
   return [
     `Skill: ${skill.name}`,
     `Skill file: ${skillFile}`,
     `Skill root: ${skillRoot}`,
     "",
     "Resolve relative paths mentioned by this skill against Skill root.",
+    ...(unavailable
+      ? ["This Skill's supporting files are not mounted in the execution environment."]
+      : []),
     "",
     "<skill-content>",
     skill.content,

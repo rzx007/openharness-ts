@@ -46,6 +46,14 @@ export interface SkillDirectoryLoadOptions extends SkillMarkdownLoadOptions {
   recursive?: boolean;
 }
 
+export interface CreateSkillRegistrySnapshotOptions {
+  bundled?: boolean | readonly SkillDefinition[];
+  baseline?: readonly SkillDefinition[];
+  plugins?: readonly SkillDefinition[];
+  userDir?: string;
+  projectDirs?: readonly string[];
+}
+
 /**
  * 技能注册表，用于管理已加载的技能定义。
  * 提供技能的注册、查询、获取列表和注销功能。
@@ -451,6 +459,36 @@ export class SkillLoader {
       return [];
     }
   }
+}
+
+/** Rebuild a registry from immutable sources so removed filesystem Skills disappear. */
+export async function createSkillRegistrySnapshot(
+  options: CreateSkillRegistrySnapshotOptions = {},
+): Promise<SkillRegistry> {
+  const registry = new SkillRegistry();
+  const bundled = options.bundled ?? true;
+  if (bundled === true) {
+    registry.registerBundled();
+  } else if (bundled !== false) {
+    for (const skill of bundled) registry.register(skill);
+  }
+  for (const skill of options.baseline ?? []) registry.register(skill);
+  for (const skill of options.plugins ?? []) registry.register(skill);
+
+  const loader = new SkillLoader(registry);
+  if (options.userDir) {
+    await loader.loadFromDirectory(options.userDir, {
+      source: "user",
+      recursive: true,
+    });
+  }
+  for (const directory of options.projectDirs ?? []) {
+    await loader.loadFromDirectory(directory, {
+      source: "project",
+      recursive: true,
+    });
+  }
+  return registry;
 }
 
 /**

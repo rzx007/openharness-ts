@@ -4,6 +4,7 @@ import {
   SkillLoader,
   parseSkillMarkdown,
   findProjectSkillDirs,
+  createSkillRegistrySnapshot,
   BUNDLED_SKILLS,
   type SkillDefinition,
 } from "../src/index.js";
@@ -84,6 +85,51 @@ describe("SkillRegistry", () => {
     expect(reg.resolve("dothing")).toBe(skill);
     expect(reg.resolve("dt")).toBe(skill);
     expect(reg.resolve("missing")).toBeUndefined();
+  });
+});
+
+describe("createSkillRegistrySnapshot", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("does not retain a user Skill removed between refreshes", async () => {
+    mockedReaddir
+      .mockResolvedValueOnce([
+        { name: "temporary.md", isFile: () => true, isDirectory: () => false } as any,
+      ])
+      .mockResolvedValueOnce([]);
+    mockedReadFile.mockResolvedValue("---\nname: temporary\ndescription: temporary\n---\nbody");
+
+    const first = await createSkillRegistrySnapshot({ userDir: "/user-skills" });
+    const second = await createSkillRegistrySnapshot({ userDir: "/user-skills" });
+
+    expect(first.has("temporary")).toBe(true);
+    expect(second.has("temporary")).toBe(false);
+  });
+
+  it("applies bundled < plugin < user < project precedence", async () => {
+    mockedReaddir.mockImplementation(async (target) => {
+      const value = String(target);
+      if (value === "/user-skills" || value === "/project-skills") {
+        return [{ name: "winner.md", isFile: () => true, isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    });
+    mockedReadFile.mockImplementation(async (target) => {
+      const description = String(target).includes("project-skills") ? "project" : "user";
+      return `---\nname: winner\ndescription: ${description}\n---\n${description}`;
+    });
+    const base = makeSkill({ name: "winner", description: "bundled", source: "bundled" });
+    const plugin = makeSkill({ name: "winner", description: "plugin", source: "plugin" });
+
+    const registry = await createSkillRegistrySnapshot({
+      bundled: [base],
+      plugins: [plugin],
+      userDir: "/user-skills",
+      projectDirs: ["/project-skills"],
+    });
+
+    expect(registry.get("winner")?.description).toBe("project");
+    expect(registry.get("winner")?.source).toBe("project");
   });
 });
 
