@@ -25,6 +25,7 @@ OpenHarness Desktop 的设置页计划提供两项职责不同、但相互关联
 8. Docker 不可用时必须明确失败，不能静默回退到宿主机。
 9. 当前阶段将整个用户级 Skill 目录读写挂载到 Docker，优先保证 Skill 引用、脚本和资源的兼容性；接受其跨项目、跨会话持久修改风险，后续再收紧为只读或按需暴露。
 10. “不在项目中工作”的会话仍必须拥有独立的受管工作目录；Docker 只挂载该会话目录，不挂载整个用户文档目录。
+11. Agent 核心不处理 Docker 启动、挂载、路径转换或进程创建细节；这些职责统一收口到执行环境层。Agent 只接收真实环境信息并通过统一接口使用工具。
 
 ## 3. 术语
 
@@ -60,6 +61,32 @@ TerminalOpen → JobSend → JobRead / JobWait / JobCancel
 ```
 
 它用于 REPL、交互式 CLI，以及需要保留会话状态的命令。
+
+### 3.6 执行环境
+
+执行环境是 Agent 工具与本机或 Docker 后端之间的统一边界。它负责：
+
+- 启动、验证和关闭环境；
+- 执行短命令和 argv 进程；
+- 创建交互终端；
+- 读取、写入、编辑和搜索文件；
+- 解析当前环境中的路径；
+- 提供当前环境的真实信息；
+- 强制执行挂载、网络和资源边界。
+
+Agent 核心和各业务工具不应散落 `if local`、`if docker` 分支，也不应直接拼接 `docker exec`。新增 WSL、SSH 或远程容器时，应增加新的执行环境实现，而不是修改 Agent 的决策流程。
+
+概念接口如下，具体 TypeScript 类型在实现计划中落定：
+
+```text
+ExecutionEnvironment
+├─ start / inspect / close
+├─ execShell / execProcess
+├─ openTerminal
+├─ fileOperations
+├─ resolvePath
+└─ environmentInfo
+```
 
 ## 4. 配置边界
 
@@ -165,19 +192,47 @@ Shell 工具接收整段命令文本，不能可靠地把 PowerShell 命令自�
 
 ### 5.4 文件工具
 
-`Read`、`Write`、`Edit`、`Glob` 和 `Grep` 先由宿主机完成权限与路径判断，再把工作区路径转换到容器路径，实际文件操作在容器中进行：
+`Read`、`Write`、`Edit`、`Glob` 和 `Grep` 根据当前执行环境解释路径。Docker 模式统一接受和返回容器路径：
 
 ```text
-D:\code\project\src\index.ts
-        ↓
-/workspace/src/index.ts
+绝对路径：/workspace/src/index.ts
+相对路径：src/index.ts，以 /workspace 为基准
 ```
 
-权限批准和 diff 编排仍留在宿主机，但批准不等于自动增加 Docker 挂载。
+路径规范化、`..`、符号链接和实际文件操作都依据容器文件系统判断。允许访问的根目录是实际挂载到容器的 `/workspace` 和 `/opt/openharness/skills`；文件工具不先使用 Windows 路径规则解释 `/workspace/...`。
 
-## 6. Agent 如何知道路径和 Shell 风格
+权限批准和 diff 展示仍由宿主控制面编排。只有 Desktop 需要在资源管理器中打开文件等宿主操作时，环境层才根据真实挂载信息把容器路径转换为宿主路径。批准不等于自动增加 Docker 挂载。
 
-Agent 依赖系统提示词中的环境事实决定生成 Windows 命令还是 Linux 命令。工具层只负责执行和已知路径映射，不负责翻译任意 Shell 文本。
+## 6. Agent 如何使用运行环境
+
+Agent 核心不需要理解 Docker 的实现方式。执行环境启动成功后生成一份有效环境信息，系统提示词把它告诉 Agent；工具调用则进入同一个执行环境实例。
+
+```text
+用户配置
+    ↓
+启动并验证执行环境
+    ↓
+生成 EffectiveEnvironmentInfo
+    ├─ 注入 Agent 系统提示词
+    └─ 绑定 Shell、文件和终端工具
+```
+
+环境信息必须来自已经启动并验证的真实环境，不能只根据用户选择推测。Docker 没有成功启动时，不得向 Agent 宣称当前运行在 Docker 中。
+
+环境信息包括：
+
+- 运行环境类型；
+- 宿主系统和实际执行系统；
+- Shell 及其命令语法；
+- 路径风格；
+- 当前工作目录；
+- Home 和临时目录；
+- 项目目录、用户级 Skill 目录及其读写方式；
+- 网络模式；
+- Git 仓库和分支信息；
+- 当前环境的已知限制。
+
+环境信息不枚举可执行文件。Agent 需要某个程序时，可以在当前环境中按需检查。
 
 ### 6.1 本机模式应注入
 
@@ -189,6 +244,7 @@ Agent 依赖系统提示词中的环境事实决定生成 Windows 命令还是 L
 - Working directory: D:\code\project
 - Path style: Windows
 - Home directory: C:\Users\<user>
+- Temporary directory: C:\Users\<user>\AppData\Local\Temp
 ```
 
 ### 6.2 Docker 模式应注入
@@ -201,11 +257,16 @@ Agent 依赖系统提示词中的环境事实决定生成 Windows 命令还是 L
 - Shell: /bin/sh
 - Working directory: /workspace
 - Path style: POSIX
-- Host workspace is mounted read-write at /workspace
-- Host paths outside the mounted workspace are unavailable
+- Home directory: /root
+- Temporary directory: /tmp
+- Mounts:
+  - /workspace: read-write
+  - /opt/openharness/skills: read-write
+- Network: <effective mode>
+- Host paths outside the effective mount list are unavailable
 ```
 
-“宿主环境”和“执行环境”必须分开描述。Docker 模式下只告诉 Agent“宿主是 Windows”，却不告诉它命令实际在 Linux 中运行，会导致 Agent 生成错误的 PowerShell 命令或 `D:\...` 路径。
+“宿主环境”和“执行环境”必须分开描述，且以执行环境作为命令和路径的依据。Shell 工具不会翻译任意 PowerShell/POSIX 命令，文件工具也不要求 Agent 提供宿主路径。
 
 ## 7. 用户级 Skill 在 Docker 中的访问
 
@@ -382,6 +443,8 @@ Docker 不可用   → 报错并提示检查 Docker
 5. Docker 设置允许不可用时降级到宿主机；作为桌面“运行环境”选择使用时，需要强制 fail-closed。
 6. 用户级 Skill 目前由宿主发现并读取，但整个用户 Skill 目录尚未以读写方式挂载到 Docker，Skill 附带的引用、脚本和资源不能保证在容器中可访问。
 7. Desktop 已支持项目外会话：创建独立受管 `cwd`、保存 `outside_project` 元数据，并让右侧工具把该目录作为当前工作区；Docker 环境设置和终端跟随策略仍需按本文接线。
+8. 执行位置的选择目前分散在 Sandbox、文件工具和 Terminal Provider 中，还没有形成供所有工具共同使用的执行环境接口。
+9. Docker 文件工具当前仍从宿主 `cwd` 解析路径；要采用本文的容器路径契约，需要改为依据有效执行环境处理 `/workspace` 和 `/opt/openharness/skills`。
 
 ## 12. 目标行为矩阵
 
@@ -390,8 +453,8 @@ Docker 不可用   → 报错并提示检查 Docker
 | Agent 短命令 | 宿主 Shell | 容器 `/bin/sh` |
 | Agent 后台命令 | 宿主进程 | 容器进程 |
 | Agent TerminalOpen | 本机终端 | 容器终端 |
-| Read/Write/Edit | 宿主文件系统，受权限限制 | `/workspace`，受权限和挂载限制 |
-| Glob/Grep | 宿主工作区 | 容器 `/workspace` |
+| Read/Write/Edit | 宿主文件系统，使用宿主路径 | 容器文件系统，接受 `/workspace` 和 `/opt/openharness/skills` 路径 |
+| Glob/Grep | 宿主工作区，使用宿主路径 | 容器文件系统，接受容器路径 |
 | Hook/Cron | 宿主进程 | 容器进程 |
 | LSP/MCP stdio | 宿主进程 | 容器进程 |
 | 默认用户集成终端 | 用户选择的本机 Shell | 用户选择的容器 Shell，工作目录为 `/workspace` |
@@ -434,6 +497,8 @@ Docker 选项可补充说明：
 - 本机模式下，Agent 看见宿主 OS、Shell 和宿主工作目录。
 - Docker 模式下，Agent 看见 Linux、`/bin/sh` 和 `/workspace`。
 - Docker 模式同时标明宿主 OS，但不能让宿主信息覆盖有效执行环境。
+- 环境信息只在目标环境启动并验证成功后生成，并与本轮工具绑定的环境一致。
+- 环境信息包括有效挂载、路径风格、目录、网络和限制，不枚举可执行文件。
 
 ### 14.2 执行边界
 
@@ -441,6 +506,9 @@ Docker 选项可补充说明：
 - Docker 模式下，通过 Agent Terminal 创建文件后，文件出现在挂载的宿主项目目录中。
 - Docker 模式下，Agent 无法通过任何命令或文件工具访问未挂载的 Windows 桌面。
 - Docker 不可用时，Agent 工具明确失败，宿主机上没有对应命令被启动。
+- Docker 模式下，文件工具可以直接读取 `/workspace/...` 和 `/opt/openharness/skills/...`，并返回容器路径。
+- Docker 模式下，相对文件路径以 `/workspace` 为基准，`..` 和符号链接不能越过有效挂载边界。
+- Shell、文件工具和终端使用同一个有效执行环境实例，不能各自重新判断或静默切换运行位置。
 
 ### 14.3 终端一致性与显式例外
 
@@ -482,5 +550,6 @@ Docker 选项可补充说明：
 - 自动把显式创建的本机终端切换回 Docker；
 - 把 Desktop、daemon 或完整 Agent 控制程序迁入 Docker；
 - 在 Shell 工具层翻译 PowerShell 与 POSIX 命令。
+- 在环境信息中枚举全部可执行文件或完整 `PATH` 内容。
 - 当前阶段实现用户级 Skill 的只读挂载或按需暴露。
 - 为项目外工作区自动初始化 Git 仓库。
