@@ -33,6 +33,11 @@ export {
   ExecutionConfigError,
   resolveExecutionEnvironmentConfig,
 } from "./execution-config.js";
+export { createExecutionEnvironment } from "./execution-environment.js";
+export type {
+  CreateExecutionEnvironmentDependencies,
+  CreateExecutionEnvironmentInput,
+} from "./execution-environment.js";
 export type {
   ExecutionSurface,
   ResolveExecutionEnvironmentConfigInput,
