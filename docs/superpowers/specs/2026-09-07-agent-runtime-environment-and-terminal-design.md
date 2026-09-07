@@ -1,6 +1,6 @@
 # Agent 运行环境与集成终端设计
 
-> 状态：第一期安全执行闭环已实现并通过本机真实 Docker 验证；第二、三期未开始
+> 状态：第二期统一终端体验已实现并通过本机真实 Docker PTY 验证；第三期未开始
 >
 > 日期：2026-09-07
 >
@@ -827,14 +827,18 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 
 ### 18.2 第二期：统一终端体验
 
-- 实现 Docker PTY；
-- Agent Terminal 跟随 Agent 环境；
-- 默认用户终端跟随 Agent 环境；
-- Terminal 协议支持 project/session 判别作用域；
-- 项目外用户终端和 Agent Terminal；
-- Environment Manager、workspace owner 和内存 lease；
-- 同一环境内多个终端共享单个容器；
-- 关闭终端、Agent 和后台进程时按 owner 安全清理。
+- [x] 实现 Docker PTY；
+- [x] Agent Terminal 跟随 Agent 环境；
+- [x] 默认用户终端跟随 Agent 环境，并保留显式本机入口；
+- [x] Terminal 协议支持 project/session 判别作用域；
+- [x] 项目外用户终端和 Agent Terminal；
+- [x] daemon 持有唯一 Environment Manager、workspace owner 和内存 lease；
+- [x] 同一 owner 的 Agent、多个终端和后台任务共享单个环境；
+- [x] 关闭终端、Agent 和后台进程时只释放自己的 lease；
+- [x] Docker PTY 覆盖输入、实时输出、resize、Ctrl-C、EOF 和 terminate；
+- [x] 非隔离子 Session 通过引用计数 alias 使用根 Session 的活动容器。
+
+第二期 lease 只存在于 daemon 内存中。运行中切换、持久 lease 和 daemon 崩溃恢复仍属于第三期。
 
 ### 18.3 第三期：生命周期加固
 
