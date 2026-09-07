@@ -139,8 +139,7 @@ export function selectMcpServersForEnvironment(
   if (!environment || environment.kind === "local") return servers;
   return Object.fromEntries(
     Object.entries(servers).filter(([, server]) =>
-      environment.networkMode !== "none" &&
-      (server.type === "http" || server.type === "sse")
+      server.type === "stdio" || environment.networkMode !== "none"
     ),
   );
 }

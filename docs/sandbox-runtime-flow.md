@@ -76,7 +76,7 @@ Bash("pwd")
 
 这两个 cwd 必须分开。把 `/workspace` 当作宿主 `docker.exe` 的 cwd 会在 Windows 上直接启动失败。
 
-Command Hook 和后台 Shell 仍由宿主控制面创建，但它们携带 Session 的宿主 cwd、settings 和 sessionId，通过同一个活动 Docker Session 执行。LSP 当前只在本机环境可见；在完成全部路径操作环境化前，不允许它在 Docker 中旁路宿主文件系统。
+Command Hook 和后台 Shell 仍由宿主控制面创建，但它们携带 Session 的宿主 cwd、settings 和 sessionId，通过同一个活动 Docker Session 执行。LSP 在 Docker 中通过 `environment.files` 读取和搜索，不直接读取宿主路径。
 
 ## 5. 文件工具与 ImageToText
 
@@ -124,8 +124,7 @@ bundled < plugin < user < project
 
 - Native Plugin Tool Host 不在 Docker 会话中 fork；
 - Agent `TerminalOpen` 不注册；
-- stdio MCP 不在 Docker 中从宿主启动；网络允许时仍可使用远程 HTTP/SSE MCP；
-- LSP 暂时只支持本机环境；
+- stdio MCP 通过同一个活动 Docker Session 启动；远程 HTTP/SSE MCP 在控制面运行并遵守网络策略；
 - 用户集成终端固定 `runtime: local`。
 
 ## 8. 容器生命周期

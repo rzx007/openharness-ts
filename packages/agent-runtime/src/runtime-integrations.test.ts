@@ -12,17 +12,17 @@ describe("MCP execution domains", () => {
     expect(selectMcpServersForEnvironment(SERVERS)).toEqual(SERVERS);
   });
 
-  it("keeps only remote MCP in a networked Docker environment", () => {
+  it("keeps stdio and remote MCP in a networked Docker environment", () => {
     expect(selectMcpServersForEnvironment(SERVERS, {
       kind: "docker",
       networkMode: "bridge",
-    })).toEqual({ remote: SERVERS.remote });
+    })).toEqual(SERVERS);
   });
 
-  it("keeps no MCP servers in a network-isolated Docker environment", () => {
+  it("keeps stdio MCP but removes remote MCP in a network-isolated Docker environment", () => {
     expect(selectMcpServersForEnvironment(SERVERS, {
       kind: "docker",
       networkMode: "none",
-    })).toEqual({});
+    })).toEqual({ local: SERVERS.local });
   });
 });

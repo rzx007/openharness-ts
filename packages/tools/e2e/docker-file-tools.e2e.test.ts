@@ -16,6 +16,7 @@ import { globTool } from "../src/file/glob.js";
 import { fileReadTool } from "../src/file/read.js";
 import { fileWriteTool } from "../src/file/write.js";
 import { grepTool } from "../src/search/grep.js";
+import { lspTool } from "../src/search/lsp.js";
 
 const image = process.env.OPENHARNESS_E2E_DOCKER_FILE_IMAGE ?? "openharness-sandbox:latest";
 const autoBuildImage = process.env.OPENHARNESS_E2E_DOCKER_FILE_IMAGE === undefined;
@@ -41,7 +42,7 @@ beforeAll(() => {
 });
 
 maybeDescribe("docker file tools e2e", () => {
-  it("runs Read, Write, Edit, Glob, and Grep through a Docker sandbox", async () => {
+  it("runs Shell, file tools, and LSP through a Docker environment", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "oh-tools-docker-e2e-"));
     const sessionId = `tools-docker-${Date.now()}`;
     const settings = dockerSettings();
@@ -117,6 +118,12 @@ maybeDescribe("docker file tools e2e", () => {
       );
       expect((grepResult.content[0] as any).text).toContain("src/a.ts:1:");
       expect((grepResult.content[0] as any).text).not.toContain("src/b.js");
+
+      const lspResult = await lspTool.execute!(
+        { operation: "workspace_symbol", query: "token" },
+        context,
+      );
+      expect((lspResult.content[0] as any).text).toContain("src/a.ts:1");
 
       const skillWrite = await fileWriteTool.execute!(
         { file_path: "/opt/openharness/skills/e2e/SKILL.md", content: "# e2e" },
