@@ -62,6 +62,19 @@ export function resolveExecutionEnvironmentConfig(
 ): ResolvedExecutionEnvironmentConfig {
   const sandbox = normalizeSandboxConfig(input.settings.sandbox);
 
+  if (input.settings.agentEnvironment) {
+    if (input.settings.agentEnvironment.kind === "wsl") {
+      if (sandbox.enabled) {
+        throw new ExecutionConfigError(
+          "unsupported_srt",
+          "WSL cannot currently be combined with the configured local sandbox",
+        );
+      }
+      return { mode: "wsl", kind: "wsl", failClosed: true, cwd: input.cwd, sandbox };
+    }
+    return { mode: "local", kind: "local", failClosed: false, cwd: input.cwd, sandbox };
+  }
+
   if (input.surface === "desktop_managed") {
     if (sandbox.enabled && sandbox.backend === "srt") {
       throw new ExecutionConfigError(

@@ -119,7 +119,7 @@ export function TerminalTool({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<TerminalContextMenuState | null>(null)
-  const [agentEnvironment, setAgentEnvironment] = useState<DesktopAgentEnvironment>("local")
+  const [agentEnvironment, setAgentEnvironment] = useState<DesktopAgentEnvironment>("native")
 
   const visibleRecords = useCallback(
     (nextRecords: DesktopTerminalRecord[]): DesktopTerminalRecord[] =>
@@ -244,8 +244,7 @@ export function TerminalTool({
   const createTerminal = useCallback(
     async (
       preferredName?: string,
-      knownRecords?: DesktopTerminalRecord[],
-      explicitHost = false
+      knownRecords?: DesktopTerminalRecord[]
     ): Promise<void> => {
       const project = selectedProject
       const terminal = terminalRef.current
@@ -257,7 +256,7 @@ export function TerminalTool({
       fitAndResize()
 
       const currentRecords = knownRecords ?? recordsRef.current
-      const target = resolveTerminalCreateTarget({ agentEnvironment, session: activeSession, explicitHost })
+      const target = resolveTerminalCreateTarget({ session: activeSession })
       const name = preferredName ?? nextTerminalName(currentRecords, activeSession.id)
 
       try {
@@ -686,22 +685,13 @@ export function TerminalTool({
               <SquareTerminal className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
               <p className="text-ui-small text-ui-muted">当前会话没有打开的终端</p>
               <p className="text-ui-caption mt-1 text-ui-muted">
-                默认打开{agentEnvironment === "docker" ? " Docker 终端" : "本机终端"}。
+                默认打开{agentEnvironment === "wsl" ? " WSL 终端" : "本机终端"}。
               </p>
-              <div className="mt-4 flex justify-center gap-2">
+              <div className="mt-4 flex justify-center">
                 <Button type="button" onClick={() => void createTerminal()}>
                   <Plus data-icon="inline-start" />
-                  新建{agentEnvironment === "docker" ? " Docker 终端" : "本机终端"}
+                  新建{agentEnvironment === "wsl" ? " WSL 终端" : "本机终端"}
                 </Button>
-                {agentEnvironment === "docker" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void createTerminal(undefined, undefined, true)}
-                  >
-                    在本机打开
-                  </Button>
-                ) : null}
               </div>
             </div>
           </div>

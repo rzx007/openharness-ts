@@ -15,6 +15,7 @@ import {
   dockerSandboxConfigHash,
   type ExecutionEnvironmentManager,
   resolveExecutionEnvironmentConfig,
+  hostPathToWslPath,
 } from "@openharness/sandbox";
 import { createEnvironmentFileSystem } from "@openharness/tools";
 
@@ -41,7 +42,11 @@ export function createSessionEnvironmentAcquirer(input: {
     const binding = createWorkspaceBinding({
       kind: config.kind,
       hostRoot: owner.hostRoot,
-      executionRoot: config.kind === "docker" ? "/workspace" : owner.hostRoot,
+      executionRoot: config.kind === "docker"
+        ? "/workspace"
+        : config.kind === "wsl"
+          ? hostPathToWslPath(owner.hostRoot)
+          : owner.hostRoot,
     });
     const skillsRoot = getSkillsDir();
     const configHash = environmentConfigHash(config, owner.hostRoot, skillsRoot, settings);
@@ -100,7 +105,7 @@ function environmentConfigHash(
         hostRoot,
         createDesktopManagedMounts({ workspaceRoot: hostRoot, userSkillsRoot: skillsRoot }),
       )
-    : `local:${hostRoot}`;
+    : `${config.kind}:${hostRoot}`;
   return createHash("sha256")
     .update(JSON.stringify({ base, terminal: settings.terminal ?? {} }))
     .digest("hex")

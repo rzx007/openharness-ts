@@ -13,7 +13,8 @@ import type { DesktopAgentEnvironment } from "@shared/settings-types"
 import { runtimeEnvironmentLabel, runtimeEnvironmentNotice } from "./runtime-setting-model"
 
 export function RuntimeSettingControl(): React.JSX.Element {
-  const [environment, setEnvironment] = useState<DesktopAgentEnvironment>("local")
+  const [environment, setEnvironment] = useState<DesktopAgentEnvironment>("native")
+  const [wslSupported, setWslSupported] = useState(false)
   const [restartRequired, setRestartRequired] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -27,6 +28,7 @@ export function RuntimeSettingControl(): React.JSX.Element {
         if (!cancelled) {
           setEnvironment(snapshot.agentEnvironment)
           setRestartRequired(snapshot.restartRequired)
+          setWslSupported(snapshot.wslSupported ?? false)
         }
       })
       .catch((caught: unknown) => {
@@ -40,7 +42,7 @@ export function RuntimeSettingControl(): React.JSX.Element {
     }
   }, [])
 
-  const update = (next: "local" | "docker"): void => {
+  const update = (next: "native" | "wsl"): void => {
     if (saving || next === environment) return
     const previous = environment
     setEnvironment(next)
@@ -65,7 +67,7 @@ export function RuntimeSettingControl(): React.JSX.Element {
       <Select
         value={environment}
         onValueChange={(value) => {
-          if (value === "local" || value === "docker") update(value)
+          if (value === "native" || value === "wsl") update(value)
         }}
       >
         <SelectTrigger
@@ -79,13 +81,8 @@ export function RuntimeSettingControl(): React.JSX.Element {
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectItem value="local">本机</SelectItem>
-            <SelectItem value="docker">Docker 沙箱</SelectItem>
-            {environment === "unsupported_srt" ? (
-              <SelectItem value="unsupported_srt" disabled>
-                旧 SRT 配置（不支持）
-              </SelectItem>
-            ) : null}
+            <SelectItem value="native">本机</SelectItem>
+            {wslSupported ? <SelectItem value="wsl">WSL</SelectItem> : null}
           </SelectGroup>
         </SelectContent>
       </Select>

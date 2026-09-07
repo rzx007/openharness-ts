@@ -16,7 +16,7 @@ export async function activateNativePluginTools(
   plugin: LoadedNativePlugin,
   context: {
     cwd: string;
-    environmentKind?: "local" | "docker";
+    environmentKind?: "local" | "wsl" | "docker";
     toolRegistry: IToolRegistry;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
     onLog?: (message: string) => void;
@@ -31,7 +31,7 @@ export async function activateNativePluginTools(
   if (!plugin.components.tools?.value?.length) {
     return { pluginId: plugin.manifest.id, state: "inactive", toolNames: [], diagnostics: [] };
   }
-  if (context.environmentKind === "docker") {
+  if (context.environmentKind && context.environmentKind !== "local") {
     return {
       pluginId: plugin.manifest.id,
       state: "inactive",
@@ -39,8 +39,8 @@ export async function activateNativePluginTools(
       diagnostics: [{
         severity: "warning",
         phase: "activate",
-        code: "native_tools_unavailable_in_docker",
-        message: "Native Plugin Tools are unavailable in the Docker execution environment.",
+        code: "native_tools_unavailable_in_environment",
+        message: "Native Plugin Tools are unavailable outside the local execution environment.",
         pluginId: plugin.manifest.id,
         component: "tools",
       }],

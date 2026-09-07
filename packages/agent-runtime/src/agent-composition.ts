@@ -12,6 +12,7 @@ import { createWorkspaceBinding } from "@openharness/environment";
 import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import {
   createExecutionEnvironment,
+  hostPathToWslPath,
   resolveExecutionEnvironmentConfig,
 } from "@openharness/sandbox";
 import { createEnvironmentFileSystem } from "@openharness/tools";
@@ -198,11 +199,11 @@ async function composeOpenHarnessAgentInternal(
 
 export function createAgentWorkspaceBinding(
   cwd: string,
-  kind: "local" | "docker",
+  kind: "local" | "wsl" | "docker",
 ) {
   return createWorkspaceBinding({
     kind,
     hostRoot: cwd,
-    executionRoot: kind === "docker" ? "/workspace" : cwd,
+    executionRoot: kind === "docker" ? "/workspace" : kind === "wsl" ? hostPathToWslPath(cwd) : cwd,
   });
 }

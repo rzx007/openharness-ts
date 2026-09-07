@@ -84,6 +84,10 @@ export interface TerminalSettings {
   dockerShell?: "/bin/sh" | "/bin/bash";
 }
 
+export interface AgentEnvironmentSettings {
+  kind: "native" | "wsl";
+}
+
 export interface PathRuleConfig {
   pattern: string;
   allow: boolean;
@@ -165,6 +169,7 @@ export interface Settings {
   hooks?: HookDefinition[];
   memory?: MemoryConfig;
   sandbox?: SandboxConfig;
+  agentEnvironment?: AgentEnvironmentSettings;
   terminal?: TerminalSettings;
   mcpServers?: Record<string, McpServerConfig>;
   plugins?: {

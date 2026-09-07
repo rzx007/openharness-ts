@@ -43,11 +43,11 @@
 
 **文件：** core settings types/load/tests、sandbox execution config/tests、Desktop shared settings、main settings service/tests、renderer runtime setting model/control/content/tests。
 
-- [ ] 写失败测试：默认 `native`；Windows 保存/预检 WSL；macOS/Linux 不显示也拒绝 WSL；旧 Docker 配置不决定环境。
-- [ ] 新增全局 `agentEnvironment.kind`，映射为内部 `local | wsl`；设置变更要求重启，不新增 session 字段。
-- [ ] Docker 配置不再进入 Desktop/Agent 主路径；WSL 与 SRT 同时启用时 fail-closed。
-- [ ] 运行 core、sandbox 和 Desktop settings 测试。
-- [ ] 提交 `feat(settings): select Native or WSL agent environment`。
+- [x] 写失败测试：默认 `native`；Windows 保存/预检 WSL；macOS/Linux 不显示也拒绝 WSL；旧 Docker 配置不决定环境。
+- [x] 新增全局 `agentEnvironment.kind`，映射为内部 `local | wsl`；设置变更要求重启，不新增 session 字段。
+- [x] Docker 配置不再进入 Desktop/Agent 主路径；WSL 与 SRT 同时启用时 fail-closed。
+- [x] 运行 core、sandbox 和 Desktop settings 测试。
+- [x] 提交 `feat(settings): select Native or WSL agent environment`。
 
 ### 任务 5：删除 Docker 生命周期和共享实例体系
 

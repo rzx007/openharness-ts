@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS: Settings = {
       runtimeCommand: "srt",
     },
   },
+  agentEnvironment: { kind: "native" },
   terminal: {
     dockerShell: "/bin/sh",
   },
@@ -124,6 +125,12 @@ export async function loadSettings(
     envSettings.sandbox,
     cliOverrides?.sandbox,
   );
+  merged.agentEnvironment = {
+    ...DEFAULT_SETTINGS.agentEnvironment,
+    ...fileSettings?.agentEnvironment,
+    ...envSettings.agentEnvironment,
+    ...cliOverrides?.agentEnvironment,
+  } as NonNullable<Settings["agentEnvironment"]>;
   merged.terminal = {
     ...DEFAULT_SETTINGS.terminal,
     ...fileSettings?.terminal,
@@ -196,6 +203,9 @@ function loadFromEnv(): SettingsPatch {
   if (process.env.OPENHARNESS_MAX_TURNS !== undefined) result.maxTurns = parseInt(process.env.OPENHARNESS_MAX_TURNS, 10);
   const sandbox = buildSandboxEnvOverrides();
   if (sandbox !== undefined) result.sandbox = sandbox;
+  if (process.env.OPENHARNESS_AGENT_ENVIRONMENT === "native" || process.env.OPENHARNESS_AGENT_ENVIRONMENT === "wsl") {
+    result.agentEnvironment = { kind: process.env.OPENHARNESS_AGENT_ENVIRONMENT };
+  }
 
   return result;
 }
@@ -334,6 +344,7 @@ const TOP_LEVEL_SETTINGS_FIELDS = new Set([
   "hooks",
   "memory",
   "sandbox",
+  "agentEnvironment",
   "terminal",
   "mcpServers",
   "plugins",
@@ -382,6 +393,7 @@ function validateSettingsFields(
     "docker",
     "srt",
   ], configPath);
+  assertNestedFields(settings, "agentEnvironment", ["kind"], configPath);
   const sandbox = recordValue(settings.sandbox);
   if (sandbox) {
     assertNestedFields(sandbox, "filesystem", [

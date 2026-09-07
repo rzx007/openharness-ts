@@ -139,13 +139,13 @@ function GeneralSettings(): React.JSX.Element {
         <Separator />
         <SettingRow
           title="运行环境"
-          description="选择智能体的命令、脚本和文件工具在本机还是 Docker 沙箱中运行。更改会在重启后用于新建的 Agent。"
+          description="选择智能体的命令、脚本、文件工具和终端在本机还是 WSL 中运行。WSL 仅在 Windows 上可用，更改会在重启后生效。"
           control={<RuntimeSettingControl />}
         />
         <Separator />
         <SettingRow
           title="集成终端 Shell"
-          description="本机环境使用这里选择的本机 Shell；Docker 环境使用容器 Shell。显式“在本机打开”也使用这里的设置。"
+          description="本机环境使用这里选择的 Shell；WSL 环境使用 Linux 发行版的默认 Shell。"
           control={<DefaultTerminalShellControl />}
         />
         <Separator />

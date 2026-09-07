@@ -256,6 +256,9 @@ importers:
       '@openharness/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
       '@openharness/server':
         specifier: workspace:*
         version: link:../../packages/server

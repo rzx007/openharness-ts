@@ -33,7 +33,7 @@ class DesktopTerminalService {
       listDetectedTerminalShells()
     )
     const settings = await desktopSettingsService.snapshot()
-    const next = applyPreferredTerminalShell(input, preferred, settings.agentEnvironment === "local")
+    const next = applyPreferredTerminalShell(input, preferred, settings.agentEnvironment === "native")
     return await withDaemonRetry((client) => client.createTerminal(next))
   }
 

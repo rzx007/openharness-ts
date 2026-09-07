@@ -4,13 +4,12 @@ import { runtimeEnvironmentLabel, runtimeEnvironmentNotice } from "./runtime-set
 
 describe("runtime setting model", () => {
   it("labels every persisted environment state", () => {
-    expect(runtimeEnvironmentLabel("local")).toBe("本机")
-    expect(runtimeEnvironmentLabel("docker")).toBe("Docker 沙箱")
-    expect(runtimeEnvironmentLabel("unsupported_srt")).toBe("旧 SRT 配置（不支持）")
+    expect(runtimeEnvironmentLabel("native")).toBe("本机")
+    expect(runtimeEnvironmentLabel("wsl")).toBe("WSL")
   })
 
   it("explains restart and unsupported states", () => {
-    expect(runtimeEnvironmentNotice("docker", true)).toContain("重启")
-    expect(runtimeEnvironmentNotice("unsupported_srt", false)).toContain("重新选择")
+    expect(runtimeEnvironmentNotice("wsl", true)).toContain("重启")
+    expect(runtimeEnvironmentNotice("native", false)).toBeNull()
   })
 })
