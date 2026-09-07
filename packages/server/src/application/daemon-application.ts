@@ -102,6 +102,7 @@ export interface DaemonApplicationOptions {
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
+  executionSurface?: "desktop_managed" | "cli_advanced";
   /** Root used for scheduled conversations that intentionally run outside a project. */
   outsideProjectWorkspaceRoot?: string;
   createAgent?: CreateDaemonAgent;
@@ -330,6 +331,7 @@ export class DaemonApplication implements DurableAgentApplication {
 
       // 每个会话第一次用时，在这里造活 Agent，并接上投影。
       const loadAgent = createDaemonAgentLoader({
+        executionSurface: options.executionSurface,
         settings: options.settings,
         getSettings: options.getSettings,
         getSettingsForCwd: options.getSettingsForCwd,

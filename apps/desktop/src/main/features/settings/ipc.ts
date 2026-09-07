@@ -1,6 +1,7 @@
 import { IpcChannels } from "../../../shared/ipc-channels"
 import type {
   UpdateDesktopNotificationModeInput,
+  UpdateDesktopAgentEnvironmentInput,
   UpdateDesktopWorkStyleInput,
 } from "../../../shared/settings-types"
 import type { IpcContribution } from "../../core/ipc/types"
@@ -24,6 +25,13 @@ export const settingsIpcContribution: IpcContribution = {
         handler: (_event, input) =>
           desktopSettingsService.updateNotificationMode(
             input as UpdateDesktopNotificationModeInput
+          ),
+      },
+      {
+        channel: IpcChannels.settingsUpdateAgentEnvironment,
+        handler: (_event, input) =>
+          desktopSettingsService.updateAgentEnvironment(
+            input as UpdateDesktopAgentEnvironmentInput
           ),
       },
     ]

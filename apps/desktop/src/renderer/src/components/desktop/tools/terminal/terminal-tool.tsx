@@ -666,7 +666,10 @@ export function TerminalTool({
           <div className="absolute inset-0 grid place-items-center bg-conversation/84 px-8 text-center backdrop-blur-sm">
             <div>
               <SquareTerminal className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
-              <p className="text-ui-small text-ui-muted">当前项目没有打开的终端</p>
+              <p className="text-ui-small text-ui-muted">当前项目没有打开的本机终端</p>
+              <p className="text-ui-caption mt-1 text-ui-muted">
+                集成终端在本机运行，与 Agent 的 Docker 沙箱相互独立。
+              </p>
               <Button type="button" className="mt-4" onClick={() => void createTerminal()}>
                 <Plus data-icon="inline-start" />
                 新建终端
