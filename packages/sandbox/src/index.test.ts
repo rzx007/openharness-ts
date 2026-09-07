@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   detectSandboxPlatform,
   buildDockerExecArgs,
+  buildDockerPtyTarget,
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
@@ -556,6 +557,35 @@ describe("docker backend argv builders", () => {
     });
 
     expect(argv[argv.indexOf("-w") + 1]).toBe("/workspace/src");
+  });
+
+  it("builds a Docker PTY target with separate host and execution cwd", () => {
+    const target = buildDockerPtyTarget({
+      dockerCommand: "docker",
+      containerName: "ohs-project",
+      hostCwd: "D:\\code\\ohs",
+      executionCwd: "/workspace",
+      shell: "/bin/sh",
+      executionId: "terminal-1",
+      signal: async () => {},
+      close: async () => {},
+    });
+
+    expect(target).toMatchObject({
+      command: "docker",
+      hostCwd: "D:\\code\\ohs",
+      executionCwd: "/workspace",
+      shell: "/bin/sh",
+    });
+    expect(target.args.slice(0, 5)).toEqual([
+      "exec",
+      "-it",
+      "-w",
+      "/workspace",
+      "ohs-project",
+    ]);
+    expect(target.args).toContain("/bin/sh");
+    expect(target.args).toContain("-i");
   });
 
   it("maps host paths to Docker workspace paths", () => {

@@ -71,6 +71,7 @@ export {
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
 export {
   buildDockerExecArgs,
+  buildDockerPtyTarget,
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
@@ -90,6 +91,7 @@ export {
   toContainerWorkspacePath,
 } from "./docker-backend.js";
 export type { DockerBuildArgsOptions, DockerExecArgsOptions, DockerRunArgsOptions } from "./docker-backend.js";
+export type { DockerPtyTargetOptions } from "./docker-backend.js";
 export {
   getActiveSandboxSession,
   isSandboxSessionActive,
