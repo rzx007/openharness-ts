@@ -99,6 +99,7 @@ ExecutionEnvironment
 | 包 | 职责 |
 |---|---|
 | `@openharness/environment` | 环境接口、环境信息、WorkspaceBinding、路径结果、lease 类型 |
+| `@openharness/core` | ToolContext 和 Runtime 核心类型引用环境契约，不实现环境后端 |
 | `@openharness/sandbox` | Local/Docker 的进程、文件、路径、挂载和低层 Docker 执行实现 |
 | `@openharness/terminal-node` | 本机 PTY、Docker PTY、终端会话输入输出和信号 |
 | `@openharness/server` | Environment Manager、容器所有权、设置应用、恢复和服务端校验 |
@@ -112,6 +113,8 @@ ExecutionEnvironment
 environment ← sandbox
 environment ← terminal-node
 environment ← tools
+environment ← core
+environment ← permissions
 
 server → environment + sandbox + terminal-node
 agent-runtime → environment
@@ -133,13 +136,14 @@ type ToolExecutionDomain = "environment" | "control_plane";
 | 工具类型 | 执行域 | Docker 规则 |
 |---|---|---|
 | Bash、后台 Shell、文件工具、LSP、MCP stdio | environment | 必须进入当前 Docker 环境 |
+| MCP HTTP/SSE | control_plane | 受当前会话网络和权限策略控制，不获得宿主文件能力 |
 | Agent Terminal | environment | 第二期接入 Docker PTY；第一期禁用 |
 | Native Plugin Tool | environment | 第一、二期禁用；后续接入环境后再启用 |
 | `ImageToText(image_path)` | environment | 文件必须通过环境文件能力读取 |
 | `ImageToText(assetId)`、附件读取 | control_plane | 只允许当前会话已授权的不可变附件 |
 | ImageGeneration | control_plane | 不接受任意宿主文件路径；结果进入附件服务 |
 | Skill、ListSkills | control_plane | 宿主加载元数据，路径通过当前环境呈现 |
-| WebSearch、WebFetch | control_plane | 受权限与有效网络策略控制，不获得宿主文件能力 |
+| WebSearch、WebFetch、ImageToText URL | control_plane | 受权限与有效网络策略控制，不获得宿主文件能力 |
 
 Runtime 创建时枚举全部模型可见工具并验证执行域，避免靠手写 fail-closed 清单遗漏新工具。
 
