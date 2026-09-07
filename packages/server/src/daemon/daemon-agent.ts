@@ -21,6 +21,7 @@ import type {
   ToolDefinition,
 } from "@openharness/core";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import { readSessionRuntimeConfig } from "@openharness/protocol";
 import type {
   SessionMessagePartRecord,
@@ -70,6 +71,10 @@ export type DaemonToolsProvider = (
 
 export interface DaemonAgentLoaderOptions {
   executionSurface?: "desktop_managed" | "cli_advanced";
+  acquireEnvironment?(
+    session: SessionRecord,
+    settings: Settings,
+  ): Promise<ExecutionEnvironmentHandle>;
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings> | Settings;
@@ -140,11 +145,15 @@ export function createDaemonAgentLoader(
     const terminal = options.createTerminal?.(session);
     const backgroundShell = options.createBackgroundShell?.(session);
     const tools = (await options.tools?.({ session, settings })) ?? [];
+    const executionEnvironment = settings && options.acquireEnvironment
+      ? await options.acquireEnvironment(session, settings)
+      : undefined;
     const agentOptions: OpenHarnessAgentOptions = {
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
       sessionId: session.id,
       ...(options.executionSurface ? { executionSurface: options.executionSurface } : {}),
+      ...(executionEnvironment ? { executionEnvironment } : {}),
       ...agentConfigurationFromSession(session, settings),
       capabilityOverrides: {
         ...(options.schedules ? { schedules: options.schedules } : {}),
@@ -175,14 +184,20 @@ export function createDaemonAgentLoader(
           }
         : {}),
     };
-    const agent = options.createAgent
-      ? await options.createAgent({
-          session,
-          history,
-          parts,
-          options: agentOptions,
-        })
-      : await createDefaultNodeAgent(agentOptions);
+    let agent: OpenHarnessAgent;
+    try {
+      agent = options.createAgent
+        ? await options.createAgent({
+            session,
+            history,
+            parts,
+            options: agentOptions,
+          })
+        : await createDefaultNodeAgent(agentOptions);
+    } catch (error) {
+      await executionEnvironment?.release();
+      throw error;
+    }
     try {
       // 重启 daemon / 热加载 session 时，内存 Agent 是空的；必须先灌历史再对外暴露，
       // 否则下一句 prompt 会丢上下文。

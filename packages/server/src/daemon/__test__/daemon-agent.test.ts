@@ -75,6 +75,40 @@ describe("createDaemonAgentLoader", () => {
     });
   });
 
+  it("acquires one daemon-owned environment lease before creating an Agent", async () => {
+    const lease = { environmentId: "env-1", release: vi.fn(async () => {}) } as any;
+    const acquireEnvironment = vi.fn(async () => lease);
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model" } as any,
+      executionSurface: "desktop_managed",
+      acquireEnvironment,
+      createAgent,
+    })!;
+
+    await loader({ session, history: [], parts: [] });
+
+    expect(acquireEnvironment).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ model: "default-model" }),
+    );
+    expect(createAgent.mock.calls[0]![0].options.executionEnvironment).toBe(lease);
+  });
+
+  it("releases an acquired environment when Agent creation fails", async () => {
+    const lease = { release: vi.fn(async () => {}) } as any;
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model" } as any,
+      executionSurface: "desktop_managed",
+      acquireEnvironment: vi.fn(async () => lease),
+      createAgent: vi.fn(async () => { throw new Error("create failed"); }),
+    })!;
+
+    await expect(loader({ session, history: [], parts: [] })).rejects.toThrow("create failed");
+    expect(lease.release).toHaveBeenCalledOnce();
+  });
+
   it("creates one fully initialized Agent from durable session state", async () => {
     const sink = vi.fn(async () => {});
     const loadHistory = vi.fn();

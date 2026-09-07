@@ -11,6 +11,7 @@ import {
   type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import { ExecutionEnvironmentManager } from "@openharness/sandbox";
 import {
   readSessionRuntimeConfig,
   type AttachmentLimits,
@@ -43,6 +44,7 @@ import { ScheduledTaskService } from "../daemon/scheduled-task-service.js";
 import { DaemonJobService } from "../jobs/daemon-job-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
 import { DaemonTerminalService } from "../terminal/daemon-terminal-service.js";
+import { createSessionEnvironmentAcquirer } from "../runtime/session-execution-environment.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
@@ -169,6 +171,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
   private readonly attachmentResources: SessionAttachmentResources;
+  private readonly environmentManager = new ExecutionEnvironmentManager();
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -336,6 +339,9 @@ export class DaemonApplication implements DurableAgentApplication {
         getSettings: options.getSettings,
         getSettingsForCwd: options.getSettingsForCwd,
         createAgent: options.createAgent,
+        acquireEnvironment: options.executionSurface === "desktop_managed"
+          ? createSessionEnvironmentAcquirer({ manager: this.environmentManager, store })
+          : undefined,
         createTerminal:
           options.createTerminal ??
           ((session) => ({
@@ -815,6 +821,11 @@ export class DaemonApplication implements DurableAgentApplication {
     }
     try {
       await closeExecutionRuntimes();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.environmentManager.dispose();
     } catch (error) {
       failures.push(error);
     }
