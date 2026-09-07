@@ -531,13 +531,15 @@ export class DetachedProcessSupervisor {
     const state: RunState = { child, generation };
     this.states.set(taskId, state);
 
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    // `exit` can fire before stdout/stderr have drained. `close` fires only
+    // after the process has ended and its stdio streams are closed, so readers
+    // cannot observe a terminal task before its final output is persisted.
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
       void this.handleExit(taskId, generation, code, signal);
     };
-    child.on("exit", onExit);
+    child.on("close", onClose);
     child.on("error", (err) => {
       append(`[spawn error] ${(err as Error).message}\n`);
-      void this.handleExit(taskId, generation, 1, null);
     });
 
     return state;
