@@ -6,21 +6,23 @@
 
 ## 1. 背景
 
-OpenHarness Desktop 的设置页计划提供两项彼此独立的配置：
+OpenHarness Desktop 的设置页计划提供两项职责不同、但相互关联的配置：
 
 - **智能体运行环境**：本机或 Docker 沙箱。
-- **集成终端 Shell**：用户打开集成终端时使用的 Shell，例如 PowerShell。
+- **集成终端 Shell**：用户打开集成终端时使用的 Shell，例如 PowerShell 或容器内 Bash。
 
-这两个配置容易被误解为同一件事。本文明确它们分别控制什么、Docker 模式下文件和命令如何运行，以及当前实现与目标行为之间的差距。
+运行环境决定新终端在哪里启动，Shell 配置再决定使用该环境中的哪个命令解释器。本文明确它们分别控制什么、Docker 模式下文件和命令如何运行，以及当前实现与目标行为之间的差距。
 
 ## 2. 核心结论
 
 1. “智能体运行环境”控制的是 **Agent 发起的工作负载在哪里执行**，不是把整个 Agent 控制程序搬进 Docker。
 2. Agent 控制程序、模型调用、权限审批、任务状态和 Desktop/daemon 仍在宿主机运行。
 3. 选择 Docker 后，Agent 的命令、文件操作、后台任务和交互终端都应进入同一个 Docker 沙箱。
-4. “集成终端 Shell”只控制 **用户手动操作的集成终端**，不决定 Agent 在 Docker 中使用什么 Shell。
-5. Windows 上的项目目录挂载到 Docker 的 `/workspace`。Docker 内的 Agent 命令统一使用 Linux 路径和 `/bin/sh` 语法。
-6. Docker 不可用时必须明确失败，不能静默回退到宿主机。
+4. 用户集成终端默认跟随 Agent 运行环境，让用户和 Agent 使用同一套工具、路径和依赖；用户仍可显式新建宿主终端。
+5. “集成终端 Shell”只能选择当前终端目标环境中真实可用的 Shell，不能把宿主 PowerShell 直接套用到 Linux 容器。
+6. Agent Terminal 必须始终跟随 Agent 运行环境，不能通过终端绕开 Docker 沙箱。
+7. Windows 上的项目目录挂载到 Docker 的 `/workspace`。Docker 内的 Agent 命令统一使用 Linux 路径和 `/bin/sh` 语法。
+8. Docker 不可用时必须明确失败，不能静默回退到宿主机。
 
 ## 3. 术语
 
@@ -45,7 +47,7 @@ Agent 为完成任务而触发的实际操作，包括：
 
 ### 3.4 用户集成终端
 
-用户在 Desktop 终端面板中打开并手动输入命令的终端。它与 Agent 创建的终端不是同一个会话。
+用户在 Desktop 终端面板中打开并手动输入命令的终端。它与 Agent 创建的终端不是同一个会话，但默认使用相同的运行环境，方便用户复现 Agent 的命令和问题。
 
 ### 3.5 Agent Terminal
 
@@ -72,24 +74,31 @@ docker  Docker 沙箱
 
 ### 4.2 集成终端 Shell
 
-示例取值：
+可选 Shell 由终端目标环境决定：
 
 ```text
-PowerShell
-Command Prompt
-Git Bash
+本机：PowerShell | Command Prompt | Git Bash
+Docker：/bin/sh | /bin/bash（镜像中存在时）
 ```
 
-它只决定用户集成终端启动哪个 Shell。该配置不应传给 Docker 内的 Agent 命令或 Agent Terminal，因为 Windows 的 `powershell.exe` 通常不存在于 Linux 容器中。
+该配置只决定用户集成终端在目标环境中启动哪个 Shell，不直接控制 Agent 的普通 Shell 工具。Windows 的 `powershell.exe` 通常不存在于 Linux 容器中，因此 Docker 模式不能继续沿用宿主 PowerShell 配置。
+
+用户集成终端默认跟随 Agent 运行环境。终端“新建”菜单提供一次性的“在本机打开”入口，供用户管理 Docker、Git 或宿主文件；该入口不改变 Agent 的运行环境，也不改变后续终端的默认行为。
+
+本机和 Docker 的 Shell 偏好应分别保存。例如用户从“本机 + PowerShell”切到“Docker + Bash”，再切回本机时，仍恢复 PowerShell，不能把 Bash 当作本机配置。
 
 ### 4.3 推荐组合
 
-| Agent 运行环境 | 用户集成终端 | Agent 命令 | Agent Terminal |
+| Agent 运行环境 | 默认用户集成终端 | Agent 命令 | Agent Terminal |
 |---|---|---|---|
 | 本机 | 用户选择的本机 Shell | 宿主 Shell | 本机默认 Shell，或 Agent 显式指定的本机 Shell |
-| Docker | 用户选择的本机 Shell | 容器 `/bin/sh` | 容器 Shell |
+| Docker | 用户选择的容器 Shell | 容器 `/bin/sh` | 容器 Shell |
 
-用户集成终端与 Agent 环境可以不同，这是明确支持的设计，不是异常状态。UI 应帮助用户理解：前者是“我手动操作的终端”，后者是“Agent 工作负载的隔离边界”。
+默认用户集成终端与 Agent 使用同一个环境，但它们仍是相互独立的会话。需要宿主终端时，用户通过“在本机打开”显式创建，而不是让全局默认长期处于混合环境。
+
+这里统一的是 **环境、工作目录和路径风格**，不是强制所有入口使用同一个 Shell 名称。例如 Docker 中 Agent 普通命令固定通过 `/bin/sh -c` 执行，而用户集成终端可以选择镜像中真实存在的 `/bin/bash`。
+
+切换运行环境只影响后续创建的 Agent Runtime 和终端，不迁移已经运行的进程或终端会话。存在活跃任务时应阻止切换并说明原因；没有活跃任务时关闭旧 Runtime，再按新环境创建。
 
 ## 5. Docker 模式的运行流程
 
@@ -108,7 +117,8 @@ Git Bash
             ├─ /bin/sh 命令
             ├─ 文件读写和搜索
             ├─ 后台进程
-            └─ Agent Terminal
+            ├─ Agent Terminal
+            └─ 默认用户集成终端
             ↓
       输出返回宿主 Agent
             ↓
@@ -268,7 +278,8 @@ Docker 不可用   → 报错并提示检查 Docker
 | Glob/Grep | 宿主工作区 | 容器 `/workspace` |
 | Hook/Cron | 宿主进程 | 容器进程 |
 | LSP/MCP stdio | 宿主进程 | 容器进程 |
-| 用户集成终端 | 用户选择的本机 Shell | 仍为用户选择的本机 Shell |
+| 默认用户集成终端 | 用户选择的本机 Shell | 用户选择的容器 Shell，工作目录为 `/workspace` |
+| 显式宿主终端 | 用户选择的本机 Shell | 用户选择的本机 Shell，不改变 Agent 环境 |
 | Git worktree 管理 | 宿主机 | 宿主机 |
 | Desktop/daemon | 宿主机 | 宿主机 |
 
@@ -281,13 +292,21 @@ Docker 不可用   → 报错并提示检查 Docker
 选择 Agent 的命令、文件工具和后台任务在本机还是 Docker 沙箱中运行。
 
 集成终端 Shell
-选择你在 OpenHarness 中打开新终端时使用的本机 Shell。
+选择新终端在当前 Agent 环境中使用的 Shell。Docker 模式只显示镜像内可用的 Shell。
 ```
 
 Docker 选项可补充说明：
 
 ```text
-项目目录将挂载到容器的 /workspace。宿主机其他目录默认不可见。
+项目目录将挂载到容器的 /workspace。Agent 和默认集成终端都在容器中运行，宿主机其他目录默认不可见。
+```
+
+终端“新建”菜单提供：
+
+```text
+新建终端
+├─ 在当前 Agent 环境中打开（默认）
+└─ 在本机打开
 ```
 
 ## 12. 验收标准
@@ -305,11 +324,15 @@ Docker 选项可补充说明：
 - Docker 模式下，Agent 无法通过任何命令或文件工具访问未挂载的 Windows 桌面。
 - Docker 不可用时，Agent 工具明确失败，宿主机上没有对应命令被启动。
 
-### 12.3 终端独立性
+### 12.3 终端一致性与显式例外
 
-- Docker Agent 环境下，用户仍可打开配置的 PowerShell 集成终端。
-- 修改“集成终端 Shell”不会改变 Agent 在 Docker 中使用的 `/bin/sh`。
-- 修改“智能体运行环境”不会擅自改变用户集成终端的 Shell。
+- Docker Agent 环境下，新建的默认用户集成终端进入同一个容器，并以 `/workspace` 为工作目录。
+- Docker Agent 环境下，用户集成终端只能选择镜像中可用的 `/bin/sh` 或 `/bin/bash`。
+- 修改“集成终端 Shell”不会改变 Agent 普通命令固定使用的 `/bin/sh -c`。
+- 本机与 Docker 的 Shell 偏好分别保存，切换回来时恢复各自上次的选择。
+- 用户可以显式新建本机 PowerShell，但该终端清楚标记为“本机”，且不改变 Agent 环境。
+- Agent TerminalOpen 不提供宿主例外，Docker 模式下必须始终进入当前 Agent 容器。
+- 有活跃任务时不能切换 Agent 环境；切换不会迁移已经打开的终端会话。
 
 ### 12.4 自然语言路径
 
@@ -321,7 +344,6 @@ Docker 选项可补充说明：
 
 - 自动挂载 Windows 桌面、下载目录或整个用户目录；
 - 在 Docker 镜像内安装 PowerShell；
-- 让用户集成终端默认进入 Docker；
+- 自动把显式创建的本机终端切换回 Docker；
 - 把 Desktop、daemon 或完整 Agent 控制程序迁入 Docker；
 - 在 Shell 工具层翻译 PowerShell 与 POSIX 命令。
-
