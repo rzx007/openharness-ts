@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@openharness/core": "workspace:*",
+    "@openharness/environment": "workspace:*",
     "@openharness/jobs": "workspace:*",
     "@openharness/sandbox": "workspace:*",
     "@openharness/terminal": "workspace:*",

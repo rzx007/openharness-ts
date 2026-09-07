@@ -1065,6 +1065,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/jobs':
         specifier: workspace:*
         version: link:../jobs

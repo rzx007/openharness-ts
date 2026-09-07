@@ -5,11 +5,70 @@ import { LocalTerminalProvider } from "./local-terminal-provider";
 import { TerminalOutputStore } from "./terminal-output-store";
 
 describe("LocalTerminalProvider", () => {
+  it("drives a Docker target through node-pty with input, resize, and signals", async () => {
+    let onData: ((data: string) => void) | undefined;
+    let onExit: ((event: { exitCode: number }) => void) | undefined;
+    const pty = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      onData: vi.fn((listener) => { onData = listener; return { dispose() {} }; }),
+      onExit: vi.fn((listener) => { onExit = listener; return { dispose() {} }; }),
+    } as any;
+    const spawnPty = vi.fn(() => pty);
+    const signal = vi.fn(async () => {});
+    const close = vi.fn(async () => {});
+    const provider = new LocalTerminalProvider({
+      resolveCwd: async () => process.cwd(),
+      resolveTarget: async () => ({
+        command: "docker",
+        args: ["exec", "-it", "container", "/bin/sh", "-i"],
+        hostCwd: process.cwd(),
+        executionCwd: "/workspace",
+        shell: "/bin/sh",
+        signal,
+        close,
+      }),
+      spawnPty,
+    });
+
+    const info = await provider.create({
+      scope: { kind: "session", sessionId: "s1" },
+      runtime: "sandbox",
+      cols: 100,
+      rows: 30,
+    });
+    expect(spawnPty).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["exec", "-it"]),
+      expect.objectContaining({ cwd: process.cwd(), cols: 100, rows: 30 }),
+    );
+    expect(info).toMatchObject({ cwd: "/workspace", shell: "/bin/sh" });
+
+    await provider.write({ terminalId: info.id, data: "echo ok\r" });
+    await provider.resize({ terminalId: info.id, cols: 120, rows: 40 });
+    await provider.signal({ terminalId: info.id, signal: "interrupt" });
+    await provider.signal({ terminalId: info.id, signal: "eof" });
+    expect(pty.write).toHaveBeenCalledWith("echo ok\r");
+    expect(pty.write).toHaveBeenCalledWith("\x03");
+    expect(pty.write).toHaveBeenCalledWith("\x04");
+    expect(pty.resize).toHaveBeenCalledWith(120, 40);
+
+    onData?.("ok\r\n");
+    expect((await provider.read({ terminalId: info.id })).data).toContain("ok");
+    await provider.kill(info.id);
+    expect(signal).toHaveBeenCalledWith("terminate");
+    expect(pty.kill).toHaveBeenCalledOnce();
+    onExit?.({ exitCode: 0 });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("observes an exit that happens while wait subscribes", async () => {
     const provider = new LocalTerminalProvider({ resolveCwd: async () => "/repo" });
     const info: TerminalSessionInfo = {
       id: "terminal-1",
       name: "test",
+      scope: { kind: "project", projectId: "project-1" },
       projectId: "project-1",
       runtime: "local",
       source: "agent",
