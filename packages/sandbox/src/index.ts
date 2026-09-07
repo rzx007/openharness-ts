@@ -78,6 +78,23 @@ export {
 } from "./srt-adapter.js";
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
 export {
+  listManagedDockerResources,
+  planDockerOrphanReconciliation,
+  reconcileDockerOrphans,
+} from "./docker-orphan-reconciler.js";
+export type {
+  DockerCleanupAction,
+  DockerCommandResult,
+  DockerCommandRunner,
+  DockerManagedContainer,
+  DockerManagedExecution,
+  DockerManagedResourceInventory,
+  DockerReconciliationDiagnostic,
+  DockerReconciliationPlan,
+  DockerReconciliationReport,
+  ReconcileDockerOrphansInput,
+} from "./docker-orphan-reconciler.js";
+export {
   buildDockerExecArgs,
   buildDockerPtyTarget,
   buildDockerBuildArgs,

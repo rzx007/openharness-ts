@@ -1,4 +1,5 @@
 import { SessionStore } from "@openharness/services";
+import { reconcileDockerOrphans } from "@openharness/sandbox";
 
 import { getDefaultSessionStorePath } from "../daemon/paths.js";
 import {
@@ -31,5 +32,11 @@ export function createDefaultNodeApplication(
     ...options,
     store,
     ownsStore: options.ownsStore ?? !options.store,
+    ...(options.executionSurface === "desktop_managed"
+      ? {
+          reconcileDockerOrphans:
+            options.reconcileDockerOrphans ?? reconcileDockerOrphans,
+        }
+      : {}),
   });
 }

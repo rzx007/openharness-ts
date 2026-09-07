@@ -62,6 +62,7 @@
 - `packages/server/src/runtime/session-execution-environment.ts`：把 installation 和 application owner 交给 Manager。
 - `packages/server/src/runtime/session-execution-environment.test.ts`：身份传递测试。
 - `packages/server/src/application/daemon-application.ts`：在 application owner 之后、ready 之前运行 reconciliation。
+- `packages/server/src/application/default-node-application.ts`：只在默认 Desktop managed 组装中注入真实 Docker reconciler。
 - `packages/server/src/application/__test__/durable-agent-application.test.ts`：启动顺序和失败隔离测试。
 - `packages/server/src/terminal/daemon-terminal-service.ts`：为 PTY 注入可信 terminal ID。
 - `packages/server/src/terminal/daemon-terminal-service.test.ts`：终端 owner 标记测试。
@@ -170,6 +171,7 @@ git commit -m "fix(settings): save configuration atomically (task 1/4)"
 - 修改：`packages/server/src/runtime/session-execution-environment.ts`
 - 修改：`packages/server/src/runtime/session-execution-environment.test.ts`
 - 修改：`packages/server/src/application/daemon-application.ts`
+- 修改：`packages/server/src/application/default-node-application.ts`
 - 修改：`packages/server/src/terminal/daemon-terminal-service.ts`
 - 修改：`packages/server/src/terminal/daemon-terminal-service.test.ts`
 
@@ -317,19 +319,22 @@ inventory 输入包含 container labels 和 `/proc/*/environ` 解析出的 exec 
 expect(planDockerOrphanReconciliation(inventory, {
   installationId: "install-1",
   daemon: { ownerId: "daemon-new", generation: 1 },
-})).toEqual([
-  {
-    kind: "kill_execution",
-    containerId: "reuse-id",
-    pid: 42,
-    reason: "stale_daemon_execution",
-  },
-  {
-    kind: "remove_container",
-    containerId: "temp-id",
-    reason: "orphan_temporary_environment",
-  },
-])
+})).toEqual({
+  actions: [
+    {
+      kind: "kill_execution",
+      containerId: "reuse-id",
+      pid: 42,
+      reason: "stale_daemon_execution",
+    },
+    {
+      kind: "remove_container",
+      containerId: "temp-id",
+      reason: "orphan_temporary_environment",
+    },
+  ],
+  diagnostics: [],
+})
 ```
 
 - [ ] **步骤 2：运行测试并确认失败**
