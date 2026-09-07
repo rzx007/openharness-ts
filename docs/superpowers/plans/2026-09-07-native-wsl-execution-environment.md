@@ -53,11 +53,11 @@
 
 **文件：** server session environment/daemon application/default application、agent composition；删除 sandbox Docker backend、orphan reconciler、managed mounts、lifecycle、session、environment manager、Dockerfile 和对应测试。
 
-- [ ] 调整测试，证明 root/fork/child 从同一全局配置和各自 cwd 获得等价环境，不需要 lease/owner alias。
-- [ ] server acquirer 改成轻量环境工厂，删除 daemon orphan reconciliation 和 manager dispose。
-- [ ] 删除 Docker backend、挂载、session、生命周期、复用、label、hash、orphan reconciliation、identity 和 lease。
-- [ ] 运行 environment/sandbox/server/agent-runtime 测试与类型检查。
-- [ ] 提交 `refactor(runtime): remove Docker lifecycle`。
+- [x] 调整测试，证明 root/fork/child 从同一全局配置和各自 cwd 获得等价环境，不需要 lease/owner alias。
+- [x] server acquirer 改成轻量环境工厂，删除 daemon orphan reconciliation 和 manager dispose。
+- [x] 删除 Docker backend、挂载、session、生命周期、复用、label、hash、orphan reconciliation、identity 和 lease。
+- [x] 运行 environment/sandbox/server/agent-runtime 测试与类型检查。
+- [x] 提交 `refactor(runtime): remove Docker lifecycle`。
 
 ### 任务 6：清理 Docker 配置、CLI、依赖和跨包残留
 

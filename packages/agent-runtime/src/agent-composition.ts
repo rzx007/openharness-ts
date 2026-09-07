@@ -199,11 +199,11 @@ async function composeOpenHarnessAgentInternal(
 
 export function createAgentWorkspaceBinding(
   cwd: string,
-  kind: "local" | "wsl" | "docker",
+  kind: "local" | "wsl",
 ) {
   return createWorkspaceBinding({
     kind,
     hostRoot: cwd,
-    executionRoot: kind === "docker" ? "/workspace" : kind === "wsl" ? hostPathToWslPath(cwd) : cwd,
+    executionRoot: kind === "wsl" ? hostPathToWslPath(cwd) : cwd,
   });
 }

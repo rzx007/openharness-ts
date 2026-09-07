@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { Settings } from "@openharness/core";
 import type {
   ExecutionEnvironmentConsumer,
-  ExecutionEnvironmentLease,
+  ExecutionEnvironmentHandle,
 } from "@openharness/environment";
 import type {
   AgentTerminalHost,
@@ -39,7 +39,7 @@ export interface DaemonTerminalServiceOptions {
     session: SessionRecord,
     settings: Settings,
     consumer: ExecutionEnvironmentConsumer,
-  ): Promise<ExecutionEnvironmentLease>;
+  ): Promise<ExecutionEnvironmentHandle>;
   spawnPty?: LocalTerminalProviderOptions["spawnPty"];
 }
 

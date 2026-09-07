@@ -15,7 +15,7 @@ export function createAttachmentReadTool(options: {
     ...options.defaultTool,
     execution: {
       domain: "environment",
-      supportedEnvironments: ["local", "wsl", "docker"],
+      supportedEnvironments: ["local", "wsl"],
     },
     description: `${options.defaultTool.description} Also reads daemon attachment:// resources.`,
     async execute(input, context) {

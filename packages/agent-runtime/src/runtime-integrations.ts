@@ -90,12 +90,12 @@ export async function installRuntimeIntegrations(
         execution: server?.type === "http" || server?.type === "sse"
           ? {
               domain: "control_plane",
-              supportedEnvironments: ["local", "wsl", "docker"],
+              supportedEnvironments: ["local", "wsl"],
               network: true,
             }
           : {
               domain: "environment",
-              supportedEnvironments: ["local", "wsl", "docker"],
+              supportedEnvironments: ["local", "wsl"],
             },
       }, {
         kind: "mcp",

@@ -130,12 +130,6 @@ async function executeInEnvironment(
     ? input.workdir.trim()
     : environment.workspace.executionRoot;
   const resolved = await environment.paths.resolve(rawWorkdir, "execute");
-  if (environment.info.kind === "docker" && resolved.mountPurpose === "unmounted") {
-    return {
-      content: [{ type: "text" as const, text: `Sandbox: workdir is outside the mounted execution roots: ${resolved.executionPath}` }],
-      isError: true,
-    };
-  }
 
   const timeoutMs = typeof input.timeout === "number" ? input.timeout : 120_000;
   const controller = new AbortController();
@@ -306,7 +300,6 @@ function diagnoseShellCommand(
 ): ShellDialectMismatch | null {
   const shell = spec.hostShell;
   if (shell.kind === "bash" || shell.kind === "posix-sh") return null;
-  if (spec.runner.mode === "sandbox-active" && spec.runner.backend === "docker") return null;
 
   const problems = diagnoseShellDialectMismatch(spec.command, shell);
   return problems.length > 0 ? { shell, problems } : null;

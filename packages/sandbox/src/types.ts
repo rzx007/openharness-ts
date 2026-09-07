@@ -1,13 +1,8 @@
-import type { ChildProcess, StdioOptions } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import type { SandboxConfig, Settings } from "@openharness/core";
-import type {
-  EnvironmentExecutionOwner,
-  EnvironmentPtyTarget,
-  EnvironmentTerminalPrepareOptions,
-  ExecutionEnvironmentIdentity,
-} from "@openharness/environment";
+import type { EnvironmentExecutionOwner } from "@openharness/environment";
 
-export type SandboxBackend = "srt" | "docker";
+export type SandboxBackend = "srt";
 export type SandboxPlatform = "linux" | "wsl" | "macos" | "windows" | "unknown";
 export type SandboxNetworkMode = "none" | "bridge" | "host" | "proxy";
 export type SandboxOperation = "read" | "write";
@@ -18,151 +13,27 @@ export type SandboxPolicyEnforcement = "off" | "best-effort" | "required";
 
 export interface ResolvedSandboxConfig {
   enabled: boolean;
-  backend: SandboxBackend;
+  backend: "srt";
   failIfUnavailable: boolean;
   enabledPlatforms: Array<"linux" | "wsl" | "macos">;
-  filesystem: {
-    allowRead: string[];
-    denyRead: string[];
-    allowWrite: string[];
-    denyWrite: string[];
-    extraAllowedRoots: string[];
-  };
-  network: {
-    mode: SandboxNetworkMode;
-    allowedDomains: string[];
-    deniedDomains: string[];
-    strictDomainPolicy: boolean;
-  };
-  docker: {
-    image: string;
-    autoBuildImage: boolean;
-    cpuLimit: number;
-    memoryLimit: string;
-    dns: string[];
-    extraMounts: string[];
-    extraEnv: Record<string, string>;
-    containerNamePrefix: string;
-    reuseContainer: boolean;
-  };
-  srt: {
-    runtimeCommand: string;
-  };
+  filesystem: { allowRead: string[]; denyRead: string[]; allowWrite: string[]; denyWrite: string[]; extraAllowedRoots: string[] };
+  network: { mode: SandboxNetworkMode; allowedDomains: string[]; deniedDomains: string[]; strictDomainPolicy: boolean };
+  srt: { runtimeCommand: string };
 }
 
-export interface SandboxPolicyScope {
-  cwd: string;
-  workspaceRoot: string;
-  sessionId?: string;
-}
-
+export interface SandboxPolicyScope { cwd: string; workspaceRoot: string; sessionId?: string }
 export interface SandboxPolicy {
-  mode: SandboxPolicyMode;
-  enforcement: SandboxPolicyEnforcement;
-  enabled: boolean;
-  backend: SandboxBackend;
-  failClosed: boolean;
-  scope: SandboxPolicyScope;
-  filesystem: ResolvedSandboxConfig["filesystem"];
-  network: ResolvedSandboxConfig["network"];
+  mode: SandboxPolicyMode; enforcement: SandboxPolicyEnforcement; enabled: boolean;
+  backend: "srt"; failClosed: boolean; scope: SandboxPolicyScope;
+  filesystem: ResolvedSandboxConfig["filesystem"]; network: ResolvedSandboxConfig["network"];
   config: ResolvedSandboxConfig;
 }
-
-export interface SandboxPolicyInput {
-  cwd: string;
-  workspaceRoot?: string;
-  sessionId?: string;
-  settings?: Settings;
-  config?: SandboxConfig;
-}
-
-export interface SandboxPolicyService {
-  resolvePolicy(input: SandboxPolicyInput): SandboxPolicy;
-}
-
-export interface SandboxPolicyDenial {
-  kind: "policy";
-  code: "filesystem_denied" | "execution_denied" | "network_denied";
-  operation: SandboxPolicyOperation;
-  reason: string;
-}
-
-export interface SandboxAvailability {
-  enabled: boolean;
-  available: boolean;
-  active: boolean;
-  backend?: SandboxBackend;
-  platform?: SandboxPlatform;
-  reason?: string;
-  degraded?: boolean;
-  command?: string;
-}
-
-export type SandboxRuntimeState = "off" | "active" | "degraded" | "unavailable";
-
-export type SandboxRuntimeEvent =
-  | { type: "start"; backend: SandboxBackend; image?: string; reuseContainer?: boolean }
-  | { type: "check-availability"; backend: SandboxBackend }
-  | { type: "check-image"; image: string }
-  | { type: "build-image"; image: string; dockerfile: string }
-  | { type: "start-container"; containerName: string; reused: boolean }
-  | { type: "ready"; backend: SandboxBackend; containerName?: string }
-  | { type: "unavailable"; backend: SandboxBackend; reason: string };
-
+export interface SandboxPolicyInput { cwd: string; workspaceRoot?: string; sessionId?: string; settings?: Settings; config?: SandboxConfig }
+export interface SandboxPolicyService { resolvePolicy(input: SandboxPolicyInput): SandboxPolicy }
+export interface SandboxPolicyDenial { kind: "policy"; code: "filesystem_denied" | "execution_denied" | "network_denied"; operation: SandboxPolicyOperation; reason: string }
+export interface SandboxAvailability { enabled: boolean; available: boolean; active: boolean; backend?: "srt"; platform?: SandboxPlatform; reason?: string; degraded?: boolean; command?: string }
+export type SandboxRuntimeEvent = { type: "check-availability" | "ready" | "unavailable"; backend: "srt"; reason?: string };
 export type SandboxRuntimeReporter = (event: SandboxRuntimeEvent) => void;
-
-export interface SandboxRuntimeStatus {
-  state: SandboxRuntimeState;
-  enabled: boolean;
-  active: boolean;
-  backend?: SandboxBackend;
-  platform?: SandboxPlatform;
-  reason?: string;
-  degraded?: boolean;
-  containerName?: string;
-  containerCwd?: string;
-  networkMode?: SandboxNetworkMode;
-  dns?: string[];
-  proxy?: "configured" | "not configured";
-  reuseContainer?: boolean;
-}
-
-export interface ShellSpawnOptions {
-  cwd: string;
-  settings?: Settings;
-  stdio?: StdioOptions;
-  env?: Record<string, string>;
-  owner?: EnvironmentExecutionOwner;
-  signal?: AbortSignal;
-  detached?: boolean;
-}
-
-export interface SandboxSession {
-  readonly backend: SandboxBackend;
-  readonly cwd: string;
-  readonly active: boolean;
-  readonly identity?: ExecutionEnvironmentIdentity;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  stopSync?(): void;
-  wrapCommand?(argv: string[]): Promise<{ argv: string[]; cleanup?: () => Promise<void> }>;
-  execCommand?(argv: string[], options: ShellSpawnOptions): Promise<ChildProcess>;
-  preparePtyTarget?(input: EnvironmentTerminalPrepareOptions): Promise<EnvironmentPtyTarget>;
-}
-
-export interface ValidateSandboxPathOptions {
-  sandboxRoot: string;
-  operation: SandboxOperation;
-  config?: SandboxConfig;
-  policy?: SandboxPolicy;
-  extraAllowedRoots?: string[];
-}
-
-export interface SandboxPathValidationResult {
-  allowed: boolean;
-  decision: "allow" | "deny";
-  resolvedPath: string;
-  reason?: string;
-  failureKind?: "policy";
-  denial?: SandboxPolicyDenial;
-}
+export interface ShellSpawnOptions { cwd: string; settings?: Settings; stdio?: StdioOptions; env?: Record<string, string>; owner?: EnvironmentExecutionOwner; signal?: AbortSignal; detached?: boolean }
+export interface ValidateSandboxPathOptions { sandboxRoot: string; operation: SandboxOperation; config?: SandboxConfig; policy?: SandboxPolicy; extraAllowedRoots?: string[] }
+export interface SandboxPathValidationResult { allowed: boolean; decision: "allow" | "deny"; resolvedPath: string; reason?: string; failureKind?: "policy"; denial?: SandboxPolicyDenial }

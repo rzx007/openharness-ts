@@ -23,7 +23,6 @@ const DEFAULT_SETTINGS: Settings = {
   },
   sandbox: {
     enabled: false,
-    backend: "srt",
     failIfUnavailable: false,
     filesystem: {
       allowRead: ["."],
@@ -38,25 +37,12 @@ const DEFAULT_SETTINGS: Settings = {
       deniedDomains: [],
       strictDomainPolicy: false,
     },
-    docker: {
-      image: "openharness-sandbox:latest",
-      autoBuildImage: true,
-      cpuLimit: 0,
-      memoryLimit: "",
-      dns: [],
-      extraMounts: [],
-      extraEnv: {},
-      containerNamePrefix: "openharness-sandbox",
-      reuseContainer: false,
-    },
     srt: {
       runtimeCommand: "srt",
     },
   },
   agentEnvironment: { kind: "native" },
-  terminal: {
-    dockerShell: "/bin/sh",
-  },
+  terminal: {},
   daemon: {
     autoStart: false,
   },
@@ -215,10 +201,6 @@ function buildSandboxEnvOverrides(): Partial<NonNullable<Settings["sandbox"]>> |
   if (process.env.OPENHARNESS_SANDBOX_ENABLED !== undefined) {
     sandbox.enabled = parseBooleanEnv(process.env.OPENHARNESS_SANDBOX_ENABLED);
   }
-  if (process.env.OPENHARNESS_SANDBOX_BACKEND !== undefined) {
-    const backend = process.env.OPENHARNESS_SANDBOX_BACKEND;
-    if (backend === "srt" || backend === "docker") sandbox.backend = backend;
-  }
   if (process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE !== undefined) {
     sandbox.failIfUnavailable = parseBooleanEnv(
       process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE,
@@ -230,42 +212,11 @@ function buildSandboxEnvOverrides(): Partial<NonNullable<Settings["sandbox"]>> |
       sandbox.network = { mode };
     }
   }
-  if (process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE !== undefined) {
-    sandbox.docker = { image: process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE };
-  }
-  const dockerEnv: NonNullable<NonNullable<Settings["sandbox"]>["docker"]> = {
-    ...(sandbox.docker ?? {}),
-  };
-  if (process.env.OPENHARNESS_SANDBOX_DOCKER_DNS !== undefined) {
-    dockerEnv.dns = parseListEnv(process.env.OPENHARNESS_SANDBOX_DOCKER_DNS);
-  }
-  const extraEnv: Record<string, string> = { ...(dockerEnv.extraEnv ?? {}) };
-  if (process.env.OPENHARNESS_SANDBOX_HTTP_PROXY !== undefined) {
-    extraEnv.HTTP_PROXY = process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
-    extraEnv.http_proxy = process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
-  }
-  if (process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY !== undefined) {
-    extraEnv.HTTPS_PROXY = process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
-    extraEnv.https_proxy = process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
-  }
-  if (process.env.OPENHARNESS_SANDBOX_NO_PROXY !== undefined) {
-    extraEnv.NO_PROXY = process.env.OPENHARNESS_SANDBOX_NO_PROXY;
-    extraEnv.no_proxy = process.env.OPENHARNESS_SANDBOX_NO_PROXY;
-  }
-  if (Object.keys(extraEnv).length > 0) dockerEnv.extraEnv = extraEnv;
-  if (Object.keys(dockerEnv).length > 0) sandbox.docker = dockerEnv;
   return Object.keys(sandbox).length > 0 ? sandbox : undefined;
 }
 
 function parseBooleanEnv(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
-}
-
-function parseListEnv(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function mergeSandboxConfig(
@@ -276,12 +227,10 @@ function mergeSandboxConfig(
     if (!config) continue;
     const filesystem = result.filesystem;
     const network = result.network;
-    const docker = result.docker;
     const srt = result.srt;
     Object.assign(result, config);
     result.filesystem = { ...filesystem, ...config.filesystem };
     result.network = { ...network, ...config.network };
-    result.docker = { ...docker, ...config.docker };
     result.srt = { ...srt, ...config.srt };
   }
   return result;
@@ -385,12 +334,10 @@ function validateSettingsFields(
   ], configPath);
   assertNestedFields(settings, "sandbox", [
     "enabled",
-    "backend",
     "failIfUnavailable",
     "enabledPlatforms",
     "filesystem",
     "network",
-    "docker",
     "srt",
   ], configPath);
   assertNestedFields(settings, "agentEnvironment", ["kind"], configPath);
@@ -409,20 +356,9 @@ function validateSettingsFields(
       "deniedDomains",
       "strictDomainPolicy",
     ], configPath, "settings.sandbox");
-    assertNestedFields(sandbox, "docker", [
-      "image",
-      "autoBuildImage",
-      "cpuLimit",
-      "memoryLimit",
-      "dns",
-      "extraMounts",
-      "extraEnv",
-      "containerNamePrefix",
-      "reuseContainer",
-    ], configPath, "settings.sandbox");
     assertNestedFields(sandbox, "srt", ["runtimeCommand"], configPath, "settings.sandbox");
   }
-  assertNestedFields(settings, "terminal", ["localShell", "dockerShell"], configPath);
+  assertNestedFields(settings, "terminal", ["localShell"], configPath);
   assertNestedFields(settings, "plugins", ["enabled"], configPath);
   assertNestedFields(settings, "daemon", ["autoStart"], configPath);
   assertNestedFields(settings, "childBudget", [

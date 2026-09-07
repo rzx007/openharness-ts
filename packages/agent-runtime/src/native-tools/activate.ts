@@ -16,7 +16,7 @@ export async function activateNativePluginTools(
   plugin: LoadedNativePlugin,
   context: {
     cwd: string;
-    environmentKind?: "local" | "wsl" | "docker";
+    environmentKind?: "local" | "wsl";
     toolRegistry: IToolRegistry;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;
     onLog?: (message: string) => void;

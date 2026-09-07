@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { SandboxUnavailableError } from "./docker-backend.js";
+import { SandboxUnavailableError } from "./errors.js";
 import { normalizeSandboxConfig } from "./config.js";
 import type {
   SandboxFailureKind,

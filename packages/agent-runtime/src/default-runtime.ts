@@ -259,16 +259,7 @@ export async function createOpenHarnessRuntime(
     .build(settings);
 
   if (options.executionEnvironment) {
-    bundle.sandboxStatus = options.executionEnvironment.info.kind === "docker"
-      ? {
-          state: "active",
-          enabled: true,
-          active: true,
-          backend: "docker",
-          containerCwd: options.executionEnvironment.workspace.executionRoot,
-          networkMode: options.executionEnvironment.info.networkMode,
-        }
-      : { state: "off", enabled: false, active: false };
+    bundle.sandboxStatus = { state: "off", enabled: false, active: false };
     bundle.addCleanup(() => options.executionEnvironment?.release());
   } else {
     await attachSandboxRuntime(

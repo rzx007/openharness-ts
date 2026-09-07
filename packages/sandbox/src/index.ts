@@ -1,156 +1,25 @@
 export type {
-  ResolvedSandboxConfig,
-  SandboxAvailability,
-  SandboxBackend,
-  SandboxFailureKind,
-  SandboxNetworkMode,
-  SandboxOperation,
-  SandboxPathValidationResult,
-  SandboxPolicy,
-  SandboxPolicyDenial,
-  SandboxPolicyEnforcement,
-  SandboxPolicyInput,
-  SandboxPolicyMode,
-  SandboxPolicyOperation,
-  SandboxPolicyScope,
-  SandboxPolicyService,
-  SandboxPlatform,
-  SandboxRuntimeEvent,
-  SandboxRuntimeReporter,
-  SandboxRuntimeState,
-  SandboxRuntimeStatus,
-  SandboxSession,
-  ShellSpawnOptions,
-  ValidateSandboxPathOptions,
+  ResolvedSandboxConfig, SandboxAvailability, SandboxBackend, SandboxFailureKind,
+  SandboxNetworkMode, SandboxOperation, SandboxPathValidationResult, SandboxPolicy,
+  SandboxPolicyDenial, SandboxPolicyEnforcement, SandboxPolicyInput, SandboxPolicyMode,
+  SandboxPolicyOperation, SandboxPolicyScope, SandboxPolicyService, SandboxPlatform,
+  SandboxRuntimeEvent, SandboxRuntimeReporter, ShellSpawnOptions, ValidateSandboxPathOptions,
 } from "./types.js";
+export { SandboxUnavailableError } from "./errors.js";
 export { normalizeSandboxConfig } from "./config.js";
-export {
-  createDesktopManagedMounts,
-  resolveContainerWorkspacePath,
-} from "./managed-mounts.js";
-export type { ManagedDockerMount } from "./managed-mounts.js";
-export {
-  ExecutionConfigError,
-  resolveExecutionEnvironmentConfig,
-} from "./execution-config.js";
+export { ExecutionConfigError, resolveExecutionEnvironmentConfig } from "./execution-config.js";
 export { createExecutionEnvironment } from "./execution-environment.js";
-export {
-  ExecutionEnvironmentManager,
-  ExecutionEnvironmentManagerError,
-} from "./execution-environment-manager.js";
-export type {
-  AcquireExecutionEnvironmentRequest,
-  ExecutionEnvironmentInspection,
-} from "./execution-environment-manager.js";
-export type {
-  CreateExecutionEnvironmentDependencies,
-  CreateExecutionEnvironmentInput,
-} from "./execution-environment.js";
-export type {
-  ExecutionSurface,
-  ResolveExecutionEnvironmentConfigInput,
-  ResolvedExecutionEnvironmentConfig,
-} from "./execution-config.js";
-export {
-  classifySandboxFailure,
-  defaultSandboxPolicyService,
-  DefaultSandboxPolicyService,
-  resolveSandboxPolicy,
-  SandboxPolicyDeniedError,
-} from "./policy.js";
-export {
-  detectSandboxPlatform,
-  supportsDockerSandbox,
-  supportsSandboxRuntime,
-} from "./platform.js";
+export type { CreateExecutionEnvironmentDependencies, CreateExecutionEnvironmentInput } from "./execution-environment.js";
+export type { ExecutionSurface, ResolveExecutionEnvironmentConfigInput, ResolvedExecutionEnvironmentConfig } from "./execution-config.js";
+export { classifySandboxFailure, defaultSandboxPolicyService, DefaultSandboxPolicyService, resolveSandboxPolicy, SandboxPolicyDeniedError } from "./policy.js";
+export { detectSandboxPlatform, supportsSandboxRuntime } from "./platform.js";
 export { validateSandboxPath } from "./path-validator.js";
-export {
-  getDockerAvailability,
-  getSandboxAvailability,
-  getSrtAvailability,
-} from "./availability.js";
+export { getSandboxAvailability, getSrtAvailability } from "./availability.js";
 export type { AvailabilityDeps } from "./availability.js";
-export {
-  buildSrtRuntimeConfig,
-  shellJoin,
-  shellQuote,
-  wrapCommandForSrt,
-} from "./srt-adapter.js";
+export { buildSrtRuntimeConfig, shellJoin, shellQuote, wrapCommandForSrt } from "./srt-adapter.js";
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
-export {
-  listManagedDockerResources,
-  planDockerOrphanReconciliation,
-  reconcileDockerOrphans,
-} from "./docker-orphan-reconciler.js";
-export type {
-  DockerCleanupAction,
-  DockerCommandResult,
-  DockerCommandRunner,
-  DockerManagedContainer,
-  DockerManagedExecution,
-  DockerManagedResourceInventory,
-  DockerReconciliationDiagnostic,
-  DockerReconciliationPlan,
-  DockerReconciliationReport,
-  ReconcileDockerOrphansInput,
-} from "./docker-orphan-reconciler.js";
-export {
-  buildDockerExecArgs,
-  buildDockerPtyTarget,
-  buildDockerBuildArgs,
-  buildDockerImageInspectArgs,
-  buildDockerRunArgs,
-  buildDockerSupervisedArgv,
-  DOCKER_CONFIG_HASH_LABEL,
-  DOCKER_CREATED_BY_GENERATION_LABEL,
-  DOCKER_CREATED_BY_OWNER_LABEL,
-  DOCKER_ENVIRONMENT_ID_LABEL,
-  DOCKER_INSTALLATION_LABEL,
-  DOCKER_MANAGED_LABEL,
-  DOCKER_REUSABLE_LABEL,
-  DOCKER_WORKSPACE_LABEL,
-  DOCKER_WORKSPACE_OWNER_LABEL,
-  dockerDefaultDockerfilePath,
-  dockerContainerName,
-  dockerReusableContainerName,
-  dockerSandboxConfigHash,
-  dockerNetworkMode,
-  DockerSandboxSession,
-  hostPathToContainerPath,
-  inspectDockerSandbox,
-  SandboxUnavailableError,
-  toContainerWorkspacePath,
-} from "./docker-backend.js";
-export type { DockerBuildArgsOptions, DockerExecArgsOptions, DockerRunArgsOptions } from "./docker-backend.js";
-export type { DockerPtyTargetOptions } from "./docker-backend.js";
-export {
-  getActiveSandboxSession,
-  acquireSandboxSessionAlias,
-  isSandboxSessionActive,
-  setActiveSandboxSession,
-  stopActiveSandboxSession,
-  stopActiveSandboxSessionSync,
-} from "./session.js";
-export type { SandboxSessionLookup, SandboxSessionScope } from "./session.js";
 export { signalProcessTree, terminateProcessTree } from "./process-control.js";
 export type { ProcessSignal } from "./process-control.js";
-export {
-  createProcess,
-  createShellProcess,
-  describeHostShellLauncher,
-  resolveContainerShellArgv,
-  resolveHostShellLauncher,
-  resolveShellArgv,
-  resetHostShellCacheForTests,
-} from "./shell.js";
+export { createProcess, createShellProcess, describeHostShellLauncher, resolveHostShellLauncher, resolveShellArgv, resetHostShellCacheForTests } from "./shell.js";
 export type { CreateProcessOptions, CreateShellProcessOptions, HostShellLauncher } from "./shell.js";
-export { startSandboxRuntime } from "./lifecycle.js";
-export type { SandboxRuntimeOptions, StartedSandboxRuntime } from "./lifecycle.js";
-export {
-  WslEnvironmentUnavailableError,
-  createWslPathResolver,
-  hostPathToWslPath,
-  preflightWsl,
-  spawnWslProcess,
-  wslPathToHostPath,
-} from "./wsl-environment.js";
+export { WslEnvironmentUnavailableError, createWslPathResolver, hostPathToWslPath, preflightWsl, spawnWslProcess, wslPathToHostPath } from "./wsl-environment.js";

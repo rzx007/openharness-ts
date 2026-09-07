@@ -9,10 +9,7 @@ import type {
 } from "@openharness/environment";
 import {
   createProcess,
-  getActiveSandboxSession,
-  hostPathToContainerPath,
   resolveSandboxPolicy,
-  SandboxUnavailableError,
 } from "@openharness/sandbox";
 
 export interface FileEntry {
@@ -46,18 +43,6 @@ export function fileOperationsFor(context: ToolContext): FileOperations {
   const hostCwd = cwd;
   const settings = context.settings;
   const policy = resolveSandboxPolicy({ cwd: hostCwd, sessionId: context.sessionId, settings });
-  if (policy.enabled && policy.backend === "docker") {
-    const session = getActiveSandboxSession({
-      cwd: policy.scope.cwd,
-      sessionId: policy.scope.sessionId,
-    });
-    if (session?.backend === "docker" && session.active && session.execCommand) {
-      return new DockerFileOperations({ cwd: hostCwd, settings, sessionId: context.sessionId, signal: context.abortSignal });
-    }
-    if (policy.failClosed) {
-      throw new SandboxUnavailableError("Docker sandbox session is not running");
-    }
-  }
   return new HostFileOperations();
 }
 
@@ -184,15 +169,7 @@ export class DockerFileOperations implements FileOperations {
   }
 
   private containerPath(path: string): string {
-    if (
-      path === "/workspace" ||
-      path.startsWith("/workspace/") ||
-      path === "/opt/openharness/skills" ||
-      path.startsWith("/opt/openharness/skills/")
-    ) {
-      return path;
-    }
-    return hostPathToContainerPath(path, this.options.cwd);
+    return path;
   }
 
   private async nodeHelper<T>(input: Record<string, unknown>): Promise<T> {
@@ -333,14 +310,7 @@ export function createEnvironmentFileSystem(
   } = {},
 ): EnvironmentFileSystem {
   if (environment.info.kind === "wsl") return new WslFileOperations(environment);
-  return environment.info.kind === "docker"
-    ? new DockerFileOperations({
-        cwd: environment.workspace.hostRoot,
-        settings: options.settings,
-        sessionId: options.sessionId,
-        signal: options.signal,
-      })
-    : new HostFileOperations();
+  return new HostFileOperations();
 }
 
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
