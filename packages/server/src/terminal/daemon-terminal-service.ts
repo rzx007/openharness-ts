@@ -1,5 +1,10 @@
 import { resolve } from "node:path";
 
+import type { Settings } from "@openharness/core";
+import type {
+  ExecutionEnvironmentConsumer,
+  ExecutionEnvironmentLease,
+} from "@openharness/environment";
 import type {
   AgentTerminalHost,
   TerminalCreateRequest,
@@ -14,7 +19,10 @@ import type {
   TerminalWaitResult,
   TerminalWriteRequest,
 } from "@openharness/terminal";
-import { LocalTerminalProvider } from "@openharness/terminal-node";
+import {
+  LocalTerminalProvider,
+  type LocalTerminalProviderOptions,
+} from "@openharness/terminal-node";
 import type { SessionRecord } from "@openharness/protocol";
 import type { SessionStore } from "@openharness/services";
 import { ApplicationError } from "../shared/application-error.js";
@@ -25,60 +33,61 @@ export interface ListDaemonTerminalsOptions {
   source?: TerminalSource;
 }
 
+export interface DaemonTerminalServiceOptions {
+  getSettingsForCwd?(cwd: string): Promise<Settings>;
+  acquireEnvironment?(
+    session: SessionRecord,
+    settings: Settings,
+    consumer: ExecutionEnvironmentConsumer,
+  ): Promise<ExecutionEnvironmentLease>;
+  spawnPty?: LocalTerminalProviderOptions["spawnPty"];
+}
+
+interface ResolvedTerminalRequest {
+  scope: NonNullable<TerminalCreateRequest["scope"]>;
+  cwd: string;
+  projectId?: string;
+  session?: SessionRecord;
+}
+
 export class DaemonTerminalService {
   private readonly provider: LocalTerminalProvider;
 
-  constructor(private readonly store: Pick<SessionStore, "getProject">) {
+  constructor(
+    private readonly store: Pick<SessionStore, "getProject" | "getSession">,
+    private readonly options: DaemonTerminalServiceOptions = {},
+  ) {
     this.provider = new LocalTerminalProvider({
-      resolveCwd: async (input) => {
-        if (input.cwd) return resolve(input.cwd);
-        const project = this.store.getProject(input.projectId);
-        if (!project)
-          throw new DaemonTerminalError(
-            404,
-            `Project not found: ${input.projectId}`,
-          );
-        return project.path;
-      },
+      resolveCwd: async (input) => this.resolveRequest(input).cwd,
+      resolveTarget: async (input, _cwd, terminalId) =>
+        await this.resolveEnvironmentTarget(input, terminalId),
+      spawnPty: options.spawnPty,
     });
   }
 
   async create(input: TerminalCreateRequest): Promise<TerminalSessionInfo> {
+    const resolved = this.resolveRequest(input);
     return await this.provider.create({
-      projectId: requireValue(input.projectId, "projectId"),
-      runtime: input.runtime,
-      cols: input.cols,
-      rows: input.rows,
-      name: input.name,
-      shell: input.shell,
-      cwd: input.cwd,
+      ...input,
+      scope: resolved.scope,
+      projectId: resolved.projectId,
+      sessionId: resolved.session?.id,
       source: input.source ?? "user",
-      sessionId: input.sessionId,
     });
   }
 
-  async list(
-    options: ListDaemonTerminalsOptions = {},
-  ): Promise<TerminalSessionInfo[]> {
+  async list(options: ListDaemonTerminalsOptions = {}): Promise<TerminalSessionInfo[]> {
     return (await this.provider.list()).filter((terminal) => {
-      if (options.projectId && terminal.projectId !== options.projectId)
-        return false;
-      if (options.sessionId && terminal.sessionId !== options.sessionId)
-        return false;
+      if (options.projectId && terminal.projectId !== options.projectId) return false;
+      if (options.sessionId && terminal.sessionId !== options.sessionId) return false;
       if (options.source && terminal.source !== options.source) return false;
       return true;
     });
   }
 
   async get(terminalId: string): Promise<TerminalSessionInfo> {
-    const terminal = (await this.provider.list()).find(
-      (item) => item.id === terminalId,
-    );
-    if (!terminal)
-      throw new DaemonTerminalError(
-        404,
-        `Terminal ${terminalId} does not exist.`,
-      );
+    const terminal = (await this.provider.list()).find((item) => item.id === terminalId);
+    if (!terminal) throw new DaemonTerminalError(404, `Terminal ${terminalId} does not exist.`);
     return terminal;
   }
 
@@ -116,45 +125,123 @@ export class DaemonTerminalService {
   }
 
   createAgentHost(rootSession: SessionRecord): AgentTerminalHost {
-    const projectId = rootSession.projectId;
-    if (!projectId) {
-      throw new DaemonTerminalError(
-        400,
-        `Session ${rootSession.id} is not attached to a project.`,
-      );
-    }
     return {
-      open: async (input) =>
-        await this.provider.create({
-          projectId,
-          runtime: "local",
-          cols: input.cols ?? 100,
-          rows: input.rows ?? 30,
-          name: input.name ?? "Agent terminal",
-          shell: input.shell,
-          cwd: input.cwd,
-          source: "agent",
-          sessionId: input.sessionId,
-        }),
+      open: async (input) => await this.create({
+        scope: { kind: "session", sessionId: rootSession.id },
+        runtime: "sandbox",
+        cols: input.cols ?? 100,
+        rows: input.rows ?? 30,
+        name: input.name ?? "Agent terminal",
+        shell: input.shell,
+        cwd: input.cwd,
+        source: "agent",
+      }),
     };
   }
 
   async dispose(): Promise<void> {
     await this.provider.dispose();
   }
-}
 
-export class DaemonTerminalError extends ApplicationError {
-  constructor(
-    status: number,
-    message: string,
-  ) {
-    super(status, message);
-    this.name = "DaemonTerminalError";
+  private resolveRequest(input: TerminalCreateRequest): ResolvedTerminalRequest {
+    const scope = input.scope ?? (
+      input.sessionId
+        ? { kind: "session" as const, sessionId: input.sessionId }
+        : input.projectId
+          ? { kind: "project" as const, projectId: input.projectId }
+          : undefined
+    );
+    if (!scope) throw new DaemonTerminalError(400, "Terminal scope is required.");
+
+    let cwd: string;
+    let projectId: string | undefined;
+    let session: SessionRecord | undefined;
+    if (scope.kind === "session") {
+      session = this.store.getSession(scope.sessionId);
+      if (!session) throw new DaemonTerminalError(404, `Session not found: ${scope.sessionId}`);
+      projectId = session.projectId;
+      if (input.sessionId && input.sessionId !== session.id) {
+        throw new DaemonTerminalError(400, `Terminal sessionId does not match scope ${scope.sessionId}.`);
+      }
+      if (input.projectId && session.projectId !== input.projectId) {
+        throw new DaemonTerminalError(
+          400,
+          `Session ${session.id} does not belong to project ${input.projectId}.`,
+        );
+      }
+      cwd = session.cwd;
+    } else {
+      projectId = scope.projectId;
+      const project = this.store.getProject(projectId);
+      if (!project) throw new DaemonTerminalError(404, `Project not found: ${projectId}`);
+      cwd = project.path;
+      if (input.sessionId) {
+        session = this.store.getSession(input.sessionId);
+        if (!session || session.projectId !== projectId) {
+          throw new DaemonTerminalError(400, `Session ${input.sessionId} does not belong to project ${projectId}.`);
+        }
+        if (resolve(session.cwd) !== resolve(cwd)) {
+          throw new DaemonTerminalError(400, "Terminal session and project cwd do not match.");
+        }
+      }
+    }
+    if (input.cwd && resolve(input.cwd) !== resolve(cwd)) {
+      throw new DaemonTerminalError(400, "Terminal cwd does not match its trusted scope.");
+    }
+    return {
+      scope,
+      cwd,
+      ...(projectId ? { projectId } : {}),
+      ...(session ? { session } : {}),
+    };
+  }
+
+  private async resolveEnvironmentTarget(input: TerminalCreateRequest, terminalId: string) {
+    if (!this.options.getSettingsForCwd || !this.options.acquireEnvironment) {
+      throw new DaemonTerminalError(503, "Sandbox terminal environment is not configured.");
+    }
+    const resolved = this.resolveRequest(input);
+    const session = resolved.session ?? ({
+      id: `terminal:${terminalId}`,
+      cwd: resolved.cwd,
+      ...(resolved.projectId ? { projectId: resolved.projectId } : {}),
+    } as SessionRecord);
+    const settings = await this.options.getSettingsForCwd(resolved.cwd);
+    const lease = await this.options.acquireEnvironment(
+      session,
+      settings,
+      { kind: "terminal", id: terminalId },
+    );
+    try {
+      const target = await lease.terminal.prepare({
+        cwd: lease.workspace.executionRoot,
+        shell: input.shell ?? settings.terminal?.dockerShell,
+        cols: input.cols,
+        rows: input.rows,
+      });
+      let closed = false;
+      return {
+        ...target,
+        close: async () => {
+          if (closed) return;
+          closed = true;
+          try {
+            await target.close();
+          } finally {
+            await lease.release();
+          }
+        },
+      };
+    } catch (error) {
+      await lease.release();
+      throw error;
+    }
   }
 }
 
-function requireValue(value: string, name: string): string {
-  if (!value.trim()) throw new DaemonTerminalError(400, `${name} is required.`);
-  return value.trim();
+export class DaemonTerminalError extends ApplicationError {
+  constructor(status: number, message: string) {
+    super(status, message);
+    this.name = "DaemonTerminalError";
+  }
 }

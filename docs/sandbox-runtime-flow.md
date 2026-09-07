@@ -1,17 +1,18 @@
 # Agent 运行环境与 Docker 调用链
 
-> 状态：第一期实现说明。Desktop 使用统一 `ExecutionEnvironment`；CLI 高级模式继续保留原有 SRT/Docker 能力。
+> 状态：第二期实现说明。Desktop 使用统一 `ExecutionEnvironment` 和共享 lease；CLI 高级模式继续保留原有 SRT/Docker 能力。
 
 ## 1. 两个设置互不混用
 
 - **智能体运行环境**决定 Agent 的命令、脚本和文件工具在哪里执行。Desktop 当前支持“本机”和“Docker 沙箱”。
-- **集成终端 Shell**只决定用户手动打开的本机终端使用哪个 Shell。第一期集成终端不会进入 Docker。
+- **集成终端 Shell**决定新终端在对应环境中使用的 Shell：本机用本机 Shell，Docker 用容器 Shell。用户仍可显式选择“在本机打开”。
 
 因此，选择 Docker 后：
 
 - Agent 看到 Linux、`/bin/sh` 和 `/workspace`；
-- 用户手动打开的集成终端仍在宿主机运行，界面明确标为“本机终端”；
-- `TerminalOpen` 和 Native Plugin Tool 在 Docker Agent 中不可用；
+- 用户默认集成终端和 Agent `TerminalOpen` 使用当前 Docker 环境的真实 PTY；
+- 显式“在本机打开”使用宿主 PTY，不改变 Agent 环境；
+- Native Plugin Tool 在 Docker Agent 中仍不可用；
 - 设置保存后需要重启 OpenHarness，新环境不会伪装成立即生效。
 
 ## 2. Desktop 启动顺序
@@ -27,8 +28,11 @@ Desktop 启动内置 daemon
   → createWorkspaceBinding()
        hostRoot      = Session.cwd
        executionRoot = local ? Session.cwd : /workspace
-  → createExecutionEnvironment()
-       preflight → 创建挂载 → 启动容器 → probe → ready
+  → resolveEnvironmentOwner()
+  → ExecutionEnvironmentManager.acquire()
+       同 owner + 同 configHash → 复用 ready 环境并增加 lease
+       没有环境              → createExecutionEnvironment()
+                                 preflight → 挂载 → 启动容器 → ready
   → 创建 Tool Registry、PermissionChecker 和 system prompt
   → 向模型开放与当前环境兼容的工具
 ```
@@ -36,6 +40,19 @@ Desktop 启动内置 daemon
 项目外会话也走同一条流程。它已有一个位于“文档/OpenHarness/日期/xN”的受管 cwd，该目录直接成为 `hostRoot`，不需要 `projectId` 或另一套 Projectless Runtime。
 
 Docker 不可用、配置不合法或容器启动失败时，环境创建失败，Agent 不会退回宿主执行。
+
+同一个 owner 的 Agent、Agent Terminal、用户环境终端和后台任务共享一个 EnvironmentHandle：
+
+```text
+workspace owner
+  └─ ExecutionEnvironmentManager
+       ├─ Agent lease
+       ├─ Agent Terminal lease
+       ├─ user terminal lease
+       └─ background job lease
+```
+
+关闭一个消费者只释放自己的 lease。最后一个 lease 释放后，临时容器停止并删除；项目复用容器保留，但本次 Runtime 的残留进程会被清理。
 
 ## 3. Docker 路径契约
 
@@ -120,16 +137,14 @@ bundled < plugin < user < project
 
 未声明执行域的扩展工具默认是 `environment + local only`，因此不会意外出现在 Docker Agent 中。Docker `networkMode=none` 时，WebSearch、WebFetch 和远程 MCP 等需要网络的控制面工具会隐藏或拒绝调用。
 
-第一期安全限制：
+当前安全限制：
 
 - Native Plugin Tool Host 不在 Docker 会话中 fork；
-- Agent `TerminalOpen` 不注册；
 - stdio MCP 通过同一个活动 Docker Session 启动；远程 HTTP/SSE MCP 在控制面运行并遵守网络策略；
-- 用户集成终端固定 `runtime: local`。
 
 ## 8. 容器生命周期
 
-Desktop 受管环境按 Session 启动临时容器，关闭 Agent Runtime 时释放。受管挂载会进入配置 hash。
+daemon 持有唯一的内存 `ExecutionEnvironmentManager`。workspace owner 和 config hash 决定环境复用；config hash 不进入容器名。同 owner 有活动 lease 时若请求另一份配置，会返回 `environment_config_in_use`，不会启动第二个版本。
 
 底层 Docker 后端也保留 CLI 的 workspace 复用容器：容器名只由 owner/workspace 决定，不包含配置 hash。发现同名、可确认属于 OpenHarness 且 hash 过期的容器时，删除旧容器并按最新配置重建，不同时保留多个版本。无法确认 owner 的同名容器不会被删除，启动会 fail-closed。
 
@@ -154,12 +169,27 @@ CLI `cli_advanced`：
 ```bash
 pnpm --filter @openharness/sandbox e2e:docker
 pnpm --filter @openharness/tools e2e:docker
+pnpm --filter @openharness/terminal-node e2e:docker
 ```
 
-覆盖 `/workspace` cwd、容器内 Shell、五个文件工具、工作区/用户 Skills 双向写入、未挂载路径拒绝、容器复用与最新配置替换、网络隔离和进程清理。外网 bridge 用例仅在显式设置 `OPENHARNESS_E2E_DOCKER_NETWORK=1` 时运行。
+覆盖 `/workspace` cwd、容器内 Shell、五个文件工具、工作区/用户 Skills 双向写入、未挂载路径拒绝、容器复用与最新配置替换、网络隔离和进程清理。PTY E2E 额外覆盖 `tty -s`、输入输出、resize、Ctrl-C、EOF、terminate 和关闭单个终端后 Agent lease 继续工作。外网 bridge 用例仅在显式设置 `OPENHARNESS_E2E_DOCKER_NETWORK=1` 时运行。
 
-## 11. 后续阶段
+## 11. 交互终端调用链
 
-第二期实现 Docker PTY、Agent Terminal 与默认用户终端跟随 Agent 环境、session/project 终端作用域和共享容器 lease。
+```text
+TerminalCreateRequest(scope=session|project, runtime=local|sandbox)
+  → DaemonTerminalService 从 Store 解析可信 cwd
+  ├─ local   → host EnvironmentPtyTarget → node-pty
+  └─ sandbox → Manager.acquire(terminal lease)
+                 → environment.terminal.prepare()
+                 → docker exec -it -w /workspace
+                 → node-pty
+```
+
+Docker PTY 用 `OPENHARNESS_PTY_ID` 标识容器内 shell。resize 通过该 ID 找到目标 PTY 并设置 `stty rows/cols`；Ctrl-C 和 EOF 写入控制字符；terminate 只停止该终端的容器进程并释放它自己的 lease。
+
+Terminal HTTP 新客户端发送显式判别 scope。旧请求只有 projectId 或 sessionId 时仍可解析；两者同时出现时，服务验证 Session 确实属于 Project 且 cwd 一致。Renderer 传入的 cwd 不能覆盖 Store 中的可信 cwd。
+
+## 12. 后续阶段
 
 第三期实现运行中 draining/switching、持久化切换恢复、孤儿清理和更完整的热刷新。仍只保留单一最新容器版本，不支持旧环境并存。

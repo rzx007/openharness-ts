@@ -195,7 +195,7 @@ function findExecutable(command: string): string | undefined {
   const pathEnv = process.env.PATH;
   if (!pathEnv) return undefined;
   const extensions = process.platform === "win32"
-    ? ["", ".exe", ".cmd", ".bat"]
+    ? [".exe", ".cmd", ".bat", ""]
     : [""];
   for (const dir of pathEnv.split(delimiter)) {
     for (const ext of extensions) {

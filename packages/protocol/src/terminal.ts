@@ -5,8 +5,14 @@ export type TerminalSessionStatus = JobStatus;
 export type TerminalSource = "user" | "agent";
 export type TerminalSignal = "interrupt" | "eof" | "terminate";
 
+export type TerminalScope =
+  | { kind: "project"; projectId: string }
+  | { kind: "session"; sessionId: string };
+
 export interface TerminalCreateRequest {
-  projectId: string;
+  /** New callers must provide scope. Optional only for the HTTP legacy adapter. */
+  scope?: TerminalScope;
+  projectId?: string;
   runtime: TerminalRuntime;
   cols: number;
   rows: number;
@@ -21,7 +27,8 @@ export interface TerminalCreateRequest {
 export interface TerminalSessionInfo {
   id: string;
   name: string;
-  projectId: string;
+  scope: TerminalScope;
+  projectId?: string;
   runtime: TerminalRuntime;
   source: TerminalSource;
   sessionId?: string;

@@ -69,6 +69,29 @@ export interface EnvironmentProcessExecutor {
   ): Promise<EnvironmentProcess>;
 }
 
+export interface EnvironmentTerminalPrepareOptions {
+  cwd?: string;
+  shell?: string;
+  cols: number;
+  rows: number;
+}
+
+export interface EnvironmentPtyTarget {
+  command: string;
+  args: string[];
+  hostCwd: string;
+  executionCwd: string;
+  shell: string;
+  env?: Record<string, string>;
+  resize?(cols: number, rows: number): Promise<void>;
+  signal(signal: "interrupt" | "terminate"): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface EnvironmentTerminalFactory {
+  prepare(input: EnvironmentTerminalPrepareOptions): Promise<EnvironmentPtyTarget>;
+}
+
 export interface EnvironmentFileStat {
   isFile: boolean;
   isDirectory: boolean;
@@ -113,9 +136,24 @@ export interface ExecutionEnvironmentHandle {
   readonly info: EffectiveEnvironmentInfo;
   readonly workspace: WorkspaceBinding;
   readonly process: EnvironmentProcessExecutor;
+  readonly terminal: EnvironmentTerminalFactory;
   readonly files: EnvironmentFileSystem;
   readonly paths: EnvironmentPathResolver;
   release(): Promise<void>;
+}
+
+export type ExecutionEnvironmentConsumerKind = "agent" | "terminal" | "background";
+
+export interface ExecutionEnvironmentConsumer {
+  kind: ExecutionEnvironmentConsumerKind;
+  id: string;
+}
+
+export interface ExecutionEnvironmentLease extends ExecutionEnvironmentHandle {
+  readonly environmentId: string;
+  readonly ownerId: string;
+  readonly leaseId: string;
+  readonly consumer: ExecutionEnvironmentConsumer;
 }
 
 export type ToolExecutionDomain = "environment" | "control_plane";

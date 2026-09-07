@@ -34,6 +34,14 @@ export {
   resolveExecutionEnvironmentConfig,
 } from "./execution-config.js";
 export { createExecutionEnvironment } from "./execution-environment.js";
+export {
+  ExecutionEnvironmentManager,
+  ExecutionEnvironmentManagerError,
+} from "./execution-environment-manager.js";
+export type {
+  AcquireExecutionEnvironmentRequest,
+  ExecutionEnvironmentInspection,
+} from "./execution-environment-manager.js";
 export type {
   CreateExecutionEnvironmentDependencies,
   CreateExecutionEnvironmentInput,
@@ -71,6 +79,7 @@ export {
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
 export {
   buildDockerExecArgs,
+  buildDockerPtyTarget,
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
@@ -90,8 +99,10 @@ export {
   toContainerWorkspacePath,
 } from "./docker-backend.js";
 export type { DockerBuildArgsOptions, DockerExecArgsOptions, DockerRunArgsOptions } from "./docker-backend.js";
+export type { DockerPtyTargetOptions } from "./docker-backend.js";
 export {
   getActiveSandboxSession,
+  acquireSandboxSessionAlias,
   isSandboxSessionActive,
   setActiveSandboxSession,
   stopActiveSandboxSession,

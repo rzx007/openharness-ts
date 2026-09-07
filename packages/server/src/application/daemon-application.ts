@@ -12,6 +12,7 @@ import {
   type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
+import { ExecutionEnvironmentManager } from "@openharness/sandbox";
 import {
   readSessionRuntimeConfig,
   type AttachmentLimits,
@@ -44,6 +45,7 @@ import { ScheduledTaskService } from "../daemon/scheduled-task-service.js";
 import { DaemonJobService } from "../jobs/daemon-job-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
 import { DaemonTerminalService } from "../terminal/daemon-terminal-service.js";
+import { createSessionEnvironmentAcquirer } from "../runtime/session-execution-environment.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
@@ -152,6 +154,10 @@ export interface DurableAgentApplication {
   close(): Promise<void>;
 }
 
+function failMissingSettings(): never {
+  throw new Error("Agent settings are not configured");
+}
+
 /**
  * daemon 的装配根：把「会话记录、活 Agent、投影、跑 prompt 的车道」接成一张图。
  * 不管听端口、不管路由；`POST /prompts` 最终会进这里的 sessions.admitPrompt。
@@ -178,6 +184,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
   private readonly attachmentResources: SessionAttachmentResources;
+  private readonly environmentManager = new ExecutionEnvironmentManager();
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -282,7 +289,16 @@ export class DaemonApplication implements DurableAgentApplication {
           operationGate: this.attachments.operationGate,
         }),
       );
-      this.terminals = new DaemonTerminalService(store);
+      const acquireSessionEnvironment = options.executionSurface === "desktop_managed"
+        ? createSessionEnvironmentAcquirer({ manager: this.environmentManager, store })
+        : undefined;
+      this.terminals = new DaemonTerminalService(store, {
+        getSettingsForCwd: async (cwd) =>
+          options.getSettingsForCwd
+            ? await options.getSettingsForCwd(cwd)
+            : options.getSettings?.() ?? options.settings ?? failMissingSettings(),
+        acquireEnvironment: acquireSessionEnvironment,
+      });
       this.projects = new ProjectApplicationService(store);
       this.permissions = new StorePermissionBroker({
         store,
@@ -307,6 +323,11 @@ export class DaemonApplication implements DurableAgentApplication {
         getDetachedProcessSupervisor: (scope) =>
           getDetachedProcessSupervisor(scope),
         events: this.eventPublisher,
+        getSettingsForCwd: async (cwd) =>
+          options.getSettingsForCwd
+            ? await options.getSettingsForCwd(cwd)
+            : options.getSettings?.() ?? options.settings ?? failMissingSettings(),
+        acquireEnvironment: acquireSessionEnvironment,
       });
       // JobWait / JobList 走这里：终端、后台 shell、子 Agent、workflow 合成一张本会话任务表。
       this.jobs = new DaemonJobService(
@@ -345,6 +366,7 @@ export class DaemonApplication implements DurableAgentApplication {
         getSettings: options.getSettings,
         getSettingsForCwd: options.getSettingsForCwd,
         createAgent: options.createAgent,
+        acquireEnvironment: acquireSessionEnvironment,
         createTerminal:
           options.createTerminal ??
           ((session) => ({
@@ -909,6 +931,11 @@ export class DaemonApplication implements DurableAgentApplication {
     }
     try {
       await closeExecutionRuntimes();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.environmentManager.dispose();
     } catch (error) {
       failures.push(error);
     }

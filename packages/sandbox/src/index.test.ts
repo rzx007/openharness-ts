@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   detectSandboxPlatform,
   buildDockerExecArgs,
+  buildDockerPtyTarget,
   buildDockerBuildArgs,
   buildDockerImageInspectArgs,
   buildDockerRunArgs,
@@ -34,6 +35,7 @@ import {
   getActiveSandboxSession,
   isSandboxSessionActive,
   setActiveSandboxSession,
+  acquireSandboxSessionAlias,
   toContainerWorkspacePath,
 } from "./index.js";
 
@@ -556,6 +558,56 @@ describe("docker backend argv builders", () => {
     });
 
     expect(argv[argv.indexOf("-w") + 1]).toBe("/workspace/src");
+  });
+
+  it("keeps a shared session alias until its final reference releases", () => {
+    const cwd = resolve("D:/shared-repo");
+    const session = {
+      backend: "docker" as const,
+      cwd,
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+    };
+    setActiveSandboxSession(session, { cwd, sessionId: "root" });
+
+    const first = acquireSandboxSessionAlias({ cwd, sourceSessionId: "root", targetSessionId: "child" });
+    const second = acquireSandboxSessionAlias({ cwd, sourceSessionId: "root", targetSessionId: "child" });
+    expect(getActiveSandboxSession({ cwd, sessionId: "child" })).toBe(session);
+    first();
+    expect(getActiveSandboxSession({ cwd, sessionId: "child" })).toBe(session);
+    second();
+    expect(getActiveSandboxSession({ cwd, sessionId: "child" })).toBeNull();
+  });
+
+  it("builds a Docker PTY target with separate host and execution cwd", () => {
+    const target = buildDockerPtyTarget({
+      dockerCommand: "docker",
+      containerName: "ohs-project",
+      hostCwd: "D:\\code\\ohs",
+      executionCwd: "/workspace",
+      shell: "/bin/sh",
+      executionId: "terminal-1",
+      signal: async () => {},
+      close: async () => {},
+    });
+
+    expect(target).toMatchObject({
+      command: "docker",
+      hostCwd: "D:\\code\\ohs",
+      executionCwd: "/workspace",
+      shell: "/bin/sh",
+    });
+    expect(target.args.slice(0, 4)).toEqual([
+      "exec",
+      "-it",
+      "-w",
+      "/workspace",
+    ]);
+    expect(target.args).toContain("OPENHARNESS_PTY_ID=terminal-1");
+    expect(target.args).toContain("ohs-project");
+    expect(target.args).toContain("/bin/sh");
+    expect(target.args).toContain("-i");
   });
 
   it("maps host paths to Docker workspace paths", () => {

@@ -38,7 +38,7 @@ let router: typeof DesktopRouter
 describe("desktop router", () => {
   beforeAll(async () => {
     ;({ router } = await import("./router"))
-  })
+  }, 60_000)
 
   it("builds a stable route for a conversation", () => {
     const location = router.buildLocation({

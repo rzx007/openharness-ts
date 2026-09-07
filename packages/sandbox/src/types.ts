@@ -1,5 +1,6 @@
 import type { ChildProcess, StdioOptions } from "node:child_process";
 import type { SandboxConfig, Settings } from "@openharness/core";
+import type { EnvironmentPtyTarget, EnvironmentTerminalPrepareOptions } from "@openharness/environment";
 
 export type SandboxBackend = "srt" | "docker";
 export type SandboxPlatform = "linux" | "wsl" | "macos" | "windows" | "unknown";
@@ -139,6 +140,7 @@ export interface SandboxSession {
   stopSync?(): void;
   wrapCommand?(argv: string[]): Promise<{ argv: string[]; cleanup?: () => Promise<void> }>;
   execCommand?(argv: string[], options: ShellSpawnOptions): Promise<ChildProcess>;
+  preparePtyTarget?(input: EnvironmentTerminalPrepareOptions): Promise<EnvironmentPtyTarget>;
 }
 
 export interface ValidateSandboxPathOptions {

@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { SandboxSession } from "./types.js";
 
 const activeSessions = new Map<string, SandboxSession>();
+const aliasReferences = new Map<string, { session: SandboxSession; count: number }>();
 let lastActiveKey: string | null = null;
 
 export interface SandboxSessionScope {
@@ -47,6 +48,7 @@ export function setActiveSandboxSession(
       return;
     }
     activeSessions.clear();
+    aliasReferences.clear();
     lastActiveKey = null;
     return;
   }
@@ -54,6 +56,44 @@ export function setActiveSandboxSession(
   const key = keyForScope(scope ?? session.cwd);
   activeSessions.set(key, session);
   lastActiveKey = key;
+}
+
+export function acquireSandboxSessionAlias(input: {
+  cwd: string;
+  sourceSessionId: string;
+  targetSessionId: string;
+}): () => void {
+  if (input.sourceSessionId === input.targetSessionId) return () => {};
+  const source = getActiveSandboxSession({ cwd: input.cwd, sessionId: input.sourceSessionId });
+  if (!source) throw new Error(`Source sandbox session is not active: ${input.sourceSessionId}`);
+  const targetScope = { cwd: input.cwd, sessionId: input.targetSessionId };
+  const targetKey = keyForScope(targetScope);
+  const existing = activeSessions.get(targetKey);
+  if (existing && existing !== source) {
+    throw new Error(`Sandbox session alias conflicts with an active session: ${input.targetSessionId}`);
+  }
+  const reference = aliasReferences.get(targetKey);
+  if (reference && reference.session !== source) {
+    throw new Error(`Sandbox session alias belongs to another environment: ${input.targetSessionId}`);
+  }
+  activeSessions.set(targetKey, source);
+  aliasReferences.set(targetKey, {
+    session: source,
+    count: (reference?.count ?? 0) + 1,
+  });
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = aliasReferences.get(targetKey);
+    if (!current || current.session !== source) return;
+    if (current.count > 1) {
+      current.count -= 1;
+      return;
+    }
+    aliasReferences.delete(targetKey);
+    if (activeSessions.get(targetKey) === source) activeSessions.delete(targetKey);
+  };
 }
 
 export function isSandboxSessionActive(scope?: SandboxSessionLookup): boolean {

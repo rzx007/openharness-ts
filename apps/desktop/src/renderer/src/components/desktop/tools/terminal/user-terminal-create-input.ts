@@ -1,14 +1,11 @@
 import type { DesktopTerminalCreateInput } from "@shared/terminal-types"
 
-export function userTerminalCreateInput(input: {
-  projectId: string
-  runtime: DesktopTerminalCreateInput["runtime"]
-  name: string
-  cols: number
-  rows: number
-}): DesktopTerminalCreateInput {
+type UserTerminalCreateInput = Required<Pick<DesktopTerminalCreateInput, "scope">> &
+  Pick<DesktopTerminalCreateInput, "runtime" | "name" | "cols" | "rows">
+
+export function userTerminalCreateInput(input: UserTerminalCreateInput): DesktopTerminalCreateInput {
   return {
-    projectId: input.projectId,
+    scope: input.scope,
     runtime: input.runtime,
     name: input.name,
     cols: input.cols,

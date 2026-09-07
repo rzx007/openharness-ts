@@ -87,6 +87,46 @@ describe("createExecutionEnvironment", () => {
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
+  it("prepares Docker terminals only for mounted cwd and configured shells", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "ohs-environment-terminal-"));
+    roots.push(workspace);
+    const preparePtyTarget = vi.fn(async (input) => ({
+      command: "docker",
+      args: ["exec", "-it"],
+      hostCwd: workspace,
+      executionCwd: input.cwd,
+      shell: input.shell,
+      signal: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    }));
+    const settings = baseSettings({
+      terminal: { dockerShell: "/bin/bash" },
+      sandbox: { enabled: true, backend: "docker" },
+    });
+    const handle = await createExecutionEnvironment({
+      config: resolveExecutionEnvironmentConfig({ surface: "desktop_managed", settings, cwd: workspace }),
+      settings,
+      binding: createWorkspaceBinding({ kind: "docker", hostRoot: workspace, executionRoot: "/workspace" }),
+      sessionId: "session-terminal",
+      userSkillsRoot: join(workspace, "skills"),
+    }, {
+      startSandboxRuntime: vi.fn(async () => ({
+        status: { state: "active", enabled: true, active: true, backend: "docker" },
+        session: { preparePtyTarget } as any,
+        stop: vi.fn(async () => {}),
+        stopSync: vi.fn(),
+      })),
+    });
+
+    await handle.terminal.prepare({ cwd: "/workspace/src", cols: 100, rows: 30 });
+    expect(preparePtyTarget).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/workspace/src",
+      shell: "/bin/bash",
+    }));
+    await expect(handle.terminal.prepare({ cwd: "/etc", cols: 100, rows: 30 }))
+      .rejects.toThrow("outside the mounted execution roots");
+  });
+
   it("fails closed when Docker startup fails", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "ohs-environment-fail-"));
     roots.push(workspace);

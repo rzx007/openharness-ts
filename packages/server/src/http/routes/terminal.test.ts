@@ -41,7 +41,8 @@ describe("Terminal routes", () => {
     const create = vi.fn(async (input: TerminalCreateRequest): Promise<TerminalSessionInfo> => ({
       id: "terminal-1",
       name: input.name ?? "Terminal",
-      projectId: input.projectId,
+      scope: input.scope ?? { kind: "project", projectId: input.projectId },
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       runtime: input.runtime,
       source: input.source ?? "user",
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -62,6 +63,7 @@ describe("Terminal routes", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        scope: { kind: "session", sessionId: "session-1" },
         projectId: "project-1",
         runtime: "sandbox",
         cols: 120,
@@ -76,6 +78,7 @@ describe("Terminal routes", () => {
 
     expect(response.status).toBe(201);
     expect(create).toHaveBeenCalledWith({
+      scope: { kind: "session", sessionId: "session-1" },
       projectId: "project-1",
       runtime: "sandbox",
       cols: 120,
@@ -94,5 +97,42 @@ describe("Terminal routes", () => {
         sessionId: "session-1",
       },
     });
+  });
+
+  it("accepts a new session-scoped terminal request without projectId", async () => {
+    const create = vi.fn(async (input: TerminalCreateRequest): Promise<TerminalSessionInfo> => ({
+      id: "terminal-outside",
+      name: "Terminal",
+      scope: input.scope!,
+      sessionId: input.scope?.kind === "session" ? input.scope.sessionId : undefined,
+      runtime: input.runtime,
+      source: "user",
+      status: "running",
+      cwd: "/workspace",
+      shell: "/bin/sh",
+      cols: input.cols,
+      rows: input.rows,
+      createdAt: "2026-09-07T00:00:00.000Z",
+    }));
+    const terminals = { create, subscribe: () => () => {} } as unknown as DaemonTerminalService;
+    const app = createTerminalRoutes(terminals, new TerminalHttpEventHub(terminals));
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        scope: { kind: "session", sessionId: "outside-1" },
+        runtime: "sandbox",
+        cols: 100,
+        rows: 30,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      scope: { kind: "session", sessionId: "outside-1" },
+      projectId: undefined,
+      sessionId: undefined,
+    }));
   });
 });

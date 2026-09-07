@@ -191,7 +191,8 @@ describe("protocol serialization", () => {
       decodeTerminalSessionInfo({
         id: "terminal-1",
         name: "Terminal",
-        projectId: "p1",
+        scope: { kind: "session", sessionId: "s1" },
+        sessionId: "s1",
         runtime: "local",
         source: "user",
         status: "running",
@@ -202,6 +203,21 @@ describe("protocol serialization", () => {
         createdAt: "2026-08-22T00:00:00.000Z",
       }).id,
     ).toBe("terminal-1");
+
+    expect(() => decodeTerminalSessionInfo({
+      id: "terminal-2",
+      name: "Terminal",
+      scope: { kind: "session", sessionId: "s1" },
+      sessionId: "different",
+      runtime: "local",
+      source: "user",
+      status: "running",
+      cwd: "/repo",
+      shell: "pwsh",
+      cols: 120,
+      rows: 30,
+      createdAt: "2026-08-22T00:00:00.000Z",
+    })).toThrow("terminal.sessionId must match terminal.scope.sessionId");
 
     expect(
       decodeTerminalEvent({

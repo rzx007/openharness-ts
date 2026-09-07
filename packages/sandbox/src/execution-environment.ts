@@ -10,6 +10,7 @@ import type {
   EnvironmentPathResolver,
   EnvironmentProcess,
   EnvironmentProcessExecutor,
+  EnvironmentTerminalFactory,
   ExecutionEnvironmentHandle,
   ResolvedEnvironmentPath,
   WorkspaceBinding,
@@ -125,6 +126,7 @@ function createLocalHandle(
     },
     workspace: input.binding,
     process: createProcessExecutor(input, dependencies),
+    terminal: createLocalTerminalFactory(input),
     files: unavailableFileSystem(),
     paths: createPathResolver(input.binding, []),
     async release() {},
@@ -162,12 +164,65 @@ function createDockerHandle(
     },
     workspace: input.binding,
     process: createProcessExecutor(input, dependencies, runtime),
+    terminal: createDockerTerminalFactory(input, runtime, managedMounts),
     files: unavailableFileSystem(),
     paths: createPathResolver(input.binding, managedMounts),
     async release() {
       if (released) return;
       released = true;
       await runtime.stop();
+    },
+  };
+}
+
+function createLocalTerminalFactory(
+  input: CreateExecutionEnvironmentInput,
+): EnvironmentTerminalFactory {
+  return {
+    async prepare(options) {
+      const launcher = resolveHostShellLauncher();
+      const command = options.shell?.trim() || input.settings.terminal?.localShell ||
+        (launcher.kind === "posix-sh" ? "/bin/sh" : launcher.bin);
+      return {
+        command,
+        args: [],
+        hostCwd: options.cwd ?? input.binding.hostRoot,
+        executionCwd: options.cwd ?? input.binding.executionRoot,
+        shell: command,
+        async signal() {},
+        async close() {},
+      };
+    },
+  };
+}
+
+function createDockerTerminalFactory(
+  input: CreateExecutionEnvironmentInput,
+  runtime: StartedSandboxRuntime,
+  mounts: readonly ManagedDockerMount[],
+): EnvironmentTerminalFactory {
+  const paths = createPathResolver(input.binding, mounts);
+  return {
+    async prepare(options) {
+      const resolved = await paths.resolve(
+        options.cwd ?? input.binding.executionRoot,
+        "execute",
+      );
+      if (resolved.mountPurpose === "unmounted") {
+        throw new Error(`Terminal cwd is outside the mounted execution roots: ${resolved.executionPath}`);
+      }
+      const shell = options.shell ?? input.settings.terminal?.dockerShell ?? "/bin/sh";
+      if (shell !== "/bin/sh" && shell !== "/bin/bash") {
+        throw new Error(`docker_terminal_shell_unavailable: ${shell}`);
+      }
+      if (!runtime.session?.preparePtyTarget) {
+        throw new Error("Docker execution environment does not provide PTY support");
+      }
+      return runtime.session.preparePtyTarget({
+        ...options,
+        cwd: resolved.executionPath,
+        shell,
+      });
     },
   };
 }

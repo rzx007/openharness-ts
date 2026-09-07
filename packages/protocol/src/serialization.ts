@@ -427,13 +427,35 @@ export function decodeJobWaitResult(value: unknown): JobWaitResult {
 
 export function decodeTerminalSessionInfo(value: unknown): TerminalSessionInfo {
   const terminal = object(value, "terminal");
-  for (const field of ["id", "name", "projectId", "cwd", "shell", "createdAt"] as const) {
+  for (const field of ["id", "name", "cwd", "shell", "createdAt"] as const) {
     stringField(terminal, field, "terminal");
   }
+  const scope = recordField(terminal, "scope", "terminal");
+  const scopeKind = enumField(scope, "kind", "terminal.scope", ["project", "session"] as const);
+  if (scopeKind === "project") {
+    const projectId = stringField(scope, "projectId", "terminal.scope");
+    optionalString(terminal, "projectId", "terminal");
+    if (terminal.projectId !== undefined && terminal.projectId !== projectId) {
+      throw new ProtocolDataError(
+        "terminal.projectId must match terminal.scope.projectId",
+        "terminal.projectId",
+      );
+    }
+  } else {
+    const sessionId = stringField(scope, "sessionId", "terminal.scope");
+    optionalString(terminal, "sessionId", "terminal");
+    if (terminal.sessionId !== undefined && terminal.sessionId !== sessionId) {
+      throw new ProtocolDataError(
+        "terminal.sessionId must match terminal.scope.sessionId",
+        "terminal.sessionId",
+      );
+    }
+  }
+  optionalString(terminal, "projectId", "terminal");
+  optionalString(terminal, "sessionId", "terminal");
   enumField(terminal, "runtime", "terminal", ["local", "sandbox"] as const);
   enumField(terminal, "source", "terminal", ["user", "agent"] as const);
   enumField(terminal, "status", "terminal", ["running", "stopping", "completed", "killed", "failed"] as const);
-  optionalString(terminal, "sessionId", "terminal");
   numberField(terminal, "cols", "terminal");
   numberField(terminal, "rows", "terminal");
   optionalString(terminal, "exitedAt", "terminal");
