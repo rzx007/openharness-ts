@@ -34,6 +34,14 @@ export {
   resolveExecutionEnvironmentConfig,
 } from "./execution-config.js";
 export { createExecutionEnvironment } from "./execution-environment.js";
+export {
+  ExecutionEnvironmentManager,
+  ExecutionEnvironmentManagerError,
+} from "./execution-environment-manager.js";
+export type {
+  AcquireExecutionEnvironmentRequest,
+  ExecutionEnvironmentInspection,
+} from "./execution-environment-manager.js";
 export type {
   CreateExecutionEnvironmentDependencies,
   CreateExecutionEnvironmentInput,

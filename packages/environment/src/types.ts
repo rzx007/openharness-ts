@@ -141,6 +141,20 @@ export interface ExecutionEnvironmentHandle {
   release(): Promise<void>;
 }
 
+export type ExecutionEnvironmentConsumerKind = "agent" | "terminal" | "background";
+
+export interface ExecutionEnvironmentConsumer {
+  kind: ExecutionEnvironmentConsumerKind;
+  id: string;
+}
+
+export interface ExecutionEnvironmentLease extends ExecutionEnvironmentHandle {
+  readonly environmentId: string;
+  readonly ownerId: string;
+  readonly leaseId: string;
+  readonly consumer: ExecutionEnvironmentConsumer;
+}
+
 export type ToolExecutionDomain = "environment" | "control_plane";
 
 export function createWorkspaceBinding(
