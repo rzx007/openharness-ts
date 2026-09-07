@@ -23,6 +23,7 @@ OpenHarness Desktop 的设置页计划提供两项职责不同、但相互关联
 6. Agent Terminal 必须始终跟随 Agent 运行环境，不能通过终端绕开 Docker 沙箱。
 7. Windows 上的项目目录挂载到 Docker 的 `/workspace`。Docker 内的 Agent 命令统一使用 Linux 路径和 `/bin/sh` 语法。
 8. Docker 不可用时必须明确失败，不能静默回退到宿主机。
+9. 当前阶段将整个用户级 Skill 目录读写挂载到 Docker，优先保证 Skill 引用、脚本和资源的兼容性；接受其跨项目、跨会话持久修改风险，后续再收紧为只读或按需暴露。
 
 ## 3. 术语
 
@@ -205,7 +206,57 @@ Agent 依赖系统提示词中的环境事实决定生成 Windows 命令还是 L
 
 “宿主环境”和“执行环境”必须分开描述。Docker 模式下只告诉 Agent“宿主是 Windows”，却不告诉它命令实际在 Linux 中运行，会导致 Agent 生成错误的 PowerShell 命令或 `D:\...` 路径。
 
-## 7. 自然语言文件请求
+## 7. 用户级 Skill 在 Docker 中的访问
+
+用户级 Skill 默认存放在宿主配置目录：
+
+```text
+~/.openharness-ts/skills
+```
+
+Skill 的发现、注册和 `SKILL.md` 读取继续由宿主 Agent 控制程序完成。为了让 Docker 内的 Agent 命令能够直接读取 Skill 的 `references`、执行 `scripts` 并使用 `assets`，当前阶段在启动容器时挂载整个用户级 Skill 目录：
+
+```text
+宿主：~/.openharness-ts/skills
+容器：/opt/openharness/skills
+模式：读写
+```
+
+Agent 在 Docker 中加载 Skill 后，收到的 `Skill root` 必须是容器路径 `/opt/openharness/skills/<skill-name>`，不能继续返回宿主 Windows 路径。Skill 脚本默认从该目录读取资源；任务产物仍应优先写入 `/workspace` 或容器 `/tmp`。
+
+### 7.1 当前阶段接受的风险
+
+读写挂载意味着 Docker 内的 Agent 可以修改、创建或删除用户级 Skill，并且变更立即持久化到宿主机。这些修改会影响其他项目和后续会话，风险范围大于普通项目文件。
+
+当前阶段明确接受这项风险，以换取以下能力：
+
+- Skill 中引用的相对路径可以直接使用；
+- Skill 附带脚本无需额外复制即可运行和更新；
+- 用户可以让 Agent 安装、修改和调试用户级 Skill；
+- 项目级复用容器不需要在每次 Skill 调用时重新挂载。
+
+### 7.2 当前阶段最低防护
+
+即使采用读写挂载，也必须保留以下约束：
+
+- 只挂载用户级 `skills` 子目录，不能挂载整个 `~/.openharness-ts`；
+- 不把 `credentials.json`、数据库、会话记录、用户配置或其他宿主目录暴露给容器；
+- 用户级 Skill 不得存放密码、Token、私钥等秘密；
+- 环境提示词明确说明用户级 Skill 是宿主持久资源，修改会影响其他项目和未来会话；
+- Docker 不可用时，Skill 脚本不得静默回退到宿主机执行。
+
+必须明确：读写挂载本身已经把修改能力交给容器。普通 Shell 命令无法可靠判断是在修改项目还是用户级 Skill，因此当前阶段不能承诺对每次 Skill 修改单独触发路径级审批；这属于本阶段接受的风险，而不是已有安全保护。
+
+### 7.3 后续安全演进
+
+后续可以在不改变 Skill 目录结构的前提下，将挂载策略收紧为：
+
+1. 整个用户级 Skill 目录只读挂载；或
+2. 只把当前调用的 Skill 按需、只读暴露给容器。
+
+这两项属于后续安全增强，不作为当前阶段的交付要求。
+
+## 8. 自然语言文件请求
 
 Docker 模式下，未指定明确路径的文件请求默认以 `/workspace` 为范围。
 
@@ -236,7 +287,7 @@ Docker 容器没有 Windows 桌面概念。按当前产品期望，Agent 应：
 
 仅有一次权限批准不能让容器凭空访问未挂载的目录。
 
-## 8. 失败策略
+## 9. 失败策略
 
 用户选择 Docker 沙箱意味着用户依赖这个隔离边界，因此应采用 fail-closed 策略：Docker 不可用时停止执行并明确报错。
 
@@ -248,7 +299,7 @@ Docker 不可用   → 报错并提示检查 Docker
 
 这条规则必须覆盖 Shell、后台进程、文件工具、Agent Terminal、Hook、Cron、LSP 和 MCP stdio，不能只覆盖普通 `Bash`。
 
-## 9. 当前实现
+## 10. 当前实现
 
 当前已经具备：
 
@@ -266,8 +317,9 @@ Docker 不可用   → 报错并提示检查 Docker
 3. Agent Terminal 同样固定传入 `runtime: "local"`，因此可能绕过 Agent 的 Docker 执行边界。
 4. Agent 系统提示词目前主要根据宿主机生成环境信息。Windows + Docker 模式下，模型可能收到 Windows、PowerShell 和宿主绝对路径，但命令实际由容器 `/bin/sh` 执行。
 5. Docker 设置允许不可用时降级到宿主机；作为桌面“运行环境”选择使用时，需要强制 fail-closed。
+6. 用户级 Skill 目前由宿主发现并读取，但整个用户 Skill 目录尚未以读写方式挂载到 Docker，Skill 附带的引用、脚本和资源不能保证在容器中可访问。
 
-## 10. 目标行为矩阵
+## 11. 目标行为矩阵
 
 | 操作 | 本机环境 | Docker 沙箱环境 |
 |---|---|---|
@@ -280,10 +332,11 @@ Docker 不可用   → 报错并提示检查 Docker
 | LSP/MCP stdio | 宿主进程 | 容器进程 |
 | 默认用户集成终端 | 用户选择的本机 Shell | 用户选择的容器 Shell，工作目录为 `/workspace` |
 | 显式宿主终端 | 用户选择的本机 Shell | 用户选择的本机 Shell，不改变 Agent 环境 |
+| 用户级 Skill | 直接访问宿主 Skill 目录 | `/opt/openharness/skills` 读写挂载 |
 | Git worktree 管理 | 宿主机 | 宿主机 |
 | Desktop/daemon | 宿主机 | 宿主机 |
 
-## 11. UI 文案建议
+## 12. UI 文案建议
 
 为了减少歧义，可以把设置项写成：
 
@@ -309,22 +362,22 @@ Docker 选项可补充说明：
 └─ 在本机打开
 ```
 
-## 12. 验收标准
+## 13. 验收标准
 
-### 12.1 环境信息
+### 13.1 环境信息
 
 - 本机模式下，Agent 看见宿主 OS、Shell 和宿主工作目录。
 - Docker 模式下，Agent 看见 Linux、`/bin/sh` 和 `/workspace`。
 - Docker 模式同时标明宿主 OS，但不能让宿主信息覆盖有效执行环境。
 
-### 12.2 执行边界
+### 13.2 执行边界
 
 - Docker 模式下，`Bash`、后台命令和 Agent Terminal 均能通过 `pwd` 得到 `/workspace`。
 - Docker 模式下，通过 Agent Terminal 创建文件后，文件出现在挂载的宿主项目目录中。
 - Docker 模式下，Agent 无法通过任何命令或文件工具访问未挂载的 Windows 桌面。
 - Docker 不可用时，Agent 工具明确失败，宿主机上没有对应命令被启动。
 
-### 12.3 终端一致性与显式例外
+### 13.3 终端一致性与显式例外
 
 - Docker Agent 环境下，新建的默认用户集成终端进入同一个容器，并以 `/workspace` 为工作目录。
 - Docker Agent 环境下，用户集成终端只能选择镜像中可用的 `/bin/sh` 或 `/bin/bash`。
@@ -334,16 +387,25 @@ Docker 选项可补充说明：
 - Agent TerminalOpen 不提供宿主例外，Docker 模式下必须始终进入当前 Agent 容器。
 - 有活跃任务时不能切换 Agent 环境；切换不会迁移已经打开的终端会话。
 
-### 12.4 自然语言路径
+### 13.4 自然语言路径
 
 - Docker 模式下，“查找文档”等未指定路径的请求以 `/workspace` 为默认范围。
 - Docker 模式下，“我的桌面”等宿主语义不会触发对真实 Windows 桌面的访问。
 - 回复中明确说明实际查找的是沙箱工作区。
 
-## 13. 不在本设计范围内
+### 13.5 用户级 Skill
+
+- Docker 中可以通过 `/opt/openharness/skills` 访问完整用户级 Skill 目录。
+- Skill 工具在 Docker 环境返回容器可用的 `Skill root`，不返回无法使用的宿主绝对路径。
+- 修改用户级 Skill 后，宿主目录立即看到相同变更，后续 Agent Runtime 能加载新内容。
+- 容器不能借助该挂载访问 `~/.openharness-ts` 下除 `skills` 以外的文件。
+- Docker 不可用时，用户级 Skill 脚本不会在宿主机上执行。
+
+## 14. 不在本设计范围内
 
 - 自动挂载 Windows 桌面、下载目录或整个用户目录；
 - 在 Docker 镜像内安装 PowerShell；
 - 自动把显式创建的本机终端切换回 Docker；
 - 把 Desktop、daemon 或完整 Agent 控制程序迁入 Docker；
 - 在 Shell 工具层翻译 PowerShell 与 POSIX 命令。
+- 当前阶段实现用户级 Skill 的只读挂载或按需暴露。
