@@ -1,4 +1,4 @@
-import { ChevronDown, Code2, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { ChevronDown, SlidersHorizontal } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card"
@@ -23,6 +23,9 @@ import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
 import { AttachmentStorageSettings } from "./attachment-storage-settings"
 import { RuntimeSettingControl } from "./runtime-setting-control"
+import { DefaultOpenerControl } from "./default-opener-control"
+import { DefaultTerminalShellControl } from "./default-terminal-shell-control"
+import { errorMessage } from "./settings-error-message"
 import { AppearanceSettings } from "@renderer/components/appearance/appearance-settings"
 import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
 import type { DesktopNotificationMode, DesktopWorkStyle } from "@shared/settings-types"
@@ -131,7 +134,7 @@ function GeneralSettings(): React.JSX.Element {
         <SettingRow
           title="默认文件打开目标"
           description="选择打开代码文件和文件夹时使用的应用"
-          control={<SettingSelect icon={<Code2 />} label="VS Code" />}
+          control={<DefaultOpenerControl />}
         />
         <Separator />
         <SettingRow
@@ -143,7 +146,7 @@ function GeneralSettings(): React.JSX.Element {
         <SettingRow
           title="集成终端 Shell"
           description="选择新终端默认打开的 Shell"
-          control={<SettingSelect icon={<TerminalSquare />} label="PowerShell" />}
+          control={<DefaultTerminalShellControl />}
         />
         <Separator />
         <SettingRow
@@ -350,10 +353,6 @@ function NotificationModeControl(): React.JSX.Element {
       ) : null}
     </div>
   )
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function SettingsSection({

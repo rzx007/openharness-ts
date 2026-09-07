@@ -28,6 +28,7 @@ import type {
   DesktopTerminalRecord,
 } from "@shared/terminal-types"
 
+import { userTerminalCreateInput } from "./user-terminal-create-input"
 import { getXtermTheme } from "./xterm-theme"
 
 type TerminalDataEvent = Extract<DesktopTerminalEvent, { type: "data" }>
@@ -244,16 +245,15 @@ export function TerminalTool({
       const name = preferredName ?? nextTerminalName(currentRecords, project.id)
 
       try {
-        const nextRecord = await window.desktop.terminal.create({
-          projectId: project.id,
-          runtime: runtimeMode,
-          name,
-          ...(runtimeMode === "local" && project.defaultShell
-            ? { shell: project.defaultShell }
-            : {}),
-          cols: terminal.cols || 80,
-          rows: terminal.rows || 24,
-        })
+        const nextRecord = await window.desktop.terminal.create(
+          userTerminalCreateInput({
+            projectId: project.id,
+            runtime: runtimeMode,
+            name,
+            cols: terminal.cols || 80,
+            rows: terminal.rows || 24,
+          })
+        )
         setRecords((current) => [
           ...current.filter((record) => record.id !== nextRecord.id),
           nextRecord,

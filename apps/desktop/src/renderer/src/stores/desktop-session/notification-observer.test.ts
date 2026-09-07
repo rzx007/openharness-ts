@@ -16,6 +16,8 @@ describe("notifyForSessionViewChange", () => {
     notificationMode: "when_unfocused" as const,
     agentEnvironment: "local" as const,
     restartRequired: false,
+    defaultOpenerId: null,
+    defaultTerminalShellId: null,
   }))
 
   beforeEach(() => {
@@ -82,6 +84,8 @@ describe("notifyForSessionViewChange", () => {
       notificationMode: "never",
       agentEnvironment: "local",
       restartRequired: false,
+      defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
 
     await notifyForSessionViewChange({
@@ -98,6 +102,8 @@ describe("notifyForSessionViewChange", () => {
       notificationMode: "always",
       agentEnvironment: "local",
       restartRequired: false,
+      defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
 
     await notifyForSessionViewChange({

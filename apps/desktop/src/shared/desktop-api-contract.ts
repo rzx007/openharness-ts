@@ -33,7 +33,9 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
+  GetDesktopContextUsageInput,
 } from "./session-types"
+import type { DesktopContextUsageSnapshot } from "./context-usage-types"
 import type {
   WorkspaceListFilesInput,
   WorkspaceListFilesResult,
@@ -45,6 +47,7 @@ import type {
   WorkspaceOpener,
 } from "./workspace-types"
 import type {
+  DesktopDetectedTerminalShell,
   DesktopTerminalCreateInput,
   DesktopTerminalEvent,
   DesktopTerminalReadInput,
@@ -84,6 +87,8 @@ import type {
 import type {
   DesktopSettingsSnapshot,
   UpdateDesktopAgentEnvironmentInput,
+  UpdateDesktopDefaultOpenerInput,
+  UpdateDesktopDefaultTerminalShellInput,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "./settings-types"
@@ -185,6 +190,7 @@ export type DesktopAPI = {
     read: (input: DesktopTerminalReadInput) => Promise<DesktopTerminalReadResult>
     kill: (terminalId: string) => Promise<void>
     list: () => Promise<DesktopTerminalRecord[]>
+    listShells: () => Promise<DesktopDetectedTerminalShell[]>
     onEvent: (listener: (event: DesktopTerminalEvent) => void) => () => void
   }
   schedules: {
@@ -214,6 +220,12 @@ export type DesktopAPI = {
     ) => Promise<DesktopSettingsSnapshot>
     updateAgentEnvironment: (
       input: UpdateDesktopAgentEnvironmentInput
+    ) => Promise<DesktopSettingsSnapshot>
+    updateDefaultOpener: (
+      input: UpdateDesktopDefaultOpenerInput
+    ) => Promise<DesktopSettingsSnapshot>
+    updateDefaultTerminalShell: (
+      input: UpdateDesktopDefaultTerminalShellInput
     ) => Promise<DesktopSettingsSnapshot>
   }
   plugins: {
@@ -258,6 +270,7 @@ export type DesktopAPI = {
     updatePermissionMode: (
       input: UpdateDesktopSessionPermissionModeInput
     ) => Promise<DesktopSessionRecord>
+    getContextUsage: (input: GetDesktopContextUsageInput) => Promise<DesktopContextUsageSnapshot>
     rename: (input: RenameDesktopSessionInput) => Promise<DesktopSessionRecord>
     setPinned: (input: PinDesktopSessionInput) => Promise<DesktopSessionRecord>
     archive: (sessionId: string) => Promise<DesktopSessionRecord>

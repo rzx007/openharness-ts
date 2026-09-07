@@ -437,12 +437,30 @@
     border-left-style: solid;
   }
 
-  /* Lists — tighter spacing */
+  /* Lists — marker stays on the first line; wrapped lines align with text */
   .desktop-streamdown [data-streamdown="unordered-list"],
   .desktop-streamdown [data-streamdown="ordered-list"] {
-    /* margin: 0.5rem 0; */
-    /* padding-left: 1.25rem; */
+    list-style-position: outside;
+    margin-block: 0.35em;
+    padding-inline-start: 1.4em;
   }
+
+  .desktop-streamdown [data-streamdown="list-item"] {
+    display: list-item;
+    margin-block: 0.12em;
+    padding-inline-start: 0.3em;
+  }
+
+  .desktop-streamdown [data-streamdown="list-item"] > p {
+    display: inline;
+    margin: 0;
+  }
+
+  .desktop-streamdown [data-streamdown="list-item"] > p ~ p {
+    display: block;
+    margin-top: 0.35em;
+  }
+
   /* Paragraphs — tighter between blocks */
   .desktop-streamdown [data-streamdown="paragraph"] + [data-streamdown="paragraph"] {
     margin-top: 0.5rem;

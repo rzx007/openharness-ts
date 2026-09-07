@@ -6,7 +6,8 @@
  */
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
-import { resolve } from "node:path"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import { promisify } from "node:util"
 
 import {
@@ -66,14 +67,18 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
+  GetDesktopContextUsageInput,
 } from "../../../shared/session-types"
 import { resolveDesktopAttachmentSupport } from "../../../shared/attachment-types"
+import type { DesktopContextUsageSnapshot } from "../../../shared/context-usage-types"
+import { parseDesktopContextUsageSnapshot } from "../../../shared/parse-context-usage-snapshot"
 import {
   allocateOutsideProjectWorkspace,
   buildOutsideProjectRoot,
   isOutsideProjectWorkspacePath,
   removeEmptyOutsideProjectWorkspace,
 } from "./outside-project-workspace"
+import { workspaceService } from "../workspace/workspace-service"
 import { resolveDesktopRuntimeSnapshot } from "./runtime-selection"
 import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./session-subscriptions"
 
@@ -95,6 +100,10 @@ export class DesktopSessionService {
    * 设置里没有可用模型时，会把解析出的默认 model/provider 写回 daemon。
    */
   async bootstrap(): Promise<DesktopBootstrapData> {
+    workspaceService.configureAllowedRoots({
+      configDir: process.env.OPENHARNESS_CONFIG_DIR ?? join(homedir(), ".openharness-ts"),
+      documentsPath: app.getPath("documents"),
+    })
     const client = await this.getClient()
     const [settings, providers, allSessions, projectRecords, capabilities] = await Promise.all([
       client.getSettings(),
@@ -546,6 +555,24 @@ export class DesktopSessionService {
         metadata: { runtime: { permissionMode } },
       })
     )
+  }
+
+  async getContextUsage(input: GetDesktopContextUsageInput): Promise<DesktopContextUsageSnapshot> {
+    const cwd = requireString(input.cwd, "工作目录")
+    const client = await this.getClient()
+    const result = await client.getContextUsage({
+      cwd,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.refresh !== undefined ? { refresh: input.refresh } : {}),
+      ...(input.previousContextWindow !== undefined
+        ? { previousContextWindow: input.previousContextWindow }
+        : {}),
+    })
+    const snapshot = parseDesktopContextUsageSnapshot(result.snapshot)
+    if (!snapshot) {
+      throw new Error("Context usage 快照格式无效")
+    }
+    return snapshot
   }
 
   async renameSession(input: RenameDesktopSessionInput): Promise<DesktopSessionRecord> {

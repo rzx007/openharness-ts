@@ -45,6 +45,9 @@ function fileTab(path: string, projectPath?: string | null, content = path): Fil
     size: content.length,
     binary: false,
     content,
+    scope: "project",
+    relativePath: path,
+    rootLabel: "",
   }
   return { preview, type: "code", projectPath }
 }

@@ -56,6 +56,36 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         return errorResponse(500, error instanceof Error ? error.message : String(error));
       }
     })
+    .get("/context/usage", async (c) => {
+      if (!context.contextService) return errorResponse(501, "Context service is not configured");
+      const cwd = c.req.query("cwd");
+      if (!cwd) return errorResponse(400, "cwd is required");
+      const sessionId = c.req.query("sessionId") || undefined;
+      const refreshRaw = c.req.query("refresh");
+      const refresh =
+        refreshRaw === "true" || refreshRaw === "1"
+          ? true
+          : refreshRaw === "false" || refreshRaw === "0"
+            ? false
+            : undefined;
+      const previousRaw = c.req.query("previousContextWindow");
+      const previousContextWindow =
+        previousRaw != null && previousRaw !== "" && Number.isFinite(Number(previousRaw))
+          ? Number(previousRaw)
+          : undefined;
+      try {
+        return jsonResponse(
+          await context.contextService.usage({
+            cwd,
+            ...(sessionId ? { sessionId } : {}),
+            ...(refresh !== undefined ? { refresh } : {}),
+            ...(previousContextWindow !== undefined ? { previousContextWindow } : {}),
+          }),
+        );
+      } catch (error) {
+        return errorResponse(500, error instanceof Error ? error.message : String(error));
+      }
+    })
     .post("/dream", async (c) => {
       if (!context.dreamService) return errorResponse(501, "Dream service is not configured");
       const body = await readJson(c);

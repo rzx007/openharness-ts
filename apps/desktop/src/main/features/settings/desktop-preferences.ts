@@ -5,11 +5,19 @@ import { app } from "electron"
 
 import {
   isDesktopNotificationMode,
+  normalizeDefaultOpenerId,
+  normalizeDefaultTerminalShellId,
   type DesktopNotificationMode,
 } from "../../../shared/settings-types"
 
 export interface DesktopPreferences {
   notificationMode: DesktopNotificationMode
+  defaultOpenerId?: string
+  defaultTerminalShellId?: string
+}
+
+type DesktopPreferencesPatch = Omit<Partial<DesktopPreferences>, "defaultTerminalShellId"> & {
+  defaultTerminalShellId?: string | null
 }
 
 const defaults: DesktopPreferences = {
@@ -22,26 +30,32 @@ export function getDesktopPreferences(): DesktopPreferences {
 
   try {
     const raw = JSON.parse(readFileSync(filePath, "utf8")) as Partial<DesktopPreferences>
+    const defaultOpenerId = normalizeDefaultOpenerId(raw.defaultOpenerId)
+    const defaultTerminalShellId = normalizeDefaultTerminalShellId(raw.defaultTerminalShellId)
     return {
       notificationMode: isDesktopNotificationMode(raw.notificationMode)
         ? raw.notificationMode
         : defaults.notificationMode,
+      ...(defaultOpenerId ? { defaultOpenerId } : {}),
+      ...(defaultTerminalShellId ? { defaultTerminalShellId } : {}),
     }
   } catch {
     return defaults
   }
 }
 
-export function patchDesktopPreferences(patch: Partial<DesktopPreferences>): DesktopPreferences {
+export function patchDesktopPreferences(patch: DesktopPreferencesPatch): DesktopPreferences {
   const next = { ...getDesktopPreferences(), ...patch }
-
-  try {
-    writeFileSync(getDesktopPreferencesPath(), JSON.stringify(next, null, 2), "utf8")
-  } catch (error) {
-    console.warn("[settings] failed to persist desktop preferences", error)
+  const defaultOpenerId = normalizeDefaultOpenerId(next.defaultOpenerId)
+  const defaultTerminalShellId = normalizeDefaultTerminalShellId(next.defaultTerminalShellId)
+  const persisted: DesktopPreferences = {
+    notificationMode: next.notificationMode,
+    ...(defaultOpenerId ? { defaultOpenerId } : {}),
+    ...(defaultTerminalShellId ? { defaultTerminalShellId } : {}),
   }
 
-  return next
+  writeFileSync(getDesktopPreferencesPath(), JSON.stringify(persisted, null, 2), "utf8")
+  return persisted
 }
 
 export function getDesktopPreferencesPath(): string {

@@ -3,43 +3,56 @@ import { describe, expect, it, vi } from "vitest"
 import { buildDesktopSettingsSnapshot } from "../../../shared/settings-types"
 import { DesktopSettingsService } from "./settings-service"
 
+const defaultSnapshot = {
+  workStyle: "practical",
+  notificationMode: "when_unfocused",
+  agentEnvironment: "local",
+  restartRequired: false,
+  defaultOpenerId: null,
+  defaultTerminalShellId: null,
+} as const
+
+const preferences = () => ({
+  notificationMode: "when_unfocused" as const,
+})
+
 describe("buildDesktopSettingsSnapshot", () => {
-  it("defaults to practical work style", () => {
-    expect(buildDesktopSettingsSnapshot({})).toEqual({
-      workStyle: "practical",
-      notificationMode: "when_unfocused",
-      agentEnvironment: "local",
-      restartRequired: false,
-    })
+  it("defaults safely", () => {
+    expect(buildDesktopSettingsSnapshot({})).toEqual(defaultSnapshot)
   })
 
   it("preserves an efficient work style", () => {
     expect(buildDesktopSettingsSnapshot({ workStyle: "efficient" })).toEqual({
+      ...defaultSnapshot,
       workStyle: "efficient",
-      notificationMode: "when_unfocused",
-      agentEnvironment: "local",
-      restartRequired: false,
     })
   })
 
   it("rejects unknown persisted values by falling back safely", () => {
-    expect(buildDesktopSettingsSnapshot({ workStyle: "chatty" })).toEqual({
-      workStyle: "practical",
-      notificationMode: "when_unfocused",
-      agentEnvironment: "local",
-      restartRequired: false,
-    })
+    expect(buildDesktopSettingsSnapshot({ workStyle: "chatty" })).toEqual(defaultSnapshot)
   })
 
-  it("preserves a valid desktop notification mode", () => {
-    expect(buildDesktopSettingsSnapshot({}, { notificationMode: "always" })).toMatchObject({
+  it("preserves valid notification and desktop preference values", () => {
+    expect(buildDesktopSettingsSnapshot({}, {
       notificationMode: "always",
+      defaultOpenerId: "  vscode  ",
+      defaultTerminalShellId: "  pwsh  ",
+    })).toMatchObject({
+      notificationMode: "always",
+      defaultOpenerId: "vscode",
+      defaultTerminalShellId: "pwsh",
     })
   })
 
-  it("rejects unknown desktop notification values by falling back safely", () => {
-    expect(buildDesktopSettingsSnapshot({}, { notificationMode: "chatty" })).toMatchObject({
+  it("normalizes unknown or blank preference values", () => {
+    expect(buildDesktopSettingsSnapshot({}, {
+      notificationMode: "chatty",
+      defaultOpenerId: "   ",
+      defaultTerminalShellId: "system",
+    })).toMatchObject({
       notificationMode: "when_unfocused",
+      defaultOpenerId: null,
+      defaultTerminalShellId: null,
     })
   })
 
@@ -64,7 +77,7 @@ describe("DesktopSettingsService.updateAgentEnvironment", () => {
       daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
       refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
       preflightDocker: async () => { calls.push("preflight") },
-      getPreferences: () => ({ notificationMode: "when_unfocused" }),
+      getPreferences: preferences,
       patchPreferences: vi.fn(),
     })
 
@@ -83,7 +96,7 @@ describe("DesktopSettingsService.updateAgentEnvironment", () => {
       daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
       refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
       preflightDocker: async () => { throw new Error("Docker daemon is not running") },
-      getPreferences: () => ({ notificationMode: "when_unfocused" }),
+      getPreferences: preferences,
       patchPreferences: vi.fn(),
     })
 

@@ -17,13 +17,18 @@ import type {
 } from "../attachment-routing/attachment-routing-types.js";
 import type { SessionAttachmentResources } from "../attachment-resource/session-attachment-resources.js";
 import { applySkillInvocationToContent } from "./skill-invocation.js";
+import type { ContextUsageCache } from "../context-usage-cache.js";
+import type { SessionContextUsageAgent } from "../assemble-session-context-usage.js";
 
 const ATTACHMENT_LEASE_TTL_MS = 2 * 60 * 1_000;
 const ATTACHMENT_LEASE_RENEW_INTERVAL_MS = 30 * 1_000;
 
 export interface SessionRunExecutorContext {
   store: SessionStore;
-  agentPool: AgentPool;
+  agentPool: Pick<
+    AgentPool,
+    "configured" | "acquireSession" | "close" | "closeIfStale"
+  >;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   transcriptProjection: Pick<
     SessionTranscriptProjection,
@@ -41,6 +46,12 @@ export interface SessionRunExecutorContext {
   postRunMaintenance?: Pick<SessionPostRunMaintenance, "run">;
   attachmentResources?: Pick<SessionAttachmentResources, "materializeRun">;
   attachmentOcrAvailable?: boolean;
+  /** Invalidate / refresh session context-usage cache on run terminal states. */
+  contextUsageCache?: Pick<ContextUsageCache, "invalidate">;
+  refreshContextUsage?: (
+    sessionId: string,
+    agent: SessionContextUsageAgent,
+  ) => Promise<void>;
 }
 
 export interface ExecuteSessionRunInput {
@@ -183,6 +194,25 @@ export class SessionRunExecutor {
 
       // 只在成功走完之后做记忆/个性化/auto-dream。失败路径不跑，避免半截对话被写进长期记忆。
       await this.context.postRunMaintenance?.run(sessionId, runId, agent);
+
+      // Run terminal (success): invalidate then rewrite live usage from the same agent
+      // before closeIfStale may drop the warm runtime.
+      this.context.contextUsageCache?.invalidate(sessionId);
+      try {
+        await this.context.refreshContextUsage?.(sessionId, agent);
+      } catch (error) {
+        this.context.log({
+          level: "warn",
+          event: "context.usage.refresh_failed",
+          traceId: this.context.traceIdForRun(runId),
+          sessionId,
+          runId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Soft settings may have marked this warm agent stale while the run was active.
+      await this.context.agentPool.closeIfStale(sessionId);
     } catch (error) {
       // 这次 run 把 session agent 弄脏了（或根本没创建成功）：关掉，下次 acquire 会新建。
       // close 失败不能盖住原始错误；先记日志，再继续结算 run。
@@ -207,7 +237,10 @@ export class SessionRunExecutor {
       }
 
       // projector / interrupt 已经写下终态就不要再改：否则会把 completed 覆盖成 failed。
-      if (current && ["completed", "failed", "interrupted"].includes(current.status)) return;
+      if (current && ["completed", "failed", "interrupted"].includes(current.status)) {
+        this.context.contextUsageCache?.invalidate(sessionId);
+        return;
+      }
 
       const message = error instanceof Error ? error.message : String(error);
       const traceId = this.context.traceIdForRun(runId);
@@ -277,6 +310,8 @@ export class SessionRunExecutor {
         error: message,
       });
       this.context.events.publishSince(before);
+      // Failed / interrupted terminal: drop stale usage; next usage() may reassemble.
+      this.context.contextUsageCache?.invalidate(sessionId);
     } finally {
       if (cleanupAttachmentResources) {
         try {

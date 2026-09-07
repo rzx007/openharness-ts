@@ -36,6 +36,7 @@ function daemonControl(overrides: Record<string, unknown> = {}) {
     acquireCwdMutation: () => ({ release() {} }),
     closeAllRuntimes: async () => {},
     closeRuntimesForCwd: async () => {},
+    invalidateRuntimes: async () => {},
     runtimeInspectionAvailable: true,
     sessionExists: () => true,
     inspectRuntimeHooks: async () => [],
@@ -192,6 +193,63 @@ describe("system routes", () => {
     expect(body.commands.some((command) => command.name === "/model")).toBe(
       false,
     );
+  });
+
+  it("allows soft settings updates while session runs are active", async () => {
+    const patch = vi.fn(async () => ({
+      settings: { workStyle: "efficient" },
+      invalidateRuntimes: true,
+    }));
+    const invalidateRuntimes = vi.fn(async () => {});
+    const app = createSystemRoutes({
+      settingsService: {
+        get: async () => ({ workStyle: "practical" }),
+        patch,
+      },
+      control: daemonControl({
+        acquireGlobalMutation: () => undefined,
+        invalidateRuntimes,
+      }),
+    });
+
+    const response = await app.request("/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workStyle: "efficient" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      settings: { workStyle: "efficient" },
+    });
+    expect(patch).toHaveBeenCalledWith({ workStyle: "efficient" });
+    expect(invalidateRuntimes).toHaveBeenCalledOnce();
+  });
+
+  it("still blocks hard settings updates while session runs are active", async () => {
+    const patch = vi.fn(async () => ({
+      settings: { provider: "anthropic" },
+      restartRuntimes: true,
+    }));
+    const app = createSystemRoutes({
+      settingsService: {
+        get: async () => ({ provider: "openai" }),
+        patch,
+      },
+      control: daemonControl({ acquireGlobalMutation: () => undefined }),
+    });
+
+    const response = await app.request("/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "anthropic" }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Cannot update daemon settings while session runs are active",
+    });
+    expect(patch).not.toHaveBeenCalled();
   });
 
   it("lists connected model providers", async () => {

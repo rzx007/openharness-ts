@@ -1,12 +1,14 @@
 import { execFile, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { app, shell } from "electron"
 
 import type { WorkspaceOpener } from "../../../shared/workspace-types"
+import { resolveSpawnInvocation } from "./resolve-spawn-invocation"
+import { resolveWorkspaceOpenTarget } from "./workspace-path"
+import { workspaceService } from "./workspace-service"
 
 const execFileAsync = promisify(execFile)
 
@@ -49,7 +51,11 @@ class OpenerService {
     const opener = this.resolved.find((item) => item.id === openerId)
     if (!opener) throw new Error("未找到该打开方式。")
 
-    const target = await resolveOpenTarget(path, rootPath)
+    const target = await resolveWorkspaceOpenTarget(
+      path,
+      rootPath,
+      workspaceService.allowedRootsFor(rootPath ?? "")
+    )
     await launchOpener(opener, target, rootPath)
   }
 }
@@ -329,28 +335,6 @@ async function readIconDataUrl(path: string | null): Promise<string | null> {
   }
 }
 
-async function resolveOpenTarget(
-  path: string,
-  rootPath?: string
-): Promise<{ path: string; isDirectory: boolean }> {
-  if (typeof path !== "string" || !path.trim()) throw new Error("路径不能为空。")
-  const absolutePath = rootPath ? resolveInsideRoot(rootPath, path) : resolve(path)
-  const info = await stat(absolutePath)
-  return { path: absolutePath, isDirectory: info.isDirectory() }
-}
-
-function resolveInsideRoot(rootPath: string, relativePath: string): string {
-  if (typeof rootPath !== "string" || !rootPath.trim()) throw new Error("项目路径不能为空。")
-  const root = resolve(rootPath)
-  const normalizedInput = relativePath.replace(/\\/g, "/").replace(/^\/+/, "")
-  const absolutePath = resolve(root, normalizedInput)
-  const relativePathFromRoot = relative(root, absolutePath)
-  if (relativePathFromRoot.startsWith("..") || isAbsolute(relativePathFromRoot)) {
-    throw new Error("文件必须位于当前项目目录内。")
-  }
-  return absolutePath
-}
-
 async function launchOpener(
   opener: ResolvedOpener,
   target: { path: string; isDirectory: boolean },
@@ -376,7 +360,14 @@ async function launchOpener(
   }
 
   const args = plan.args.map((arg) => arg.replaceAll(placeholder, launchPath))
-  await spawnDetached(plan.command, args, folderPath)
+  const invocation = resolveSpawnInvocation({
+    platform: process.platform,
+    kind: opener.kind,
+    command: plan.command,
+    args,
+    cwd: folderPath,
+  })
+  await spawnDetached(invocation.command, invocation.args, folderPath, opener.kind === "terminal")
 }
 
 function resolveLaunchPath(
@@ -392,13 +383,18 @@ function resolveLaunchPath(
   return target.path
 }
 
-function spawnDetached(command: string, args: string[], cwd?: string): Promise<void> {
+function spawnDetached(
+  command: string,
+  args: string[],
+  cwd?: string,
+  hideWindowsConsole = false
+): Promise<void> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd,
       detached: true,
       stdio: "ignore",
-      windowsHide: false,
+      windowsHide: hideWindowsConsole,
     })
     child.once("error", reject)
     child.unref()

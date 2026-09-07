@@ -12,12 +12,14 @@ describe("SessionRunExecutor", () => {
     const store = createStore();
     const registerHandle = vi.fn(async () => {});
     const postRunMaintenance = { run: vi.fn(async () => {}) };
+    const closeIfStale = vi.fn(async () => {});
     const executorWithMaintenance = new SessionRunExecutor({
       store: store as any,
       agentPool: {
         configured: true,
         acquireSession: vi.fn(async () => agent),
         close: vi.fn(async () => {}),
+        closeIfStale,
       } as any,
       events: { checkpoint: vi.fn(() => 1), publishSince: vi.fn() },
       transcriptProjection: { finalizeRunParts: vi.fn() },
@@ -39,6 +41,7 @@ describe("SessionRunExecutor", () => {
     });
     expect(registerHandle).toHaveBeenCalledWith(handle);
     expect(postRunMaintenance.run).toHaveBeenCalledWith("s1", "run-1", agent);
+    expect(closeIfStale).toHaveBeenCalledWith("s1");
   });
 
   it("submits an explicit Skill tool instruction for selected skill metadata", async () => {

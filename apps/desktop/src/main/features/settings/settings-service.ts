@@ -6,18 +6,25 @@ import {
   buildDesktopSettingsSnapshot,
   isDesktopNotificationMode,
   isDesktopWorkStyle,
+  normalizeDefaultOpenerId,
+  normalizeDefaultTerminalShellId,
 } from "../../../shared/settings-types"
 import type {
-  UpdateDesktopNotificationModeInput,
-  UpdateDesktopAgentEnvironmentInput,
   DesktopSettingsSnapshot,
+  UpdateDesktopAgentEnvironmentInput,
+  UpdateDesktopDefaultOpenerInput,
+  UpdateDesktopDefaultTerminalShellInput,
+  UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "../../../shared/settings-types"
 import { desktopSessionService } from "../session/session-service"
-import { getDesktopPreferences, patchDesktopPreferences } from "./desktop-preferences"
+import {
+  getDesktopPreferences,
+  patchDesktopPreferences,
+  type DesktopPreferences,
+} from "./desktop-preferences"
 
 const execFileAsync = promisify(execFile)
-
 type SettingsClient = Pick<OpenHarnessClient, "getSettings" | "patchSettings">
 
 export interface DesktopSettingsServiceDependencies {
@@ -40,10 +47,7 @@ export class DesktopSettingsService {
   constructor(private readonly dependencies: DesktopSettingsServiceDependencies = defaultDependencies) {}
 
   snapshot(): Promise<DesktopSettingsSnapshot> {
-    const preferences = this.dependencies.getPreferences()
-    return this.withDaemonRetry(async (client) =>
-      buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
-    )
+    return this.snapshotWithPreferences(this.dependencies.getPreferences())
   }
 
   async updateWorkStyle(input: UpdateDesktopWorkStyleInput): Promise<DesktopSettingsSnapshot> {
@@ -62,11 +66,27 @@ export class DesktopSettingsService {
     if (!isDesktopNotificationMode(input.notificationMode)) {
       throw new Error("未知的通知设置，请选择从不、仅失去焦点时或始终。")
     }
-    const preferences = this.dependencies.patchPreferences({ notificationMode: input.notificationMode })
-    return this.withDaemonRetry(async (client) => {
-      const settings = await client.getSettings()
-      return buildDesktopSettingsSnapshot(settings, preferences)
+    const preferences = this.dependencies.patchPreferences({
+      notificationMode: input.notificationMode,
     })
+    return this.snapshotWithPreferences(preferences)
+  }
+
+  async updateDefaultOpener(
+    input: UpdateDesktopDefaultOpenerInput
+  ): Promise<DesktopSettingsSnapshot> {
+    const defaultOpenerId = normalizeDefaultOpenerId(input.defaultOpenerId)
+    if (!defaultOpenerId) throw new Error("打开方式不能为空。")
+    const preferences = this.dependencies.patchPreferences({ defaultOpenerId })
+    return this.snapshotWithPreferences(preferences)
+  }
+
+  async updateDefaultTerminalShell(
+    input: UpdateDesktopDefaultTerminalShellInput
+  ): Promise<DesktopSettingsSnapshot> {
+    const defaultTerminalShellId = normalizeDefaultTerminalShellId(input.defaultTerminalShellId)
+    const preferences = this.dependencies.patchPreferences({ defaultTerminalShellId })
+    return this.snapshotWithPreferences(preferences)
   }
 
   async updateAgentEnvironment(
@@ -84,12 +104,22 @@ export class DesktopSettingsService {
           failIfUnavailable: true,
         },
       })
-      return buildDesktopSettingsSnapshot(
-        settings,
-        this.dependencies.getPreferences(),
-        { restartRequired: true }
-      )
+      return buildDesktopSettingsSnapshot(settings, this.dependencies.getPreferences(), {
+        restartRequired: true,
+      })
     })
+  }
+
+  private async snapshotWithPreferences(
+    preferences: DesktopPreferences
+  ): Promise<DesktopSettingsSnapshot> {
+    try {
+      return await this.withDaemonRetry(async (client) =>
+        buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
+      )
+    } catch {
+      return buildDesktopSettingsSnapshot({}, preferences)
+    }
   }
 
   private async withDaemonRetry<T>(operation: (client: SettingsClient) => Promise<T>): Promise<T> {

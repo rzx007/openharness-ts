@@ -63,4 +63,104 @@ describe("desktop preferences", () => {
 
     expect(getDesktopPreferences()).toEqual({ notificationMode: "when_unfocused" })
   })
+
+  it("reads a valid default opener id without dropping notification mode", async () => {
+    await writeFile(
+      join(userDataPath, "desktop-preferences.json"),
+      JSON.stringify({ notificationMode: "always", defaultOpenerId: "vscode" }),
+      "utf8"
+    )
+    const { getDesktopPreferences } = await import("./desktop-preferences")
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "always",
+      defaultOpenerId: "vscode",
+    })
+  })
+
+  it("treats blank default opener ids as missing", async () => {
+    await writeFile(
+      join(userDataPath, "desktop-preferences.json"),
+      JSON.stringify({ notificationMode: "never", defaultOpenerId: "   " }),
+      "utf8"
+    )
+    const { getDesktopPreferences } = await import("./desktop-preferences")
+    expect(getDesktopPreferences()).toEqual({ notificationMode: "never" })
+  })
+
+  it("keeps defaultOpenerId when patching notification mode", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences } = await import("./desktop-preferences")
+    patchDesktopPreferences({ defaultOpenerId: "cursor" })
+    patchDesktopPreferences({ notificationMode: "always" })
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "always",
+      defaultOpenerId: "cursor",
+    })
+  })
+
+  it("keeps notification mode when patching defaultOpenerId", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences } = await import("./desktop-preferences")
+    patchDesktopPreferences({ notificationMode: "never" })
+    patchDesktopPreferences({ defaultOpenerId: "vscode" })
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "never",
+      defaultOpenerId: "vscode",
+    })
+  })
+
+  it("reads a valid default terminal shell id without dropping other fields", async () => {
+    await writeFile(
+      join(userDataPath, "desktop-preferences.json"),
+      JSON.stringify({
+        notificationMode: "always",
+        defaultOpenerId: "vscode",
+        defaultTerminalShellId: "git-bash",
+      }),
+      "utf8"
+    )
+    const { getDesktopPreferences } = await import("./desktop-preferences")
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "always",
+      defaultOpenerId: "vscode",
+      defaultTerminalShellId: "git-bash",
+    })
+  })
+
+  it("omits system and blank terminal shell ids from disk", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences, getDesktopPreferencesPath } =
+      await import("./desktop-preferences")
+    const { readFile } = await import("node:fs/promises")
+    patchDesktopPreferences({ defaultTerminalShellId: "pwsh" })
+    patchDesktopPreferences({ defaultTerminalShellId: "system" })
+    expect(getDesktopPreferences()).toEqual({ notificationMode: "when_unfocused" })
+    expect(JSON.parse(await readFile(getDesktopPreferencesPath(), "utf8"))).not.toHaveProperty(
+      "defaultTerminalShellId"
+    )
+  })
+
+  it("keeps opener and notification when clearing the terminal shell", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences } = await import("./desktop-preferences")
+    patchDesktopPreferences({ defaultOpenerId: "cursor", defaultTerminalShellId: "pwsh" })
+    patchDesktopPreferences({ defaultTerminalShellId: null })
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "when_unfocused",
+      defaultOpenerId: "cursor",
+    })
+  })
+
+  it("keeps terminal shell when patching notification mode", async () => {
+    const { patchDesktopPreferences, getDesktopPreferences } = await import("./desktop-preferences")
+    patchDesktopPreferences({ defaultTerminalShellId: "pwsh" })
+    patchDesktopPreferences({ notificationMode: "never" })
+    expect(getDesktopPreferences()).toEqual({
+      notificationMode: "never",
+      defaultTerminalShellId: "pwsh",
+    })
+  })
+
+  it("throws when the preferences file cannot be written", async () => {
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(join(userDataPath, "desktop-preferences.json"))
+    const { patchDesktopPreferences } = await import("./desktop-preferences")
+    expect(() => patchDesktopPreferences({ defaultOpenerId: "vscode" })).toThrow()
+  })
 })

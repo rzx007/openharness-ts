@@ -152,6 +152,7 @@ export const desktopAPI = {
       invoke(IpcChannels.terminalRead, input),
     kill: (terminalId: string) => invoke(IpcChannels.terminalKill, terminalId),
     list: () => invoke(IpcChannels.terminalList),
+    listShells: () => invoke(IpcChannels.terminalListShells),
     onEvent: (listener: (event: DesktopTerminalEvent) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, value: DesktopTerminalEvent): void =>
         listener(value)
@@ -203,9 +204,15 @@ export const desktopAPI = {
     updateNotificationMode: (
       input: IpcInvokeMap[typeof IpcChannels.settingsUpdateNotificationMode]["args"][0]
       ) => invoke(IpcChannels.settingsUpdateNotificationMode, input),
-    updateAgentEnvironment: (
-      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateAgentEnvironment]["args"][0]
-    ) => invoke(IpcChannels.settingsUpdateAgentEnvironment, input),
+      updateAgentEnvironment: (
+        input: IpcInvokeMap[typeof IpcChannels.settingsUpdateAgentEnvironment]["args"][0]
+      ) => invoke(IpcChannels.settingsUpdateAgentEnvironment, input),
+      updateDefaultOpener: (
+      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultOpener]["args"][0]
+    ) => invoke(IpcChannels.settingsUpdateDefaultOpener, input),
+      updateDefaultTerminalShell: (
+        input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultTerminalShell]["args"][0]
+      ) => invoke(IpcChannels.settingsUpdateDefaultTerminalShell, input),
   },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>
@@ -273,6 +280,8 @@ export const desktopAPI = {
     updatePermissionMode: (
       input: IpcInvokeMap[typeof IpcChannels.sessionUpdatePermissionMode]["args"][0]
     ) => invoke(IpcChannels.sessionUpdatePermissionMode, input),
+    getContextUsage: (input: IpcInvokeMap[typeof IpcChannels.sessionGetContextUsage]["args"][0]) =>
+      invoke(IpcChannels.sessionGetContextUsage, input),
     rename: (input: IpcInvokeMap[typeof IpcChannels.sessionRename]["args"][0]) =>
       invoke(IpcChannels.sessionRename, input),
     setPinned: (input: IpcInvokeMap[typeof IpcChannels.sessionSetPinned]["args"][0]) =>

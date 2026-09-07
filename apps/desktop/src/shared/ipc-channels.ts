@@ -17,6 +17,7 @@ import type {
   PinDesktopSessionInput,
   PinDesktopProjectInput,
   OpenDesktopAuxSessionInput,
+  GetDesktopContextUsageInput,
   RenameDesktopProjectInput,
   RenameDesktopSessionInput,
   ReplyDesktopPermissionInput,
@@ -27,6 +28,7 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
 } from "./session-types"
+import type { DesktopContextUsageSnapshot } from "./context-usage-types"
 import type {
   WorkspaceListFilesInput,
   WorkspaceListFilesResult,
@@ -38,6 +40,7 @@ import type {
   WorkspaceOpener,
 } from "./workspace-types"
 import type {
+  DesktopDetectedTerminalShell,
   DesktopTerminalCreateInput,
   DesktopTerminalReadInput,
   DesktopTerminalReadResult,
@@ -76,6 +79,8 @@ import type {
 import type {
   DesktopSettingsSnapshot,
   UpdateDesktopAgentEnvironmentInput,
+  UpdateDesktopDefaultOpenerInput,
+  UpdateDesktopDefaultTerminalShellInput,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "./settings-types"
@@ -153,6 +158,7 @@ export const IpcChannels = {
   sessionSetDefaultPermissionMode: "session:set-default-permission-mode",
   sessionUpdateModel: "session:update-model",
   sessionUpdatePermissionMode: "session:update-permission-mode",
+  sessionGetContextUsage: "session:get-context-usage",
   sessionRename: "session:rename",
   sessionSetPinned: "session:set-pinned",
   sessionArchive: "session:archive",
@@ -193,6 +199,7 @@ export const IpcChannels = {
   terminalRead: "terminal:read",
   terminalKill: "terminal:kill",
   terminalList: "terminal:list",
+  terminalListShells: "terminal:list-shells",
 
   scheduleStatus: "schedule:status",
   scheduleList: "schedule:list",
@@ -221,6 +228,8 @@ export const IpcChannels = {
   settingsUpdateWorkStyle: "settings:update-work-style",
   settingsUpdateNotificationMode: "settings:update-notification-mode",
   settingsUpdateAgentEnvironment: "settings:update-agent-environment",
+  settingsUpdateDefaultOpener: "settings:update-default-opener",
+  settingsUpdateDefaultTerminalShell: "settings:update-default-terminal-shell",
 } as const
 
 export const IpcEvents = {
@@ -313,6 +322,14 @@ export interface IpcInvokeMap {
     args: [input: UpdateDesktopAgentEnvironmentInput]
     result: DesktopSettingsSnapshot
   }
+  [IpcChannels.settingsUpdateDefaultOpener]: {
+    args: [input: UpdateDesktopDefaultOpenerInput]
+    result: DesktopSettingsSnapshot
+  }
+  [IpcChannels.settingsUpdateDefaultTerminalShell]: {
+    args: [input: UpdateDesktopDefaultTerminalShellInput]
+    result: DesktopSettingsSnapshot
+  }
 
   [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData }
   [IpcChannels.sessionDaemonStatus]: { args: []; result: DesktopDaemonStatus }
@@ -398,6 +415,10 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionUpdatePermissionMode]: {
     args: [input: UpdateDesktopSessionPermissionModeInput]
     result: DesktopSessionRecord
+  }
+  [IpcChannels.sessionGetContextUsage]: {
+    args: [input: GetDesktopContextUsageInput]
+    result: DesktopContextUsageSnapshot
   }
   [IpcChannels.sessionRename]: {
     args: [input: RenameDesktopSessionInput]
@@ -528,6 +549,10 @@ export interface IpcInvokeMap {
   [IpcChannels.terminalList]: {
     args: []
     result: DesktopTerminalRecord[]
+  }
+  [IpcChannels.terminalListShells]: {
+    args: []
+    result: DesktopDetectedTerminalShell[]
   }
   [IpcChannels.scheduleStatus]: { args: []; result: DesktopScheduledStatus }
   [IpcChannels.scheduleList]: { args: []; result: DesktopScheduledTask[] }

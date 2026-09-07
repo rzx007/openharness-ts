@@ -12,7 +12,7 @@ import { Spinner } from "@renderer/components/ui/spinner"
 import type { WorkspaceReadFileResult } from "@shared/workspace-types"
 
 import { VirtualizedCodePreview } from "./virtualized-code-preview"
-import { shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
+import { canOpenHtmlInBrowser, shouldOfferHtmlBrowserOpen } from "./file-viewer-model"
 
 export type FileViewMode = "preview" | "source"
 
@@ -69,7 +69,8 @@ export function FileViewer({
   const { resolvedTheme: themeType } = useAppearance()
   const activeTab = tabs.find((tab) => tab.preview.path === activePath) ?? null
   const showLargeHtmlAction = activeTab
-    ? shouldOfferHtmlBrowserOpen(activeTab.preview.path, activeTab.preview.content ?? "")
+    ? shouldOfferHtmlBrowserOpen(activeTab.preview.path, activeTab.preview.content ?? "") &&
+      canOpenHtmlInBrowser(activeTab.preview.scope)
     : false
 
   if (tabs.length === 0 && !loadingPath) {

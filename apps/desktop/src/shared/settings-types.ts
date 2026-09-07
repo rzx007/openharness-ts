@@ -7,6 +7,8 @@ export interface DesktopSettingsSnapshot {
   notificationMode: DesktopNotificationMode
   agentEnvironment: DesktopAgentEnvironment
   restartRequired: boolean
+  defaultOpenerId: string | null
+  defaultTerminalShellId: string | null
 }
 
 export interface UpdateDesktopWorkStyleInput {
@@ -21,9 +23,34 @@ export interface UpdateDesktopAgentEnvironmentInput {
   environment: "local" | "docker"
 }
 
+export interface UpdateDesktopDefaultOpenerInput {
+  defaultOpenerId: string
+}
+
+export interface UpdateDesktopDefaultTerminalShellInput {
+  defaultTerminalShellId: string | null
+}
+
+export function normalizeDefaultOpenerId(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function normalizeDefaultTerminalShellId(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === "system") return null
+  return trimmed
+}
+
 export function buildDesktopSettingsSnapshot(
   settings: Record<string, unknown>,
-  preferences: Partial<{ notificationMode: unknown }> = {},
+  preferences: Partial<{
+    notificationMode: unknown
+    defaultOpenerId: unknown
+    defaultTerminalShellId: unknown
+  }> = {},
   options: Partial<{ restartRequired: boolean }> = {}
 ): DesktopSettingsSnapshot {
   return {
@@ -33,6 +60,8 @@ export function buildDesktopSettingsSnapshot(
       : "when_unfocused",
     agentEnvironment: resolveDesktopAgentEnvironment(settings.sandbox),
     restartRequired: options.restartRequired ?? false,
+    defaultOpenerId: normalizeDefaultOpenerId(preferences.defaultOpenerId),
+    defaultTerminalShellId: normalizeDefaultTerminalShellId(preferences.defaultTerminalShellId),
   }
 }
 

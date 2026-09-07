@@ -32,6 +32,7 @@ import {
   withoutTraceId,
 } from "../support.js";
 import { SessionApplicationError } from "./session-application-error.js";
+import type { ContextUsageCache } from "../context-usage-cache.js";
 
 export { SessionApplicationError } from "./session-application-error.js";
 
@@ -44,6 +45,8 @@ export interface SessionApplicationServiceContext {
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   /** 应用启动恢复完成前，拒绝新的写操作。测试和独立服务可不提供。 */
   assertReady?(): void;
+  /** Optional: invalidate session context-usage cache on model/runtime changes. */
+  contextUsageCache?: Pick<ContextUsageCache, "invalidate">;
 }
 
 export interface UpdateSessionCommand {
@@ -307,6 +310,12 @@ export class SessionApplicationService {
       });
       if (runtimeConfigurationChanged)
         await this.context.agentPool.close(sessionId);
+      if (
+        nextModel !== undefined &&
+        nextModel !== existing.model
+      ) {
+        this.context.contextUsageCache?.invalidate(sessionId);
+      }
       this.context.events.publishSince(before);
       return session;
     } finally {

@@ -2,8 +2,7 @@ import { useEffect, useState } from "react"
 
 import type { WorkspaceOpener } from "@shared/workspace-types"
 
-const persistedOpenerKey = "openharness.desktop.open-with.v1"
-const openerChangedEvent = "openharness:open-with-changed"
+import { resolveSelectedOpener } from "./resolve-selected-opener"
 
 let cachedOpeners: WorkspaceOpener[] | null = null
 let inflight: Promise<WorkspaceOpener[]> | null = null
@@ -14,9 +13,10 @@ export function useWorkspaceOpeners(): {
   ready: boolean
 } {
   const [openers, setOpeners] = useState<WorkspaceOpener[]>(cachedOpeners ?? [])
-  const [selectedId, setSelectedId] = useState<string | null>(readPersistedOpenerId)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [preferenceReady, setPreferenceReady] = useState(false)
   const [ready, setReady] = useState(cachedOpeners !== null)
-  const selected = resolveSelectedOpener(openers, selectedId)
+  const selected = preferenceReady ? resolveSelectedOpener(openers, selectedId) : null
 
   useEffect(() => {
     let cancelled = false
@@ -37,18 +37,22 @@ export function useWorkspaceOpeners(): {
   }, [])
 
   useEffect(() => {
-    const syncFromStorage = (event: StorageEvent): void => {
-      if (event.key === persistedOpenerKey) setSelectedId(readPersistedOpenerId())
-    }
-    const syncFromEvent = (event: Event): void => {
-      const openerId = (event as CustomEvent<string>).detail
-      if (typeof openerId === "string") setSelectedId(openerId)
-    }
-    window.addEventListener("storage", syncFromStorage)
-    window.addEventListener(openerChangedEvent, syncFromEvent)
+    let cancelled = false
+    void window.desktop.settings
+      .snapshot()
+      .then((snapshot) => {
+        if (cancelled) return
+        setSelectedId(snapshot.defaultOpenerId)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setSelectedId(null)
+      })
+      .finally(() => {
+        if (!cancelled) setPreferenceReady(true)
+      })
     return () => {
-      window.removeEventListener("storage", syncFromStorage)
-      window.removeEventListener(openerChangedEvent, syncFromEvent)
+      cancelled = true
     }
   }, [])
 
@@ -59,14 +63,19 @@ export async function launchWorkspaceOpener(input: {
   openerId: string
   path: string
   rootPath?: string
-  persist?: boolean
 }): Promise<void> {
-  if (input.persist) writePersistedOpenerId(input.openerId)
   await window.desktop.workspace.openWith({
     openerId: input.openerId,
     path: input.path,
     rootPath: input.rootPath,
   })
+}
+
+export async function launchProjectFolderOpener(
+  openerId: string,
+  folderPath: string
+): Promise<void> {
+  await launchWorkspaceOpener({ openerId, path: folderPath, rootPath: folderPath })
 }
 
 function loadOpeners(): Promise<WorkspaceOpener[]> {
@@ -83,35 +92,4 @@ function loadOpeners(): Promise<WorkspaceOpener[]> {
       })
   }
   return inflight
-}
-
-function resolveSelectedOpener(
-  openers: WorkspaceOpener[],
-  selectedId: string | null
-): WorkspaceOpener | null {
-  if (openers.length === 0) return null
-  return (
-    openers.find((opener) => opener.id === selectedId) ??
-    openers.find((opener) => opener.id === "cursor") ??
-    openers.find((opener) => opener.id === "vscode") ??
-    openers[0]
-  )
-}
-
-function readPersistedOpenerId(): string | null {
-  try {
-    const value = localStorage.getItem(persistedOpenerKey)
-    return value?.trim() || null
-  } catch {
-    return null
-  }
-}
-
-function writePersistedOpenerId(openerId: string): void {
-  try {
-    localStorage.setItem(persistedOpenerKey, openerId)
-    window.dispatchEvent(new CustomEvent(openerChangedEvent, { detail: openerId }))
-  } catch {
-    // Ignore storage quota and private-mode failures.
-  }
 }

@@ -1,8 +1,16 @@
 import { access } from "node:fs/promises";
 
-import { getCredentialsFilePath, getConfigDir } from "@openharness/core";
+import {
+  assembleContextUsageSnapshot,
+  createTip,
+  formatContextUsageReport,
+  getCredentialsFilePath,
+  getConfigDir,
+  type ContextUsageSnapshot,
+} from "@openharness/core";
 import {
   buildPromptLayers,
+  buildPromptLedgerSegments,
   discoverClaudeMdFiles,
   inspectPersonalPromptFiles,
   listPendingUserProfileUpdates,
@@ -14,7 +22,14 @@ import { getLocalRulesDir, loadFacts, loadLocalRules } from "@openharness/person
 import { loadOutputStyles } from "@openharness/output-styles";
 import { discoverOpenHarnessExtensions } from "@openharness/agent-runtime";
 
-import type { ContextService } from "../settings-api.js";
+import type { ContextService, ModelProviderInfo } from "../settings-api.js";
+import {
+  ContextUsageCache,
+  sharedContextUsageCache,
+} from "../context-usage-cache.js";
+import { getBoundContextUsageLiveAssembler } from "../context-usage-live-binder.js";
+import { resolveModelContextLimits, type ModelContextLimits } from "../assemble-session-context-usage.js";
+import { createDefaultModelService } from "./model-service.js";
 import { openMemoryManager } from "./memory-service.js";
 import { readCurrentSettings, type DaemonSettingsRef } from "./shared.js";
 
@@ -26,7 +41,22 @@ interface ContextStatusRow {
   purpose: string;
 }
 
-export function createDefaultContextService(ref: DaemonSettingsRef): ContextService {
+export function createDefaultContextService(
+  ref: DaemonSettingsRef,
+  cache: ContextUsageCache = sharedContextUsageCache,
+  options: {
+    assembleLive?: (input: {
+      sessionId: string;
+      cwd: string;
+      previousContextWindow?: number;
+    }) => Promise<ContextUsageSnapshot | null>;
+    listProviders?: () => Promise<ModelProviderInfo[]> | ModelProviderInfo[];
+    resolveModelLimits?: (input: {
+      model: string;
+      providerHint?: string;
+    }) => Promise<ModelContextLimits> | ModelContextLimits;
+  } = {},
+): ContextService {
   return {
     async preview({ cwd }) {
       const settings = await readCurrentSettings(ref);
@@ -176,6 +206,70 @@ export function createDefaultContextService(ref: DaemonSettingsRef): ContextServ
           formatContextStatusTable(rows),
         ].join("\n"),
       };
+    },
+    async usage({ cwd, sessionId, refresh, previousContextWindow }) {
+      if (sessionId && !refresh) {
+        const cached = cache.get(sessionId);
+        if (cached) {
+          const snapshot: ContextUsageSnapshot = { ...cached, source: "session_cache" };
+          return { snapshot, report: formatContextUsageReport(snapshot) };
+        }
+      }
+
+      if (sessionId) {
+        const assembleLive =
+          options.assembleLive ?? getBoundContextUsageLiveAssembler();
+        if (assembleLive) {
+          const live = await assembleLive({
+            sessionId,
+            cwd,
+            ...(previousContextWindow != null
+              ? { previousContextWindow }
+              : {}),
+          });
+          if (live) {
+            return { snapshot: live, report: formatContextUsageReport(live) };
+          }
+        }
+      }
+
+      const settings = await readCurrentSettings(ref);
+      const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
+      const limits = options.resolveModelLimits
+        ? await options.resolveModelLimits({
+            model: settings.model,
+            providerHint: settings.provider,
+          })
+        : await resolveModelContextLimits({
+            model: settings.model,
+            providerHint: settings.provider,
+            listProviders:
+              options.listProviders ??
+              (() => createDefaultModelService({ current: settings }).list()),
+          });
+      const segments = await buildPromptLedgerSegments({
+        customPrompt: settings.systemPrompt,
+        cwd,
+        permissionMode: settings.permission.mode,
+        workStyle: settings.workStyle,
+        fastMode: settings.fastMode,
+        effort: settings.effort,
+        passes: settings.passes,
+        skillsList: skillRegistry.modelVisibleList(),
+      });
+      const snapshot = assembleContextUsageSnapshot({
+        segments,
+        model: settings.model,
+        contextWindow: limits.contextWindow,
+        outputLimit: limits.outputLimit,
+        source: "static_only",
+        modelSwitch:
+          previousContextWindow != null
+            ? { previousContextWindow }
+            : undefined,
+        extraTips: [createTip("conversation_omitted")],
+      });
+      return { snapshot, report: formatContextUsageReport(snapshot) };
     },
   };
 }

@@ -35,6 +35,7 @@ import {
   reconcileRuntimeWithView,
   releaseAcknowledgedRuntime,
 } from "./session-view-state"
+import { parseDesktopContextUsageSnapshot } from "@shared/parse-context-usage-snapshot"
 import type {
   DesktopSessionRuntime,
   DesktopSessionState,
@@ -53,6 +54,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   const { get, set, projectDetailsCoordinator } = context
   let primaryNavigationGeneration = 0
   let defaultSettingsGeneration = 0
+  let contextUsageGeneration = 0
   let defaultSettingsWrite: Promise<void> = Promise.resolve()
   const advancePrimaryNavigation = (): number => {
     primaryNavigationGeneration += 1
@@ -73,6 +75,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       return {
         activeSessionId: sessionId,
         sessionView: null,
+        contextUsageSnapshot: null,
         sessionRuntimes: {
           ...state.sessionRuntimes,
           ...(previousActiveSessionId && previousActiveSessionId !== sessionId
@@ -183,6 +186,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         }
       }
+      void get().refreshContextUsage()
       return "applied"
     } catch (error) {
       let failed = false
@@ -223,6 +227,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       set((state) => ({
         activeSessionId: null,
         sessionView: null,
+        contextUsageSnapshot: null,
         selectedModel: state.defaultModel,
         selectedProvider: state.defaultProvider,
         selectedPermissionMode: state.defaultPermissionMode,
@@ -261,6 +266,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             model.providerName
           )
         )
+        void get().refreshContextUsage({ refresh: true })
       } catch {
         if (generation !== defaultSettingsGeneration) return
       }
@@ -299,6 +305,10 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async updateSessionModel(sessionId, model) {
+      const previousContextWindow =
+        get().activeSessionId === sessionId
+          ? get().contextUsageSnapshot?.contextWindow
+          : undefined
       const session = await window.desktop.sessions.updateModel({
         sessionId,
         model: model.id,
@@ -316,6 +326,12 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
             ? { ...state.sessionView, session }
             : state.sessionView,
       }))
+      if (get().activeSessionId === sessionId) {
+        void get().refreshContextUsage({
+          refresh: true,
+          ...(previousContextWindow != null ? { previousContextWindow } : {}),
+        })
+      }
     },
 
     async updateSessionPermissionMode(sessionId, permissionMode) {
@@ -760,6 +776,36 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         context.scheduleSelectedProjectGitRefresh(true)
       }
       return startedSessionId
+    },
+
+    async refreshContextUsage(options) {
+      const generation = ++contextUsageGeneration
+      const state = get()
+      const cwd =
+        state.sessionView?.session.cwd ??
+        state.selectedProject?.path ??
+        state.outsideProjectWorkspaceRoot
+      if (!cwd) return
+      const sessionId = state.activeSessionId ?? undefined
+      try {
+        if (typeof window.desktop.sessions.getContextUsage !== "function") return
+        const snapshot = await window.desktop.sessions.getContextUsage({
+          cwd,
+          ...(sessionId ? { sessionId } : {}),
+          ...(options?.refresh !== undefined ? { refresh: options.refresh } : {}),
+          ...(options?.previousContextWindow !== undefined
+            ? { previousContextWindow: options.previousContextWindow }
+            : {}),
+        })
+        const parsed = parseDesktopContextUsageSnapshot(snapshot)
+        // Ignore stale responses if the active session changed mid-flight.
+        const latest = get()
+        if (generation !== contextUsageGeneration) return
+        if ((latest.activeSessionId ?? undefined) !== sessionId) return
+        if (parsed) set({ contextUsageSnapshot: parsed })
+      } catch {
+        // 环保留上次成功快照；不阻断 composer。
+      }
     },
   }
 

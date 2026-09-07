@@ -18,8 +18,9 @@ export function PanelResizeHandle({
       aria-label={label}
       onPointerDown={onPointerDown}
       className={cn(
-        "relative z-40 w-px bg-transparent outline-none after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent after:transition-colors after:duration-150 after:content-['']",
-        "hover:after:bg-foreground/16 focus-visible:after:bg-ring/70 data-[separator=active]:after:bg-foreground/28",
+        "relative z-40 w-px bg-transparent outline-none after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:content-['']",
+        "after:bg-linear-to-b after:from-transparent after:via-border after:to-transparent",
+        "hover:after:via-primary focus-visible:after:via-primary data-[separator=active]:after:via-primary",
         className
       )}
     />

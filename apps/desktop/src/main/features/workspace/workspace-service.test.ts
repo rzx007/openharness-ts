@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -60,6 +60,68 @@ describe("WorkspaceService.listFiles", () => {
       "a-file.ts",
       "z-file.ts",
     ])
+  })
+})
+
+describe("WorkspaceService.readFile extra-root", () => {
+  it("reads a personal skill from an extra root", async () => {
+    const project = await createTemporaryDirectory()
+    const configDir = await createTemporaryDirectory()
+    const documentsPath = await createTemporaryDirectory()
+    const skillPath = join(configDir, "skills", "show-me", "SKILL.md")
+    await mkdir(join(configDir, "skills", "show-me"), { recursive: true })
+    await writeFile(skillPath, "# skill\n")
+    workspaceService.configureAllowedRoots({ configDir, documentsPath })
+
+    const result = await workspaceService.readFile({
+      rootPath: project,
+      path: skillPath,
+    })
+
+    expect(result).toMatchObject({
+      scope: "extra-root",
+      relativePath: "skills/show-me/SKILL.md",
+      rootLabel: "个人配置",
+      content: "# skill\n",
+    })
+  })
+
+  it("does not follow a symlink that escapes the allowed root", async () => {
+    const project = await createTemporaryDirectory()
+    const configDir = await createTemporaryDirectory()
+    const documentsPath = await createTemporaryDirectory()
+    const outside = await createTemporaryDirectory()
+    const target = join(outside, "secret.txt")
+    await writeFile(target, "secret")
+    const link = join(configDir, "skills", "leak.md")
+    await mkdir(join(configDir, "skills"), { recursive: true })
+    try {
+      await symlink(target, link)
+    } catch {
+      return
+    }
+    workspaceService.configureAllowedRoots({ configDir, documentsPath })
+
+    await expect(workspaceService.readFile({ rootPath: project, path: link })).rejects.toThrow(
+      "文件必须位于当前项目目录内。"
+    )
+  })
+
+  it("does not read credentials.json from the config directory", async () => {
+    const project = await createTemporaryDirectory()
+    const configDir = await createTemporaryDirectory()
+    await writeFile(join(configDir, "credentials.json"), "{\"token\":\"x\"}")
+    workspaceService.configureAllowedRoots({
+      configDir,
+      documentsPath: await createTemporaryDirectory(),
+    })
+
+    await expect(
+      workspaceService.readFile({
+        rootPath: project,
+        path: join(configDir, "credentials.json"),
+      })
+    ).rejects.toThrow()
   })
 })
 

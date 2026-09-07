@@ -13,5 +13,8 @@ export {
   createDefaultProviderService,
   ProviderMutationError,
 } from "./provider-service.js";
-export { createDefaultSettingsService } from "./settings-service.js";
+export {
+  createDefaultSettingsService,
+  settingsPatchRuntimeImpact,
+} from "./settings-service.js";
 export type { DaemonSettingsRef } from "./shared.js";

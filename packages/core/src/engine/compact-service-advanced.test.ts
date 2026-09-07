@@ -491,6 +491,20 @@ describe("boundary marker", () => {
       (m) => (typeof m.content === "string" ? m.content : "").includes("[Compact boundary marker]"),
     );
     expect(hasBoundary).toBe(true);
+
+    const summary = result.find(
+      (m) =>
+        m.type === "assistant" &&
+        (typeof m.content === "string" ? m.content : "").includes("[Conversation compacted"),
+    );
+    expect(summary?.compactRole).toBe("summary");
+
+    const boundary = result.find(
+      (m) =>
+        m.type === "user" &&
+        (typeof m.content === "string" ? m.content : "").includes("[Compact boundary marker]"),
+    );
+    expect(boundary?.compactRole).toBe("boundary");
   });
 });
 

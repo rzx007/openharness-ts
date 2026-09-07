@@ -147,7 +147,7 @@ describe("default daemon application services", () => {
     expect(result.restartRuntimes).toBe(true);
   });
 
-  it("updates work style and requests runtime restart", async () => {
+  it("updates work style and requests idle runtime invalidation", async () => {
     const ref = {
       current: {
         model: "m",
@@ -162,22 +162,26 @@ describe("default daemon application services", () => {
     const result = await settings.patch({ workStyle: "efficient" });
 
     expect(ref.current.workStyle).toBe("efficient");
-    expect(result.restartRuntimes).toBe(true);
+    expect(result.restartRuntimes).toBe(false);
+    expect(result.invalidateRuntimes).toBe(true);
     await expect(settings.patch({ workStyle: "chatty" })).rejects.toThrow("Unknown work style");
   });
 
   it("resolves a built-in provider model when patching provider without a model", async () => {
-    const catalogPath = join(temporaryDirectory, "models-dev.json");
+    const catalogPath = join(temporaryDirectory, "deepseek-models.json");
     writeFileSync(
       catalogPath,
       JSON.stringify({
         deepseek: {
-          id: "deepseek",
           name: "DeepSeek",
+          env: ["DEEPSEEK_API_KEY"],
+          api: "https://api.deepseek.com",
           models: {
-            "deepseek-v4-flash": {
-              id: "deepseek-v4-flash",
-              name: "DeepSeek V4 Flash",
+            "deepseek-v4-flash": { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+            "deepseek-v4-flash-vision-exp": {
+              id: "deepseek-v4-flash-vision-exp",
+              name: "DeepSeek V4 Flash Vision Exp",
+              status: "beta",
             },
           },
         },

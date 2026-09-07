@@ -352,3 +352,15 @@ export interface UpdateDesktopSessionPermissionModeInput {
   sessionId: string
   permissionMode: DesktopPermissionMode
 }
+
+export interface GetDesktopContextUsageInput {
+  cwd: string
+  sessionId?: string
+  refresh?: boolean
+  previousContextWindow?: number
+}
+
+export interface DesktopContextUsageResult {
+  snapshot: unknown
+  report: string
+}

@@ -1,4 +1,8 @@
 export {
+  AgentChildBudgetExceededError,
+  AgentRunNotAcceptingInputError,
+} from "@openharness/core";
+export {
   AgentOperationConflictError,
   type AgentCompactResult,
   type AgentInspection,

@@ -153,6 +153,34 @@ describe("AgentPool", () => {
     expect(pool.size).toBe(0);
   });
 
+  it("invalidates idle agents immediately and defers busy agents until they go idle", async () => {
+    const idleClose = vi.fn(async () => {});
+    const busyClose = vi.fn(async () => {});
+    const idleAgent = createAgent(idleClose);
+    const busyAgent = { ...createAgent(busyClose), state: "running" };
+    const secondSession = { ...session, id: "s2" };
+    const context = createContext(
+      vi.fn(async ({ session: loaded }: any) => (loaded.id === "s1" ? idleAgent : busyAgent)),
+    );
+    context.store.getSession.mockImplementation((id: string) =>
+      id === "s1" ? session : secondSession,
+    );
+    const pool = new AgentPool(context as any);
+    await Promise.all([pool.acquireSession("s1"), pool.acquireSession("s2")]);
+
+    await pool.invalidateWarmAgents();
+
+    expect(idleClose).toHaveBeenCalledOnce();
+    expect(busyClose).not.toHaveBeenCalled();
+    expect(pool.size).toBe(1);
+
+    busyAgent.state = "idle";
+    await pool.closeIfStale("s2");
+
+    expect(busyClose).toHaveBeenCalledOnce();
+    expect(pool.size).toBe(0);
+  });
+
   it("waits for every cached agent to close before reporting cleanup failures", async () => {
     const secondSession = { ...session, id: "s2" };
     const delayedClose = deferred();

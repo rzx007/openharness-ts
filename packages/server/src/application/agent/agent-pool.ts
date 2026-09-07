@@ -27,6 +27,8 @@ interface AgentPoolEntry {
   agent?: OpenHarnessAgent;
   state: "active" | "closing";
   closePromise?: Promise<void>;
+  /** Soft settings changed while this agent was busy; close once idle. */
+  stale?: boolean;
 }
 
 /** One warm framework agent per pool-owned durable session; live children stay framework-owned. */
@@ -84,7 +86,13 @@ export class AgentPool {
       throw new Error(`Session runtime is not available: ${sessionId}`);
     }
     const existing = this.agents.get(sessionId);
-    if (existing?.state === "active") return await existing.promise;
+    if (existing?.state === "active") {
+      if (existing.stale && !this.entryHasActiveWork(existing)) {
+        await this.close(sessionId);
+        return await this.acquire(sessionId);
+      }
+      return await existing.promise;
+    }
     if (existing?.closePromise) {
       await existing.closePromise;
       return await this.acquire(sessionId);
@@ -136,6 +144,30 @@ export class AgentPool {
 
   async closeAll(): Promise<void> {
     await this.closeSessions([...this.agents.keys()], "Agent pool cleanup failed");
+  }
+
+  /**
+   * Drop idle warm agents immediately; mark busy ones so they recreate after the
+   * current run. Used when soft settings (e.g. workStyle) change mid-flight.
+   */
+  async invalidateWarmAgents(): Promise<void> {
+    const idleSessionIds: string[] = [];
+    for (const [sessionId, entry] of this.agents) {
+      if (this.entryHasActiveWork(entry)) {
+        entry.stale = true;
+      } else {
+        idleSessionIds.push(sessionId);
+      }
+    }
+    if (idleSessionIds.length === 0) return;
+    await this.closeSessions(idleSessionIds, "Agent pool soft invalidation failed");
+  }
+
+  async closeIfStale(sessionId: string): Promise<void> {
+    const entry = this.agents.get(sessionId);
+    if (!entry?.stale) return;
+    if (this.entryHasActiveWork(entry)) return;
+    await this.close(sessionId);
   }
 
   private async create(

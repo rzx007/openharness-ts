@@ -8,6 +8,7 @@ import {
   launchWorkspaceOpener,
   useWorkspaceOpeners,
 } from "@renderer/components/desktop/open-with/use-workspace-openers"
+import { cn } from "@renderer/lib/utils"
 
 export function OpenWithSubmenu({
   path,
@@ -20,7 +21,7 @@ export function OpenWithSubmenu({
   onPicked?: () => void
   onError?: (error: unknown) => void
 }): React.JSX.Element {
-  const { openers, ready } = useWorkspaceOpeners()
+  const { openers, selected, ready } = useWorkspaceOpeners()
   const itemRef = useRef<HTMLDivElement | null>(null)
   const submenuRef = useRef<HTMLDivElement | null>(null)
   const closeTimerRef = useRef<number | null>(null)
@@ -130,7 +131,10 @@ export function OpenWithSubmenu({
                     event.stopPropagation()
                     pickOpener(opener.id)
                   }}
-                  className="flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  className={cn(
+                    "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    opener.id === selected?.id && "bg-muted/70"
+                  )}
                 >
                   <OpenerIcon opener={opener} />
                   <span className="min-w-0 flex-1 truncate">{opener.label}</span>

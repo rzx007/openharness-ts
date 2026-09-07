@@ -78,6 +78,31 @@ describe("QueryEngine per-turn memory retriever", () => {
     expect(system).toContain("<system-reminder>");
   });
 
+  it("exposes the exact runtime prompt source used by the latest turn", async () => {
+    const { client, requests } = createRecordingClient(SIMPLE_RESPONSE);
+    const engine = new QueryEngine(
+      client,
+      new ToolRegistry(),
+      createMockPermissionChecker(),
+      createMockHookExecutor(),
+      {
+        systemPrompt: "SESSION RUNTIME PROMPT",
+        memoryRetriever: async () => "TURN MEMORY",
+      },
+    );
+
+    for await (const _ of engine.submitMessage("remember this")) { /* drain */ }
+
+    const source = engine.getContextUsagePromptSource();
+    expect(source.systemPrompt).toBe("SESSION RUNTIME PROMPT");
+    expect(source.memoryReminderText).toBe(
+      "<system-reminder>\nTURN MEMORY\n</system-reminder>",
+    );
+    expect(requests[0]!.system).toBe(
+      `${source.systemPrompt}\n\n${source.memoryReminderText}`,
+    );
+  });
+
   it("does NOT write injected memory into the persistent message history", async () => {
     const { client } = createRecordingClient(SIMPLE_RESPONSE);
     const retriever = vi.fn(async () => "TRANSIENT_MEMORY_MARKER");

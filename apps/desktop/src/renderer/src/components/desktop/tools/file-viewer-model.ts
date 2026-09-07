@@ -1,3 +1,5 @@
+import type { WorkspaceFileScope } from "@shared/workspace-types"
+
 const largeHtmlLineThreshold = 5_000
 
 export function isHtmlPath(path: string): boolean {
@@ -14,4 +16,8 @@ export function shouldOfferHtmlBrowserOpen(path: string, content: string): boole
     if (lineCount > largeHtmlLineThreshold) return true
   }
   return false
+}
+
+export function canOpenHtmlInBrowser(scope: WorkspaceFileScope | undefined): boolean {
+  return scope !== "extra-root"
 }

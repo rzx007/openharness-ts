@@ -431,6 +431,70 @@ describe("Integration: Full Agent Loop", () => {
     expect(toolEnd.result.content[0].text).toContain("Unknown tool");
   });
 
+  it("normalizes Write path/contents aliases before schema validation", async () => {
+    const registry = new ToolRegistry();
+    const execute = vi.fn(async (input: Record<string, unknown>) => ({
+      content: [{ type: "text" as const, text: `wrote ${input.file_path}` }],
+    }));
+    registry.register({
+      name: "Write",
+      description: "write a file",
+      inputSchema: {
+        type: "object",
+        properties: {
+          file_path: { type: "string" },
+          content: { type: "string" },
+        },
+        required: ["file_path", "content"],
+      },
+      execute,
+    });
+
+    const permissionChecker = { checkTool: vi.fn(async () => ({ action: "allow" as const })) };
+    const { client } = createMockStreamClient([
+      [
+        {
+          type: "tool_use_start",
+          toolUse: {
+            type: "tool_use",
+            id: "tu1",
+            name: "Write",
+            input: { path: "/tmp/notes.ts", contents: "export {}" },
+          },
+        },
+        { type: "complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "complete", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const engine = new QueryEngine(client, registry, permissionChecker, noopHooks());
+    const events: StreamEvent[] = [];
+    for await (const e of engine.submitMessage("write file")) {
+      events.push(e);
+    }
+
+    const toolEnd = events.find((e) => e.type === "tool_use_end") as any;
+    expect(toolEnd.result.isError).toBeFalsy();
+    expect(toolEnd.result.content[0].text).toBe("wrote /tmp/notes.ts");
+    expect(permissionChecker.checkTool).toHaveBeenCalledWith(
+      "Write",
+      expect.objectContaining({
+        file_path: "/tmp/notes.ts",
+        content: "export {}",
+      }),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        file_path: "/tmp/notes.ts",
+        content: "export {}",
+      }),
+      expect.anything(),
+    );
+  });
+
   it("validates tool input schema before permission checks and execution", async () => {
     const registry = new ToolRegistry();
     const execute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }] }));
