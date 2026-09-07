@@ -25,6 +25,11 @@ export type {
 } from "./types.js";
 export { normalizeSandboxConfig } from "./config.js";
 export {
+  createDesktopManagedMounts,
+  resolveContainerWorkspacePath,
+} from "./managed-mounts.js";
+export type { ManagedDockerMount } from "./managed-mounts.js";
+export {
   ExecutionConfigError,
   resolveExecutionEnvironmentConfig,
 } from "./execution-config.js";
@@ -66,6 +71,7 @@ export {
   buildDockerRunArgs,
   buildDockerSupervisedArgv,
   DOCKER_CONFIG_HASH_LABEL,
+  DOCKER_MANAGED_LABEL,
   DOCKER_WORKSPACE_LABEL,
   dockerDefaultDockerfilePath,
   dockerContainerName,

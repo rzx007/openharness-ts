@@ -13,6 +13,7 @@ import type {
   SandboxRuntimeReporter,
   SandboxRuntimeStatus,
 } from "./types.js";
+import type { ManagedDockerMount } from "./managed-mounts.js";
 
 export interface SandboxRuntimeOptions {
   settings: Settings;
@@ -23,7 +24,7 @@ export interface SandboxRuntimeOptions {
   deps?: AvailabilityDeps;
   reporter?: SandboxRuntimeReporter;
   /** Host-managed mounts that users cannot override; always mounted read-only. */
-  managedReadOnlyMounts?: readonly { source: string; target: string }[];
+  managedMounts?: readonly ManagedDockerMount[];
 }
 
 export interface StartedSandboxRuntime {
@@ -40,7 +41,7 @@ export async function startSandboxRuntime(
     sessionId: options.sessionId,
     settings: options.settings,
   });
-  const sandbox = options.managedReadOnlyMounts?.length
+  const sandbox = options.managedMounts?.length
     ? {
         ...policy.config,
         docker: { ...policy.config.docker, reuseContainer: false },
@@ -105,7 +106,7 @@ export async function startSandboxRuntime(
     cwd: options.cwd,
     deps: options.deps,
     reporter: options.reporter,
-    managedReadOnlyMounts: options.managedReadOnlyMounts,
+    managedMounts: options.managedMounts,
   });
   try {
     await session.start();

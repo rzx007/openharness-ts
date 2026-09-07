@@ -434,9 +434,11 @@ describe("docker backend argv builders", () => {
       sessionId: "session-1",
       cwd: "D:/repo",
       config: { enabled: true, backend: "docker" },
-      managedReadOnlyMounts: [{
+      managedMounts: [{
+        purpose: "attachment",
         source: "D:/daemon/session-resources/abc",
         target: "/mnt/openharness-attachments",
+        mode: "ro",
       }],
     });
 
@@ -446,8 +448,10 @@ describe("docker backend argv builders", () => {
     expect(argv.join(" ")).not.toContain("/blobs/");
     const base = normalizeSandboxConfig({ enabled: true, backend: "docker" });
     expect(dockerSandboxConfigHash(base, "D:/repo", [{
+      purpose: "attachment",
       source: "D:/daemon/session-resources/abc",
       target: "/mnt/openharness-attachments",
+      mode: "ro",
     }])).not.toBe(dockerSandboxConfigHash(base, "D:/repo"));
   });
 
