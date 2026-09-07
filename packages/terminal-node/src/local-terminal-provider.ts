@@ -148,6 +148,7 @@ export class LocalTerminalProvider implements TerminalProvider {
     const cols = clampDimension(input.cols);
     const rows = clampDimension(input.rows);
     session.pty.resize(cols, rows);
+    await session.target.resize?.(cols, rows);
     session.info = { ...session.info, cols, rows };
   }
 
@@ -212,8 +213,8 @@ export class LocalTerminalProvider implements TerminalProvider {
     session.cancelRequested = true;
     session.info = { ...session.info, status: "stopping" };
     this.events.emit({ type: "status", terminalId, status: "stopping" });
-    await session.target.signal("terminate").catch(() => {});
     session.pty?.kill();
+    await session.target.signal("terminate").catch(() => {});
     await this.closeTarget(session);
   }
 

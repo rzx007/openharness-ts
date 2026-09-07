@@ -577,13 +577,14 @@ describe("docker backend argv builders", () => {
       executionCwd: "/workspace",
       shell: "/bin/sh",
     });
-    expect(target.args.slice(0, 5)).toEqual([
+    expect(target.args.slice(0, 4)).toEqual([
       "exec",
       "-it",
       "-w",
       "/workspace",
-      "ohs-project",
     ]);
+    expect(target.args).toContain("OPENHARNESS_PTY_ID=terminal-1");
+    expect(target.args).toContain("ohs-project");
     expect(target.args).toContain("/bin/sh");
     expect(target.args).toContain("-i");
   });

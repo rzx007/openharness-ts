@@ -17,6 +17,7 @@ describe("LocalTerminalProvider", () => {
     } as any;
     const spawnPty = vi.fn(() => pty);
     const signal = vi.fn(async () => {});
+    const resize = vi.fn(async () => {});
     const close = vi.fn(async () => {});
     const provider = new LocalTerminalProvider({
       resolveCwd: async () => process.cwd(),
@@ -26,6 +27,7 @@ describe("LocalTerminalProvider", () => {
         hostCwd: process.cwd(),
         executionCwd: "/workspace",
         shell: "/bin/sh",
+        resize,
         signal,
         close,
       }),
@@ -53,6 +55,7 @@ describe("LocalTerminalProvider", () => {
     expect(pty.write).toHaveBeenCalledWith("\x03");
     expect(pty.write).toHaveBeenCalledWith("\x04");
     expect(pty.resize).toHaveBeenCalledWith(120, 40);
+    expect(resize).toHaveBeenCalledWith(120, 40);
 
     onData?.("ok\r\n");
     expect((await provider.read({ terminalId: info.id })).data).toContain("ok");

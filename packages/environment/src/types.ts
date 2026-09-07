@@ -83,6 +83,7 @@ export interface EnvironmentPtyTarget {
   executionCwd: string;
   shell: string;
   env?: Record<string, string>;
+  resize?(cols: number, rows: number): Promise<void>;
   signal(signal: "interrupt" | "terminate"): Promise<void>;
   close(): Promise<void>;
 }

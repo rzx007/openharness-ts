@@ -44,12 +44,7 @@ export async function startSandboxRuntime(
     sessionId: options.sessionId,
     settings: options.settings,
   });
-  const sandbox = options.managedMounts?.length
-    ? {
-        ...policy.config,
-        docker: { ...policy.config.docker, reuseContainer: false },
-      }
-    : policy.config;
+  const sandbox = policy.config;
   const runtimeSettings: Settings = { ...options.settings, sandbox };
 
   if (!sandbox.enabled) {

@@ -59,6 +59,7 @@ export interface DockerPtyTargetOptions {
   shell: "/bin/sh" | "/bin/bash";
   executionId: string;
   env?: Record<string, string>;
+  resize?(cols: number, rows: number): Promise<void>;
   signal(signal: "interrupt" | "terminate"): Promise<void>;
   close(): Promise<void>;
 }
@@ -278,17 +279,16 @@ export function buildDockerPtyTarget(options: DockerPtyTargetOptions): Environme
     "-it",
     "-w",
     options.executionCwd,
+    "-e",
+    `OPENHARNESS_PTY_ID=${options.executionId}`,
   ];
   for (const [key, value] of Object.entries(containerExecEnv(options.env))) {
     args.push("-e", `${key}=${value}`);
   }
   args.push(
     options.containerName,
-    ...buildDockerSupervisedArgv(
-      [options.shell, "-i"],
-      options.executionId,
-      { preserveStdin: true },
-    ),
+    options.shell,
+    "-i",
   );
   return {
     command: options.dockerCommand,
@@ -297,6 +297,7 @@ export function buildDockerPtyTarget(options: DockerPtyTargetOptions): Environme
     executionCwd: options.executionCwd,
     shell: options.shell,
     ...(options.env ? { env: options.env } : {}),
+    ...(options.resize ? { resize: options.resize } : {}),
     signal: options.signal,
     close: options.close,
   };
@@ -458,11 +459,11 @@ export class DockerSandboxSession {
       }
     }));
     await Promise.all([...this.activePtyExecutions].map(async (executionId) => {
-      await stopDockerExecution({
+      await stopDockerPtyExecution({
         dockerCommand: this.dockerCommand,
         containerName: this.containerName,
         executionId,
-        signal: "SIGKILL",
+        signal: "TERM",
       }).catch(() => {});
       this.activePtyExecutions.delete(executionId);
     }));
@@ -491,7 +492,7 @@ export class DockerSandboxSession {
       }
     }
     for (const executionId of this.activePtyExecutions) {
-      stopDockerExecutionSync({
+      stopDockerPtyExecutionSync({
         dockerCommand: this.dockerCommand,
         containerName: this.containerName,
         executionId,
@@ -579,12 +580,21 @@ export class DockerSandboxSession {
       executionCwd: input.cwd ?? this.containerCwd,
       shell,
       executionId,
-      signal: async (signal) => {
-        await stopDockerExecution({
+      resize: async (cols, rows) => {
+        await resizeDockerPtyExecution({
           dockerCommand: this.dockerCommand,
           containerName: this.containerName,
           executionId,
-          signal: signal === "interrupt" ? "SIGINT" : "SIGTERM",
+          cols,
+          rows,
+        });
+      },
+      signal: async (signal) => {
+        await stopDockerPtyExecution({
+          dockerCommand: this.dockerCommand,
+          containerName: this.containerName,
+          executionId,
+          signal: signal === "interrupt" ? "INT" : "TERM",
         });
       },
       close: async () => {
@@ -610,6 +620,58 @@ export class DockerSandboxSession {
       );
     }
   }
+}
+
+async function resizeDockerPtyExecution(options: {
+  dockerCommand: string;
+  containerName: string;
+  executionId: string;
+  cols: number;
+  rows: number;
+}): Promise<void> {
+  await runToCompletion([
+    options.dockerCommand,
+    "exec",
+    options.containerName,
+    "/bin/sh",
+    "-c",
+    `${findDockerPtyPidScript(options.executionId)}; test -n "$pid"; stty rows ${Math.round(options.rows)} cols ${Math.round(options.cols)} < "/proc/$pid/fd/0"`,
+  ]);
+}
+
+async function stopDockerPtyExecution(options: {
+  dockerCommand: string;
+  containerName: string;
+  executionId: string;
+  signal: "INT" | "TERM";
+}): Promise<void> {
+  await runToCompletion([
+    options.dockerCommand,
+    "exec",
+    options.containerName,
+    "/bin/sh",
+    "-c",
+    `${findDockerPtyPidScript(options.executionId)}; if [ -n "$pid" ]; then kill -${options.signal} "$pid" 2>/dev/null || true; fi`,
+  ]);
+}
+
+function stopDockerPtyExecutionSync(options: {
+  dockerCommand: string;
+  containerName: string;
+  executionId: string;
+}): void {
+  spawnSync(options.dockerCommand, [
+    "exec",
+    options.containerName,
+    "/bin/sh",
+    "-c",
+    `${findDockerPtyPidScript(options.executionId)}; if [ -n "$pid" ]; then kill -KILL "$pid" 2>/dev/null || true; fi`,
+  ], { windowsHide: true, stdio: "ignore", timeout: 3_000 });
+}
+
+function findDockerPtyPidScript(executionId: string): string {
+  const safeId = executionId.replace(/[^a-zA-Z0-9_.-]/g, "");
+  return `pid=""; for f in /proc/[0-9]*/environ; do if tr '\\0' '\\n' < "$f" 2>/dev/null | grep -qx 'OPENHARNESS_PTY_ID=${safeId}'; then pid=${"${f#/proc/}"}; pid=${"${pid%/environ}"}; break; fi; done`;
 }
 
 async function ensureDockerImage(options: {
