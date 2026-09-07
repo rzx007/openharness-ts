@@ -2,7 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import type { Settings } from "@openharness/core";
-import type { SessionExecutionRecord, SessionStatus, SessionTaskStatus } from "@openharness/protocol";
+import type {
+  ExecutionEnvironmentConsumer,
+  ExecutionEnvironmentLease,
+} from "@openharness/environment";
+import type {
+  SessionExecutionRecord,
+  SessionRecord,
+  SessionStatus,
+  SessionTaskStatus,
+} from "@openharness/protocol";
 
 import type {
   DetachedProcessExecution,
@@ -17,7 +26,7 @@ type ProcessSupervisor = DetachedProcessSupervisor;
 type TaskScope = { cwd: string; sessionId?: string };
 
 interface BackgroundShellStore {
-  getSession(sessionId: string): { cwd: string; status: SessionStatus } | undefined;
+  getSession(sessionId: string): SessionRecord | undefined;
   listSessions(options?: { includeArchived?: boolean }): Array<{
     id: string;
     cwd: string;
@@ -88,10 +97,21 @@ export interface BackgroundShellServiceContext {
   >;
   getDetachedProcessSupervisor(scope: TaskScope): ProcessSupervisor;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
+  getSettingsForCwd?(cwd: string): Promise<Settings>;
+  acquireEnvironment?(
+    session: SessionRecord,
+    settings: Settings,
+    consumer: ExecutionEnvironmentConsumer,
+  ): Promise<ExecutionEnvironmentLease>;
 }
 
 /** Shared background-shell creation and control for HTTP and model-tool callers. */
 export class BackgroundShellService {
+  private readonly environmentLeases = new Map<string, {
+    lease: ExecutionEnvironmentLease;
+    unsubscribe: () => void;
+  }>();
+
   constructor(private readonly context: BackgroundShellServiceContext) {}
 
   /** Reattach live process projections and terminalize rows whose runtime owner is gone. */
@@ -236,7 +256,19 @@ export class BackgroundShellService {
     this.context.events.publishSince(eventCursor);
     eventCursor = this.context.events.checkpoint();
     let task: DetachedProcessExecution;
+    let environmentLease: ExecutionEnvironmentLease | undefined;
     try {
+      if (this.context.acquireEnvironment) {
+        const session = this.context.store.getSession(scope.sessionId);
+        if (!session) throw new BackgroundShellError(404, "Session not found");
+        const settings = input.settings ?? await this.context.getSettingsForCwd?.(scope.cwd);
+        if (!settings) throw new BackgroundShellError(400, "Background shell settings are required");
+        environmentLease = await this.context.acquireEnvironment(
+          session,
+          settings,
+          { kind: "background", id: reservation.task.id },
+        );
+      }
       task = await manager.startShellExecution({
         id: reservation.task.id,
         command,
@@ -246,6 +278,7 @@ export class BackgroundShellService {
         ...(input.settings ? { settings: input.settings } : {}),
       });
     } catch (error) {
+      await environmentLease?.release();
       this.context.store.transitionPendingSessionTask(reservation.task.id, {
         status: "failed",
         error: errorMessage(error),
@@ -254,6 +287,7 @@ export class BackgroundShellService {
       this.context.events.publishSince(eventCursor);
       throw error;
     }
+    if (environmentLease) this.trackEnvironmentLease(manager, task, environmentLease);
     const confirmation = this.context.store.transitionPendingSessionTask(task.id, {
       status: processTaskStatus(task.status),
       metadata: {
@@ -308,10 +342,36 @@ export class BackgroundShellService {
     const persisted = scope.sessionId ? this.context.store.getSessionTask(taskId) : undefined;
     const managerTaskId = persisted ? runtimeExecutionId(persisted) : taskId;
     const task = await manager.stopExecution(managerTaskId);
+    if (task.status !== "pending" && task.status !== "running") {
+      await this.releaseEnvironmentLease(managerTaskId);
+    }
     if (scope.sessionId && persisted) {
       this.context.executionProjector.syncPersistentExecution(task, manager, persisted.id);
     }
     return { execution: task };
+  }
+
+  private trackEnvironmentLease(
+    manager: ProcessSupervisor,
+    task: DetachedProcessExecution,
+    lease: ExecutionEnvironmentLease,
+  ): void {
+    const releaseIfTerminal = (execution: DetachedProcessExecution) => {
+      if (execution.id !== task.id) return;
+      if (execution.status === "pending" || execution.status === "running") return;
+      void this.releaseEnvironmentLease(task.id);
+    };
+    const unsubscribe = manager.registerExecutionListener(releaseIfTerminal);
+    this.environmentLeases.set(task.id, { lease, unsubscribe });
+    releaseIfTerminal(task);
+  }
+
+  private async releaseEnvironmentLease(taskId: string): Promise<void> {
+    const owned = this.environmentLeases.get(taskId);
+    if (!owned) return;
+    this.environmentLeases.delete(taskId);
+    owned.unsubscribe();
+    await owned.lease.release();
   }
 
   private resolveScope(

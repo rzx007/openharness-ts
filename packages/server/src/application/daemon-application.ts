@@ -314,6 +314,11 @@ export class DaemonApplication implements DurableAgentApplication {
         getDetachedProcessSupervisor: (scope) =>
           getDetachedProcessSupervisor(scope),
         events: this.eventPublisher,
+        getSettingsForCwd: async (cwd) =>
+          options.getSettingsForCwd
+            ? await options.getSettingsForCwd(cwd)
+            : options.getSettings?.() ?? options.settings ?? failMissingSettings(),
+        acquireEnvironment: acquireSessionEnvironment,
       });
       // JobWait / JobList 走这里：终端、后台 shell、子 Agent、workflow 合成一张本会话任务表。
       this.jobs = new DaemonJobService(

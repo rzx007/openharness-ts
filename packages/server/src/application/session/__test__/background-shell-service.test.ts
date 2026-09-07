@@ -20,7 +20,9 @@ afterAll(() => {
   rmSync(testConfigDir, { recursive: true, force: true });
 });
 
-function createTaskService() {
+function createTaskService(options: {
+  acquireEnvironment?: (...args: any[]) => Promise<any>;
+} = {}) {
   const listeners: Array<(task: any) => void> = [];
   const manager = {
     listExecutions: vi.fn(() => []),
@@ -42,7 +44,13 @@ function createTaskService() {
       cwd: "/repo",
       metadata: {},
     })),
-    registerExecutionListener: vi.fn((listener) => listeners.push(listener)),
+    registerExecutionListener: vi.fn((listener) => {
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      };
+    }),
   };
   let durableTask = {
     id: "task-1",
@@ -95,11 +103,34 @@ function createTaskService() {
     executionProjector: executionProjector as any,
     getDetachedProcessSupervisor: () => manager as any,
     events: { checkpoint, publishSince: broadcastSince },
+    getSettingsForCwd: async () => ({ model: "test" } as any),
+    acquireEnvironment: options.acquireEnvironment,
   });
-  return { service, store, executionProjector, manager, checkpoint, broadcastSince };
+  return { service, store, executionProjector, manager, checkpoint, broadcastSince, listeners };
 }
 
 describe("BackgroundShellService", () => {
+  it("holds a background environment lease until the process finishes", async () => {
+    const release = vi.fn(async () => {});
+    const acquireEnvironment = vi.fn(async () => ({ release }));
+    const { service, listeners } = createTaskService({ acquireEnvironment });
+
+    const result = await service.create({
+      requestId: "tool:lease",
+      sessionId: "s1",
+      command: "long-running",
+      origin: "tool",
+    });
+
+    expect(acquireEnvironment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1" }),
+      expect.any(Object),
+      { kind: "background", id: result.execution.id },
+    );
+    expect(release).not.toHaveBeenCalled();
+    for (const listener of listeners) listener({ ...result.execution, status: "completed" });
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+  });
   it("marks an active durable task interrupted when recovery finds no runtime", async () => {
     const { service, store } = createTaskService();
 
