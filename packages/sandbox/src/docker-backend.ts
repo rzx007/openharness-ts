@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
@@ -242,13 +242,15 @@ export function hasProxyEnv(extraEnv: Record<string, string>): boolean {
 }
 
 export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
-  const cwd = resolve(options.cwd);
+  const cwd = isManagedContainerPath(options.cwd)
+    ? posix.normalize(options.cwd)
+    : hostPathToContainerPath(resolve(options.cwd), options.workspaceRoot ?? options.cwd);
   const argv = [
     options.dockerCommand ?? "docker",
     "exec",
     "-i",
     "-w",
-    hostPathToContainerPath(cwd, options.workspaceRoot ?? cwd),
+    cwd,
   ];
   for (const [key, value] of Object.entries(containerExecEnv(options.env))) {
     argv.push("-e", `${key}=${value}`);
@@ -462,7 +464,11 @@ export class DockerSandboxSession {
       env: options.env,
       dockerCommand: this.dockerCommand,
     });
-    const child = spawn(execArgs[0]!, execArgs.slice(1), spawnOptions(options));
+    const child = spawn(
+      execArgs[0]!,
+      execArgs.slice(1),
+      spawnOptions({ ...options, cwd: this.cwd }),
+    );
     const nativeKill = child.kill.bind(child);
     this.activeExecutions.set(executionId, { child, nativeKill });
     const cleanup = () => this.activeExecutions.delete(executionId);
@@ -620,6 +626,11 @@ export async function inspectDockerSandbox(options: {
 
 export function toContainerWorkspacePath(hostPath: string): string {
   return resolveContainerWorkspacePath(hostPath);
+}
+
+function isManagedContainerPath(path: string): boolean {
+  return path === "/workspace" || path.startsWith("/workspace/") ||
+    path === "/opt/openharness/skills" || path.startsWith("/opt/openharness/skills/");
 }
 
 export function hostPathToContainerPath(hostPath: string, workspaceRoot: string): string {

@@ -137,7 +137,7 @@ export function createDefaultToolRegistry(
   registerBuiltin(listMcpResourcesTool, controlPlane(true));
   registerBuiltin(readMcpResourceTool, controlPlane(true));
   registerBuiltin(mcpAuthTool, controlPlane(true));
-  registerBuiltin(lspTool, environment());
+  registerBuiltin(lspTool, localEnvironment());
   registerBuiltin(feishuPushTool, controlPlane(true));
   return registry;
 }

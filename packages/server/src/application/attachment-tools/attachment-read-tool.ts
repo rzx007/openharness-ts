@@ -13,6 +13,10 @@ export function createAttachmentReadTool(options: {
 }): ToolDefinition {
   return {
     ...options.defaultTool,
+    execution: {
+      domain: "environment",
+      supportedEnvironments: ["local", "docker"],
+    },
     description: `${options.defaultTool.description} Also reads daemon attachment:// resources.`,
     async execute(input, context) {
       const path = typeof input.file_path === "string" ? input.file_path : "";

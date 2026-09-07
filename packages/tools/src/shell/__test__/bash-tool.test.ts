@@ -12,6 +12,45 @@ import type {
 const posixShell: HostShellLauncher = { kind: "posix-sh" };
 
 describe("createBashTool", () => {
+  it("executes through the active environment instead of the legacy shell runner", async () => {
+    const legacy = fakeExecutor(result({ output: "host" }));
+    legacy.resolve = vi.fn(legacy.resolve);
+    const execShell = vi.fn(async () => ({
+      onOutput(listener: (chunk: Uint8Array) => void) {
+        listener(new TextEncoder().encode("/workspace\n"));
+        return () => {};
+      },
+      wait: async () => ({ exitCode: 0 }),
+      write: vi.fn(),
+      end: vi.fn(),
+      signal: vi.fn(async () => {}),
+    }));
+    const tool = createBashTool(legacy);
+
+    const toolResult = await tool.execute({ command: "pwd" }, {
+      cwd: "/workspace",
+      environment: {
+        info: { kind: "docker", shellDialect: "posix" },
+        workspace: { hostRoot: "D:\\repo", executionRoot: "/workspace" },
+        process: { execShell },
+        paths: {
+          resolve: async (path: string) => ({
+            executionPath: path,
+            mountPurpose: "workspace",
+            mountMode: "rw",
+          }),
+        },
+      },
+    } as any);
+
+    expect(execShell).toHaveBeenCalledWith("pwd", expect.objectContaining({ cwd: "/workspace" }));
+    expect(legacy.resolve).not.toHaveBeenCalled();
+    expect(toolResult).toEqual({
+      content: [{ type: "text", text: "/workspace" }],
+      isError: false,
+    });
+  });
+
   it("steers long-running commands toward background jobs instead of blocking Bash", () => {
     const tool = createBashTool(fakeExecutor(result()));
 

@@ -161,7 +161,7 @@ function createDockerHandle(
       ],
     },
     workspace: input.binding,
-    process: createProcessExecutor(input, dependencies),
+    process: createProcessExecutor(input, dependencies, runtime),
     files: unavailableFileSystem(),
     paths: createPathResolver(input.binding, managedMounts),
     async release() {
@@ -175,6 +175,7 @@ function createDockerHandle(
 function createProcessExecutor(
   input: CreateExecutionEnvironmentInput,
   dependencies: CreateExecutionEnvironmentDependencies,
+  runtime?: StartedSandboxRuntime,
 ): EnvironmentProcessExecutor {
   const settings = {
     ...input.settings,
@@ -182,6 +183,19 @@ function createProcessExecutor(
   };
   return {
     async execShell(command, options = {}) {
+      if (runtime?.session?.execCommand) {
+        const child = await runtime.session.execCommand(
+          ["/bin/sh", "-c", command],
+          {
+            cwd: options.cwd ?? input.binding.executionRoot,
+            settings,
+            env: options.env,
+            signal: options.signal,
+            stdio: ["pipe", "pipe", "pipe"],
+          },
+        );
+        return adaptChildProcess(child);
+      }
       const child = await (
         dependencies.createShellProcess ?? createShellProcess
       )(command, {
@@ -195,6 +209,16 @@ function createProcessExecutor(
       return adaptChildProcess(child);
     },
     async execProcess(argv, options = {}) {
+      if (runtime?.session?.execCommand) {
+        const child = await runtime.session.execCommand(argv, {
+          cwd: options.cwd ?? input.binding.executionRoot,
+          settings,
+          env: options.env,
+          signal: options.signal,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        return adaptChildProcess(child);
+      }
       const child = await (
         dependencies.createProcess ?? createProcess
       )(argv, {
@@ -290,6 +314,12 @@ function createPathResolver(
       path,
       _operation: EnvironmentPathOperation,
     ): Promise<ResolvedEnvironmentPath> {
+      if (/^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\")) {
+        return {
+          executionPath: path,
+          mountPurpose: "unmounted",
+        };
+      }
       const executionPath = resolveDockerPath(path);
       const mount = matchMount(executionPath);
       return {

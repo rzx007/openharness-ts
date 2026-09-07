@@ -12,6 +12,7 @@ import type {
   SandboxPolicy,
   SandboxRuntimeReporter,
   SandboxRuntimeStatus,
+  SandboxSession,
 } from "./types.js";
 import type { ManagedDockerMount } from "./managed-mounts.js";
 
@@ -29,6 +30,8 @@ export interface SandboxRuntimeOptions {
 
 export interface StartedSandboxRuntime {
   status: SandboxRuntimeStatus;
+  /** Internal execution handle used by the unified environment adapter. */
+  session?: SandboxSession;
   stop(): Promise<void>;
   stopSync(): void;
 }
@@ -143,6 +146,7 @@ export async function startSandboxRuntime(
 
   return {
     status,
+    session,
     async stop() {
       try {
         await session.stop();

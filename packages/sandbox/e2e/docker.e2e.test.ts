@@ -31,7 +31,7 @@ let runtime: StartedSandboxRuntime | undefined;
 afterEach(async () => {
   await runtime?.stop();
   runtime = undefined;
-});
+}, 60_000);
 
 beforeAll(() => {
   if (!runDocker) {
@@ -55,7 +55,7 @@ maybeDescribe("docker sandbox e2e", () => {
       dockerRmForce(containerName);
     }
     ownedContainers.clear();
-  });
+  }, 60_000);
 
   it("starts a docker runtime and executes shell commands inside the mounted workspace", async () => {
     const sessionId = `e2e-docker-${Date.now()}`;
@@ -100,6 +100,7 @@ maybeDescribe("docker sandbox e2e", () => {
     const result = await collectProcess(child);
 
     expect(result.exitCode).toBe(0);
+    expect(result.stdout.split(/\r?\n/)[0]).toBe("/workspace");
     expect(result.stdout).toContain("node-ok");
   }, 60_000);
 

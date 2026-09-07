@@ -35,13 +35,20 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
       const hasExplicitTimeout = input.timeout !== undefined;
       if (command && !hasExplicitTimeout && shouldCreateBackgroundShell(command, context)) {
         try {
+          const requestedCwd = typeof input.workdir === "string" && input.workdir.trim()
+            ? input.workdir.trim()
+            : context.cwd;
+          const backgroundCwd = context.environment
+            ? context.environment.paths.toHostPath(requestedCwd)
+            : requestedCwd;
+          if (!backgroundCwd) {
+            throw new Error(`Background shell workdir is outside the mounted execution roots: ${requestedCwd}`);
+          }
           const created = await context.backgroundShell!.create({
             requestId: `tool:${context.toolCallId}`,
             command,
             description: summarizeCommand(command),
-            cwd: typeof input.workdir === "string" && input.workdir.trim()
-              ? input.workdir.trim()
-              : context.cwd,
+            cwd: backgroundCwd,
             sessionId: context.sessionId!,
             settings: context.settings,
           });
@@ -64,6 +71,9 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
             isError: true,
           };
         }
+      }
+      if (context.environment) {
+        return await executeInEnvironment(command, input, context);
       }
 
       const spec = await executor.resolve({
@@ -105,6 +115,77 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
       };
     },
   };
+}
+
+async function executeInEnvironment(
+  command: string,
+  input: Record<string, unknown>,
+  context: Parameters<ToolDefinition["execute"]>[1],
+) {
+  if (!command) {
+    return { content: [{ type: "text" as const, text: "command is required" }], isError: true };
+  }
+  const environment = context.environment!;
+  const rawWorkdir = typeof input.workdir === "string" && input.workdir.trim()
+    ? input.workdir.trim()
+    : environment.workspace.executionRoot;
+  const resolved = await environment.paths.resolve(rawWorkdir, "execute");
+  if (resolved.mountPurpose === "unmounted") {
+    return {
+      content: [{ type: "text" as const, text: `Sandbox: workdir is outside the mounted execution roots: ${resolved.executionPath}` }],
+      isError: true,
+    };
+  }
+
+  const timeoutMs = typeof input.timeout === "number" ? input.timeout : 120_000;
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  context.abortSignal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  let output = "";
+  try {
+    const process = await environment.process.execShell(command, {
+      cwd: resolved.executionPath,
+      signal: controller.signal,
+    });
+    const stopListening = process.onOutput((chunk) => {
+      output = (output + new TextDecoder().decode(chunk)).slice(-12_000);
+    });
+    try {
+      const result = await process.wait();
+      const formatted = formatOutput(output, 12_000);
+      if (timedOut) {
+        return {
+          content: [{ type: "text" as const, text: formatTimeoutOutput(output, timeoutMs, 12_000) }],
+          isError: true,
+        };
+      }
+      if (context.abortSignal?.aborted) {
+        return {
+          content: [{ type: "text" as const, text: formatInterruptedOutput(output, 12_000) }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: formatted }],
+        isError: result.exitCode !== 0,
+      };
+    } finally {
+      stopListening();
+    }
+  } catch (error) {
+    return {
+      content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+      isError: true,
+    };
+  } finally {
+    clearTimeout(timer);
+    context.abortSignal?.removeEventListener("abort", abort);
+  }
 }
 
 export const bashTool: ToolDefinition = createBashTool();

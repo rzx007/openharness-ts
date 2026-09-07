@@ -547,6 +547,17 @@ describe("docker backend argv builders", () => {
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
   });
 
+  it("passes managed container cwd through without host path resolution", () => {
+    const argv = buildDockerExecArgs({
+      containerName: "oh-s",
+      cwd: "/workspace/src",
+      workspaceRoot: resolve("D:/repo"),
+      argv: ["pwd"],
+    });
+
+    expect(argv[argv.indexOf("-w") + 1]).toBe("/workspace/src");
+  });
+
   it("maps host paths to Docker workspace paths", () => {
     const root = resolve("D:/repo");
     const file = resolve("D:/repo/src/a.ts");

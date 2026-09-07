@@ -1,6 +1,6 @@
 # Agent 运行环境与集成终端设计
 
-> 状态：已根据独立审查完整修订，等待最终审查
+> 状态：第一期安全执行闭环已实现并通过本机真实 Docker 验证；第二、三期未开始
 >
 > 日期：2026-09-07
 >
@@ -766,7 +766,7 @@ Docker 环境不可用、配置不匹配或环境句柄失效时，以下入口�
 
 ```text
 智能体运行环境
-选择 Agent 的命令、文件工具、后台任务和默认终端在本机还是 Docker 沙箱中运行。
+选择 Agent 的命令、文件工具和可环境化后台任务在本机还是 Docker 沙箱中运行。
 
 本机
 直接使用当前系统环境。
@@ -775,15 +775,14 @@ Docker 沙箱
 当前工作区和用户级 Skills 将读写挂载到容器。容器中的修改会同步到宿主文件。
 
 集成终端 Shell
-选择新终端在当前 Agent 环境中使用的 Shell。Docker 模式只显示容器内可用的 Shell。
+选择用户手动新建的本机集成终端使用的 Shell。第一期它不跟随 Agent 的 Docker 环境。
 ```
 
 终端菜单：
 
 ```text
-新建终端
-├─ 在当前 Agent 环境中打开（默认）
-└─ 在本机打开
+新建本机终端
+└─ 使用“集成终端 Shell”配置
 ```
 
 第一期保存设置后：
@@ -804,20 +803,25 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 
 目标是让所有仍可调用的 Agent 本地工作负载可靠地留在 Docker 中。设置变化重启后生效。
 
-- 建立 `@openharness/environment` 契约和 WorkspaceBinding；
-- `agent-runtime` 改为接收环境能力，并在环境 ready 后构建提示词；
-- 设置页接入 local/docker，使用 `desktop_managed` 配置解析；
-- 所有 Docker 平台统一 `/workspace`；
-- 挂载 workspace 和用户级 Skills，拒绝 extraMounts、Docker Socket 和 privileged；
-- Shell、后台任务、文件工具、Hook、Cron、LSP 和 MCP stdio 接入环境；
-- 文件工具直接接受容器路径，PermissionChecker 使用结构化环境路径；
-- Skill file/root 使用环境路径呈现；
-- `ImageToText(image_path)` 接入环境文件能力；
-- 工具注册增加 execution domain，无法环境化的 Native Plugin Tool 与 Agent Terminal 在 Docker 模式下禁用；
-- 默认用户终端暂不进入 Docker，界面明确标记为本机终端；
-- Docker 不可用或配置不合法时 fail-closed；
-- 项目外会话支持 Docker Shell 和文件能力；
-- 配置变化要求重启，只保留最新容器版本。
+- [x] 建立 `@openharness/environment` 契约和 WorkspaceBinding；
+- [x] `agent-runtime` 接收环境能力，并在环境 ready 后构建提示词；
+- [x] 设置页接入 local/docker，使用 `desktop_managed` 配置解析；
+- [x] 所有 Docker 平台统一 `/workspace`；
+- [x] 挂载 workspace 和用户级 Skills，拒绝 Desktop `extraMounts`、Docker Socket 和 privileged；
+- [x] Shell、文件工具、Command Hook 和后台 Shell 通过当前 Docker Session 执行；
+- [x] 文件工具直接接受容器路径，PermissionChecker 使用环境路径风格；
+- [x] Skill file/root 使用环境路径呈现，并从不可变基线刷新；
+- [x] `ImageToText(image_path)` 接入环境字节读取；
+- [x] 工具注册增加 execution domain；Native Plugin Tool 与 Agent Terminal 在 Docker 第一期禁用；
+- [x] 默认用户终端保持本机运行，界面明确说明与 Agent 沙箱分离；
+- [x] Docker 不可用或配置不合法时 fail-closed；
+- [x] 项目外会话使用已有受管 cwd，支持 Docker Shell 和文件能力；
+- [x] 配置变化要求重启；同一 owner 只保留最新容器版本；
+- [x] 远程 HTTP/SSE MCP 受环境网络策略约束；Docker 禁网时不连接；
+- [ ] LSP 完整环境化：当前为避免宿主文件旁路，Docker 中隐藏；
+- [ ] MCP stdio 环境化：当前为避免宿主进程旁路，Docker 中不连接。
+
+第一期的安全目标已经达到：未完成环境化的能力不会在 Docker 中退回宿主执行。LSP 与 MCP stdio 的重新启用放到后续能力补齐，不作为第一期的宿主旁路保留。
 
 第一期不引入共享终端 lease、Docker PTY、Session 环境快照、运行中热切换或多配置容器。
 

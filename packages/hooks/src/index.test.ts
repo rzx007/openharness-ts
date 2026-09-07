@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,21 @@ import type {
  * where they are meaningful.
  */
 const itPosix = it.skipIf(process.platform === "win32");
+
+let previousConfigDir: string | undefined;
+let isolatedConfigDir: string;
+
+beforeAll(() => {
+  previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+  isolatedConfigDir = mkdtempSync(join(tmpdir(), "oh-hooks-config-"));
+  process.env.OPENHARNESS_CONFIG_DIR = isolatedConfigDir;
+});
+
+afterAll(() => {
+  if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+  else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+  rmSync(isolatedConfigDir, { recursive: true, force: true });
+});
 
 /** A client that streams a fixed text response, capturing the last params. */
 function fakeClient(responseText: string): {
