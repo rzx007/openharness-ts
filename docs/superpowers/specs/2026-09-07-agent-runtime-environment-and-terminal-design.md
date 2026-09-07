@@ -1,6 +1,6 @@
 # Agent 运行环境与集成终端设计
 
-> 状态：第二期统一终端体验已实现并通过本机真实 Docker PTY 验证；第三期未开始
+> 状态：第二期统一终端体验已实现并通过本机真实 Docker PTY 验证；第三、四期未开始
 >
 > 日期：2026-09-07
 >
@@ -434,7 +434,7 @@ Skill 文件内容变化不改变指纹，因为 bind mount 会立即反映内�
 
 ### 7.4 文件系统影响
 
-容器可以直接修改两个 rw 挂载中的宿主文件。容器自身 `/tmp`、`/root` 等未挂载路径不会直接修改宿主文件，但网络请求、端口和资源消耗仍可能产生外部影响。
+容器可以直接修改两个 rw 挂载中的宿主文件。容器自身未挂载路径的文件操作只修改当前容器，不直接修改宿主文件；网络请求、端口和资源消耗仍可能产生外部影响。第四阶段将为这些容器本地路径增加独立授权，详见第 18.4 节。
 
 ## 8. 路径契约与文件工具
 
@@ -460,7 +460,7 @@ Read、Write、Edit、Glob 和 Grep 通过 `ExecutionEnvironment.fileOperations`
 - 文件读写；
 - Glob 和 Grep 搜索。
 
-允许的根目录来自真实挂载表，即 `/workspace` 和 `/opt/openharness/skills`。文件工具不先使用 Windows `node:path` 解释 `/workspace/...`。
+第一至第三阶段允许的根目录来自真实挂载表，即 `/workspace` 和 `/opt/openharness/skills`。第四阶段增加经授权的容器本地路径，但不会把它们转换成宿主路径或创建新挂载。文件工具不先使用 Windows `node:path` 解释 POSIX 容器路径。
 
 ### 8.3 宿主路径展示
 
@@ -470,29 +470,40 @@ Read、Write、Edit、Glob 和 Grep 通过 `ExecutionEnvironment.fileOperations`
 
 ### 8.4 权限与旧路径规则
 
-文件工具先由执行环境解析出结构化路径，再交给 PermissionChecker：
+文件工具先由执行环境解析出结构化路径，再交给 PermissionChecker。第四阶段把当前路径结果扩展为：
 
 ```ts
 interface ResolvedEnvironmentPath {
   executionPath: string;
   hostPath?: string;
-  mountPurpose: "workspace" | "user_skills" | "unmounted";
+  scope: "mounted_workspace" | "mounted_user_skills" | "container_local" | "protected";
+  syncsToHost: boolean;
   mountMode?: "ro" | "rw";
 }
 ```
 
-Docker 模式的权限判断以规范化 `executionPath` 为主。审批 UI 首先显示容器路径；存在安全映射时，可以同时显示宿主路径，二者必须指向同一文件。
+Docker 模式的权限判断以规范化 `executionPath` 为主。`container_local` 不再等同于路径非法，而是表示文件操作只作用于当前容器。审批 UI 首先显示容器路径；存在安全映射时，可以同时显示宿主路径，二者必须指向同一文件。
 
 当前 Settings 结构中的 pathRules 使用以下路径规则：
 
 - 相对规则始终相对工作区，Docker 中归一化到 `/workspace`；
 - 本机环境允许当前平台的宿主绝对路径；
-- Docker 环境只接受 `/workspace` 或 `/opt/openharness/skills` 下的 POSIX 绝对路径；
+- Docker 环境的挂载路径规则接受 `/workspace` 或 `/opt/openharness/skills` 下的 POSIX 绝对路径；第四阶段的容器本地授权规则接受其他非受保护 POSIX 绝对路径；
 - Docker 环境发现 Windows 或其他宿主绝对路径时直接返回 `invalid_execution_path_rule`，不自动转换；
 - deny 规则优先于 allow 规则；
 - “当前 cwd 自动允许”指 executionRoot，不能用宿主 cwd 绕过。
 
 diff 生成应通过环境文件能力读取旧内容；宿主控制面只负责展示和批准，不能再绕过环境直接读取任意输入路径。
+
+### 8.5 符号链接与真实影响范围
+
+路径分类必须基于容器内真实目标，而不是只看输入字符串：
+
+- 读取已有路径时，在容器内解析 `realpath` 后再分类；
+- 创建新文件时，解析最近已存在父目录的真实路径，再拼接剩余路径；
+- `/tmp/link -> /workspace` 必须分类为 `mounted_workspace`，审批界面明确显示会同步到宿主；
+- 指向 `protected` 的符号链接仍然拒绝；
+- 解析失败时 fail-closed，不退回字符串前缀判断。
 
 ## 9. Skill 访问与路径
 
@@ -852,6 +863,33 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 
 第三期仍使用单一最新容器版本，不增加旧配置恢复或多版本并存。
 
+### 18.4 第四期：容器本地路径授权
+
+目标是在不扩大宿主挂载面的前提下，让 Agent 使用 `/tmp`、镜像内示例文件和运行时生成物。核心规则是：除 `/workspace` 与 `/opt/openharness/skills` 外，其他允许访问的路径操作只发生在当前容器内部。
+
+路径分为四类：
+
+| 范围 | 示例 | 是否影响宿主文件 | 权限行为 |
+|---|---|---:|---|
+| `mounted_workspace` | `/workspace/image.png` | 是 | 继续使用现有工作区权限 |
+| `mounted_user_skills` | `/opt/openharness/skills/demo/icon.png` | 是 | 继续使用现有 Skills 权限 |
+| `container_local` | `/tmp/generated.png`、`/usr/share/example.png`、`/root/private.png` | 否 | 按操作请求容器路径授权 |
+| `protected` | `/proc/**`、`/sys/**`、`/dev/**`、`/run/secrets/**`、`/var/run/docker.sock`、`/root/.ssh/**`、`/root/.aws/**` | 不适用 | 始终拒绝，不提供授权入口 |
+
+第四阶段要求：
+
+- `Read`、`Write`、`Edit`、`Glob`、`Grep`、`ImageToText(image_path)` 等含路径参数的工具都使用同一分类和授权入口；
+- `container_local` 的 read/write/edit/search 分别参与 PermissionChecker，支持单次、当前会话和现有明确配置规则，不能把一次读取授权扩大成目录写入授权；
+- 授权界面明确显示“仅当前 Docker 容器”“不会读取或修改宿主文件”“容器替换后数据可能丢失”；
+- `container_local` 不设置 `hostPath`，不能用于宿主文件预览、资源管理器打开或宿主侧直接 diff；diff 和图片读取继续通过环境文件能力在容器内完成；
+- 批准容器路径不能创建 bind mount、volume、copy-out 或其他宿主访问通道；动态挂载仍不在本阶段范围内；
+- Shell 命令仍按 Bash 工具整体授权，不尝试从命令字符串猜测每个路径；命令后续交给文件工具的路径再按本规则分类；
+- 权限记录包含 `environmentId`、规范化容器路径、真实路径、操作类型和授权范围；环境被替换后，会话级容器路径授权失效；
+- 受保护路径表由运行环境策略集中维护，deny 永远优先，用户不能通过普通权限确认覆盖；除普通文件和目录外，socket、设备、FIFO 等特殊文件类型默认归为 `protected`；
+- 容器本地路径的磁盘占用仍受容器资源和生命周期策略约束，授权不承诺持久化。
+
+第四阶段不增加新的宿主目录挂载，不改变 `/workspace` 和用户 Skills 的读写挂载约定，也不把容器本地文件自动保存为附件。若用户需要持久化，应由 Agent 明确复制到 `/workspace`、用户 Skills，或调用附件服务。
+
 ## 19. 验收与测试分层
 
 ### 19.1 单元测试
@@ -913,6 +951,18 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 - 隔离 worktree 创建失败时没有共享父工作区的 child 被启动；
 - daemon 重启后清理可确认的孤儿临时容器和旧进程；
 - Docker 不可用时所有受管入口 fail-closed。
+
+### 19.4 第四阶段路径授权验收
+
+- `/tmp/generated.png` 经授权后可被 Read 和 ImageToText 读取，且宿主不存在对应映射；
+- `/usr/share/example.png` 的读取请求明确标为容器本地操作；
+- `/root/private.png` 未授权时拒绝，授权后只在当前容器内生效；
+- `/workspace` 与用户 Skills 的审批继续明确标为会同步宿主；
+- `/proc`、`/sys`、`/dev`、`/run/secrets`、Docker Socket、`/root/.ssh`、`/root/.aws` 和特殊文件类型不能通过批准访问；
+- 指向挂载目录或受保护目录的符号链接按真实目标分类，不能伪装为容器本地路径；
+- 容器重建后旧的会话级容器路径授权不能复用；
+- 未授权、拒绝或路径解析失败时，文件工具和 ImageToText 均不回退宿主读取；
+- 授权前后 Docker inspect 的 Mounts 不增加，证明权限操作没有隐式创建宿主挂载。
 
 仅在具有对应平台和 Docker daemon 的 CI Job 中运行真实 E2E；其他环境明确 skip，不把 skip 计为通过证据。
 
