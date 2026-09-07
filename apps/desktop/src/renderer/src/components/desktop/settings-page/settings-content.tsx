@@ -142,7 +142,7 @@ function GeneralSettings(): React.JSX.Element {
         <Separator />
         <SettingRow
           title="集成终端 Shell"
-          description="选择新终端默认打开的 Shell"
+          description="本机环境使用本机 Shell；Docker 环境使用容器 Shell。显式“在本机打开”始终使用本机 Shell。"
           control={<SettingSelect icon={<TerminalSquare />} label="PowerShell" />}
         />
         <Separator />

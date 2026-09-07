@@ -20,15 +20,17 @@ import { cn } from "@renderer/lib/utils"
 import { Button } from "@renderer/components/ui/button"
 import {
   selectActiveWorkspaceProject,
+  selectActiveSessionRecord,
   useDesktopSessionStore,
 } from "@renderer/stores/desktop-session-store"
 import type {
-  DesktopTerminalCreateInput,
   DesktopTerminalEvent,
   DesktopTerminalRecord,
 } from "@shared/terminal-types"
+import type { DesktopAgentEnvironment } from "@shared/settings-types"
 
 import { getXtermTheme } from "./xterm-theme"
+import { resolveTerminalCreateTarget } from "./terminal-runtime-model"
 
 type TerminalDataEvent = Extract<DesktopTerminalEvent, { type: "data" }>
 
@@ -42,8 +44,6 @@ type TerminalContextMenuState = {
   y: number
   selectedText: string
 }
-
-type TerminalRuntimeMode = DesktopTerminalCreateInput["runtime"]
 
 export type TerminalSessionTabInfo = {
   id: string
@@ -110,6 +110,7 @@ export function TerminalTool({
   onCommandSettledRef.current = onCommandSettled
 
   const selectedProject = useDesktopSessionStore(selectActiveWorkspaceProject)
+  const activeSession = useDesktopSessionStore(selectActiveSessionRecord)
   const rebindProject = useDesktopSessionStore((state) => state.rebindProject)
   const [records, setRecords] = useState<DesktopTerminalRecord[]>([])
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null)
@@ -117,7 +118,7 @@ export function TerminalTool({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<TerminalContextMenuState | null>(null)
-  const runtimeMode: TerminalRuntimeMode = "local"
+  const [agentEnvironment, setAgentEnvironment] = useState<DesktopAgentEnvironment>("local")
 
   const visibleRecords = useCallback(
     (nextRecords: DesktopTerminalRecord[]): DesktopTerminalRecord[] =>
@@ -128,9 +129,9 @@ export function TerminalTool({
   const activeRecord = useMemo(
     () =>
       records.find(
-        (record) => record.id === activeTerminalId && record.projectId === selectedProject?.id
+        (record) => record.id === activeTerminalId && recordBelongsToSession(record, activeSession)
       ) ?? null,
-    [activeTerminalId, records, selectedProject?.id]
+    [activeSession, activeTerminalId, records]
   )
 
   useEffect(() => {
@@ -138,8 +139,18 @@ export function TerminalTool({
   }, [records])
 
   useEffect(() => {
-    selectedProjectIdRef.current = selectedProject?.id ?? null
-  }, [selectedProject?.id])
+    selectedProjectIdRef.current = activeSession?.id ?? null
+  }, [activeSession?.id])
+
+  useEffect(() => {
+    let cancelled = false
+    void window.desktop.settings.snapshot().then((snapshot) => {
+      if (!cancelled) setAgentEnvironment(snapshot.agentEnvironment)
+    }).catch((caught) => {
+      if (!cancelled) setError(errorMessage(caught))
+    })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     activeTerminalIdRef.current = activeTerminalId
@@ -230,10 +241,14 @@ export function TerminalTool({
   }, [fitAndResize])
 
   const createTerminal = useCallback(
-    async (preferredName?: string, knownRecords?: DesktopTerminalRecord[]): Promise<void> => {
+    async (
+      preferredName?: string,
+      knownRecords?: DesktopTerminalRecord[],
+      explicitHost = false
+    ): Promise<void> => {
       const project = selectedProject
       const terminal = terminalRef.current
-      if (!project?.available || !terminal || creatingRef.current) return
+      if (!project?.available || !activeSession || !terminal || creatingRef.current) return
 
       creatingRef.current = true
       setCreating(true)
@@ -241,14 +256,14 @@ export function TerminalTool({
       fitAndResize()
 
       const currentRecords = knownRecords ?? recordsRef.current
-      const name = preferredName ?? nextTerminalName(currentRecords, project.id)
+      const target = resolveTerminalCreateTarget({ agentEnvironment, session: activeSession, explicitHost })
+      const name = preferredName ?? nextTerminalName(currentRecords, activeSession.id)
 
       try {
         const nextRecord = await window.desktop.terminal.create({
-          projectId: project.id,
-          runtime: runtimeMode,
+          ...target,
           name,
-          ...(runtimeMode === "local" && project.defaultShell
+          ...(target.runtime === "local" && project.defaultShell
             ? { shell: project.defaultShell }
             : {}),
           cols: terminal.cols || 80,
@@ -258,7 +273,7 @@ export function TerminalTool({
           ...current.filter((record) => record.id !== nextRecord.id),
           nextRecord,
         ])
-        if (selectedProjectIdRef.current === project.id) {
+        if (selectedProjectIdRef.current === activeSession.id) {
           setActiveTerminalId(nextRecord.id)
           onSessionUpsertRef.current(toTabInfo(nextRecord), true)
           onActiveTerminalChangeRef.current(nextRecord.id)
@@ -270,7 +285,7 @@ export function TerminalTool({
         setCreating(false)
       }
     },
-    [fitAndResize, runtimeMode, selectedProject]
+    [activeSession, agentEnvironment, fitAndResize, selectedProject]
   )
 
   useEffect(() => {
@@ -280,7 +295,7 @@ export function TerminalTool({
 
   useEffect(() => {
     if (!terminalReady || !active) return
-    if (!selectedProject?.available) return
+    if (!selectedProject?.available || !activeSession) return
 
     let cancelled = false
     void window.desktop.terminal
@@ -296,7 +311,7 @@ export function TerminalTool({
     return () => {
       cancelled = true
     }
-  }, [active, selectedProject?.available, selectedProject?.id, terminalReady, visibleRecords])
+  }, [active, activeSession, selectedProject?.available, selectedProject?.id, terminalReady, visibleRecords])
 
   useEffect(() => {
     if (!openRequest || !terminalReady) return
@@ -493,7 +508,7 @@ export function TerminalTool({
       }
     }
 
-    if (!selectedProject?.available) {
+    if (!selectedProject?.available || !activeSession) {
       onCommandSettledRef.current(command.id)
       return
     }
@@ -506,7 +521,7 @@ export function TerminalTool({
         const nextVisibleRecords = visibleRecords(nextRecords)
         setRecords(nextVisibleRecords)
         const currentProjectRecords = nextVisibleRecords.filter(
-          (record) => record.projectId === selectedProject.id
+          (record) => recordBelongsToSession(record, activeSession)
         )
         if (currentProjectRecords.length === 0) {
           await createTerminal(undefined, nextRecords)
@@ -536,6 +551,7 @@ export function TerminalTool({
     createTerminal,
     selectedProject?.available,
     selectedProject?.id,
+    activeSession,
     selectedTerminalId,
     terminalReady,
     visibleRecords,
@@ -637,19 +653,21 @@ export function TerminalTool({
           />
         )}
 
-        {(!selectedProject || !selectedProject.available) && (
+        {(!activeSession || !selectedProject || !selectedProject.available) && (
           <div className="absolute inset-0 grid place-items-center bg-conversation/90 px-8 text-center backdrop-blur-sm">
             <div className="max-w-sm">
               <Folder className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
               <h2 className="text-base font-semibold text-ui-foreground">
-                {selectedProject ? "项目目录不可用" : "未选择项目"}
+                {!activeSession ? "未选择会话" : selectedProject ? "项目目录不可用" : "未选择项目"}
               </h2>
               <p className="text-ui-small mt-2 leading-6 text-ui-muted">
-                {selectedProject
+                {!activeSession
+                  ? "打开一个会话后，终端会使用该会话的可信工作目录。"
+                  : selectedProject
                   ? "当前项目目录可能已被移动，请重新绑定目录后再启动终端。"
                   : "选择项目后，终端会在项目目录中启动。"}
               </p>
-              {selectedProject && (
+              {activeSession && selectedProject && (
                 <Button
                   type="button"
                   className="mt-4"
@@ -662,18 +680,29 @@ export function TerminalTool({
           </div>
         )}
 
-        {selectedProject?.available && !activeRecord && !creating && (
+        {activeSession && selectedProject?.available && !activeRecord && !creating && (
           <div className="absolute inset-0 grid place-items-center bg-conversation/84 px-8 text-center backdrop-blur-sm">
             <div>
               <SquareTerminal className="mx-auto mb-3 size-9 text-ui-muted" strokeWidth={1.6} />
-              <p className="text-ui-small text-ui-muted">当前项目没有打开的本机终端</p>
+              <p className="text-ui-small text-ui-muted">当前会话没有打开的终端</p>
               <p className="text-ui-caption mt-1 text-ui-muted">
-                集成终端在本机运行，与 Agent 的 Docker 沙箱相互独立。
+                默认打开{agentEnvironment === "docker" ? " Docker 终端" : "本机终端"}。
               </p>
-              <Button type="button" className="mt-4" onClick={() => void createTerminal()}>
-                <Plus data-icon="inline-start" />
-                新建终端
-              </Button>
+              <div className="mt-4 flex justify-center gap-2">
+                <Button type="button" onClick={() => void createTerminal()}>
+                  <Plus data-icon="inline-start" />
+                  新建{agentEnvironment === "docker" ? " Docker 终端" : "本机终端"}
+                </Button>
+                {agentEnvironment === "docker" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void createTerminal(undefined, undefined, true)}
+                  >
+                    在本机打开
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </div>
         )}
@@ -777,10 +806,10 @@ function TerminalContextMenuItem({
   )
 }
 
-function nextTerminalName(records: DesktopTerminalRecord[], projectId: string): string {
+function nextTerminalName(records: DesktopTerminalRecord[], sessionId: string): string {
   const used = new Set(
     records
-      .filter((record) => record.projectId === projectId)
+      .filter((record) => record.scope.kind === "session" && record.scope.sessionId === sessionId)
       .map((record) => /^Terminal (\d+)$/.exec(record.name)?.[1])
       .filter((value): value is string => Boolean(value))
       .map(Number)
@@ -788,6 +817,15 @@ function nextTerminalName(records: DesktopTerminalRecord[], projectId: string): 
   let index = 1
   while (used.has(index)) index += 1
   return `Terminal ${index}`
+}
+
+function recordBelongsToSession(
+  record: DesktopTerminalRecord,
+  session: { id: string; projectId?: string } | null
+): boolean {
+  if (!session) return false
+  if (record.scope.kind === "session") return record.scope.sessionId === session.id
+  return Boolean(session.projectId && record.scope.projectId === session.projectId)
 }
 
 function clampContextMenuPosition(x: number, y: number): { x: number; y: number } {

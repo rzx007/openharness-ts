@@ -63,6 +63,15 @@ export function selectActiveSessionId(
   return state.activeSessionId
 }
 
+export function selectActiveSessionRecord(
+  state: DesktopSessionState
+): DesktopSessionRecord | null {
+  if (!state.activeSessionId) return null
+  return state.sessionView?.session.id === state.activeSessionId
+    ? state.sessionView.session
+    : (state.sessions.find((session) => session.id === state.activeSessionId) ?? null)
+}
+
 /** 右侧工具使用的实际工作目录；项目外会话使用它自己的托管 xN 目录。 */
 export function selectActiveWorkspaceProject(state: DesktopSessionState): DesktopProject | null {
   const activeSession = state.activeSessionId
