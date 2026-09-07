@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { loadSettings, saveSettings } from "./settings.js";
+import { loadSettings, saveProjectSettings, saveSettings } from "./settings.js";
 
 describe("daemon settings", () => {
   let configDir: string;
@@ -117,6 +117,24 @@ describe("daemon settings", () => {
       readFileSync(join(configDir, "settings.json"), "utf-8"),
     ) as Record<string, unknown>;
     expect(saved).not.toHaveProperty("_formatVersion");
+    expect(readdirSync(configDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("atomically replaces project settings without leaving temporary files", async () => {
+    const projectRoot = join(configDir, "atomic-project");
+    const projectConfigDir = join(projectRoot, ".openharness-ts");
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(
+      join(projectConfigDir, "settings.json"),
+      JSON.stringify({ workStyle: "practical" }),
+    );
+
+    await saveProjectSettings({ workStyle: "efficient" }, projectRoot);
+
+    expect(
+      JSON.parse(readFileSync(join(projectConfigDir, "settings.json"), "utf8")),
+    ).toEqual({ workStyle: "efficient" });
+    expect(readdirSync(projectConfigDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
   it("deep-merges local and Docker terminal shell preferences", async () => {
