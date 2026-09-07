@@ -30,6 +30,7 @@ export interface LocalTerminalProviderOptions {
   resolveTarget?: (
     input: TerminalCreateRequest,
     resolvedCwd: string,
+    terminalId: string,
   ) => Promise<EnvironmentPtyTarget>;
   spawnPty?: (
     command: string,
@@ -55,22 +56,23 @@ export class LocalTerminalProvider implements TerminalProvider {
   constructor(private readonly options: LocalTerminalProviderOptions) {}
 
   async create(input: TerminalCreateRequest): Promise<TerminalSessionInfo> {
+    const id = randomUUID();
     const resolvedCwd = await this.options.resolveCwd(input);
     const target = input.runtime === "sandbox"
-      ? await this.requireEnvironmentTarget(input, resolvedCwd)
+      ? await this.requireEnvironmentTarget(input, resolvedCwd, id)
       : createHostTerminalTarget({
           cwd: resolvedCwd,
           shell: input.shell?.trim() || resolveDefaultShell().command,
         });
     await requireDirectory(target.hostCwd);
-    return await this.createPtyTerminal(input, target);
+    return await this.createPtyTerminal(id, input, target);
   }
 
   private async createPtyTerminal(
+    id: string,
     input: TerminalCreateRequest,
     target: EnvironmentPtyTarget,
   ): Promise<TerminalSessionInfo> {
-    const id = randomUUID();
     const spawnPty = this.options.spawnPty ?? (await import("node-pty")).spawn;
     const pty = spawnPty(target.command, target.args, {
       cwd: target.hostCwd,
@@ -270,11 +272,12 @@ export class LocalTerminalProvider implements TerminalProvider {
   private async requireEnvironmentTarget(
     input: TerminalCreateRequest,
     cwd: string,
+    terminalId: string,
   ): Promise<EnvironmentPtyTarget> {
     if (!this.options.resolveTarget) {
       throw new Error("Sandbox terminal target resolver is not configured.");
     }
-    return await this.options.resolveTarget(input, cwd);
+    return await this.options.resolveTarget(input, cwd, terminalId);
   }
 
   private async closeTarget(session: PtyTerminalSession): Promise<void> {

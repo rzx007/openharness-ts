@@ -145,6 +145,10 @@ export interface DurableAgentApplication {
   close(): Promise<void>;
 }
 
+function failMissingSettings(): never {
+  throw new Error("Agent settings are not configured");
+}
+
 /**
  * daemon 的装配根：把「会话记录、活 Agent、投影、跑 prompt 的车道」接成一张图。
  * 不管听端口、不管路由；`POST /prompts` 最终会进这里的 sessions.admitPrompt。
@@ -276,7 +280,16 @@ export class DaemonApplication implements DurableAgentApplication {
           operationGate: this.attachments.operationGate,
         }),
       );
-      this.terminals = new DaemonTerminalService(store);
+      const acquireSessionEnvironment = options.executionSurface === "desktop_managed"
+        ? createSessionEnvironmentAcquirer({ manager: this.environmentManager, store })
+        : undefined;
+      this.terminals = new DaemonTerminalService(store, {
+        getSettingsForCwd: async (cwd) =>
+          options.getSettingsForCwd
+            ? await options.getSettingsForCwd(cwd)
+            : options.getSettings?.() ?? options.settings ?? failMissingSettings(),
+        acquireEnvironment: acquireSessionEnvironment,
+      });
       this.projects = new ProjectApplicationService(store);
       this.permissions = new StorePermissionBroker({
         store,
@@ -339,9 +352,7 @@ export class DaemonApplication implements DurableAgentApplication {
         getSettings: options.getSettings,
         getSettingsForCwd: options.getSettingsForCwd,
         createAgent: options.createAgent,
-        acquireEnvironment: options.executionSurface === "desktop_managed"
-          ? createSessionEnvironmentAcquirer({ manager: this.environmentManager, store })
-          : undefined,
+        acquireEnvironment: acquireSessionEnvironment,
         createTerminal:
           options.createTerminal ??
           ((session) => ({

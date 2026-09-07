@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 
 import { getSkillsDir, type Settings } from "@openharness/core";
-import { createWorkspaceBinding, type ExecutionEnvironmentLease } from "@openharness/environment";
+import {
+  createWorkspaceBinding,
+  type ExecutionEnvironmentConsumer,
+  type ExecutionEnvironmentLease,
+} from "@openharness/environment";
 import type { SessionRecord } from "@openharness/protocol";
 import {
   createDesktopManagedMounts,
@@ -21,6 +25,7 @@ export function createSessionEnvironmentAcquirer(input: {
   return async (
     session: SessionRecord,
     settings: Settings,
+    consumer: ExecutionEnvironmentConsumer = { kind: "agent", id: session.id },
   ): Promise<ExecutionEnvironmentLease> => {
     const config = resolveExecutionEnvironmentConfig({
       surface: "desktop_managed",
@@ -41,7 +46,7 @@ export function createSessionEnvironmentAcquirer(input: {
     return input.manager.acquire({
       ownerId: owner.ownerId,
       configHash,
-      consumer: { kind: "agent", id: session.id },
+      consumer,
       create: async () => {
         const base = await createExecutionEnvironment({
           config,
