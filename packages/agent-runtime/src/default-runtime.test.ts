@@ -27,6 +27,7 @@ import {
 import { LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
 import type { Settings, ToolDefinition } from "@openharness/core";
 import type { ExecutionEnvironmentHandle } from "@openharness/environment";
+import { createAgentWorkspaceBinding } from "./agent-composition.js";
 
 function testTool(name: string): ToolDefinition {
   return {
@@ -200,6 +201,39 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
+  it("uses a projectless managed cwd as the Docker workspace root", () => {
+    expect(createAgentWorkspaceBinding("D:\\Documents\\OpenHarness\\2026-09-07\\x1", "docker"))
+      .toEqual({
+        kind: "docker",
+        hostRoot: "D:\\Documents\\OpenHarness\\2026-09-07\\x1",
+        executionRoot: "/workspace",
+      });
+  });
+
+  it("keeps environment tools but hides local Terminal tools in Docker", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      executionEnvironment: dockerEnvironment(),
+      capabilities: {
+        terminal: { status: "available", value: {} as never },
+        jobs: { status: "available", value: {} as never },
+      },
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+      },
+    });
+
+    expect(runtime.toolRegistry.has("Bash")).toBe(true);
+    expect(runtime.toolRegistry.has("Read")).toBe(true);
+    expect(runtime.toolRegistry.has("Write")).toBe(true);
+    expect(runtime.toolRegistry.has("TerminalOpen")).toBe(false);
+    await runtime.close();
+  });
+
   it("hides undeclared local-only tools from Docker agents", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,

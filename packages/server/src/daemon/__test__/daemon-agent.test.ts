@@ -53,6 +53,28 @@ describe("createDaemonAgentLoader", () => {
     expect(createDaemonAgentLoader({})).toBeUndefined();
   });
 
+  it("passes a projectless cwd into the desktop-managed Agent environment", async () => {
+    const projectless = {
+      ...session,
+      cwd: "D:\\Documents\\OpenHarness\\2026-09-07\\x1",
+      projectId: undefined,
+    };
+    const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
+    const createAgent = vi.fn(async () => agent);
+    const loader = createDaemonAgentLoader({
+      settings: { model: "default-model", sandbox: { enabled: true, backend: "docker" } } as any,
+      executionSurface: "desktop_managed",
+      createAgent,
+    })!;
+
+    await loader({ session: projectless, history: [], parts: [] });
+
+    expect(createAgent.mock.calls[0]![0].options).toMatchObject({
+      cwd: projectless.cwd,
+      executionSurface: "desktop_managed",
+    });
+  });
+
   it("creates one fully initialized Agent from durable session state", async () => {
     const sink = vi.fn(async () => {});
     const loadHistory = vi.fn();

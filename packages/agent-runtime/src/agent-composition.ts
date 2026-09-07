@@ -128,11 +128,7 @@ async function composeOpenHarnessAgentInternal(
     const baseEnvironment = await createExecutionEnvironment({
       config,
       settings,
-      binding: createWorkspaceBinding({
-        kind: config.kind,
-        hostRoot: cwd,
-        executionRoot: config.kind === "docker" ? "/workspace" : cwd,
-      }),
+      binding: createAgentWorkspaceBinding(cwd, config.kind),
       sessionId,
       userSkillsRoot: getSkillsDir(),
     });
@@ -201,4 +197,15 @@ async function composeOpenHarnessAgentInternal(
     model: options.model ?? settings.model,
     cleanup,
   };
+}
+
+export function createAgentWorkspaceBinding(
+  cwd: string,
+  kind: "local" | "docker",
+) {
+  return createWorkspaceBinding({
+    kind,
+    hostRoot: cwd,
+    executionRoot: kind === "docker" ? "/workspace" : cwd,
+  });
 }

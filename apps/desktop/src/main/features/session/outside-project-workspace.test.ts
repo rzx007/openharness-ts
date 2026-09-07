@@ -72,4 +72,14 @@ describe("outside-project workspace paths", () => {
     expect(new Set(allocated).size).toBe(3)
     expect(allocated.map((path) => path.split(/[\\/]/).at(-1)).sort()).toEqual(["x1", "x2", "x3"])
   })
+
+  it("allocates a real cwd without requiring a project record", async () => {
+    const documentsPath = await mkdtemp(join(tmpdir(), "openharness-projectless-"))
+    temporaryRoots.push(documentsPath)
+
+    const cwd = await allocateOutsideProjectWorkspace(documentsPath, date)
+
+    expect(isOutsideProjectWorkspacePath(cwd, documentsPath)).toBe(true)
+    expect(cwd).toContain(join("OpenHarness", "2026-08-24", "x1"))
+  })
 })
