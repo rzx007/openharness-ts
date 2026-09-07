@@ -167,6 +167,24 @@ describe("default daemon application services", () => {
   });
 
   it("resolves a built-in provider model when patching provider without a model", async () => {
+    const catalogPath = join(temporaryDirectory, "models-dev.json");
+    writeFileSync(
+      catalogPath,
+      JSON.stringify({
+        deepseek: {
+          id: "deepseek",
+          name: "DeepSeek",
+          models: {
+            "deepseek-v4-flash": {
+              id: "deepseek-v4-flash",
+              name: "DeepSeek V4 Flash",
+            },
+          },
+        },
+      }),
+      "utf-8",
+    );
+    vi.stubEnv("OPENHARNESS_MODELS_PATH", catalogPath);
     const ref = {
       current: {
         model: "gpt-5.4",
