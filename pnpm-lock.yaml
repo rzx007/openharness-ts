@@ -693,6 +693,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../sandbox
@@ -731,6 +734,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../sandbox
@@ -981,6 +987,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/memory':
         specifier: workspace:*
         version: link:../memory

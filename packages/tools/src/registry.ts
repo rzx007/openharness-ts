@@ -72,7 +72,7 @@ export function createDefaultToolRegistry(
   };
   const environment = (): ToolExecutionSpec => ({
     domain: "environment",
-    supportedEnvironments: ["local", "docker"],
+    supportedEnvironments: ["local", "wsl", "docker"],
   });
   const localEnvironment = (): ToolExecutionSpec => ({
     domain: "environment",
@@ -80,7 +80,7 @@ export function createDefaultToolRegistry(
   });
   const controlPlane = (network = false): ToolExecutionSpec => ({
     domain: "control_plane",
-    supportedEnvironments: ["local", "docker"],
+    supportedEnvironments: ["local", "wsl", "docker"],
     ...(network ? { network: true } : {}),
   });
   registerBuiltin(bashTool, environment());

@@ -96,7 +96,7 @@ async function executeEnvironmentLsp(
   const rawFilePath = typeof input.filePath === "string" ? input.filePath : "";
   if (!rawFilePath) return errorResult(`${operation} requires filePath`);
   const resolved = await environment.paths.resolve(rawFilePath, "read");
-  if (resolved.mountPurpose === "unmounted") {
+  if (environment.info.kind === "docker" && resolved.mountPurpose === "unmounted") {
     return errorResult(`Lsp path is outside the mounted execution roots: ${resolved.executionPath}`);
   }
 

@@ -130,7 +130,7 @@ async function executeInEnvironment(
     ? input.workdir.trim()
     : environment.workspace.executionRoot;
   const resolved = await environment.paths.resolve(rawWorkdir, "execute");
-  if (resolved.mountPurpose === "unmounted") {
+  if (environment.info.kind === "docker" && resolved.mountPurpose === "unmounted") {
     return {
       content: [{ type: "text" as const, text: `Sandbox: workdir is outside the mounted execution roots: ${resolved.executionPath}` }],
       isError: true,

@@ -142,6 +142,22 @@ describe("scoped DetachedProcessSupervisor", () => {
 });
 
 describe("DetachedProcessSupervisor real execution", () => {
+  it("keeps a background shell on the supplied execution environment", async () => {
+    const mgr = makeManager();
+    const task = await mgr.startShellExecution({
+      command: "pwd",
+      description: "environment shell",
+      cwd: "/mnt/d/repo",
+      processExecutor: {
+        execShell: async () => environmentProcess("/mnt/d/repo\n"),
+        execProcess: async () => environmentProcess(""),
+      },
+    });
+
+    await waitFor(() => mgr.getExecution(task.id)?.status === "completed");
+    expect(mgr.readOutput(task.id)).toBe("/mnt/d/repo\n");
+  });
+
   it("starts one process for concurrent requests with the same explicit job id", async () => {
     const mgr = makeManager();
     const options = {
@@ -526,6 +542,22 @@ describe("DetachedProcessSupervisor real execution", () => {
     await expect(mgr.writeInput(task.id, "late")).rejects.toThrow(/does not accept input/);
   });
 });
+
+function environmentProcess(output: string) {
+  return {
+    write() {},
+    end() {},
+    onOutput(listener: (chunk: Uint8Array) => void) {
+      setImmediate(() => listener(Buffer.from(output)));
+      return () => {};
+    },
+    async wait() {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { exitCode: 0 };
+    },
+    async signal() {},
+  };
+}
 
 describe("DetachedProcessSupervisor.awaitExecution", () => {
   it("returns immediately for an already-terminal task with its output/status", async () => {

@@ -201,9 +201,10 @@ export async function createOpenHarnessRuntime(
   });
 
   const hookExecutor = new HookExecutor({
-    cwd: hostCwd,
+    cwd: options.executionEnvironment?.workspace.executionRoot ?? hostCwd,
     sessionId: options.sessionId,
     settings,
+    processExecutor: options.executionEnvironment?.process,
   });
   const runtimeModel = resolveRuntimeModel(settings, configuration);
 

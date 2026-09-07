@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { grepTool } from "../../search/grep.js";
 import { fileEditTool } from "../edit.js";
 import { globTool } from "../glob.js";
-import { fileOperationsFor } from "../operations.js";
+import { WslFileOperations, fileOperationsFor } from "../operations.js";
 import { fileReadTool } from "../read.js";
 import { fileWriteTool } from "../write.js";
 
@@ -164,6 +164,27 @@ describe("fileOperationsFor", () => {
   });
 });
 
+describe("WslFileOperations", () => {
+  it("uses the environment process executor for POSIX paths", async () => {
+    const calls: string[][] = [];
+    const operations = new WslFileOperations({
+      info: { kind: "wsl" },
+      workspace: { executionRoot: "/mnt/d/repo" },
+      process: {
+        execProcess: async (argv: string[]) => {
+          calls.push(argv);
+          return makeEnvironmentProcess(argv[0] === "/bin/cat" ? "hello" : "file\0dir\td\0");
+        },
+      },
+    } as any);
+
+    await expect(operations.readText("/home/me/file.txt")).resolves.toBe("hello");
+    await operations.listDir("/home/me");
+    expect(calls[0]).toEqual(["/bin/cat", "--", "/home/me/file.txt"]);
+    expect(calls[1]).toEqual(expect.arrayContaining(["/usr/bin/find", "/home/me"]));
+  });
+});
+
 function dockerSettings(): Settings {
   return {
     model: "m",
@@ -249,4 +270,17 @@ function makeChild(options: {
   child.stderr = stderr;
   child.kill = vi.fn(() => true);
   return child;
+}
+
+function makeEnvironmentProcess(output: string) {
+  return {
+    write() {},
+    end() {},
+    onOutput(listener: (chunk: Uint8Array) => void) {
+      listener(Buffer.from(output));
+      return () => {};
+    },
+    async wait() { return { exitCode: 0 }; },
+    async signal() {},
+  };
 }

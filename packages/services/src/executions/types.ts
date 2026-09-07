@@ -1,4 +1,5 @@
 import type { AgentChildResult, Settings } from "@openharness/core";
+import type { EnvironmentProcessExecutor } from "@openharness/environment";
 import type { SandboxPolicy } from "@openharness/sandbox";
 
 export type ExecutionBackend = "detached_process" | "child_agent";
@@ -69,6 +70,7 @@ export interface StartShellExecutionOptions {
   env?: Record<string, string>;
   settings?: Settings;
   policy?: SandboxPolicy;
+  processExecutor?: EnvironmentProcessExecutor;
 }
 
 export interface StartAgentProcessOptions {
@@ -84,6 +86,7 @@ export interface StartAgentProcessOptions {
   env?: Record<string, string>;
   settings?: Settings;
   policy?: SandboxPolicy;
+  processExecutor?: EnvironmentProcessExecutor;
 }
 
 export interface RegisterChildAgentExecutionOptions {

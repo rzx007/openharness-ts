@@ -23,11 +23,11 @@
 
 **文件：** `packages/tools/src/file/operations.ts`、`sandbox-guard.ts`、shell executor/registry、`packages/mcp/src/sandbox-stdio-transport.ts`、`packages/hooks/src/index.ts`、`packages/services/src/lsp/index.ts`、detached supervisor、background shell service 与对应测试。
 
-- [ ] 写失败测试：WSL stat/list/text/binary/glob/grep 使用环境进程；`/home` 不因“未挂载”被拒绝；命令转后台后仍使用 WSL executor。
-- [ ] 实现 WSL FileOperations 和环境进程注入；路径与内容使用 argv/stdin 传输。
-- [ ] 将 Bash、后台 Shell、MCP stdio、command hook、LSP 统一到 handle.process；保留 Native SRT。
-- [ ] 更新工具环境声明，Native Plugin Tool 在 WSL 不注册；运行相关测试。
-- [ ] 提交 `feat(runtime): route WSL workloads through one environment`。
+- [x] 写失败测试：WSL stat/list/text/binary/glob/grep 使用环境进程；`/home` 不因“未挂载”被拒绝；命令转后台后仍使用 WSL executor。
+- [x] 实现 WSL FileOperations 和环境进程注入；路径与内容使用 argv/stdin 传输。
+- [x] 将 Bash、后台 Shell、MCP stdio、command hook、LSP 统一到 handle.process；保留 Native SRT。
+- [x] 更新工具环境声明，Native Plugin Tool 在 WSL 不注册；运行相关测试。
+- [x] 提交 `feat(runtime): route WSL workloads through one environment`。
 
 ### 任务 3：接通 WSL 终端
 

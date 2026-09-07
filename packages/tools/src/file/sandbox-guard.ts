@@ -33,7 +33,7 @@ export async function sandboxPathError(
 ): Promise<string | undefined> {
   if (environment) {
     const result = await environment.paths.resolve(filePath, operation);
-    if (result.mountPurpose === "unmounted") {
+    if (environment.info.kind === "docker" && result.mountPurpose === "unmounted") {
       return `Sandbox: path is outside the mounted execution roots: ${result.executionPath}`;
     }
     if (operation === "write" && result.mountMode === "ro") {

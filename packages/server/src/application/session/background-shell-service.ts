@@ -276,6 +276,9 @@ export class BackgroundShellService {
         cwd: scope.cwd,
         sessionId: scope.sessionId,
         ...(input.settings ? { settings: input.settings } : {}),
+        ...(environmentLease ? {
+          processExecutor: bindEnvironmentProcessExecutor(environmentLease),
+        } : {}),
       });
     } catch (error) {
       await environmentLease?.release();
@@ -395,6 +398,16 @@ export class BackgroundShellService {
     if (!cwd) throw new BackgroundShellError(400, "cwd or sessionId is required");
     return { cwd, ...(input.sessionId ? { sessionId: input.sessionId } : {}) };
   }
+}
+
+function bindEnvironmentProcessExecutor(environment: ExecutionEnvironmentLease) {
+  const cwd = environment.workspace.executionRoot;
+  return {
+    execShell: (command: string, options = {}) =>
+      environment.process.execShell(command, { ...options, cwd }),
+    execProcess: (argv: string[], options = {}) =>
+      environment.process.execProcess(argv, { ...options, cwd }),
+  } satisfies typeof environment.process;
 }
 
 function shellRequestFingerprint(input: {

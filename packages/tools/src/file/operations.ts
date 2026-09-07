@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 import type { Settings, ToolContext } from "@openharness/core";
 import type {
   EnvironmentFileSystem,
@@ -218,6 +218,112 @@ export class DockerFileOperations implements FileOperations {
   }
 }
 
+export class WslFileOperations implements FileOperations {
+  constructor(private readonly environment: ExecutionEnvironmentHandle) {}
+
+  async stat(path: string): Promise<FileStat> {
+    const result = await this.run([
+      "/bin/sh", "-c",
+      'if [ -f "$1" ]; then printf file; elif [ -d "$1" ]; then printf directory; else exit 2; fi',
+      "ohs-stat", path,
+    ]);
+    if (result.exitCode !== 0) throw new Error(result.output || `Path not found: ${path}`);
+    return { isFile: result.output === "file", isDirectory: result.output === "directory" };
+  }
+
+  async listDir(path: string): Promise<FileEntry[]> {
+    const result = await this.run([
+      "/usr/bin/find", path, "-mindepth", "1", "-maxdepth", "1", "-printf", "%f\\t%y\\0",
+    ]);
+    if (result.exitCode !== 0) throw new Error(result.output || `Cannot list directory: ${path}`);
+    return result.output.split("\0").filter(Boolean).map((entry) => {
+      const [name, type] = entry.split("\t");
+      return { name: name ?? "", isDirectory: type === "d" };
+    });
+  }
+
+  async readText(path: string): Promise<string> {
+    return new TextDecoder().decode(await this.readBytes(path));
+  }
+
+  async readBytes(path: string): Promise<Uint8Array> {
+    const result = await this.run(["/bin/cat", "--", path], undefined, true);
+    if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.bytes));
+    return result.bytes;
+  }
+
+  async writeText(path: string, content: string): Promise<void> {
+    await this.writeBytes(path, new TextEncoder().encode(content));
+  }
+
+  async writeBytes(path: string, content: Uint8Array): Promise<void> {
+    const result = await this.run([
+      "/bin/sh", "-c", 'mkdir -p -- "$(dirname -- "$1")" && cat > "$1"', "ohs-write", path,
+    ], content, true);
+    if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.bytes));
+  }
+
+  async glob(basePath: string, pattern: string, limit: number): Promise<string[]> {
+    const files = await this.collectFiles(basePath, limit * 10);
+    const matches = globToRegex(pattern);
+    return files.filter((path) => matches.test(path)).slice(0, limit);
+  }
+
+  async grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[]> {
+    const files = await this.collectFiles(basePath, options.limit * 20);
+    const include = options.include ? globToRegex(options.include) : undefined;
+    const expression = new RegExp(pattern, options.caseSensitive ? "" : "i");
+    const results: string[] = [];
+    for (const file of files) {
+      if (include && !include.test(file)) continue;
+      const content = await this.readText(posix.join(basePath, file)).catch(() => "");
+      if (content.includes("\0")) continue;
+      for (const [index, line] of content.split("\n").entries()) {
+        if (!expression.test(line)) continue;
+        results.push(`${file}:${index + 1}:${line}`);
+        if (results.length >= options.limit) return results;
+      }
+    }
+    return results;
+  }
+
+  private async collectFiles(basePath: string, limit: number): Promise<string[]> {
+    const result = await this.run([
+      "/usr/bin/find", basePath, "-type", "f", "-printf", "%P\\0",
+    ]);
+    if (result.exitCode !== 0) return [];
+    return result.output.split("\0").filter((path) => {
+      if (!path) return false;
+      return !path.split("/").some((part) => part.startsWith(".") || SKIP_DIRS.has(part));
+    }).slice(0, limit);
+  }
+
+  private async run(
+    argv: string[],
+    stdin?: Uint8Array,
+    binary = false,
+  ): Promise<{ exitCode: number; output: string; bytes: Uint8Array }> {
+    const process = await this.environment.process.execProcess(argv, {
+      cwd: this.environment.workspace.executionRoot,
+    });
+    const chunks: Uint8Array[] = [];
+    const stop = process.onOutput((chunk) => chunks.push(chunk));
+    if (stdin) process.write(stdin);
+    process.end();
+    try {
+      const result = await process.wait();
+      const bytes = concatBytes(chunks);
+      return {
+        exitCode: result.exitCode ?? 1,
+        output: binary ? "" : new TextDecoder().decode(bytes),
+        bytes,
+      };
+    } finally {
+      stop();
+    }
+  }
+}
+
 export function createEnvironmentFileSystem(
   environment: ExecutionEnvironmentHandle,
   options: {
@@ -226,6 +332,7 @@ export function createEnvironmentFileSystem(
     signal?: AbortSignal;
   } = {},
 ): EnvironmentFileSystem {
+  if (environment.info.kind === "wsl") return new WslFileOperations(environment);
   return environment.info.kind === "docker"
     ? new DockerFileOperations({
         cwd: environment.workspace.hostRoot,
@@ -234,6 +341,16 @@ export function createEnvironmentFileSystem(
         signal: options.signal,
       })
     : new HostFileOperations();
+}
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
 }
 
 export async function walkGlob(

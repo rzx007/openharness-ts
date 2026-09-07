@@ -1,9 +1,12 @@
 import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { PassThrough, Writable } from "node:stream";
 import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
 import { getTasksDir, PROJECT_CONFIG_DIR_NAME, type Settings } from "@openharness/core";
+import type { EnvironmentProcess, EnvironmentProcessExecutor } from "@openharness/environment";
 import {
   createProcess,
   createShellProcess,
@@ -50,6 +53,7 @@ export class DetachedProcessSupervisor {
   private readonly tasksDir: string;
   private taskSettings = new Map<string, Settings>();
   private taskPolicies = new Map<string, SandboxPolicy>();
+  private taskProcessExecutors = new Map<string, EnvironmentProcessExecutor>();
   private shellStartPromises = new Map<string, Promise<DetachedProcessExecution>>();
 
   constructor(tasksDir?: string) {
@@ -129,6 +133,7 @@ export class DetachedProcessSupervisor {
     this.executions.set(id, task);
     if (opts.settings) this.taskSettings.set(id, opts.settings);
     if (opts.policy) this.taskPolicies.set(id, opts.policy);
+    if (opts.processExecutor) this.taskProcessExecutors.set(id, opts.processExecutor);
     this.notifyExecutionEvent(task, "created");
     try {
       await this.startProcess(id);
@@ -495,7 +500,20 @@ export class DetachedProcessSupervisor {
     const detached = process.platform !== "win32";
 
     let child: ChildProcess;
-    if (task.argv != null) {
+    const environmentExecutor = this.taskProcessExecutors.get(taskId);
+    if (environmentExecutor && task.argv != null) {
+      child = adaptEnvironmentProcess(await environmentExecutor.execProcess(task.argv, {
+        cwd: task.cwd,
+        env: task.env,
+        owner: { kind: task.type === "agent" ? "agent" : "background", id: task.id },
+      }));
+    } else if (environmentExecutor) {
+      child = adaptEnvironmentProcess(await environmentExecutor.execShell(task.command!, {
+        cwd: task.cwd,
+        env: task.env,
+        owner: { kind: task.type === "agent" ? "agent" : "background", id: task.id },
+      }));
+    } else if (task.argv != null) {
       child = await createProcess(task.argv, {
         cwd: task.cwd,
         sessionId: task.sessionId,
@@ -662,6 +680,61 @@ export class DetachedProcessSupervisor {
       }
     }
   }
+}
+
+function adaptEnvironmentProcess(process: EnvironmentProcess): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  const mutable = child as unknown as {
+    pid?: number;
+    exitCode: number | null;
+    signalCode: NodeJS.Signals | null;
+    killed: boolean;
+  };
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const stdin = new Writable({
+    write(chunk, _encoding, callback) {
+      try {
+        process.write(chunk);
+        callback();
+      } catch (error) {
+        callback(error as Error);
+      }
+    },
+    final(callback) {
+      process.end();
+      callback();
+    },
+  });
+  child.stdout = stdout;
+  child.stderr = stderr;
+  child.stdin = stdin;
+  mutable.pid = process.pid;
+  mutable.exitCode = null;
+  mutable.signalCode = null;
+  mutable.killed = false;
+  child.kill = ((signal?: NodeJS.Signals | number) => {
+    mutable.killed = true;
+    void process.signal(signal === "SIGINT" ? "interrupt" : "terminate");
+    return true;
+  }) as ChildProcess["kill"];
+  const stop = process.onOutput((chunk) => stdout.write(chunk));
+  void process.wait().then((result) => {
+    stop();
+    mutable.exitCode = result.exitCode;
+    stdout.end();
+    stderr.end();
+    child.emit("close", result.exitCode, result.signal ?? null);
+    child.emit("exit", result.exitCode, result.signal ?? null);
+  }).catch((error) => {
+    stop();
+    stdout.end();
+    stderr.end();
+    child.emit("error", error);
+    child.emit("close", 1, null);
+    child.emit("exit", 1, null);
+  });
+  return child;
 }
 
 // ── helpers ───────────────────────────────────────────────
