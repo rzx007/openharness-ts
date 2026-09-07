@@ -210,7 +210,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       });
   });
 
-  it("keeps environment tools but hides local Terminal tools in Docker", async () => {
+  it("keeps environment tools including TerminalOpen in Docker", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,
       executionEnvironment: dockerEnvironment(),
@@ -230,7 +230,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     expect(runtime.toolRegistry.has("Bash")).toBe(true);
     expect(runtime.toolRegistry.has("Read")).toBe(true);
     expect(runtime.toolRegistry.has("Write")).toBe(true);
-    expect(runtime.toolRegistry.has("TerminalOpen")).toBe(false);
+    expect(runtime.toolRegistry.has("TerminalOpen")).toBe(true);
     await runtime.close();
   });
 

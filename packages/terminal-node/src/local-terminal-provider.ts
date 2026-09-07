@@ -96,7 +96,7 @@ export class LocalTerminalProvider implements TerminalProvider {
       name: normalizeTerminalName(input.name),
       scope: resolveTerminalScope(input),
       ...(input.projectId ? { projectId: input.projectId } : {}),
-      runtime: "local",
+      runtime: input.runtime,
       source: input.source ?? "user",
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       status: "running",

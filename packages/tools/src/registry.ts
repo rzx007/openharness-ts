@@ -128,7 +128,7 @@ export function createDefaultToolRegistry(
     registerBuiltin(scheduleRunNowTool, controlPlane());
   }
   if (options.terminal) {
-    for (const tool of terminalTools) registerBuiltin(tool, localEnvironment());
+    for (const tool of terminalTools) registerBuiltin(tool, environment());
   }
   if (options.jobs) {
     for (const tool of jobTools) registerBuiltin(tool, controlPlane());

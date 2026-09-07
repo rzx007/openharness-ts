@@ -76,6 +76,44 @@ describe("DaemonTerminalService scoped environments", () => {
       rows: 24,
     })).rejects.toThrow("does not belong to project different");
   });
+
+  it("opens an Agent Terminal for a projectless session in its environment", async () => {
+    const session = { id: "outside-agent", cwd: process.cwd(), status: "idle" } as any;
+    const prepare = vi.fn(async () => ({
+      command: "docker",
+      args: ["exec", "-it"],
+      hostCwd: process.cwd(),
+      executionCwd: "/workspace",
+      shell: "/bin/sh",
+      signal: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    }));
+    const pty = fakePty();
+    const service = new DaemonTerminalService({
+      getProject: () => undefined,
+      getSession: () => session,
+    } as any, {
+      getSettingsForCwd: async () => ({ terminal: { dockerShell: "/bin/sh" } } as any),
+      acquireEnvironment: async () => ({
+        workspace: { executionRoot: "/workspace" },
+        terminal: { prepare },
+        release: vi.fn(async () => {}),
+      } as any),
+      spawnPty: vi.fn(() => pty.value),
+    });
+
+    const terminal = await service.createAgentHost(session).open({
+      sessionId: session.id,
+      cwd: session.cwd,
+    });
+
+    expect(terminal).toMatchObject({
+      source: "agent",
+      runtime: "sandbox",
+      scope: { kind: "session", sessionId: session.id },
+      cwd: "/workspace",
+    });
+  });
 });
 
 function fakePty() {

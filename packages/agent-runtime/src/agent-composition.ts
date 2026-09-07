@@ -141,13 +141,10 @@ async function composeOpenHarnessAgentInternal(
     };
     rollback.add(() => executionEnvironment?.release(), executionEnvironment);
   }
-  const capabilityOverrides = executionEnvironment?.info.kind === "docker"
-    ? { ...options.capabilityOverrides, terminal: false as const }
-    : options.capabilityOverrides;
   const environment = await resolveDefaultAgentCapabilities({
     settings,
     configuration: options,
-    capabilityOverrides,
+    capabilityOverrides: options.capabilityOverrides,
     effects: options.effects,
     cwd,
     sessionId,
