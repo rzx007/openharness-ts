@@ -79,6 +79,11 @@ export interface SrtSandboxConfig {
   runtimeCommand?: string;
 }
 
+export interface TerminalSettings {
+  localShell?: string;
+  dockerShell?: "/bin/sh" | "/bin/bash";
+}
+
 export interface PathRuleConfig {
   pattern: string;
   allow: boolean;
@@ -160,6 +165,7 @@ export interface Settings {
   hooks?: HookDefinition[];
   memory?: MemoryConfig;
   sandbox?: SandboxConfig;
+  terminal?: TerminalSettings;
   mcpServers?: Record<string, McpServerConfig>;
   plugins?: {
     /** Master switch for all installed Native Plugin contributions. Defaults to true. */

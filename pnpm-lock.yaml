@@ -871,6 +871,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

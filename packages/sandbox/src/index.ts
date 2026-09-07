@@ -25,6 +25,15 @@ export type {
 } from "./types.js";
 export { normalizeSandboxConfig } from "./config.js";
 export {
+  ExecutionConfigError,
+  resolveExecutionEnvironmentConfig,
+} from "./execution-config.js";
+export type {
+  ExecutionSurface,
+  ResolveExecutionEnvironmentConfigInput,
+  ResolvedExecutionEnvironmentConfig,
+} from "./execution-config.js";
+export {
   classifySandboxFailure,
   defaultSandboxPolicyService,
   DefaultSandboxPolicyService,
