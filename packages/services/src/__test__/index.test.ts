@@ -56,11 +56,11 @@ describe("LspClient", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
     });
     await expect(client.workspaceSymbolSearch(process.cwd(), "QueryEngine"))
-      .rejects.toThrow("Docker sandbox session is not running");
+      .rejects.toThrow();
   });
 
   it("connects and disconnects", async () => {

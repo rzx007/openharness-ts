@@ -60,7 +60,7 @@ describe("daemon ImageToText tool", () => {
         cwd: "/workspace",
         settings: settings("vision-main", "openai"),
         environment: {
-          info: { kind: "docker", networkMode: "bridge" },
+          info: { kind: "wsl", networkMode: "host" },
           paths: { resolve: resolvePath },
           files: { readBytes },
         },
@@ -99,7 +99,7 @@ describe("daemon ImageToText tool", () => {
       {
         cwd: "/workspace",
         settings: settings("vision-main", "anthropic"),
-        environment: { info: { kind: "docker", networkMode: "none" } },
+        environment: { info: { kind: "wsl", networkMode: "none" } },
       } as any,
     );
 

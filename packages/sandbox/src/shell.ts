@@ -19,7 +19,7 @@ export interface CreateShellProcessOptions {
   stdio?: StdioOptions;
   signal?: AbortSignal;
   detached?: boolean;
-  /** Host-only shell policy. Docker always uses /bin/sh; SRT follows the host platform. */
+  /** Host shell selection policy. */
   hostShell?: "preferred" | "system";
 }
 
@@ -132,7 +132,7 @@ export function describeHostShellLauncher(shell: HostShellLauncher = resolveHost
  * - Windows：优先 bash.exe（非 login `-c`），否则 PowerShell / cmd
  * - POSIX：`/bin/sh -c`
  *
- * 探测结果进程内缓存；docker 路径请用 {@link resolveContainerShellArgv}。
+ * 探测结果进程内缓存。
  */
 export function resolveShellArgv(command: string): string[] {
   const shell = detectHostShell();

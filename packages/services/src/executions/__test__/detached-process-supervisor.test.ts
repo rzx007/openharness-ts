@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDetachedProcessSupervisor, resetExecutionRuntimes, DetachedProcessSupervisor } from "../index.js";
-import { resolveSandboxPolicy, setActiveSandboxSession } from "@openharness/sandbox";
+import { resolveSandboxPolicy } from "@openharness/sandbox";
 
 const NODE = process.execPath;
 let testConfigDir: string;
@@ -14,7 +14,6 @@ beforeAll(() => {
   testConfigDir = mkdtempSync(join(tmpdir(), "oh-execution-config-"));
   process.env.OPENHARNESS_CONFIG_DIR = testConfigDir;
 });
-
 afterAll(() => {
   if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
   else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
@@ -52,7 +51,6 @@ function makeManager(): DetachedProcessSupervisor {
 }
 
 afterEach(async () => {
-  setActiveSandboxSession(null);
   resetExecutionRuntimes();
   while (managers.length) {
     const mgr = managers.pop()!;
@@ -61,40 +59,6 @@ afterEach(async () => {
 });
 
 describe("scoped DetachedProcessSupervisor", () => {
-  it("marks a Docker background process with its durable task id", async () => {
-    const cwd = tempTasksDir();
-    let seenOwner: unknown;
-    setActiveSandboxSession({
-      backend: "docker",
-      cwd,
-      active: true,
-      start: async () => {},
-      stop: async () => {},
-      execCommand: async (_argv, options) => {
-        seenOwner = options.owner;
-        throw new Error("captured owner");
-      },
-    }, { cwd, sessionId: "s1" });
-    const manager = makeManager();
-
-    await expect(manager.startShellExecution({
-      id: "task-durable-1",
-      command: "echo hi",
-      description: "owned",
-      cwd,
-      sessionId: "s1",
-      settings: {
-        model: "test",
-        apiFormat: "openai",
-        maxTurns: 1,
-        permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
-      },
-    })).rejects.toThrow("captured owner");
-
-    expect(seenOwner).toEqual({ kind: "background", id: "task-durable-1" });
-  });
-
   it("returns isolated managers per cwd", () => {
     const cwdA = join(tempTasksDir(), "repo-a");
     const cwdB = join(tempTasksDir(), "repo-b");
@@ -204,9 +168,10 @@ describe("DetachedProcessSupervisor real execution", () => {
     await waitFor(() => mgr.getExecution(first.id)?.status === "completed");
   });
 
-  it("records a failed task and rejects when strict Docker sandbox is unavailable", async () => {
+  it("records a failed task and rejects when strict SRT sandbox is unavailable", async () => {
     const mgr = makeManager();
-    await expect(mgr.startShellExecution({
+    let failure = "";
+    await mgr.startShellExecution({
       command: "echo must-not-run-on-host",
       description: "strict sandbox",
       cwd: process.cwd(),
@@ -216,15 +181,16 @@ describe("DetachedProcessSupervisor real execution", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
-    })).rejects.toThrow("Docker sandbox session is not running");
+    }).catch((error) => { failure = error instanceof Error ? error.message : String(error); });
+    expect(failure).toBeTruthy();
 
     const [task] = mgr.listExecutions("failed");
     expect(task).toMatchObject({
       status: "failed",
       exitCode: 1,
-      metadata: { status_note: "Docker sandbox session is not running" },
+      metadata: { status_note: failure },
     });
     expect(mgr.readOutput(task!.id)).toContain("[spawn error]");
   });
@@ -242,7 +208,7 @@ describe("DetachedProcessSupervisor real execution", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
     });
 
@@ -268,7 +234,7 @@ describe("DetachedProcessSupervisor real execution", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
     });
 

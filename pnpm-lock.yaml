@@ -1083,9 +1083,6 @@ importers:
       '@openharness/jobs':
         specifier: workspace:*
         version: link:../jobs
-      '@openharness/sandbox':
-        specifier: workspace:*
-        version: link:../sandbox
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal

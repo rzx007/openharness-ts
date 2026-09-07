@@ -27,13 +27,13 @@ describe("tool execution domains", () => {
     const registry = new ToolRegistry();
     registry.register(testTool({
       domain: "control_plane",
-      supportedEnvironments: ["local", "docker"],
+      supportedEnvironments: ["local", "wsl"],
       network: true,
     }));
 
     expect(registry.getAll()[0]?.execution).toEqual({
       domain: "control_plane",
-      supportedEnvironments: ["local", "docker"],
+      supportedEnvironments: ["local", "wsl"],
       network: true,
     });
   });

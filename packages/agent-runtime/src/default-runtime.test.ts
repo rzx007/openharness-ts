@@ -2,21 +2,6 @@ import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, expect, vi } from "vitest";
 
-const startSandboxRuntime = vi.hoisted(() => vi.fn(async () => ({
-  status: {
-    state: "off" as const,
-    enabled: false,
-    active: false,
-    backend: "docker" as const,
-  },
-  stop: vi.fn(async () => {}),
-  stopSync: vi.fn(),
-})));
-
-vi.mock("@openharness/sandbox", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@openharness/sandbox")>()),
-  startSandboxRuntime,
-}));
 import {
   createOpenHarnessRuntime,
   resolveAutoApproveTools,
@@ -40,23 +25,23 @@ function testTool(name: string): ToolDefinition {
   };
 }
 
-function dockerEnvironment(networkMode = "bridge"): ExecutionEnvironmentHandle {
+function wslEnvironment(networkMode = "bridge"): ExecutionEnvironmentHandle {
   return {
     info: {
-      kind: "docker",
+      kind: "wsl",
       hostOs: "Windows",
       executionOs: "Linux",
       shell: "/bin/sh",
       shellDialect: "posix",
       pathStyle: "posix",
-      cwd: "/workspace",
-      homeDir: "/root",
+      cwd: "/mnt/d/repo",
+      homeDir: "/home",
       tempDir: "/tmp",
       mounts: [{ path: "/workspace", mode: "rw", purpose: "workspace" }],
       networkMode,
       limitations: [],
     },
-    workspace: { kind: "docker", hostRoot: "D:\\repo", executionRoot: "/workspace" },
+    workspace: { kind: "wsl", hostRoot: "D:\\repo", executionRoot: "/mnt/d/repo" },
     process: {} as never,
     files: {} as never,
     paths: {} as never,
@@ -132,7 +117,6 @@ describe("resolveAutoApproveTools", () => {
     ).toContain("WebFetch");
   });
 });
-
 describe("resolveRuntimeModel", () => {
   it("prefers CLI override model over settings model", () => {
     expect(resolveRuntimeModel(BASE_SETTINGS, { model: "deepseek-v4-flash" })).toBe("deepseek-v4-flash");
@@ -201,19 +185,19 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
-  it("uses a projectless managed cwd as the Docker workspace root", () => {
-    expect(createAgentWorkspaceBinding("D:\\Documents\\OpenHarness\\2026-09-07\\x1", "docker"))
+  it("uses a projectless managed cwd as the WSL workspace root", () => {
+    expect(createAgentWorkspaceBinding("D:\\Documents\\OpenHarness\\2026-09-07\\x1", "wsl"))
       .toEqual({
-        kind: "docker",
+        kind: "wsl",
         hostRoot: "D:\\Documents\\OpenHarness\\2026-09-07\\x1",
-        executionRoot: "/workspace",
+        executionRoot: "/mnt/d/Documents/OpenHarness/2026-09-07/x1",
       });
   });
 
-  it("keeps environment tools including TerminalOpen in Docker", async () => {
+  it("keeps environment tools including TerminalOpen in WSL", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,
-      executionEnvironment: dockerEnvironment(),
+      executionEnvironment: wslEnvironment(),
       capabilities: {
         terminal: { status: "available", value: {} as never },
         jobs: { status: "available", value: {} as never },
@@ -234,10 +218,10 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     await runtime.close();
   });
 
-  it("hides undeclared local-only tools from Docker agents", async () => {
+  it("hides undeclared local-only tools from WSL agents", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,
-      executionEnvironment: dockerEnvironment(),
+      executionEnvironment: wslEnvironment(),
       configuration: {
         client: {
           async *streamMessage() {
@@ -252,10 +236,10 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     await runtime.close();
   });
 
-  it("hides brokered web tools when Docker networking is disabled", async () => {
+  it("hides brokered web tools when WSL networking is disabled", async () => {
     const runtime = await createOpenHarnessRuntime({
       settings: BASE_SETTINGS,
-      executionEnvironment: dockerEnvironment("none"),
+      executionEnvironment: wslEnvironment("none"),
       configuration: {
         client: {
           async *streamMessage() {

@@ -60,10 +60,9 @@ describe("buildDesktopSettingsSnapshot", () => {
   it("uses only the explicit agent environment setting", () => {
     expect(buildDesktopSettingsSnapshot({
       agentEnvironment: { kind: "wsl" },
-      sandbox: { enabled: true, backend: "docker" },
     })).toMatchObject({ agentEnvironment: "wsl" })
     expect(buildDesktopSettingsSnapshot({
-      sandbox: { enabled: true, backend: "docker" },
+      agentEnvironment: { kind: "unexpected" },
     })).toMatchObject({ agentEnvironment: "native" })
   })
 })

@@ -9,8 +9,8 @@ describe("DaemonTerminalService scoped environments", () => {
     const targetClose = vi.fn(async () => {});
     const leaseRelease = vi.fn(async () => {});
     const prepare = vi.fn(async () => ({
-      command: "docker",
-      args: ["exec", "-it", "container", "/bin/sh", "-i"],
+      command: "wsl.exe",
+      args: ["--cd", "/mnt/d/workspace"],
       hostCwd: process.cwd(),
       executionCwd: "/workspace",
       shell: undefined,
@@ -27,7 +27,7 @@ describe("DaemonTerminalService scoped environments", () => {
       getProject: () => undefined,
       getSession: (id: string) => id === session.id ? session : undefined,
     } as any, {
-      getSettingsForCwd: async () => ({ terminal: { dockerShell: "/bin/sh" } } as any),
+      getSettingsForCwd: async () => ({ terminal: {} } as any),
       acquireEnvironment,
       spawnPty: vi.fn(() => pty.value),
     });
@@ -81,7 +81,7 @@ describe("DaemonTerminalService scoped environments", () => {
   it("opens an Agent Terminal for a projectless session in its environment", async () => {
     const session = { id: "outside-agent", cwd: process.cwd(), status: "idle" } as any;
     const prepare = vi.fn(async () => ({
-      command: "docker",
+      command: "wsl.exe",
       args: ["exec", "-it"],
       hostCwd: process.cwd(),
       executionCwd: "/workspace",
@@ -94,7 +94,7 @@ describe("DaemonTerminalService scoped environments", () => {
       getProject: () => undefined,
       getSession: () => session,
     } as any, {
-      getSettingsForCwd: async () => ({ terminal: { dockerShell: "/bin/sh" } } as any),
+      getSettingsForCwd: async () => ({ terminal: {} } as any),
       acquireEnvironment: async () => ({
         workspace: { executionRoot: "/workspace" },
         terminal: { prepare },

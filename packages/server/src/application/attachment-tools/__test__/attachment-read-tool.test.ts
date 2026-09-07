@@ -16,7 +16,7 @@ describe("attachment Read tool", () => {
     });
     expect(tool.execution).toEqual({
       domain: "environment",
-      supportedEnvironments: ["local", "docker"],
+      supportedEnvironments: ["local", "wsl"],
     });
 
     await expect(tool.execute({ file_path: "notes.txt" }, { cwd: "C:/work", sessionId: "child" }))

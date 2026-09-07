@@ -5,7 +5,7 @@ import { LocalTerminalProvider } from "./local-terminal-provider";
 import { TerminalOutputStore } from "./terminal-output-store";
 
 describe("LocalTerminalProvider", () => {
-  it("drives a Docker target through node-pty with input, resize, and signals", async () => {
+  it("drives a WSL target through node-pty with input, resize, and signals", async () => {
     let onData: ((data: string) => void) | undefined;
     let onExit: ((event: { exitCode: number }) => void) | undefined;
     const pty = {
@@ -22,11 +22,11 @@ describe("LocalTerminalProvider", () => {
     const provider = new LocalTerminalProvider({
       resolveCwd: async () => process.cwd(),
       resolveTarget: async () => ({
-        command: "docker",
-        args: ["exec", "-it", "container", "/bin/sh", "-i"],
+        command: "wsl.exe",
+        args: ["--cd", "/mnt/d/workspace"],
         hostCwd: process.cwd(),
-        executionCwd: "/workspace",
-        shell: "/bin/sh",
+        executionCwd: "/mnt/d/workspace",
+        shell: "default",
         resize,
         signal,
         close,
@@ -41,11 +41,11 @@ describe("LocalTerminalProvider", () => {
       rows: 30,
     });
     expect(spawnPty).toHaveBeenCalledWith(
-      "docker",
-      expect.arrayContaining(["exec", "-it"]),
+      "wsl.exe",
+      ["--cd", "/mnt/d/workspace"],
       expect.objectContaining({ cwd: process.cwd(), cols: 100, rows: 30 }),
     );
-    expect(info).toMatchObject({ cwd: "/workspace", shell: "/bin/sh" });
+    expect(info).toMatchObject({ cwd: "/mnt/d/workspace", shell: "default" });
 
     await provider.write({ terminalId: info.id, data: "echo ok\r" });
     await provider.resize({ terminalId: info.id, cols: 120, rows: 40 });

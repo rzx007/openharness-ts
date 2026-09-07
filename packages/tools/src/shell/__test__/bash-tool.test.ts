@@ -30,7 +30,7 @@ describe("createBashTool", () => {
     const toolResult = await tool.execute({ command: "pwd" }, {
       cwd: "/workspace",
       environment: {
-        info: { kind: "docker", shellDialect: "posix" },
+        info: { kind: "wsl", shellDialect: "posix" },
         workspace: { hostRoot: "D:\\repo", executionRoot: "/workspace" },
         process: { execShell },
         paths: {
@@ -148,11 +148,11 @@ describe("createBashTool", () => {
     const executor = fakeExecutor(result({
       status: "failed",
       failureKind: "runner",
-      output: "Docker sandbox session is not running",
+      output: "SRT sandbox is unavailable",
       exitCode: null,
       runnerError: {
         name: "SandboxUnavailableError",
-        message: "Docker sandbox session is not running",
+        message: "SRT sandbox is unavailable",
       },
     }));
     const tool = createBashTool(executor);
@@ -160,7 +160,7 @@ describe("createBashTool", () => {
     const toolResult = await tool.execute({ command: "pwd" }, { cwd: process.cwd() });
 
     expect(toolResult).toEqual({
-      content: [{ type: "text", text: "Docker sandbox session is not running" }],
+      content: [{ type: "text", text: "SRT sandbox is unavailable" }],
       isError: true,
     });
   });
@@ -181,26 +181,6 @@ describe("createBashTool", () => {
       type: "text",
       text: "Command timed out after 750 ms.\n\nPartial output:\npartial marker",
     });
-  });
-
-  it("allows POSIX syntax when an active Docker runner will execute it", async () => {
-    const run = vi.fn(async () => result({ output: "docker-ok" }));
-    const executor: ShellExecutor = {
-      async resolve(request) {
-        return spec({
-          command: request.command,
-          hostShell: { kind: "powershell", bin: "powershell.exe" },
-          runner: { mode: "sandbox-active", backend: "docker", fallbackToHost: false },
-        });
-      },
-      run,
-    };
-    const tool = createBashTool(executor);
-
-    const toolResult = await tool.execute({ command: "ls -la /tmp" }, { cwd: process.cwd() });
-
-    expect(run).toHaveBeenCalledOnce();
-    expect(toolResult.isError).toBe(false);
   });
 
   it("keeps host shell dialect diagnostics before execution", async () => {

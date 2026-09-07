@@ -17,7 +17,7 @@ export function registerManagedProcess(child: ChildProcess, stop: ManagedProcess
 /**
  * Stop a process and everything it started.
  *
- * Docker processes use their container-side process group. Host processes use
+ * POSIX processes use their process group. Windows host processes use
  * a detached POSIX process group or Windows taskkill /T.
  */
 export function signalProcessTree(

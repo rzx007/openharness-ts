@@ -258,16 +258,14 @@ export async function createOpenHarnessRuntime(
     .setQueryEngine(queryEngine)
     .build(settings);
 
+  await attachSandboxRuntime(
+    bundle,
+    hostCwd,
+    options.sandboxReporter,
+    options.sessionId,
+  );
   if (options.executionEnvironment) {
-    bundle.sandboxStatus = { state: "off", enabled: false, active: false };
     bundle.addCleanup(() => options.executionEnvironment?.release());
-  } else {
-    await attachSandboxRuntime(
-      bundle,
-      hostCwd,
-      options.sandboxReporter,
-      options.sessionId,
-    );
   }
   return bundle;
 }

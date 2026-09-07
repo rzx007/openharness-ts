@@ -62,7 +62,7 @@ describe("createDaemonAgentLoader", () => {
     const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
     const createAgent = vi.fn(async () => agent);
     const loader = createDaemonAgentLoader({
-      settings: { model: "default-model", sandbox: { enabled: true, backend: "docker" } } as any,
+      settings: { model: "default-model", agentEnvironment: { kind: "wsl" }, sandbox: { enabled: false } } as any,
       executionSurface: "desktop_managed",
       createAgent,
     })!;
@@ -228,7 +228,6 @@ describe("createDaemonAgentLoader", () => {
       model: "cwd-model",
       sandbox: {
         enabled: cwd === "/repo",
-        backend: "docker",
       },
     } as any));
     const loader = createDaemonAgentLoader({
@@ -244,7 +243,6 @@ describe("createDaemonAgentLoader", () => {
       model: "cwd-model",
       sandbox: {
         enabled: true,
-        backend: "docker",
       },
     });
   });

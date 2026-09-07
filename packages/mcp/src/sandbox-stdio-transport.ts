@@ -24,7 +24,7 @@ export interface SandboxStdioClientTransportOptions extends StdioServerParameter
 
 /**
  * MCP stdio transport that starts the server through OpenHarness' process
- * factory, so Docker/SRT/fail-closed rules apply to MCP servers too.
+ * factory, so local SRT and execution-environment rules apply to MCP servers too.
  */
 export class SandboxStdioClientTransport implements Transport {
   onclose?: () => void;
