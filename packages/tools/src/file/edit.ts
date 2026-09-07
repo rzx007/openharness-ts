@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
-import { resolveToolPath } from "./path.js";
+import { resolveToolPathInContext } from "./environment-path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
 import { fileOperationsFor } from "./operations.js";
 import { managedPersistencePathKind } from "./managed-persistence-path.js";
@@ -44,7 +44,7 @@ export const fileEditTool: ToolDefinition = {
       };
     }
 
-    const filePath = resolveToolPath(rawPath, cwd);
+    const filePath = await resolveToolPathInContext(rawPath, context, "write");
 
     if (managedPersistencePathKind(filePath, cwd)) {
       return {
@@ -61,14 +61,14 @@ export const fileEditTool: ToolDefinition = {
     }
 
     try {
-      const readSandboxError = await sandboxPathError(filePath, cwd, "read", context.settings);
+      const readSandboxError = await sandboxPathError(filePath, cwd, "read", context.settings, context.environment);
       if (readSandboxError) {
         return {
           content: [{ type: "text", text: readSandboxError }],
           isError: true,
         };
       }
-      const writeSandboxError = await sandboxPathError(filePath, cwd, "write", context.settings);
+      const writeSandboxError = await sandboxPathError(filePath, cwd, "write", context.settings, context.environment);
       if (writeSandboxError) {
         return {
           content: [{ type: "text", text: writeSandboxError }],

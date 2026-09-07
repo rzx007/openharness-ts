@@ -69,6 +69,7 @@ export type DaemonToolsProvider = (
 ) => Promise<ToolDefinition[]> | ToolDefinition[];
 
 export interface DaemonAgentLoaderOptions {
+  executionSurface?: "desktop_managed" | "cli_advanced";
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings> | Settings;
@@ -143,6 +144,7 @@ export function createDaemonAgentLoader(
       ...(settings ? { settings } : {}),
       cwd: session.cwd,
       sessionId: session.id,
+      ...(options.executionSurface ? { executionSurface: options.executionSurface } : {}),
       ...agentConfigurationFromSession(session, settings),
       capabilityOverrides: {
         ...(options.schedules ? { schedules: options.schedules } : {}),

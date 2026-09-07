@@ -6,6 +6,7 @@ import type {
 } from "@openharness/core";
 import {
   QueryEngine,
+  resolveToolExecution,
   RuntimeBuilder,
   RuntimeBundle,
   ToolRegistrationError,
@@ -38,6 +39,7 @@ import { startSandboxRuntime } from "@openharness/sandbox";
 import type { SandboxRuntimeReporter } from "@openharness/sandbox";
 import type { SkillRegistry } from "@openharness/skills";
 import type { AgentDefinition } from "@openharness/coordinator";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
 import type { ResolvedAgentCapabilities } from "./capability-resolution.js";
 
@@ -77,6 +79,7 @@ interface OpenHarnessRuntimeOptions {
   sandboxReporter?: SandboxRuntimeReporter;
   sessionId?: string;
   capabilities?: ResolvedAgentCapabilities;
+  executionEnvironment?: ExecutionEnvironmentHandle;
 }
 
 /**
@@ -137,7 +140,8 @@ export async function createOpenHarnessRuntime(
   options: OpenHarnessRuntimeOptions,
 ): Promise<RuntimeBundle> {
   const { settings } = options;
-  const cwd = options.cwd ?? process.cwd();
+  const hostCwd = options.cwd ?? process.cwd();
+  const cwd = options.executionEnvironment?.workspace.executionRoot ?? hostCwd;
   const configuration = options.configuration;
   const storage = options.credentialStorage ?? new CredentialStorage();
 
@@ -199,6 +203,7 @@ export async function createOpenHarnessRuntime(
     baseToolRegistry,
     effectiveAllowed,
     effectiveDenied,
+    options.executionEnvironment,
   );
 
   const mode = configuration.permissionMode ?? settings.permission.mode;
@@ -215,6 +220,7 @@ export async function createOpenHarnessRuntime(
   const permissionChecker = new PermissionChecker({
     mode,
     cwd,
+    pathStyle: options.executionEnvironment?.info.pathStyle,
     allowedTools:
       effectiveAllowed.kind === "only" ? [...effectiveAllowed.names] : [],
     deniedTools: [...effectiveDenied],
@@ -225,7 +231,7 @@ export async function createOpenHarnessRuntime(
   });
 
   const hookExecutor = new HookExecutor({
-    cwd,
+    cwd: hostCwd,
     sessionId: options.sessionId,
     settings,
   });
@@ -238,7 +244,8 @@ export async function createOpenHarnessRuntime(
     configuration.systemPrompt ??
     (await buildRuntimeSystemPrompt({
       customPrompt: settings.systemPrompt,
-      cwd,
+      cwd: hostCwd,
+      environmentInfo: options.executionEnvironment?.info,
       permissionMode: mode,
       workStyle: settings.workStyle,
       fastMode: configuration.fastMode ?? settings.fastMode,
@@ -256,6 +263,7 @@ export async function createOpenHarnessRuntime(
     cwd,
     sessionId: options.sessionId,
     settings,
+    executionEnvironment: options.executionEnvironment,
     skillRegistry: options.skillRegistry,
   };
 
@@ -279,12 +287,26 @@ export async function createOpenHarnessRuntime(
     .setQueryEngine(queryEngine)
     .build(settings);
 
-  await attachSandboxRuntime(
-    bundle,
-    cwd,
-    options.sandboxReporter,
-    options.sessionId,
-  );
+  if (options.executionEnvironment) {
+    bundle.sandboxStatus = options.executionEnvironment.info.kind === "docker"
+      ? {
+          state: "active",
+          enabled: true,
+          active: true,
+          backend: "docker",
+          containerCwd: options.executionEnvironment.workspace.executionRoot,
+          networkMode: options.executionEnvironment.info.networkMode,
+        }
+      : { state: "off", enabled: false, active: false };
+    bundle.addCleanup(() => options.executionEnvironment?.release());
+  } else {
+    await attachSandboxRuntime(
+      bundle,
+      hostCwd,
+      options.sandboxReporter,
+      options.sessionId,
+    );
+  }
   return bundle;
 }
 
@@ -381,6 +403,7 @@ class RuntimeToolRegistry implements IToolRegistry {
     private readonly inner: IToolRegistry,
     private readonly allowedTools: ToolLimit,
     private readonly deniedTools: ReadonlySet<string>,
+    private readonly environment?: ExecutionEnvironmentHandle,
   ) {}
 
   register(tool: ToolDefinition, source?: Parameters<IToolRegistry["register"]>[1]): void {
@@ -397,11 +420,11 @@ class RuntimeToolRegistry implements IToolRegistry {
 
   get(name: string): ToolDefinition | undefined {
     const tool = this.inner.get(name);
-    return tool && this.isVisible(tool.name) ? tool : undefined;
+    return tool && this.isVisible(tool) ? tool : undefined;
   }
 
   getAll(): ToolDefinition[] {
-    return this.inner.getAll().filter((tool) => this.isVisible(tool.name));
+    return this.inner.getAll().filter((tool) => this.isVisible(tool));
   }
 
   has(name: string): boolean {
@@ -409,17 +432,26 @@ class RuntimeToolRegistry implements IToolRegistry {
   }
 
   inspect(name: string) {
-    return this.isVisible(name) ? this.inner.inspect(name) : undefined;
+    const tool = this.inner.get(name);
+    return tool && this.isVisible(tool) ? this.inner.inspect(name) : undefined;
   }
 
   internalRegistry(): IToolRegistry {
     return this.inner;
   }
 
-  private isVisible(name: string): boolean {
-    if (this.deniedTools.has(name)) return false;
+  private isVisible(tool: ToolDefinition): boolean {
+    if (this.deniedTools.has(tool.name)) return false;
+    const execution = resolveToolExecution(tool);
+    const environmentKind = this.environment?.info.kind ?? "local";
+    if (!(execution.supportedEnvironments ?? ["local"]).includes(environmentKind)) {
+      return false;
+    }
+    if (execution.network && this.environment?.info.networkMode === "none") {
+      return false;
+    }
     return (
-      this.allowedTools.kind === "all" || this.allowedTools.names.has(name)
+      this.allowedTools.kind === "all" || this.allowedTools.names.has(tool.name)
     );
   }
 }

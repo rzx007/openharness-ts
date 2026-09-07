@@ -1,9 +1,19 @@
 import type {
   RegisteredToolInspection,
   ToolDefinition,
+  ToolExecutionSpec,
   ToolRegistrationSource,
   ToolRegistry as IToolRegistry,
 } from "../index";
+
+const DEFAULT_TOOL_EXECUTION: Readonly<ToolExecutionSpec> = Object.freeze({
+  domain: "environment",
+  supportedEnvironments: Object.freeze(["local"]) as Array<"local">,
+});
+
+export function resolveToolExecution(tool: ToolDefinition): ToolExecutionSpec {
+  return tool.execution ?? DEFAULT_TOOL_EXECUTION;
+}
 
 type ToolRegistrationErrorCode =
   | "tool_already_registered"

@@ -434,9 +434,11 @@ describe("docker backend argv builders", () => {
       sessionId: "session-1",
       cwd: "D:/repo",
       config: { enabled: true, backend: "docker" },
-      managedReadOnlyMounts: [{
+      managedMounts: [{
+        purpose: "attachment",
         source: "D:/daemon/session-resources/abc",
         target: "/mnt/openharness-attachments",
+        mode: "ro",
       }],
     });
 
@@ -446,8 +448,10 @@ describe("docker backend argv builders", () => {
     expect(argv.join(" ")).not.toContain("/blobs/");
     const base = normalizeSandboxConfig({ enabled: true, backend: "docker" });
     expect(dockerSandboxConfigHash(base, "D:/repo", [{
+      purpose: "attachment",
       source: "D:/daemon/session-resources/abc",
       target: "/mnt/openharness-attachments",
+      mode: "ro",
     }])).not.toBe(dockerSandboxConfigHash(base, "D:/repo"));
   });
 
@@ -541,6 +545,17 @@ describe("docker backend argv builders", () => {
     expect(argv).toContain("X=1");
     expect(argv).not.toContain("PATH=C:\\Windows\\System32");
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
+  });
+
+  it("passes managed container cwd through without host path resolution", () => {
+    const argv = buildDockerExecArgs({
+      containerName: "oh-s",
+      cwd: "/workspace/src",
+      workspaceRoot: resolve("D:/repo"),
+      argv: ["pwd"],
+    });
+
+    expect(argv[argv.indexOf("-w") + 1]).toBe("/workspace/src");
   });
 
   it("maps host paths to Docker workspace paths", () => {

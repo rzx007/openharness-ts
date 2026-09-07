@@ -36,6 +36,11 @@ export function createDaemonImageGenerationTool(
   const downloadRemoteImage = options.downloadRemoteImage ?? defaultDownloadRemoteImage;
   return {
     name: "ImageGeneration",
+    execution: {
+      domain: "control_plane",
+      supportedEnvironments: ["local", "docker"],
+      network: true,
+    },
     description:
       "Generate or edit an image with Agnes Image 2.5 Flash. Use a text prompt for text-to-image, and optional reference image URLs or data URIs for image-to-image or multi-image composition. Returns durable image attachments.",
     inputSchema: {

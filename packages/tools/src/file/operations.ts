@@ -3,6 +3,10 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { Settings, ToolContext } from "@openharness/core";
+import type {
+  EnvironmentFileSystem,
+  ExecutionEnvironmentHandle,
+} from "@openharness/environment";
 import {
   createProcess,
   getActiveSandboxSession,
@@ -27,26 +31,28 @@ export interface GrepOptions {
   limit: number;
 }
 
-export interface FileOperations {
+export interface FileOperations extends EnvironmentFileSystem {
   stat(path: string): Promise<FileStat>;
   listDir(path: string): Promise<FileEntry[]>;
   readText(path: string): Promise<string>;
   writeText(path: string, content: string): Promise<void>;
-  glob(basePath: string, pattern: string, limit: number): Promise<string[] | null>;
-  grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[] | null>;
+  glob(basePath: string, pattern: string, limit: number): Promise<string[]>;
+  grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[]>;
 }
 
 export function fileOperationsFor(context: ToolContext): FileOperations {
+  if (context.environment) return context.environment.files;
   const cwd = context.cwd ?? process.cwd();
+  const hostCwd = cwd;
   const settings = context.settings;
-  const policy = resolveSandboxPolicy({ cwd, sessionId: context.sessionId, settings });
+  const policy = resolveSandboxPolicy({ cwd: hostCwd, sessionId: context.sessionId, settings });
   if (policy.enabled && policy.backend === "docker") {
     const session = getActiveSandboxSession({
       cwd: policy.scope.cwd,
       sessionId: policy.scope.sessionId,
     });
     if (session?.backend === "docker" && session.active && session.execCommand) {
-      return new DockerFileOperations({ cwd, settings, sessionId: context.sessionId, signal: context.abortSignal });
+      return new DockerFileOperations({ cwd: hostCwd, settings, sessionId: context.sessionId, signal: context.abortSignal });
     }
     if (policy.failClosed) {
       throw new SandboxUnavailableError("Docker sandbox session is not running");
@@ -70,14 +76,23 @@ export class HostFileOperations implements FileOperations {
     return await readFile(path, "utf-8");
   }
 
+  async readBytes(path: string): Promise<Uint8Array> {
+    return await readFile(path);
+  }
+
   async writeText(path: string, content: string): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, "utf-8");
   }
 
-  async glob(basePath: string, pattern: string, limit: number): Promise<string[] | null> {
+  async writeBytes(path: string, content: Uint8Array): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content);
+  }
+
+  async glob(basePath: string, pattern: string, limit: number): Promise<string[]> {
     const rgPath = findRipgrep();
-    if (!rgPath) return null;
+    if (!rgPath) return await walkGlob(basePath, pattern, limit, this);
 
     const args = ["--files"];
     const gitignore = join(basePath, ".gitignore");
@@ -87,16 +102,22 @@ export class HostFileOperations implements FileOperations {
     args.push(".");
 
     const result = await runHostProcess(rgPath, args, { cwd: basePath });
-    if (result.exitCode !== 0 && result.exitCode !== 1) return null;
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      return await walkGlob(basePath, pattern, limit, this);
+    }
     return filterGlobOutput(result.stdout, pattern, limit);
   }
 
-  async grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[] | null> {
+  async grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[]> {
     const rgPath = findRipgrep();
-    if (!rgPath) return null;
+    if (!rgPath) {
+      return await fallbackGrep(basePath, pattern, options.include, options.caseSensitive, options.limit, this);
+    }
     const args = grepArgs(basePath, pattern, options);
     const result = await runHostProcess(rgPath, args, { cwd: basePath });
-    if (result.exitCode !== 0 && result.exitCode !== 1) return null;
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      return await fallbackGrep(basePath, pattern, options.include, options.caseSensitive, options.limit, this);
+    }
     return filterGrepOutput(result.stdout, options.limit);
   }
 }
@@ -122,27 +143,55 @@ export class DockerFileOperations implements FileOperations {
     return result.content;
   }
 
+  async readBytes(path: string): Promise<Uint8Array> {
+    const result = await this.nodeHelper<{ content: string }>({
+      op: "readBytes",
+      path: this.containerPath(path),
+    });
+    return Buffer.from(result.content, "base64");
+  }
+
   async writeText(path: string, content: string): Promise<void> {
     await this.nodeHelper<{ ok: true }>({ op: "writeText", path: this.containerPath(path), content });
   }
 
-  async glob(basePath: string, pattern: string, limit: number): Promise<string[] | null> {
+  async writeBytes(path: string, content: Uint8Array): Promise<void> {
+    await this.nodeHelper<{ ok: true }>({
+      op: "writeBytes",
+      path: this.containerPath(path),
+      content: Buffer.from(content).toString("base64"),
+    });
+  }
+
+  async glob(basePath: string, pattern: string, limit: number): Promise<string[]> {
     const args = ["rg", "--files"];
     args.push("--hidden");
     for (const directory of SKIP_DIRS) args.push("--glob", `!${directory}/**`);
     args.push(".");
     const result = await this.run(args, basePath);
-    if (result.exitCode !== 0 && result.exitCode !== 1) return null;
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      return await walkGlob(basePath, pattern, limit, this);
+    }
     return filterGlobOutput(result.stdout, pattern, limit);
   }
 
-  async grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[] | null> {
+  async grep(basePath: string, pattern: string, options: GrepOptions): Promise<string[]> {
     const result = await this.run(["rg", ...grepArgs(basePath, pattern, options)], basePath);
-    if (result.exitCode !== 0 && result.exitCode !== 1) return null;
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      return await fallbackGrep(basePath, pattern, options.include, options.caseSensitive, options.limit, this);
+    }
     return filterGrepOutput(result.stdout, options.limit);
   }
 
   private containerPath(path: string): string {
+    if (
+      path === "/workspace" ||
+      path.startsWith("/workspace/") ||
+      path === "/opt/openharness/skills" ||
+      path.startsWith("/opt/openharness/skills/")
+    ) {
+      return path;
+    }
     return hostPathToContainerPath(path, this.options.cwd);
   }
 
@@ -154,9 +203,9 @@ export class DockerFileOperations implements FileOperations {
     return JSON.parse(result.stdout) as T;
   }
 
-  private async run(argv: string[], cwd: string, stdin?: string): Promise<ProcessResult> {
+  private async run(argv: string[], _cwd: string, stdin?: string): Promise<ProcessResult> {
     const child = await createProcess(argv, {
-      cwd,
+      cwd: this.options.cwd,
       settings: this.options.settings,
       sessionId: this.options.sessionId,
       signal: this.options.signal,
@@ -167,6 +216,24 @@ export class DockerFileOperations implements FileOperations {
     else child.stdin?.end();
     return await result;
   }
+}
+
+export function createEnvironmentFileSystem(
+  environment: ExecutionEnvironmentHandle,
+  options: {
+    settings?: Settings;
+    sessionId?: string;
+    signal?: AbortSignal;
+  } = {},
+): EnvironmentFileSystem {
+  return environment.info.kind === "docker"
+    ? new DockerFileOperations({
+        cwd: environment.workspace.hostRoot,
+        settings: options.settings,
+        sessionId: options.sessionId,
+        signal: options.signal,
+      })
+    : new HostFileOperations();
 }
 
 export async function walkGlob(
@@ -309,9 +376,15 @@ process.stdin.on("end", () => {
       console.log(JSON.stringify(entries));
     } else if (input.op === "readText") {
       console.log(JSON.stringify({ content: fs.readFileSync(input.path, "utf8") }));
+    } else if (input.op === "readBytes") {
+      console.log(JSON.stringify({ content: fs.readFileSync(input.path).toString("base64") }));
     } else if (input.op === "writeText") {
       fs.mkdirSync(path.dirname(input.path), { recursive: true });
       fs.writeFileSync(input.path, input.content ?? "", "utf8");
+      console.log(JSON.stringify({ ok: true }));
+    } else if (input.op === "writeBytes") {
+      fs.mkdirSync(path.dirname(input.path), { recursive: true });
+      fs.writeFileSync(input.path, Buffer.from(input.content ?? "", "base64"));
       console.log(JSON.stringify({ ok: true }));
     } else {
       throw new Error("unknown file helper op: " + input.op);

@@ -26,6 +26,8 @@ import {
 } from "./default-runtime.js";
 import { LOCAL_READ_ONLY_TOOLS, READ_ONLY_TOOLS } from "@openharness/permissions";
 import type { Settings, ToolDefinition } from "@openharness/core";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
+import { createAgentWorkspaceBinding } from "./agent-composition.js";
 
 function testTool(name: string): ToolDefinition {
   return {
@@ -35,6 +37,30 @@ function testTool(name: string): ToolDefinition {
     async execute() {
       return { content: [] };
     },
+  };
+}
+
+function dockerEnvironment(networkMode = "bridge"): ExecutionEnvironmentHandle {
+  return {
+    info: {
+      kind: "docker",
+      hostOs: "Windows",
+      executionOs: "Linux",
+      shell: "/bin/sh",
+      shellDialect: "posix",
+      pathStyle: "posix",
+      cwd: "/workspace",
+      homeDir: "/root",
+      tempDir: "/tmp",
+      mounts: [{ path: "/workspace", mode: "rw", purpose: "workspace" }],
+      networkMode,
+      limitations: [],
+    },
+    workspace: { kind: "docker", hostRoot: "D:\\repo", executionRoot: "/workspace" },
+    process: {} as never,
+    files: {} as never,
+    paths: {} as never,
+    release: vi.fn(async () => {}),
   };
 }
 
@@ -175,6 +201,75 @@ describe("resolveEffectiveAllowedTools", () => {
 });
 
 describe("createOpenHarnessRuntime tool visibility", () => {
+  it("uses a projectless managed cwd as the Docker workspace root", () => {
+    expect(createAgentWorkspaceBinding("D:\\Documents\\OpenHarness\\2026-09-07\\x1", "docker"))
+      .toEqual({
+        kind: "docker",
+        hostRoot: "D:\\Documents\\OpenHarness\\2026-09-07\\x1",
+        executionRoot: "/workspace",
+      });
+  });
+
+  it("keeps environment tools but hides local Terminal tools in Docker", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      executionEnvironment: dockerEnvironment(),
+      capabilities: {
+        terminal: { status: "available", value: {} as never },
+        jobs: { status: "available", value: {} as never },
+      },
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+      },
+    });
+
+    expect(runtime.toolRegistry.has("Bash")).toBe(true);
+    expect(runtime.toolRegistry.has("Read")).toBe(true);
+    expect(runtime.toolRegistry.has("Write")).toBe(true);
+    expect(runtime.toolRegistry.has("TerminalOpen")).toBe(false);
+    await runtime.close();
+  });
+
+  it("hides undeclared local-only tools from Docker agents", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      executionEnvironment: dockerEnvironment(),
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+        tools: [testTool("PluginTool")],
+      },
+    });
+
+    expect(runtime.toolRegistry.has("PluginTool")).toBe(false);
+    await runtime.close();
+  });
+
+  it("hides brokered web tools when Docker networking is disabled", async () => {
+    const runtime = await createOpenHarnessRuntime({
+      settings: BASE_SETTINGS,
+      executionEnvironment: dockerEnvironment("none"),
+      configuration: {
+        client: {
+          async *streamMessage() {
+            yield { type: "complete" as const, stopReason: "end_turn" as const };
+          },
+        },
+      },
+    });
+
+    expect(runtime.toolRegistry.has("WebFetch")).toBe(false);
+    expect(runtime.toolRegistry.has("WebSearch")).toBe(false);
+    await runtime.close();
+  });
+
   it("registers agent tools before applying visibility filters", async () => {
     const custom = testTool("BusinessSearch");
     const runtime = await createOpenHarnessRuntime({

@@ -1,11 +1,15 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
 import { normalizeSandboxConfig } from "./config.js";
+import {
+  resolveContainerWorkspacePath,
+  type ManagedDockerMount,
+} from "./managed-mounts.js";
 import {
   bindProcessAbortSignal,
   registerManagedProcess,
@@ -27,7 +31,7 @@ export interface DockerRunArgsOptions {
   cwd: string;
   config?: SandboxConfig;
   dockerCommand?: string;
-  managedReadOnlyMounts?: readonly { source: string; target: string }[];
+  managedMounts?: readonly ManagedDockerMount[];
 }
 
 export interface DockerExecArgsOptions {
@@ -61,6 +65,7 @@ export interface DockerSandboxDiagnostics {
 
 export const DOCKER_CONFIG_HASH_LABEL = "org.openharness.sandbox.config-hash";
 export const DOCKER_WORKSPACE_LABEL = "org.openharness.sandbox.workspace";
+export const DOCKER_MANAGED_LABEL = "org.openharness.sandbox.managed";
 const DOCKER_EXEC_STATE_DIR = "/tmp/openharness-exec";
 const DOCKER_SUPERVISOR_VERSION = "docker-init-v1";
 
@@ -180,7 +185,9 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
   }
   argv.push(
     "--label",
-    `${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(config, cwd, options.managedReadOnlyMounts)}`,
+    `${DOCKER_MANAGED_LABEL}=true`,
+    "--label",
+    `${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(config, cwd, options.managedMounts)}`,
     "--label",
     `${DOCKER_WORKSPACE_LABEL}=${cwd}`,
   );
@@ -195,17 +202,23 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
     argv.push("--dns", dns);
   }
 
-  argv.push("-v", `${cwd}:${containerCwd}`, "-w", containerCwd);
-
-  for (const mount of config.docker.extraMounts) {
-    argv.push("-v", mount);
-  }
-  for (const mount of options.managedReadOnlyMounts ?? []) {
+  const managedMounts = options.managedMounts ?? [{
+    purpose: "workspace",
+    source: cwd,
+    target: containerCwd,
+    mode: "rw" as const,
+  }];
+  for (const mount of managedMounts) {
     const source = resolve(mount.source);
     if (!mount.target.startsWith("/") || mount.target.includes(":")) {
       throw new SandboxUnavailableError("Managed Docker mount target must be an absolute container path");
     }
-    argv.push("-v", `${source}:${mount.target}:ro`);
+    argv.push("-v", `${source}:${mount.target}:${mount.mode}`);
+  }
+  argv.push("-w", containerCwd);
+
+  for (const mount of config.docker.extraMounts) {
+    argv.push("-v", mount);
   }
   for (const [key, value] of Object.entries(config.docker.extraEnv)) {
     argv.push("-e", `${key}=${value}`);
@@ -229,13 +242,15 @@ export function hasProxyEnv(extraEnv: Record<string, string>): boolean {
 }
 
 export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
-  const cwd = resolve(options.cwd);
+  const cwd = isManagedContainerPath(options.cwd)
+    ? posix.normalize(options.cwd)
+    : hostPathToContainerPath(resolve(options.cwd), options.workspaceRoot ?? options.cwd);
   const argv = [
     options.dockerCommand ?? "docker",
     "exec",
     "-i",
     "-w",
-    hostPathToContainerPath(cwd, options.workspaceRoot ?? cwd),
+    cwd,
   ];
   for (const [key, value] of Object.entries(containerExecEnv(options.env))) {
     argv.push("-e", `${key}=${value}`);
@@ -295,7 +310,7 @@ export class DockerSandboxSession {
       cwd: string;
       deps?: AvailabilityDeps;
       reporter?: SandboxRuntimeReporter;
-      managedReadOnlyMounts?: readonly { source: string; target: string }[];
+      managedMounts?: readonly ManagedDockerMount[];
     },
   ) {
     const config = normalizeSandboxConfig(options.settings.sandbox);
@@ -330,16 +345,20 @@ export class DockerSandboxSession {
       dockerCommand: this.dockerCommand,
       reporter: this.options.reporter,
     });
-    if (config.docker.reuseContainer && await dockerContainerExists(this.dockerCommand, this.containerName)) {
-      await assertReusableContainerMatchesConfig({
+    if (
+      config.docker.reuseContainer &&
+      await dockerContainerExists(this.dockerCommand, this.containerName) &&
+      await prepareReusableContainer({
         dockerCommand: this.dockerCommand,
         containerName: this.containerName,
+        workspace: resolve(this.options.cwd),
         expectedHash: dockerSandboxConfigHash(
           config,
           resolve(this.options.cwd),
-          this.options.managedReadOnlyMounts,
+          this.options.managedMounts,
         ),
-      });
+      })
+    ) {
       this.options.reporter?.({ type: "start-container", containerName: this.containerName, reused: true });
       const wasRunning = await dockerContainerRunning(this.dockerCommand, this.containerName);
       if (!wasRunning) {
@@ -367,7 +386,7 @@ export class DockerSandboxSession {
       cwd: this.options.cwd,
       config: this.options.settings.sandbox,
       dockerCommand: this.dockerCommand,
-      managedReadOnlyMounts: this.options.managedReadOnlyMounts,
+      managedMounts: this.options.managedMounts,
     });
     await runToCompletion(argv);
     try {
@@ -445,7 +464,11 @@ export class DockerSandboxSession {
       env: options.env,
       dockerCommand: this.dockerCommand,
     });
-    const child = spawn(execArgs[0]!, execArgs.slice(1), spawnOptions(options));
+    const child = spawn(
+      execArgs[0]!,
+      execArgs.slice(1),
+      spawnOptions({ ...options, cwd: this.cwd }),
+    );
     const nativeKill = child.kill.bind(child);
     this.activeExecutions.set(executionId, { child, nativeKill });
     const cleanup = () => this.activeExecutions.delete(executionId);
@@ -545,7 +568,7 @@ export function dockerReusableContainerName(projectRoot: string, prefix = "openh
 export function dockerSandboxConfigHash(
   config: ReturnType<typeof normalizeSandboxConfig>,
   cwd: string,
-  managedReadOnlyMounts: readonly { source: string; target: string }[] = [],
+  managedMounts: readonly ManagedDockerMount[] = [],
 ): string {
   const payload = {
     cwd: resolve(cwd),
@@ -556,8 +579,8 @@ export function dockerSandboxConfigHash(
     memoryLimit: config.docker.memoryLimit,
     dns: [...config.docker.dns].sort(),
     extraMounts: [...config.docker.extraMounts].sort(),
-    managedReadOnlyMounts: managedReadOnlyMounts
-      .map((mount) => `${resolve(mount.source)}:${mount.target}:ro`)
+    managedMounts: managedMounts
+      .map((mount) => `${mount.purpose}:${resolve(mount.source)}:${mount.target}:${mount.mode}`)
       .sort(),
     extraEnv: stableRecord(config.docker.extraEnv),
     supervisorVersion: DOCKER_SUPERVISOR_VERSION,
@@ -602,13 +625,17 @@ export async function inspectDockerSandbox(options: {
 }
 
 export function toContainerWorkspacePath(hostPath: string): string {
-  return process.platform === "win32" ? "/workspace" : hostPath;
+  return resolveContainerWorkspacePath(hostPath);
+}
+
+function isManagedContainerPath(path: string): boolean {
+  return path === "/workspace" || path.startsWith("/workspace/") ||
+    path === "/opt/openharness/skills" || path.startsWith("/opt/openharness/skills/");
 }
 
 export function hostPathToContainerPath(hostPath: string, workspaceRoot: string): string {
   const root = resolve(workspaceRoot);
   const target = resolve(hostPath);
-  if (process.platform !== "win32") return target;
   const rel = relative(root, target).replace(/\\/g, "/");
   if (!rel || rel === ".") return "/workspace";
   if (rel.startsWith("../") || rel === ".." || /^[a-zA-Z]:/.test(rel)) {
@@ -729,20 +756,52 @@ async function runProbe(argv: string[]): Promise<boolean> {
   });
 }
 
-async function assertReusableContainerMatchesConfig(options: {
+async function prepareReusableContainer(options: {
   dockerCommand: string;
   containerName: string;
+  workspace: string;
   expectedHash: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const existingHash = await dockerContainerLabel(
     options.dockerCommand,
     options.containerName,
     DOCKER_CONFIG_HASH_LABEL,
   );
-  if (existingHash === options.expectedHash) return;
-  throw new SandboxUnavailableError(
-    `Reusable Docker sandbox container ${options.containerName} was created with a different sandbox configuration. Run 'ohs sandbox rebuild' to recreate it.`,
-  );
+  if (existingHash === options.expectedHash) return true;
+
+  const [managed, workspace] = await Promise.all([
+    dockerContainerLabel(
+      options.dockerCommand,
+      options.containerName,
+      DOCKER_MANAGED_LABEL,
+    ),
+    dockerContainerLabel(
+      options.dockerCommand,
+      options.containerName,
+      DOCKER_WORKSPACE_LABEL,
+    ),
+  ]);
+  if (managed !== "true" || !sameHostPath(workspace, options.workspace)) {
+    throw new SandboxUnavailableError(
+      `Docker container ${options.containerName} conflicts with the managed sandbox name but its ownership cannot be verified`,
+    );
+  }
+  await runToCompletion([
+    options.dockerCommand,
+    "rm",
+    "-f",
+    options.containerName,
+  ]);
+  return false;
+}
+
+function sameHostPath(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  const normalizedLeft = resolve(left);
+  const normalizedRight = resolve(right);
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }
 
 function dockerContainerExists(dockerCommand: string, containerName: string): Promise<boolean> {

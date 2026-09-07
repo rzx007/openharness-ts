@@ -1,4 +1,4 @@
-import { ToolRegistry } from "@openharness/core";
+import { ToolRegistry, type ToolExecutionSpec } from "@openharness/core";
 import {
   agentTool,
   createAgentTool,
@@ -63,62 +63,81 @@ export function createDefaultToolRegistry(
   } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
-  const registerBuiltin = (tool: Parameters<ToolRegistry["register"]>[0]) =>
+  const registerBuiltin = (
+    tool: Parameters<ToolRegistry["register"]>[0],
+    execution: ToolExecutionSpec,
+  ) => {
+    tool.execution = execution;
     registry.register(tool, { kind: "builtin" });
-  registerBuiltin(bashTool);
-  registerBuiltin(fileReadTool);
-  registerBuiltin(fileWriteTool);
-  registerBuiltin(fileEditTool);
-  registerBuiltin(globTool);
-  registerBuiltin(grepTool);
-  registerBuiltin(webFetchTool);
-  registerBuiltin(webSearchTool);
-  registerBuiltin(todoWriteTool);
-  registerBuiltin(configTool);
-  registerBuiltin(sleepTool);
-  registerBuiltin(skillTool);
-  registerBuiltin(listSkillsTool);
-  registerBuiltin(toolSearchTool);
-  registerBuiltin(askUserTool);
-  registerBuiltin(briefTool);
+  };
+  const environment = (): ToolExecutionSpec => ({
+    domain: "environment",
+    supportedEnvironments: ["local", "docker"],
+  });
+  const localEnvironment = (): ToolExecutionSpec => ({
+    domain: "environment",
+    supportedEnvironments: ["local"],
+  });
+  const controlPlane = (network = false): ToolExecutionSpec => ({
+    domain: "control_plane",
+    supportedEnvironments: ["local", "docker"],
+    ...(network ? { network: true } : {}),
+  });
+  registerBuiltin(bashTool, environment());
+  registerBuiltin(fileReadTool, environment());
+  registerBuiltin(fileWriteTool, environment());
+  registerBuiltin(fileEditTool, environment());
+  registerBuiltin(globTool, environment());
+  registerBuiltin(grepTool, environment());
+  registerBuiltin(webFetchTool, controlPlane(true));
+  registerBuiltin(webSearchTool, controlPlane(true));
+  registerBuiltin(todoWriteTool, controlPlane());
+  registerBuiltin(configTool, controlPlane());
+  registerBuiltin(sleepTool, controlPlane());
+  registerBuiltin(skillTool, controlPlane());
+  registerBuiltin(listSkillsTool, controlPlane());
+  registerBuiltin(toolSearchTool, controlPlane());
+  registerBuiltin(askUserTool, controlPlane());
+  registerBuiltin(briefTool, controlPlane());
   if (options.backgroundShell !== false) {
-    registerBuiltin(backgroundShellCreateTool);
+    registerBuiltin(backgroundShellCreateTool, environment());
   }
-  registerBuiltin(enterPlanModeTool);
-  registerBuiltin(exitPlanModeTool);
-  registerBuiltin(enterWorktreeTool);
-  registerBuiltin(exitWorktreeTool);
-  registerBuiltin(notebookEditTool);
+  registerBuiltin(enterPlanModeTool, controlPlane());
+  registerBuiltin(exitPlanModeTool, controlPlane());
+  registerBuiltin(enterWorktreeTool, localEnvironment());
+  registerBuiltin(exitWorktreeTool, localEnvironment());
+  registerBuiltin(notebookEditTool, localEnvironment());
   if (options.childEnvironment !== false) {
     registerBuiltin(
       options.agentDefinitions === undefined
         ? agentTool
         : createAgentTool({ agentDefinitions: options.agentDefinitions }),
+      controlPlane(),
     );
   }
   if (options.workflowRepository) {
-    registerBuiltin(createWorkflowTool({ repository: options.workflowRepository }));
+    registerBuiltin(createWorkflowTool({ repository: options.workflowRepository }), controlPlane());
   }
-  registerBuiltin(teamCreateTool);
-  registerBuiltin(teamDeleteTool);
+  registerBuiltin(teamCreateTool, controlPlane());
+  registerBuiltin(teamDeleteTool, controlPlane());
   if (options.schedules) {
-    registerBuiltin(scheduleCreateTool);
-    registerBuiltin(scheduleUpdateTool);
-    registerBuiltin(scheduleDeleteTool);
-    registerBuiltin(scheduleListTool);
-    registerBuiltin(scheduleRunNowTool);
+    registerBuiltin(scheduleCreateTool, controlPlane());
+    registerBuiltin(scheduleUpdateTool, controlPlane());
+    registerBuiltin(scheduleDeleteTool, controlPlane());
+    registerBuiltin(scheduleListTool, controlPlane());
+    registerBuiltin(scheduleRunNowTool, controlPlane());
   }
   if (options.terminal) {
-    for (const tool of terminalTools) registerBuiltin(tool);
+    for (const tool of terminalTools) registerBuiltin(tool, localEnvironment());
   }
   if (options.jobs) {
-    for (const tool of jobTools) registerBuiltin(tool);
+    for (const tool of jobTools) registerBuiltin(tool, controlPlane());
   }
-  registerBuiltin(mcpToolCallTool);
-  registerBuiltin(listMcpResourcesTool);
-  registerBuiltin(readMcpResourceTool);
-  registerBuiltin(mcpAuthTool);
-  registerBuiltin(lspTool);
-  registerBuiltin(feishuPushTool);
+  registerBuiltin(mcpToolCallTool, controlPlane(true));
+  registerBuiltin(listMcpResourcesTool, controlPlane(true));
+  registerBuiltin(readMcpResourceTool, controlPlane(true));
+  registerBuiltin(mcpAuthTool, controlPlane(true));
+  registerBuiltin(lspTool, environment());
+  registerBuiltin(feishuPushTool, controlPlane(true));
   return registry;
 }

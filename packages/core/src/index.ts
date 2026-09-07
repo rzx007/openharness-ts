@@ -38,6 +38,7 @@ export type {
   ToolRegistry as IToolRegistry,
   ToolRegistryView,
   ToolDescriptor,
+  ToolExecutionSpec,
 } from "./types/tools";
 
 export type {
@@ -133,7 +134,11 @@ export {
 } from "./agent-session";
 
 export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
-export { ToolRegistry, ToolRegistrationError } from "./engine/tool-registry";
+export {
+  ToolRegistry,
+  ToolRegistrationError,
+  resolveToolExecution,
+} from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
 export {
   CompactService,

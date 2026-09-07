@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@openharness/core";
-import { resolveToolPath } from "./path.js";
+import { resolveToolPathInContext } from "./environment-path.js";
 import { sandboxPathError } from "./sandbox-guard.js";
 import { fileOperationsFor } from "./operations.js";
 import { managedPersistencePathKind } from "./managed-persistence-path.js";
@@ -34,7 +34,7 @@ export const fileWriteTool: ToolDefinition = {
     const cwd = (context as { cwd?: string } | undefined)?.cwd ?? process.cwd();
 
     // Resolve to absolute path, then guard against system directories.
-    const filePath = resolveToolPath(rawPath, cwd);
+    const filePath = await resolveToolPathInContext(rawPath, context, "write");
 
     if (managedPersistencePathKind(filePath, cwd)) {
       return {
@@ -51,7 +51,7 @@ export const fileWriteTool: ToolDefinition = {
     }
 
     try {
-      const sandboxError = await sandboxPathError(filePath, cwd, "write", context.settings);
+      const sandboxError = await sandboxPathError(filePath, cwd, "write", context.settings, context.environment);
       if (sandboxError) {
         return {
           content: [{ type: "text", text: sandboxError }],

@@ -102,6 +102,7 @@ export interface OpenHarnessServerOptions {
   settings?: Settings;
   getSettings?: () => Settings;
   getSettingsForCwd?: (cwd: string) => Promise<Settings>;
+  executionSurface?: "desktop_managed" | "cli_advanced";
   outsideProjectWorkspaceRoot?: string;
   /** Test/embedding seam. Production daemon creation uses createDefaultNodeAgent directly. */
   createAgent?: CreateDaemonAgent;
@@ -161,6 +162,7 @@ export class OpenHarnessHttpServer {
         settings: options.settings,
         getSettings: options.getSettings,
         getSettingsForCwd: options.getSettingsForCwd,
+        executionSurface: options.executionSurface,
         outsideProjectWorkspaceRoot: options.outsideProjectWorkspaceRoot,
         createAgent: options.createAgent,
         log: (event) => this.log(event),

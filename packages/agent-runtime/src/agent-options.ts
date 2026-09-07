@@ -12,6 +12,7 @@ import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
 import type { WorkflowRunRepository } from "@openharness/coordinator";
 import type { AgentChildEnvironmentProvider } from "./child-environment.js";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 
 export type CapabilityOverride<T> = T | false;
 
@@ -66,4 +67,8 @@ export interface OpenHarnessAgentConfiguration {
   trustedToolOverrides?: string[];
   /** Overrides the root-tree child-agent limits. */
   childBudget?: Partial<AgentChildBudget>;
+  /** Selects the managed Desktop environment path; CLI callers omit it. */
+  executionSurface?: "desktop_managed" | "cli_advanced";
+  /** Optional host-provided environment handle. */
+  executionEnvironment?: ExecutionEnvironmentHandle;
 }

@@ -140,7 +140,7 @@ describe("createDefaultToolRegistry", () => {
       description: "fixture",
       content: "# Location fixture\n\nRead references/guide.md.",
       path: skillFile,
-      source: "project",
+      source: "plugin",
       userInvocable: true,
       disableModelInvocation: false,
     });

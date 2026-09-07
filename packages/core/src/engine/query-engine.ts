@@ -785,6 +785,9 @@ export class QueryEngine implements IQueryEngine {
         try {
           const context: ToolContext = {
             cwd: this.cwd,
+            ...(this.options.executionEnvironment
+              ? { environment: this.options.executionEnvironment }
+              : {}),
             sessionId: this.sessionId,
             toolCallId: toolUse.id,
             toolAttemptId,

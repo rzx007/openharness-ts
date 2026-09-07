@@ -14,6 +14,10 @@ describe("attachment Read tool", () => {
       authorizationSessions: { resolve: (id) => id === "child" ? "root" : undefined },
       attachmentReader: { readText },
     });
+    expect(tool.execution).toEqual({
+      domain: "environment",
+      supportedEnvironments: ["local", "docker"],
+    });
 
     await expect(tool.execute({ file_path: "notes.txt" }, { cwd: "C:/work", sessionId: "child" }))
       .resolves.toMatchObject({ content: [{ text: "local" }] });

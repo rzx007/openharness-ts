@@ -1,4 +1,6 @@
 import type { OpenHarnessClient } from "@openharness/client"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 
 import {
   buildDesktopSettingsSnapshot,
@@ -7,16 +9,39 @@ import {
 } from "../../../shared/settings-types"
 import type {
   UpdateDesktopNotificationModeInput,
+  UpdateDesktopAgentEnvironmentInput,
   DesktopSettingsSnapshot,
   UpdateDesktopWorkStyleInput,
 } from "../../../shared/settings-types"
 import { desktopSessionService } from "../session/session-service"
 import { getDesktopPreferences, patchDesktopPreferences } from "./desktop-preferences"
 
+const execFileAsync = promisify(execFile)
+
+type SettingsClient = Pick<OpenHarnessClient, "getSettings" | "patchSettings">
+
+export interface DesktopSettingsServiceDependencies {
+  daemonClient(): Promise<SettingsClient>
+  refreshDaemonClient(): Promise<SettingsClient>
+  preflightDocker(): Promise<void>
+  getPreferences: typeof getDesktopPreferences
+  patchPreferences: typeof patchDesktopPreferences
+}
+
+const defaultDependencies: DesktopSettingsServiceDependencies = {
+  daemonClient: () => desktopSessionService.daemonClient(),
+  refreshDaemonClient: () => desktopSessionService.refreshDaemonClient(),
+  preflightDocker: preflightDesktopDocker,
+  getPreferences: getDesktopPreferences,
+  patchPreferences: patchDesktopPreferences,
+}
+
 export class DesktopSettingsService {
+  constructor(private readonly dependencies: DesktopSettingsServiceDependencies = defaultDependencies) {}
+
   snapshot(): Promise<DesktopSettingsSnapshot> {
-    const preferences = getDesktopPreferences()
-    return withDaemonRetry(async (client) =>
+    const preferences = this.dependencies.getPreferences()
+    return this.withDaemonRetry(async (client) =>
       buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
     )
   }
@@ -25,9 +50,9 @@ export class DesktopSettingsService {
     if (!isDesktopWorkStyle(input.workStyle)) {
       throw new Error("未知的工作风格，请选择务实或高效。")
     }
-    return withDaemonRetry(async (client) => {
+    return this.withDaemonRetry(async (client) => {
       const settings = await client.patchSettings({ workStyle: input.workStyle })
-      return buildDesktopSettingsSnapshot(settings, getDesktopPreferences())
+      return buildDesktopSettingsSnapshot(settings, this.dependencies.getPreferences())
     })
   }
 
@@ -37,30 +62,63 @@ export class DesktopSettingsService {
     if (!isDesktopNotificationMode(input.notificationMode)) {
       throw new Error("未知的通知设置，请选择从不、仅失去焦点时或始终。")
     }
-    const preferences = patchDesktopPreferences({ notificationMode: input.notificationMode })
-    return withDaemonRetry(async (client) => {
+    const preferences = this.dependencies.patchPreferences({ notificationMode: input.notificationMode })
+    return this.withDaemonRetry(async (client) => {
       const settings = await client.getSettings()
       return buildDesktopSettingsSnapshot(settings, preferences)
     })
+  }
+
+  async updateAgentEnvironment(
+    input: UpdateDesktopAgentEnvironmentInput
+  ): Promise<DesktopSettingsSnapshot> {
+    if (input.environment !== "local" && input.environment !== "docker") {
+      throw new Error("未知的智能体运行环境，请选择本机或 Docker 沙箱。")
+    }
+    if (input.environment === "docker") await this.dependencies.preflightDocker()
+    return this.withDaemonRetry(async (client) => {
+      const settings = await client.patchSettings({
+        sandbox: {
+          enabled: input.environment === "docker",
+          backend: "docker",
+          failIfUnavailable: true,
+        },
+      })
+      return buildDesktopSettingsSnapshot(
+        settings,
+        this.dependencies.getPreferences(),
+        { restartRequired: true }
+      )
+    })
+  }
+
+  private async withDaemonRetry<T>(operation: (client: SettingsClient) => Promise<T>): Promise<T> {
+    try {
+      return await operation(await this.dependencies.daemonClient())
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (
+        !message.includes("Failed to fetch") &&
+        !message.includes("ECONNREFUSED") &&
+        !message.includes("ECONNRESET")
+      ) {
+        throw error
+      }
+      return await operation(await this.dependencies.refreshDaemonClient())
+    }
   }
 }
 
 export const desktopSettingsService = new DesktopSettingsService()
 
-async function withDaemonRetry<T>(
-  operation: (client: OpenHarnessClient) => Promise<T>
-): Promise<T> {
+export async function preflightDesktopDocker(): Promise<void> {
   try {
-    return await operation(await desktopSessionService.daemonClient())
+    await execFileAsync("docker", ["info", "--format", "{{.ServerVersion}}"], {
+      timeout: 10_000,
+      windowsHide: true,
+    })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (
-      !message.includes("Failed to fetch") &&
-      !message.includes("ECONNREFUSED") &&
-      !message.includes("ECONNRESET")
-    ) {
-      throw error
-    }
-    return await operation(await desktopSessionService.refreshDaemonClient())
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`Docker 不可用，请确认 Docker Desktop 已启动。${detail ? ` ${detail}` : ""}`)
   }
 }

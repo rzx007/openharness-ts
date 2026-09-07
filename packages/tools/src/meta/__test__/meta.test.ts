@@ -160,6 +160,56 @@ describe("skillTool", () => {
     expect(result.isError).not.toBe(true);
     expect((result.content[0] as any).text).toContain("Run the thing.");
   });
+
+  it("presents Skill file and root through the execution environment", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({
+      name: "review",
+      source: "plugin",
+      path: "C:\\Users\\ruanz\\.openharness-ts\\skills\\review\\SKILL.md",
+      content: "# review",
+    }));
+    const presentHostPath = (hostPath: string) => {
+      const normalized = hostPath.replace(/\\/g, "/");
+      const marker = "/.openharness-ts/skills/";
+      const offset = normalized.indexOf(marker);
+      return offset >= 0
+        ? `/opt/openharness/skills/${normalized.slice(offset + marker.length)}`
+        : undefined;
+    };
+
+    const result = await skillTool.execute!({ name: "review" }, {
+      cwd: "/workspace",
+      skillRegistry: registry,
+      environment: { paths: { presentHostPath } },
+    } as any);
+
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("Skill file: /opt/openharness/skills/review/SKILL.md");
+    expect(text).toContain("Skill root: /opt/openharness/skills/review");
+    expect(text).not.toContain("C:\\Users\\");
+  });
+
+  it("marks unmounted plugin resources unavailable while retaining their Markdown", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({
+      name: "plugin-review",
+      source: "plugin",
+      path: "C:\\plugin-cache\\review\\SKILL.md",
+      content: "# Keep this guidance",
+    }));
+
+    const result = await skillTool.execute!({ name: "plugin-review" }, {
+      cwd: "/workspace",
+      skillRegistry: registry,
+      environment: { paths: { presentHostPath: () => undefined } },
+    } as any);
+
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("Skill file: (unavailable in this environment)");
+    expect(text).toContain("supporting files are not mounted");
+    expect(text).toContain("# Keep this guidance");
+  });
 });
 
 describe("listSkillsTool", () => {

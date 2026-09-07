@@ -21,6 +21,7 @@ export type OpenHarnessDaemonOptions = Pick<
   | "storePath"
   | "token"
   | "version"
+  | "executionSurface"
 >;
 
 /** Starts the opinionated daemon application with all standard resource services installed. */

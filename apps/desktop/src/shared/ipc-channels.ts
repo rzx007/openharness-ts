@@ -75,6 +75,7 @@ import type {
 } from "./plugin-types"
 import type {
   DesktopSettingsSnapshot,
+  UpdateDesktopAgentEnvironmentInput,
   UpdateDesktopNotificationModeInput,
   UpdateDesktopWorkStyleInput,
 } from "./settings-types"
@@ -219,6 +220,7 @@ export const IpcChannels = {
   settingsSnapshot: "settings:snapshot",
   settingsUpdateWorkStyle: "settings:update-work-style",
   settingsUpdateNotificationMode: "settings:update-notification-mode",
+  settingsUpdateAgentEnvironment: "settings:update-agent-environment",
 } as const
 
 export const IpcEvents = {
@@ -305,6 +307,10 @@ export interface IpcInvokeMap {
   }
   [IpcChannels.settingsUpdateNotificationMode]: {
     args: [input: UpdateDesktopNotificationModeInput]
+    result: DesktopSettingsSnapshot
+  }
+  [IpcChannels.settingsUpdateAgentEnvironment]: {
+    args: [input: UpdateDesktopAgentEnvironmentInput]
     result: DesktopSettingsSnapshot
   }
 

@@ -6,8 +6,15 @@ import type {
   RuntimeBundle,
   Settings,
 } from "@openharness/core";
-import { createAgentSession, loadSettings } from "@openharness/core";
+import { createAgentSession, getSkillsDir, loadSettings } from "@openharness/core";
 import type { McpClientManager } from "@openharness/mcp";
+import { createWorkspaceBinding } from "@openharness/environment";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
+import {
+  createExecutionEnvironment,
+  resolveExecutionEnvironmentConfig,
+} from "@openharness/sandbox";
+import { createEnvironmentFileSystem } from "@openharness/tools";
 
 import type {
   AgentCapabilityOverrides,
@@ -110,10 +117,37 @@ async function composeOpenHarnessAgentInternal(
   }
 
   const sessionId = options.sessionId ?? `agent_session_${randomUUID()}`;
+  let executionEnvironment: ExecutionEnvironmentHandle | undefined =
+    options.executionEnvironment;
+  if (!executionEnvironment && options.executionSurface === "desktop_managed") {
+    const config = resolveExecutionEnvironmentConfig({
+      surface: "desktop_managed",
+      settings,
+      cwd,
+    });
+    const baseEnvironment = await createExecutionEnvironment({
+      config,
+      settings,
+      binding: createAgentWorkspaceBinding(cwd, config.kind),
+      sessionId,
+      userSkillsRoot: getSkillsDir(),
+    });
+    executionEnvironment = {
+      ...baseEnvironment,
+      files: createEnvironmentFileSystem(baseEnvironment, {
+        settings,
+        sessionId,
+      }),
+    };
+    rollback.add(() => executionEnvironment?.release(), executionEnvironment);
+  }
+  const capabilityOverrides = executionEnvironment?.info.kind === "docker"
+    ? { ...options.capabilityOverrides, terminal: false as const }
+    : options.capabilityOverrides;
   const environment = await resolveDefaultAgentCapabilities({
     settings,
     configuration: options,
-    capabilityOverrides: options.capabilityOverrides,
+    capabilityOverrides,
     effects: options.effects,
     cwd,
     sessionId,
@@ -131,6 +165,7 @@ async function composeOpenHarnessAgentInternal(
     sessionId,
     configuration: options,
     capabilities: environment.capabilities,
+    executionEnvironment,
     skillRegistry: discovery.skillRegistry,
     agentDefinitions: discovery.agentDefinitions,
   });
@@ -145,6 +180,7 @@ async function composeOpenHarnessAgentInternal(
     extensions: options.extensions,
     mcpServers: options.mcpServers,
     memory: environment.memory,
+    executionEnvironment,
   });
   const session = createAgentSession({
     queryEngine: runtime.queryEngine,
@@ -161,4 +197,15 @@ async function composeOpenHarnessAgentInternal(
     model: options.model ?? settings.model,
     cleanup,
   };
+}
+
+export function createAgentWorkspaceBinding(
+  cwd: string,
+  kind: "local" | "docker",
+) {
+  return createWorkspaceBinding({
+    kind,
+    hostRoot: cwd,
+    executionRoot: kind === "docker" ? "/workspace" : cwd,
+  });
 }

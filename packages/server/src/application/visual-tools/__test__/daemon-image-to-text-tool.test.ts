@@ -1,6 +1,3 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDaemonImageToTextTool } from "../daemon-image-to-text-tool.js";
@@ -38,9 +35,12 @@ describe("daemon ImageToText tool", () => {
   });
 
   it("uses context settings to send a local image to an OpenAI-compatible endpoint", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "oh-image-to-text-"));
-    const imagePath = join(dir, "invoice.png");
-    await writeFile(imagePath, Buffer.from([1, 2, 3]));
+    const resolvePath = vi.fn(async () => ({
+      executionPath: "/workspace/invoice.png",
+      mountPurpose: "workspace" as const,
+      mountMode: "rw" as const,
+    }));
+    const readBytes = vi.fn(async () => new Uint8Array([1, 2, 3]));
     vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       expect(body.model).toBe("vision-main");
@@ -54,15 +54,21 @@ describe("daemon ImageToText tool", () => {
     }));
     const tool = createTool();
 
-    try {
-      const result = await tool.execute(
-        { image_path: imagePath, prompt: "Extract every visible word." },
-        { cwd: dir, settings: settings("vision-main", "openai") } as any,
-      );
-      expect(result.content).toEqual([{ type: "text", text: "invoice 123" }]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const result = await tool.execute(
+      { image_path: "invoice.png", prompt: "Extract every visible word." },
+      {
+        cwd: "/workspace",
+        settings: settings("vision-main", "openai"),
+        environment: {
+          info: { kind: "docker", networkMode: "bridge" },
+          paths: { resolve: resolvePath },
+          files: { readBytes },
+        },
+      } as any,
+    );
+    expect(resolvePath).toHaveBeenCalledWith("invoice.png", "read");
+    expect(readBytes).toHaveBeenCalledWith("/workspace/invoice.png");
+    expect(result.content).toEqual([{ type: "text", text: "invoice 123" }]);
   });
 
   it("sends an HTTP image URL using the Anthropic message format", async () => {
@@ -82,6 +88,23 @@ describe("daemon ImageToText tool", () => {
     );
 
     expect(result.content).toEqual([{ type: "text", text: "a cat" }]);
+  });
+
+  it("blocks image URLs when the effective environment has no network", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await createTool().execute(
+      { image_url: "https://images.example/cat.png" },
+      {
+        cwd: "/workspace",
+        settings: settings("vision-main", "anthropic"),
+        environment: { info: { kind: "docker", networkMode: "none" } },
+      } as any,
+    );
+
+    expect(result).toMatchObject({ isError: true, failureKind: "policy" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("rejects mixed attachment input before OCR", async () => {

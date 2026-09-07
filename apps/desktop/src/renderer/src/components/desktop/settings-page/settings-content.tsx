@@ -1,4 +1,4 @@
-import { ChevronDown, Code2, MonitorCog, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { ChevronDown, Code2, SlidersHorizontal, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@renderer/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card"
@@ -22,6 +22,7 @@ import { Separator } from "@renderer/components/ui/separator"
 import { Switch } from "@renderer/components/ui/switch"
 import { ProviderSettings } from "./provider-settings"
 import { AttachmentStorageSettings } from "./attachment-storage-settings"
+import { RuntimeSettingControl } from "./runtime-setting-control"
 import { AppearanceSettings } from "@renderer/components/appearance/appearance-settings"
 import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
 import type { DesktopNotificationMode, DesktopWorkStyle } from "@shared/settings-types"
@@ -135,8 +136,8 @@ function GeneralSettings(): React.JSX.Element {
         <Separator />
         <SettingRow
           title="运行环境"
-          description="选择智能体在 Windows 上运行命令的位置"
-          control={<SettingSelect icon={<MonitorCog />} label="Windows 原生" />}
+          description="选择智能体的命令、脚本和文件工具在本机还是 Docker 沙箱中运行。更改会在重启后用于新建的 Agent。"
+          control={<RuntimeSettingControl />}
         />
         <Separator />
         <SettingRow

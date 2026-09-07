@@ -495,6 +495,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/hooks':
         specifier: workspace:*
         version: link:../hooks
@@ -653,12 +656,27 @@ importers:
 
   packages/core:
     dependencies:
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/jobs':
         specifier: workspace:*
         version: link:../jobs
       '@openharness/terminal':
         specifier: workspace:*
         version: link:../terminal
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.17
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/environment:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -756,6 +774,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -828,6 +849,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/personalization':
         specifier: workspace:*
         version: link:../personalization
@@ -859,6 +883,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1079,6 +1106,9 @@ importers:
       '@openharness/core':
         specifier: workspace:*
         version: link:../core
+      '@openharness/environment':
+        specifier: workspace:*
+        version: link:../environment
       '@openharness/jobs':
         specifier: workspace:*
         version: link:../jobs

@@ -31,7 +31,7 @@ let runtime: StartedSandboxRuntime | undefined;
 afterEach(async () => {
   await runtime?.stop();
   runtime = undefined;
-});
+}, 60_000);
 
 beforeAll(() => {
   if (!runDocker) {
@@ -55,7 +55,7 @@ maybeDescribe("docker sandbox e2e", () => {
       dockerRmForce(containerName);
     }
     ownedContainers.clear();
-  });
+  }, 60_000);
 
   it("starts a docker runtime and executes shell commands inside the mounted workspace", async () => {
     const sessionId = `e2e-docker-${Date.now()}`;
@@ -100,6 +100,7 @@ maybeDescribe("docker sandbox e2e", () => {
     const result = await collectProcess(child);
 
     expect(result.exitCode).toBe(0);
+    expect(result.stdout.split(/\r?\n/)[0]).toBe("/workspace");
     expect(result.stdout).toContain("node-ok");
   }, 60_000);
 
@@ -176,7 +177,7 @@ maybeDescribe("docker sandbox e2e", () => {
     expect(dockerContainerRunning(containerName)).toBe(true);
   }, 60_000);
 
-  it("fails fast when a reusable project container has stale config", async () => {
+  it("replaces a reusable project container with the latest config", async () => {
     const baseSandbox = {
       enabled: true,
       backend: "docker" as const,
@@ -200,7 +201,7 @@ maybeDescribe("docker sandbox e2e", () => {
     await runtime.stop();
     runtime = undefined;
 
-    await expect(startSandboxRuntime({
+    runtime = await startSandboxRuntime({
       settings: {
         ...baseSettings,
         sandbox: {
@@ -213,7 +214,11 @@ maybeDescribe("docker sandbox e2e", () => {
       },
       cwd: process.cwd(),
       sessionId: `e2e-drift-second-${Date.now()}`,
-    })).rejects.toThrow("ohs sandbox rebuild");
+    });
+
+    expect(runtime.status.containerName).toBe(containerName);
+    expect(dockerContainerExists(containerName)).toBe(true);
+    expect(dockerContainerRunning(containerName)).toBe(true);
   }, 60_000);
 
   it("removes temporary session containers after runtime stop", async () => {

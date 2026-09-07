@@ -685,6 +685,7 @@ export class DesktopSessionService {
         port: 0,
         token,
         version: app.getVersion(),
+        executionSurface: "desktop_managed",
         outsideProjectWorkspaceRoot: buildOutsideProjectRoot(app.getPath("documents")),
       })
       this.embeddedServer = server

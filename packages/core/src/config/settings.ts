@@ -52,6 +52,9 @@ const DEFAULT_SETTINGS: Settings = {
       runtimeCommand: "srt",
     },
   },
+  terminal: {
+    dockerShell: "/bin/sh",
+  },
   daemon: {
     autoStart: false,
   },
@@ -61,8 +64,9 @@ const DEFAULT_SETTINGS: Settings = {
   workStyle: "practical",
 };
 
-type SettingsPatch = Partial<Omit<Settings, "sandbox" | "daemon" | "plugins">> & {
+type SettingsPatch = Partial<Omit<Settings, "sandbox" | "terminal" | "daemon" | "plugins">> & {
   sandbox?: Partial<NonNullable<Settings["sandbox"]>>;
+  terminal?: Partial<NonNullable<Settings["terminal"]>>;
   daemon?: Partial<NonNullable<Settings["daemon"]>>;
   plugins?: Partial<NonNullable<Settings["plugins"]>>;
 };
@@ -119,6 +123,13 @@ export async function loadSettings(
     envSettings.sandbox,
     cliOverrides?.sandbox,
   );
+  merged.terminal = {
+    ...DEFAULT_SETTINGS.terminal,
+    ...fileSettings?.terminal,
+    ...projectSettings?.terminal,
+    ...envSettings.terminal,
+    ...cliOverrides?.terminal,
+  };
   merged.daemon = {
     ...DEFAULT_SETTINGS.daemon,
     ...fileSettings?.daemon,
@@ -152,7 +163,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   // 将设置对象写入 JSON 文件，使用 UTF-8 编码和缩进格式化
   await writeFile(
     configPath,
-    JSON.stringify({ ...settings, _formatVersion: 1 }, null, 2),
+    JSON.stringify(settings, null, 2),
     "utf-8",
   );
 }
@@ -170,7 +181,7 @@ export async function saveProjectSettings(
   await mkdir(configDir, { recursive: true });
   await writeFile(
     configPath,
-    JSON.stringify({ ...settings, _formatVersion: 1 }, null, 2),
+    JSON.stringify(settings, null, 2),
     "utf-8",
   );
 }
@@ -296,22 +307,169 @@ async function loadSettingsFile(configPath: string): Promise<Partial<Settings> |
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error(`Settings file must contain a JSON object: ${configPath}`);
     }
-    const settings = parsed as Partial<Settings> & {
-      _formatVersion?: unknown;
-      sandbox?: { runtime?: unknown };
-    };
-    if (settings._formatVersion !== 1) {
-      throw new Error(
-        `Unsupported settings format ${String(settings._formatVersion)} in ${configPath}; expected 1`,
-      );
-    }
-    if (settings.sandbox && "runtime" in settings.sandbox) {
-      throw new Error(`Unsupported settings field sandbox.runtime in ${configPath}; use sandbox.backend`);
-    }
-    const { _formatVersion: _discardedFormatVersion, ...currentSettings } = settings;
-    return currentSettings;
+    const settings = parsed as Record<string, unknown>;
+    validateSettingsFields(settings, configPath);
+    return settings as Partial<Settings>;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+export class SettingsFileError extends Error {
+  readonly code = "invalid_settings_field";
+
+  constructor(
+    readonly field: string,
+    readonly path: string,
+  ) {
+    super(`Unknown or deprecated settings field ${field} in ${path}`);
+    this.name = "SettingsFileError";
+  }
+}
+
+const TOP_LEVEL_SETTINGS_FIELDS = new Set([
+  "apiKey",
+  "model",
+  "apiFormat",
+  "maxTokens",
+  "baseUrl",
+  "provider",
+  "customProviders",
+  "maxTurns",
+  "systemPrompt",
+  "permission",
+  "hooks",
+  "memory",
+  "sandbox",
+  "terminal",
+  "mcpServers",
+  "plugins",
+  "channels",
+  "daemon",
+  "theme",
+  "outputStyle",
+  "workStyle",
+  "fastMode",
+  "effort",
+  "passes",
+  "childBudget",
+  "verbose",
+]);
+
+function validateSettingsFields(
+  settings: Record<string, unknown>,
+  configPath: string,
+): void {
+  assertKnownFields(settings, TOP_LEVEL_SETTINGS_FIELDS, "settings", configPath);
+  assertNestedFields(settings, "permission", [
+    "mode",
+    "allowedTools",
+    "deniedTools",
+    "pathRules",
+    "deniedCommands",
+    "autoApproveTools",
+  ], configPath);
+  assertNestedFields(settings, "memory", [
+    "enabled",
+    "maxFiles",
+    "maxEntrypointLines",
+    "sessionMemoryEnabled",
+    "autoExtractEnabled",
+    "autoDreamEnabled",
+    "autoDreamMinHours",
+    "autoDreamMinSessions",
+  ], configPath);
+  assertNestedFields(settings, "sandbox", [
+    "enabled",
+    "backend",
+    "failIfUnavailable",
+    "enabledPlatforms",
+    "filesystem",
+    "network",
+    "docker",
+    "srt",
+  ], configPath);
+  const sandbox = recordValue(settings.sandbox);
+  if (sandbox) {
+    assertNestedFields(sandbox, "filesystem", [
+      "allowRead",
+      "denyRead",
+      "allowWrite",
+      "denyWrite",
+      "extraAllowedRoots",
+    ], configPath, "settings.sandbox");
+    assertNestedFields(sandbox, "network", [
+      "mode",
+      "allowedDomains",
+      "deniedDomains",
+      "strictDomainPolicy",
+    ], configPath, "settings.sandbox");
+    assertNestedFields(sandbox, "docker", [
+      "image",
+      "autoBuildImage",
+      "cpuLimit",
+      "memoryLimit",
+      "dns",
+      "extraMounts",
+      "extraEnv",
+      "containerNamePrefix",
+      "reuseContainer",
+    ], configPath, "settings.sandbox");
+    assertNestedFields(sandbox, "srt", ["runtimeCommand"], configPath, "settings.sandbox");
+  }
+  assertNestedFields(settings, "terminal", ["localShell", "dockerShell"], configPath);
+  assertNestedFields(settings, "plugins", ["enabled"], configPath);
+  assertNestedFields(settings, "daemon", ["autoStart"], configPath);
+  assertNestedFields(settings, "childBudget", [
+    "maxDepth",
+    "maxActiveChildren",
+    "maxTotalChildren",
+  ], configPath);
+  assertNestedFields(settings, "channels", ["sendProgress", "sendToolHints", "feishu"], configPath);
+  const channels = recordValue(settings.channels);
+  if (channels) {
+    assertNestedFields(channels, "feishu", [
+      "enabled",
+      "appId",
+      "appSecret",
+      "encryptKey",
+      "verificationToken",
+      "allowFrom",
+      "replyAtBotNames",
+    ], configPath, "settings.channels");
+  }
+}
+
+function assertNestedFields(
+  owner: Record<string, unknown>,
+  field: string,
+  allowed: readonly string[],
+  configPath: string,
+  prefix = "settings",
+): void {
+  const value = owner[field];
+  if (value === undefined) return;
+  const record = recordValue(value);
+  if (!record) return;
+  assertKnownFields(record, new Set(allowed), `${prefix}.${field}`, configPath);
+}
+
+function assertKnownFields(
+  record: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  prefix: string,
+  configPath: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new SettingsFileError(`${prefix}.${key}`, configPath);
+    }
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }

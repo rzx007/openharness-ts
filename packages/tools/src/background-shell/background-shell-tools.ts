@@ -35,7 +35,7 @@ export const backgroundShellCreateTool: ToolDefinition = {
         requestId: `tool:${context.toolCallId}`,
         command: command.value,
         description: description.value,
-        cwd: context.cwd,
+        cwd: context.environment?.workspace.hostRoot ?? context.cwd,
         sessionId: context.sessionId,
         settings: context.settings,
       });
