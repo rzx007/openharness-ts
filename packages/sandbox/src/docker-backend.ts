@@ -4,7 +4,11 @@ import { existsSync } from "node:fs";
 import { basename, dirname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxConfig } from "@openharness/core";
-import type { EnvironmentPtyTarget } from "@openharness/environment";
+import type {
+  EnvironmentExecutionOwner,
+  EnvironmentPtyTarget,
+  ExecutionEnvironmentIdentity,
+} from "@openharness/environment";
 import { getDockerAvailability, type AvailabilityDeps } from "./availability.js";
 import { normalizeSandboxConfig } from "./config.js";
 import {
@@ -33,6 +37,7 @@ export interface DockerRunArgsOptions {
   config?: SandboxConfig;
   dockerCommand?: string;
   managedMounts?: readonly ManagedDockerMount[];
+  identity?: ExecutionEnvironmentIdentity;
 }
 
 export interface DockerExecArgsOptions {
@@ -42,6 +47,9 @@ export interface DockerExecArgsOptions {
   argv: string[];
   env?: Record<string, string>;
   dockerCommand?: string;
+  identity?: ExecutionEnvironmentIdentity;
+  owner?: EnvironmentExecutionOwner;
+  executionId?: string;
 }
 
 export interface DockerBuildArgsOptions {
@@ -59,6 +67,8 @@ export interface DockerPtyTargetOptions {
   shell: "/bin/sh" | "/bin/bash";
   executionId: string;
   env?: Record<string, string>;
+  identity?: ExecutionEnvironmentIdentity;
+  owner?: EnvironmentExecutionOwner;
   resize?(cols: number, rows: number): Promise<void>;
   signal(signal: "interrupt" | "terminate"): Promise<void>;
   close(): Promise<void>;
@@ -80,6 +90,12 @@ export interface DockerSandboxDiagnostics {
 export const DOCKER_CONFIG_HASH_LABEL = "org.openharness.sandbox.config-hash";
 export const DOCKER_WORKSPACE_LABEL = "org.openharness.sandbox.workspace";
 export const DOCKER_MANAGED_LABEL = "org.openharness.sandbox.managed";
+export const DOCKER_INSTALLATION_LABEL = "org.openharness.sandbox.installation";
+export const DOCKER_WORKSPACE_OWNER_LABEL = "org.openharness.sandbox.workspace-owner";
+export const DOCKER_REUSABLE_LABEL = "org.openharness.sandbox.reusable";
+export const DOCKER_CREATED_BY_OWNER_LABEL = "org.openharness.sandbox.created-by-owner";
+export const DOCKER_CREATED_BY_GENERATION_LABEL = "org.openharness.sandbox.created-by-generation";
+export const DOCKER_ENVIRONMENT_ID_LABEL = "org.openharness.sandbox.environment-id";
 const DOCKER_EXEC_STATE_DIR = "/tmp/openharness-exec";
 const DOCKER_SUPERVISOR_VERSION = "docker-init-v1";
 
@@ -201,10 +217,26 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
     "--label",
     `${DOCKER_MANAGED_LABEL}=true`,
     "--label",
-    `${DOCKER_CONFIG_HASH_LABEL}=${dockerSandboxConfigHash(config, cwd, options.managedMounts)}`,
+    `${DOCKER_CONFIG_HASH_LABEL}=${options.identity?.configHash ?? dockerSandboxConfigHash(config, cwd, options.managedMounts)}`,
     "--label",
     `${DOCKER_WORKSPACE_LABEL}=${cwd}`,
   );
+  if (options.identity) {
+    argv.push(
+      "--label",
+      `${DOCKER_INSTALLATION_LABEL}=${options.identity.installationId}`,
+      "--label",
+      `${DOCKER_WORKSPACE_OWNER_LABEL}=${options.identity.workspaceOwnerId}`,
+      "--label",
+      `${DOCKER_REUSABLE_LABEL}=${config.docker.reuseContainer}`,
+      "--label",
+      `${DOCKER_CREATED_BY_OWNER_LABEL}=${options.identity.daemonOwnerId}`,
+      "--label",
+      `${DOCKER_CREATED_BY_GENERATION_LABEL}=${options.identity.daemonGeneration}`,
+      "--label",
+      `${DOCKER_ENVIRONMENT_ID_LABEL}=${options.identity.environmentId}`,
+    );
+  }
 
   if (config.docker.cpuLimit > 0) {
     argv.push("--cpus", String(config.docker.cpuLimit));
@@ -235,6 +267,7 @@ export function buildDockerRunArgs(options: DockerRunArgsOptions): string[] {
     argv.push("-v", mount);
   }
   for (const [key, value] of Object.entries(config.docker.extraEnv)) {
+    if (isReservedExecutionEnvironmentKey(key)) continue;
     argv.push("-e", `${key}=${value}`);
   }
 
@@ -266,7 +299,12 @@ export function buildDockerExecArgs(options: DockerExecArgsOptions): string[] {
     "-w",
     cwd,
   ];
-  for (const [key, value] of Object.entries(containerExecEnv(options.env))) {
+  for (const [key, value] of Object.entries(containerExecEnv(
+    options.env,
+    options.identity,
+    options.owner,
+    options.executionId,
+  ))) {
     argv.push("-e", `${key}=${value}`);
   }
   argv.push(options.containerName, ...options.argv);
@@ -282,7 +320,12 @@ export function buildDockerPtyTarget(options: DockerPtyTargetOptions): Environme
     "-e",
     `OPENHARNESS_PTY_ID=${options.executionId}`,
   ];
-  for (const [key, value] of Object.entries(containerExecEnv(options.env))) {
+  for (const [key, value] of Object.entries(containerExecEnv(
+    options.env,
+    options.identity,
+    options.owner,
+    options.executionId,
+  ))) {
     args.push("-e", `${key}=${value}`);
   }
   args.push(
@@ -356,6 +399,7 @@ export class DockerSandboxSession {
       deps?: AvailabilityDeps;
       reporter?: SandboxRuntimeReporter;
       managedMounts?: readonly ManagedDockerMount[];
+      identity?: ExecutionEnvironmentIdentity;
     },
   ) {
     const config = normalizeSandboxConfig(options.settings.sandbox);
@@ -402,6 +446,7 @@ export class DockerSandboxSession {
           resolve(this.options.cwd),
           this.options.managedMounts,
         ),
+        identity: this.options.identity,
       })
     ) {
       this.options.reporter?.({ type: "start-container", containerName: this.containerName, reused: true });
@@ -432,6 +477,7 @@ export class DockerSandboxSession {
       config: this.options.settings.sandbox,
       dockerCommand: this.dockerCommand,
       managedMounts: this.options.managedMounts,
+      identity: this.options.identity,
     });
     await runToCompletion(argv);
     try {
@@ -525,6 +571,9 @@ export class DockerSandboxSession {
       argv: buildDockerSupervisedArgv(argv, executionId, { preserveStdin: usesStdinPipe(options.stdio) }),
       env: options.env,
       dockerCommand: this.dockerCommand,
+      identity: this.options.identity,
+      owner: options.owner,
+      executionId,
     });
     const child = spawn(
       execArgs[0]!,
@@ -552,12 +601,7 @@ export class DockerSandboxSession {
     return child;
   }
 
-  async preparePtyTarget(input: {
-    cwd?: string;
-    shell?: string;
-    cols: number;
-    rows: number;
-  }): Promise<EnvironmentPtyTarget> {
+  async preparePtyTarget(input: import("@openharness/environment").EnvironmentTerminalPrepareOptions): Promise<EnvironmentPtyTarget> {
     if (!this.running) throw new SandboxUnavailableError("Docker sandbox session is not running");
     const shell = input.shell === "/bin/bash" ? "/bin/bash" : "/bin/sh";
     if (!await runProbe([
@@ -580,6 +624,8 @@ export class DockerSandboxSession {
       executionCwd: input.cwd ?? this.containerCwd,
       shell,
       executionId,
+      identity: this.options.identity,
+      owner: input.owner,
       resize: async (cols, rows) => {
         await resizeDockerPtyExecution({
           dockerCommand: this.dockerCommand,
@@ -825,11 +871,39 @@ function usesStdinPipe(stdio: ShellSpawnOptions["stdio"]): boolean {
   return stdio === "pipe" || (Array.isArray(stdio) && stdio[0] === "pipe");
 }
 
-function containerExecEnv(env: Record<string, string> | undefined): Record<string, string> {
-  if (!env) return {};
-  return Object.fromEntries(
-    Object.entries(env).filter(([key]) => key.toUpperCase() !== "PATH"),
+function containerExecEnv(
+  env: Record<string, string> | undefined,
+  identity?: ExecutionEnvironmentIdentity,
+  owner?: EnvironmentExecutionOwner,
+  executionId?: string,
+): Record<string, string> {
+  const result = Object.fromEntries(
+    Object.entries(env ?? {}).filter(([key]) =>
+      key.toUpperCase() !== "PATH" && !isReservedExecutionEnvironmentKey(key)
+    ),
   );
+  if (!identity) return result;
+  return {
+    ...result,
+    OPENHARNESS_INSTALLATION_ID: identity.installationId,
+    OPENHARNESS_DAEMON_OWNER_ID: identity.daemonOwnerId,
+    OPENHARNESS_DAEMON_GENERATION: String(identity.daemonGeneration),
+    OPENHARNESS_ENVIRONMENT_ID: identity.environmentId,
+    OPENHARNESS_EXECUTION_KIND: owner?.kind ?? "agent",
+    OPENHARNESS_EXECUTION_ID: owner?.id ?? executionId ?? identity.environmentId,
+  };
+}
+
+function isReservedExecutionEnvironmentKey(key: string): boolean {
+  return [
+    "OPENHARNESS_INSTALLATION_ID",
+    "OPENHARNESS_DAEMON_OWNER_ID",
+    "OPENHARNESS_DAEMON_GENERATION",
+    "OPENHARNESS_ENVIRONMENT_ID",
+    "OPENHARNESS_EXECUTION_KIND",
+    "OPENHARNESS_EXECUTION_ID",
+    "OPENHARNESS_PTY_ID",
+  ].includes(key.toUpperCase());
 }
 
 function dockerExecutionStatePaths(executionId: string): { marker: string; cancel: string } {
@@ -928,15 +1002,14 @@ async function prepareReusableContainer(options: {
   containerName: string;
   workspace: string;
   expectedHash: string;
+  identity?: ExecutionEnvironmentIdentity;
 }): Promise<boolean> {
   const existingHash = await dockerContainerLabel(
     options.dockerCommand,
     options.containerName,
     DOCKER_CONFIG_HASH_LABEL,
   );
-  if (existingHash === options.expectedHash) return true;
-
-  const [managed, workspace] = await Promise.all([
+  const [managed, workspace, installation, workspaceOwner] = await Promise.all([
     dockerContainerLabel(
       options.dockerCommand,
       options.containerName,
@@ -947,12 +1020,29 @@ async function prepareReusableContainer(options: {
       options.containerName,
       DOCKER_WORKSPACE_LABEL,
     ),
+    dockerContainerLabel(
+      options.dockerCommand,
+      options.containerName,
+      DOCKER_INSTALLATION_LABEL,
+    ),
+    dockerContainerLabel(
+      options.dockerCommand,
+      options.containerName,
+      DOCKER_WORKSPACE_OWNER_LABEL,
+    ),
   ]);
-  if (managed !== "true" || !sameHostPath(workspace, options.workspace)) {
+  const ownershipVerified = managed === "true" &&
+    sameHostPath(workspace, options.workspace) &&
+    (!options.identity || (
+      installation === options.identity.installationId &&
+      workspaceOwner === options.identity.workspaceOwnerId
+    ));
+  if (!ownershipVerified) {
     throw new SandboxUnavailableError(
-      `Docker container ${options.containerName} conflicts with the managed sandbox name but its ownership cannot be verified`,
+      `docker_container_ownership_unverified: Docker container ${options.containerName} conflicts with the managed sandbox name`,
     );
   }
+  if (existingHash === (options.identity?.configHash ?? options.expectedHash)) return true;
   await runToCompletion([
     options.dockerCommand,
     "rm",

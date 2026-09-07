@@ -56,16 +56,15 @@
 - `packages/sandbox/src/docker-backend.ts`：容器 labels、exec/PTY owner 环境变量和严格复用校验。
 - `packages/sandbox/src/index.ts`：导出身份 label 与 reconciler。
 - `packages/sandbox/src/index.test.ts`：Docker argv、labels 与 exec 环境变量测试。
-- `packages/terminal-node/src/environment-terminal-target.ts`：PTY 使用服务端 terminal owner。
-- `packages/terminal-node/src/environment-terminal-target.test.ts`：PTY owner 传递测试。
+- `packages/terminal-node/e2e/docker-pty.e2e.test.ts`：真实共享环境使用完整 daemon identity。
+- `packages/services/src/executions/detached-process-supervisor.ts`：以 durable task ID 标记后台 Docker 进程。
+- `packages/services/src/executions/__test__/detached-process-supervisor.test.ts`：后台 owner 传递测试。
 - `packages/server/src/runtime/session-execution-environment.ts`：把 installation 和 application owner 交给 Manager。
 - `packages/server/src/runtime/session-execution-environment.test.ts`：身份传递测试。
 - `packages/server/src/application/daemon-application.ts`：在 application owner 之后、ready 之前运行 reconciliation。
 - `packages/server/src/application/__test__/durable-agent-application.test.ts`：启动顺序和失败隔离测试。
 - `packages/server/src/terminal/daemon-terminal-service.ts`：为 PTY 注入可信 terminal ID。
 - `packages/server/src/terminal/daemon-terminal-service.test.ts`：终端 owner 标记测试。
-- `packages/server/src/application/session/background-shell-service.ts`：为后台进程注入 durable task ID。
-- `packages/server/src/application/session/__test__/background-shell-service.test.ts`：后台 owner 标记测试。
 - `packages/sandbox/package.json`：把 orphan E2E 纳入 Docker 测试脚本。
 - `docs/sandbox-runtime-flow.md`：记录原子设置提交与启动清理流程。
 - `docs/superpowers/specs/2026-09-07-agent-runtime-environment-and-terminal-design.md`：删除 3A 持久 switching 要求，明确热切换暂缓。
@@ -165,15 +164,14 @@ git commit -m "fix(settings): save configuration atomically (task 1/4)"
 - 修改：`packages/sandbox/src/types.ts`
 - 修改：`packages/sandbox/src/docker-backend.ts`
 - 修改：`packages/sandbox/src/index.test.ts`
-- 修改：`packages/terminal-node/src/environment-terminal-target.ts`
-- 修改：`packages/terminal-node/src/environment-terminal-target.test.ts`
+- 修改：`packages/terminal-node/e2e/docker-pty.e2e.test.ts`
+- 修改：`packages/services/src/executions/detached-process-supervisor.ts`
+- 修改：`packages/services/src/executions/__test__/detached-process-supervisor.test.ts`
 - 修改：`packages/server/src/runtime/session-execution-environment.ts`
 - 修改：`packages/server/src/runtime/session-execution-environment.test.ts`
 - 修改：`packages/server/src/application/daemon-application.ts`
 - 修改：`packages/server/src/terminal/daemon-terminal-service.ts`
 - 修改：`packages/server/src/terminal/daemon-terminal-service.test.ts`
-- 修改：`packages/server/src/application/session/background-shell-service.ts`
-- 修改：`packages/server/src/application/session/__test__/background-shell-service.test.ts`
 
 - [ ] **步骤 1：编写失败的 installation 与 identity 测试**
 
@@ -229,7 +227,8 @@ OPENHARNESS_EXECUTION_ID
 ```bash
 pnpm --filter @openharness/sandbox test -- execution-environment-manager.test.ts index.test.ts
 pnpm --filter @openharness/terminal-node test -- environment-terminal-target.test.ts
-pnpm --filter @openharness/server test -- installation-id.test.ts session-execution-environment.test.ts daemon-terminal-service.test.ts background-shell-service.test.ts
+pnpm --filter @openharness/services test -- detached-process-supervisor.test.ts
+pnpm --filter @openharness/server test -- installation-id.test.ts session-execution-environment.test.ts daemon-terminal-service.test.ts
 ```
 
 预期：FAIL，当前环境创建没有 installation/application owner identity，Docker 只有 managed/config/workspace labels。
@@ -277,7 +276,8 @@ execution.daemonGeneration === current.generation
 pnpm --filter @openharness/environment test
 pnpm --filter @openharness/sandbox test
 pnpm --filter @openharness/terminal-node test
-pnpm --filter @openharness/server test -- installation-id.test.ts session-execution-environment.test.ts daemon-terminal-service.test.ts background-shell-service.test.ts
+pnpm --filter @openharness/services test -- detached-process-supervisor.test.ts
+pnpm --filter @openharness/server test -- installation-id.test.ts session-execution-environment.test.ts daemon-terminal-service.test.ts
 pnpm --filter @openharness/server check-types
 pnpm --filter @openharness/sandbox e2e:docker
 pnpm --filter @openharness/terminal-node e2e:docker

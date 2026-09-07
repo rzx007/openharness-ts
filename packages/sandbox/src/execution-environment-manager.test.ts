@@ -4,6 +4,31 @@ import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import { ExecutionEnvironmentManager } from "./execution-environment-manager.js";
 
 describe("ExecutionEnvironmentManager", () => {
+  it("assigns one full identity before creating a shared environment", async () => {
+    const handle = fakeHandle();
+    const create = vi.fn(async () => handle);
+    const manager = new ExecutionEnvironmentManager();
+
+    const agent = await manager.acquire(
+      request("owner-1", "hash-1", "agent", "s1", create),
+    );
+    const terminal = await manager.acquire(
+      request("owner-1", "hash-1", "terminal", "t1", create),
+    );
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith({
+      ...DAEMON_IDENTITY,
+      environmentId: agent.environmentId,
+      workspaceOwnerId: "owner-1",
+      configHash: "hash-1",
+    });
+    expect(terminal.environmentId).toBe(agent.environmentId);
+
+    await agent.release();
+    await terminal.release();
+  });
+
   it("coalesces concurrent acquires and releases only after the final lease", async () => {
     const handle = fakeHandle();
     const create = vi.fn(async () => handle);
@@ -72,10 +97,22 @@ function request(
   configHash: string,
   kind: "agent" | "terminal" | "background",
   id: string,
-  create: () => Promise<ExecutionEnvironmentHandle>,
+  create: (identity: unknown) => Promise<ExecutionEnvironmentHandle>,
 ) {
-  return { ownerId, configHash, consumer: { kind, id }, create };
+  return {
+    ownerId,
+    configHash,
+    daemonIdentity: DAEMON_IDENTITY,
+    consumer: { kind, id },
+    create,
+  };
 }
+
+const DAEMON_IDENTITY = {
+  installationId: "install-1",
+  daemonOwnerId: "daemon-1",
+  daemonGeneration: 7,
+};
 
 function fakeHandle(releaseWait?: Promise<void>): ExecutionEnvironmentHandle {
   return {

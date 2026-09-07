@@ -46,6 +46,7 @@ import { DaemonJobService } from "../jobs/daemon-job-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
 import { DaemonTerminalService } from "../terminal/daemon-terminal-service.js";
 import { createSessionEnvironmentAcquirer } from "../runtime/session-execution-environment.js";
+import { deriveInstallationId } from "../runtime/installation-id.js";
 import { StorePermissionBroker } from "../permissions/permission-broker.js";
 import {
   DAEMON_RESTART_PERMISSION_REASON,
@@ -290,7 +291,15 @@ export class DaemonApplication implements DurableAgentApplication {
         }),
       );
       const acquireSessionEnvironment = options.executionSurface === "desktop_managed"
-        ? createSessionEnvironmentAcquirer({ manager: this.environmentManager, store })
+        ? createSessionEnvironmentAcquirer({
+            manager: this.environmentManager,
+            store,
+            daemonIdentity: {
+              installationId: deriveInstallationId(dirname(store.path)),
+              daemonOwnerId: this.ownerLease.ownerId,
+              daemonGeneration: this.ownerLease.generation,
+            },
+          })
         : undefined;
       this.terminals = new DaemonTerminalService(store, {
         getSettingsForCwd: async (cwd) =>

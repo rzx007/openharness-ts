@@ -55,7 +55,13 @@ export interface EnvironmentProcess {
 export interface EnvironmentProcessOptions {
   cwd?: string;
   env?: Record<string, string>;
+  owner?: EnvironmentExecutionOwner;
   signal?: AbortSignal;
+}
+
+export interface EnvironmentExecutionOwner {
+  kind: "agent" | "terminal" | "background" | "hook" | "mcp";
+  id: string;
 }
 
 export interface EnvironmentProcessExecutor {
@@ -72,6 +78,7 @@ export interface EnvironmentProcessExecutor {
 export interface EnvironmentTerminalPrepareOptions {
   cwd?: string;
   shell?: string;
+  owner?: EnvironmentExecutionOwner;
   cols: number;
   rows: number;
 }
@@ -140,6 +147,19 @@ export interface ExecutionEnvironmentHandle {
   readonly files: EnvironmentFileSystem;
   readonly paths: EnvironmentPathResolver;
   release(): Promise<void>;
+}
+
+export interface ExecutionEnvironmentDaemonIdentity {
+  installationId: string;
+  daemonOwnerId: string;
+  daemonGeneration: number;
+}
+
+export interface ExecutionEnvironmentIdentity
+  extends ExecutionEnvironmentDaemonIdentity {
+  environmentId: string;
+  workspaceOwnerId: string;
+  configHash: string;
 }
 
 export type ExecutionEnvironmentConsumerKind = "agent" | "terminal" | "background";

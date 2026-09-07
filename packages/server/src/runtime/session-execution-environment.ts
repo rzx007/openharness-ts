@@ -4,6 +4,7 @@ import { getSkillsDir, type Settings } from "@openharness/core";
 import {
   createWorkspaceBinding,
   type ExecutionEnvironmentConsumer,
+  type ExecutionEnvironmentDaemonIdentity,
   type ExecutionEnvironmentLease,
 } from "@openharness/environment";
 import type { SessionRecord } from "@openharness/protocol";
@@ -22,6 +23,7 @@ import { resolveEnvironmentOwner } from "./environment-owner.js";
 export function createSessionEnvironmentAcquirer(input: {
   manager: ExecutionEnvironmentManager;
   store: { getSession(id: string): SessionRecord | undefined };
+  daemonIdentity: ExecutionEnvironmentDaemonIdentity;
 }) {
   return async (
     session: SessionRecord,
@@ -47,14 +49,16 @@ export function createSessionEnvironmentAcquirer(input: {
     const lease = await input.manager.acquire({
       ownerId: owner.ownerId,
       configHash,
+      daemonIdentity: input.daemonIdentity,
       consumer,
-      create: async () => {
+      create: async (identity) => {
         const base = await createExecutionEnvironment({
           config,
           settings,
           binding,
           sessionId: owner.rootSessionId,
           userSkillsRoot: skillsRoot,
+          identity,
         });
         return {
           ...base,

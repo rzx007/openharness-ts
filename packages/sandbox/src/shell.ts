@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess, type StdioOptions } from "node:child_process";
 import { resolve } from "node:path";
 import { loadSettings, type Settings } from "@openharness/core";
+import type { EnvironmentExecutionOwner } from "@openharness/environment";
 import { getSrtAvailability } from "./availability.js";
 import { SandboxUnavailableError } from "./docker-backend.js";
 import { bindProcessAbortSignal } from "./process-control.js";
@@ -15,6 +16,7 @@ export interface CreateShellProcessOptions {
   settings?: Settings;
   policy?: SandboxPolicy;
   env?: Record<string, string>;
+  owner?: EnvironmentExecutionOwner;
   stdio?: StdioOptions;
   signal?: AbortSignal;
   detached?: boolean;
@@ -104,6 +106,7 @@ async function createResolvedProcess(
         cwd: options.cwd,
         settings,
         env: options.env,
+        owner: options.owner,
         stdio: options.stdio,
         signal: options.signal,
         detached: options.detached,

@@ -216,6 +216,7 @@ export class DaemonTerminalService {
       const target = await lease.terminal.prepare({
         cwd: lease.workspace.executionRoot,
         shell: input.shell ?? settings.terminal?.dockerShell,
+        owner: { kind: "terminal", id: terminalId },
         cols: input.cols,
         rows: input.rows,
       });

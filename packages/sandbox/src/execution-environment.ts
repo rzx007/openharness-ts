@@ -12,6 +12,7 @@ import type {
   EnvironmentProcessExecutor,
   EnvironmentTerminalFactory,
   ExecutionEnvironmentHandle,
+  ExecutionEnvironmentIdentity,
   ResolvedEnvironmentPath,
   WorkspaceBinding,
 } from "@openharness/environment";
@@ -40,6 +41,7 @@ export interface CreateExecutionEnvironmentInput {
   binding: WorkspaceBinding;
   sessionId: string;
   userSkillsRoot: string;
+  identity?: ExecutionEnvironmentIdentity;
   onEvent?: (event: "preflight" | "start" | "probe" | "ready") => void;
 }
 
@@ -78,6 +80,7 @@ export async function createExecutionEnvironment(
     cwd: input.binding.hostRoot,
     sessionId: input.sessionId,
     managedMounts,
+    identity: input.identity,
   });
   if (!runtime.status.active || runtime.status.backend !== "docker") {
     await runtime.stop();

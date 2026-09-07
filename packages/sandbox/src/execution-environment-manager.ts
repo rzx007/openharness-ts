@@ -2,15 +2,18 @@ import { randomUUID } from "node:crypto";
 
 import type {
   ExecutionEnvironmentConsumer,
+  ExecutionEnvironmentDaemonIdentity,
   ExecutionEnvironmentHandle,
+  ExecutionEnvironmentIdentity,
   ExecutionEnvironmentLease,
 } from "@openharness/environment";
 
 export interface AcquireExecutionEnvironmentRequest {
   ownerId: string;
   configHash: string;
+  daemonIdentity: ExecutionEnvironmentDaemonIdentity;
   consumer: ExecutionEnvironmentConsumer;
-  create(): Promise<ExecutionEnvironmentHandle>;
+  create(identity: ExecutionEnvironmentIdentity): Promise<ExecutionEnvironmentHandle>;
 }
 
 export interface ExecutionEnvironmentInspection {
@@ -124,7 +127,12 @@ export class ExecutionEnvironmentManager {
       state: "preparing",
       leases: new Map(),
     };
-    record.preparing = request.create();
+    record.preparing = request.create({
+      ...request.daemonIdentity,
+      environmentId: record.environmentId,
+      workspaceOwnerId: record.ownerId,
+      configHash: record.configHash,
+    });
     return record;
   }
 
