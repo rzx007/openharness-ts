@@ -163,7 +163,7 @@ sandbox.backend = "docker"
 sandbox.failIfUnavailable = true
 ```
 
-Desktop 当前只展示“本机”和“Docker”。现有 SRT 配置继续服务 CLI 等高级入口，不在本次 Desktop 设置改造范围内。
+Desktop 当前只展示“本机”和“Docker”。SRT 配置继续服务 CLI 等高级入口，不在本次 Desktop 设置改造范围内。
 
 ### 4.2 Terminal 配置
 
@@ -178,7 +178,7 @@ terminal: {
 
 本机和 Docker 的 Shell 偏好分别保存。Docker Shell 必须在目标容器中探测存在后才能使用。
 
-现有 `ProjectRecord.defaultShell` 继续作为项目级本机 Shell 覆盖，不改写为 Docker Shell。旧值无需迁移文件，读取时按“本机 Shell”解释。
+`ProjectRecord.defaultShell` 是当前终端功能的项目级本机 Shell 覆盖，不改写为 Docker Shell。
 
 Shell 解析顺序：
 
@@ -236,16 +236,13 @@ resolveExecutionEnvironmentConfig({
 
 `desktop_managed` 只接受 local 或 docker，强制 fail-closed，并拒绝 SRT、`extraMounts`、Docker Socket 和 privileged 配置。`cli_advanced` 保留现有 SRT 与 extraMounts 能力，不享受本文的 Desktop 受管隔离承诺。
 
-已有用户配置为 `sandbox.enabled=true, backend="srt"` 时，Desktop 显示“高级 CLI 沙箱配置不受 Desktop 支持”，不创建 Agent Runtime。用户选择“本机”或“Docker”后，Desktop 才写入对应的受管配置；不能把 SRT 静默解释为本机。
+配置为 `sandbox.enabled=true, backend="srt"` 时，Desktop 显示“高级 CLI 沙箱配置不受 Desktop 支持”，不创建 Agent Runtime。用户选择“本机”或“Docker”后，Desktop 才写入对应的受管配置；不能把 SRT 静默解释为本机。
 
-### 4.5 旧配置兼容
+### 4.5 Settings Schema
 
-- 现有 `sandbox.enabled=false` 映射为 local；
-- 现有 `sandbox.enabled=true, backend="docker"` 映射为 docker，并在 Desktop 使用时强制 `failIfUnavailable=true`；
-- 现有 `sandbox.enabled=true, backend="srt"` 按第 4.4 节显示不支持状态；
-- `ProjectRecord.defaultShell` 保留为项目级本机 Shell；
-- 不写入 Session 环境快照，因此不需要迁移历史 Session metadata；
-- Settings 文件格式版本只有在实际新增 `terminal` 字段不兼容时才升级，否则保持现有版本并使用缺省值。
+用户级和项目级 Settings 文件统一要求 `_formatVersion: 2`。保存时始终写入版本 2；读取版本 1、缺少版本或包含废弃字段时直接返回带文件路径的 `unsupported_settings_version` 或 `invalid_settings_field`，不做自动迁移、别名转换或旧字段回退。
+
+用户需要自行删除旧配置并由 OHS 生成新文件，或按照错误提示手动改成版本 2。Session metadata 不保存环境配置，因此不存在 Session 环境迁移。
 
 ### 4.6 Terminal 协议兼容
 
@@ -486,12 +483,12 @@ interface ResolvedEnvironmentPath {
 
 Docker 模式的权限判断以规范化 `executionPath` 为主。审批 UI 首先显示容器路径；存在安全映射时，可以同时显示宿主路径，二者必须指向同一文件。
 
-现有 pathRules 按以下方式兼容：
+版本 2 的 pathRules 使用以下路径规则：
 
 - 相对规则始终相对工作区，Docker 中归一化到 `/workspace`；
-- 位于当前 workspace hostRoot 内的宿主绝对规则映射到 `/workspace`；
-- 位于用户 Skill hostRoot 内的宿主绝对规则映射到 `/opt/openharness/skills`；
-- 无法映射到有效挂载的宿主绝对规则在 Docker 模式不生效，并产生配置诊断；
+- 本机环境允许当前平台的宿主绝对路径；
+- Docker 环境只接受 `/workspace` 或 `/opt/openharness/skills` 下的 POSIX 绝对路径；
+- Docker 环境发现 Windows 或其他宿主绝对路径时直接返回 `invalid_execution_path_rule`，不自动转换；
 - deny 规则优先于 allow 规则；
 - “当前 cwd 自动允许”指 executionRoot，不能用宿主 cwd 绕过。
 
@@ -852,9 +849,10 @@ Docker 交互终端将在下一阶段提供。当前可显式打开本机终端�
 ### 19.1 单元测试
 
 - 配置优先级覆盖五层来源；
-- `desktop_managed` 拒绝 SRT/extraMounts，`cli_advanced` 保持旧能力；
-- 旧 SRT 配置在 Desktop 显示不支持，不能静默变成本机；
-- 旧 `ProjectRecord.defaultShell` 只作为本机 Shell；
+- `_formatVersion: 2` 正常加载，版本 1、缺失版本和废弃字段明确失败；
+- `desktop_managed` 拒绝 SRT/extraMounts，`cli_advanced` 保持 SRT 能力；
+- SRT 配置在 Desktop 显示不支持，不能静默变成本机；
+- `ProjectRecord.defaultShell` 只作为本机 Shell；
 - `local/docker` 与 Terminal `local/sandbox` 映射唯一；
 - WorkspaceBinding 分离 hostRoot 和 executionRoot；
 - `/workspace`、Skills、相对路径、`..` 和符号链接边界；

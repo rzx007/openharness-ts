@@ -26,7 +26,7 @@
 - `packages/environment/src/index.ts`：环境契约公共导出。
 - `packages/environment/src/types.test.ts`：工作区绑定和环境信息的不变量测试。
 - `packages/sandbox/src/execution-config.ts`：Desktop/CLI 环境配置解析与校验。
-- `packages/sandbox/src/execution-config.test.ts`：surface、优先级和兼容测试。
+- `packages/sandbox/src/execution-config.test.ts`：surface、优先级和版本 2 配置测试。
 - `packages/sandbox/src/execution-environment.ts`：Local/Docker 第一阶段环境句柄。
 - `packages/sandbox/src/execution-environment.test.ts`：环境创建顺序、信息与 fail-closed 测试。
 - `packages/tools/src/file/environment-path.ts`：文件工具的执行路径解析适配。
@@ -56,7 +56,7 @@
 - `packages/tools/src/file/read.ts`、`write.ts`、`edit.ts`、`glob.ts`、`grep.ts`：消费环境文件能力。
 - `packages/tools/src/file/__test__/operations.test.ts`、`read.test.ts`、`edit.test.ts`、`glob.test.ts`：容器路径契约测试。
 - `packages/permissions/src/index.ts`：按 execution path 裁决，并携带可选 host path。
-- `packages/permissions/src/index.test.ts`：旧 pathRules 映射与审批路径测试。
+- `packages/permissions/src/index.test.ts`：版本 2 pathRules 路径域与审批路径测试。
 - `packages/permissions/package.json`：增加环境契约依赖。
 - `packages/prompts/src/index.ts`：接收已经探测的环境信息。
 - `packages/prompts/src/index.test.ts`：本机/Docker 环境段测试。
@@ -182,7 +182,7 @@ git add packages/environment pnpm-lock.yaml
 git commit -m "feat(environment): define execution environment contracts"
 ```
 
-## 任务 2：实现受管环境配置解析
+## 任务 2：实现版本 2 受管环境配置解析
 
 **文件：**
 
@@ -194,7 +194,7 @@ git commit -m "feat(environment): define execution environment contracts"
 - 修改：`packages/sandbox/package.json`
 - 修改：`pnpm-lock.yaml`
 
-- [ ] **步骤 1：编写 surface 和兼容测试**
+- [ ] **步骤 1：编写 surface 和版本测试**
 
 ```ts
 it("maps the Desktop Docker choice to fail-closed Docker", () => {
@@ -227,6 +227,13 @@ it("keeps advanced CLI SRT configuration valid", () => {
     settings: settings({ sandbox: { enabled: true, backend: "srt" } }),
     cwd: "/repo",
   })).toMatchObject({ mode: "legacy_srt", backend: "srt" });
+});
+
+it("rejects settings files outside schema version 2", async () => {
+  await expect(loadSettingsFile(fileWith({ _formatVersion: 1 })))
+    .rejects.toMatchObject({ code: "unsupported_settings_version" });
+  await expect(loadSettingsFile(fileWith({ sandbox: { enabled: false } })))
+    .rejects.toMatchObject({ code: "unsupported_settings_version" });
 });
 ```
 
@@ -263,6 +270,8 @@ export function resolveExecutionEnvironmentConfig(input: {
 
 `cli_advanced` 继续返回现有 Sandbox/SRT 策略所需信息，不能被 Desktop 限制误伤。
 
+Settings 加载器只接受 `_formatVersion: 2`。删除 `sandbox.runtime` 等废弃字段处理；版本 1、缺少版本和废弃字段返回包含配置路径的结构化错误，不自动改写文件。
+
 - [ ] **步骤 4：增加 Terminal 设置并验证深合并**
 
 ```ts
@@ -276,13 +285,13 @@ export interface Settings {
 }
 ```
 
-为 `DEFAULT_SETTINGS` 增加 `terminal: { dockerShell: "/bin/sh" }`，并像 Sandbox 一样合并用户、项目、环境变量和 CLI 层，避免浅合并丢失另一个 Shell。
+为 `DEFAULT_SETTINGS` 增加 `terminal: { dockerShell: "/bin/sh" }`，并像 Sandbox 一样合并用户、项目、环境变量和 CLI 层，避免浅合并丢失另一个 Shell。`saveSettings` 和 `saveProjectSettings` 始终写入 `_formatVersion: 2`。
 
 - [ ] **步骤 5：运行配置相关测试**
 
 运行：`pnpm --filter @openharness/core test -- settings && pnpm --filter @openharness/sandbox test -- execution-config.test.ts`
 
-预期：全部通过，旧 `defaultShell` 测试保持通过。
+预期：全部通过，`ProjectRecord.defaultShell` 仍作为当前项目的本机 Shell。
 
 - [ ] **步骤 6：提交**
 
@@ -491,9 +500,9 @@ it("rejects traversal and symlink escape", async () => {
 });
 ```
 
-- [ ] **步骤 2：编写 PermissionChecker 兼容测试**
+- [ ] **步骤 2：编写 PermissionChecker 路径域测试**
 
-覆盖相对规则、工作区内 Windows 绝对规则、Skill 根绝对规则和未挂载绝对规则。审批结果必须包含 executionPath，hostPath 只能来自真实挂载。
+覆盖相对规则、本机绝对规则、Docker `/workspace` 规则、Docker Skill 根规则和 Docker 中非法的 Windows 绝对规则。非法路径规则必须返回 `invalid_execution_path_rule`，不做宿主到容器的配置迁移。审批结果必须包含 executionPath，hostPath 只能来自真实挂载。
 
 - [ ] **步骤 3：运行测试并确认失败**
 
@@ -506,11 +515,11 @@ it("rejects traversal and symlink escape", async () => {
 ```ts
 export interface ToolContext {
   cwd: string; // executionRoot
-  environment?: ExecutionEnvironmentHandle;
+  environment: ExecutionEnvironmentHandle;
 }
 ```
 
-Docker Runtime 必须提供 environment。本机兼容调用缺省时构造 LocalEnvironment，避免每个工具自行判断平台。
+所有 Runtime 都必须提供 environment。测试和独立工具宿主显式构造 LocalEnvironment，避免每个工具自行判断平台。
 
 - [ ] **步骤 5：改造文件工具**
 
