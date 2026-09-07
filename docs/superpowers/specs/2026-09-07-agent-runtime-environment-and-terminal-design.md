@@ -1,82 +1,79 @@
 # Agent 运行环境与集成终端设计
 
-> 状态：设计草案，等待审查  
-> 日期：2026-09-07  
-> 范围：OpenHarness Desktop、Agent Runtime、Docker Sandbox、Terminal
+> 状态：已根据独立审查完整修订，等待最终审查
+>
+> 日期：2026-09-07
+>
+> 范围：OpenHarness Desktop、Agent Runtime、Docker Sandbox、Terminal、文件工具与 Skill
 
-## 1. 背景
+## 1. 目标
 
-OpenHarness Desktop 的设置页计划提供两项职责不同、但相互关联的配置：
+OpenHarness Desktop 提供两种 Agent 运行环境：
 
-- **智能体运行环境**：本机或 Docker 沙箱。
-- **集成终端 Shell**：用户打开集成终端时使用的 Shell，例如 PowerShell 或容器内 Bash。
+- 本机；
+- Docker 沙箱。
 
-运行环境决定新终端在哪里启动，Shell 配置再决定使用该环境中的哪个命令解释器。本文明确它们分别控制什么、Docker 模式下文件和命令如何运行，以及当前实现与目标行为之间的差距。
+Agent 控制程序继续在宿主机运行。Agent 发起的命令、脚本、文件操作、后台进程和交互终端通过统一执行环境运行。
 
-## 2. 核心结论
+Docker 模式只把明确允许的宿主目录挂载进容器。当前阶段允许读写两个目录：
 
-1. “智能体运行环境”控制的是 **Agent 发起的工作负载在哪里执行**，不是把整个 Agent 控制程序搬进 Docker。
-2. Agent 控制程序、模型调用、权限审批、任务状态和 Desktop/daemon 仍在宿主机运行。
-3. 选择 Docker 后，Agent 的命令、文件操作、后台任务和交互终端都应进入同一个 Docker 沙箱。
-4. 用户集成终端默认跟随 Agent 运行环境，让用户和 Agent 使用同一套工具、路径和依赖；用户仍可显式新建宿主终端。
-5. “集成终端 Shell”只能选择当前终端目标环境中真实可用的 Shell，不能把宿主 PowerShell 直接套用到 Linux 容器。
-6. Agent Terminal 必须始终跟随 Agent 运行环境，不能通过终端绕开 Docker 沙箱。
-7. Windows 上的项目目录挂载到 Docker 的 `/workspace`。Docker 内的 Agent 命令统一使用 Linux 路径和 `/bin/sh` 语法。
-8. Docker 不可用时必须明确失败，不能静默回退到宿主机。
-9. 当前阶段将整个用户级 Skill 目录读写挂载到 Docker，优先保证 Skill 引用、脚本和资源的兼容性；接受其跨项目、跨会话持久修改风险，后续再收紧为只读或按需暴露。
-10. “不在项目中工作”的会话仍必须拥有独立的受管工作目录；Docker 只挂载该会话目录，不挂载整个用户文档目录。
-11. Agent 核心不处理 Docker 启动、挂载、路径转换或进程创建细节；这些职责统一收口到执行环境层。Agent 只接收真实环境信息并通过统一接口使用工具。
+```text
+当前工作区        → /workspace
+用户级 Skill 目录 → /opt/openharness/skills
+```
 
-## 3. 术语
+容器对这两个目录的修改会直接影响宿主文件。其他宿主目录在当前版本中不提供给 Agent。
+
+## 2. 核心原则
+
+1. Agent 核心不处理 Docker 启动、挂载、路径转换和进程创建细节。
+2. Shell、文件工具、Agent Terminal 和默认用户集成终端使用同一个有效执行环境。
+3. 环境启动并通过探测后，才生成 Agent 可见的环境信息。
+4. Docker 模式下，Agent 和文件工具统一使用容器路径。
+5. 安全边界由执行环境和 Docker 强制实现，不能只依赖提示词。
+6. Docker 不可用时明确失败，不允许静默回退到宿主执行。
+7. Agent Terminal 必须跟随 Agent 环境，不能作为绕过沙箱的通道。
+8. 用户集成终端默认跟随 Agent 环境，同时允许用户显式打开宿主终端。
+9. 项目外会话仍有独立受管工作区，不存在“无 cwd 的 Agent Runtime”。
+10. 用户级 Skill 目录当前采用读写挂载；这是明确接受的持久化风险，后续再收紧。
+
+## 3. 术语与边界
 
 ### 3.1 宿主环境
 
-运行 OpenHarness Desktop、daemon 和 Docker Desktop 的操作系统。例如 Windows。
+运行 OpenHarness Desktop、daemon 和 Docker Desktop 的系统，例如 Windows。
 
 ### 3.2 Agent 控制程序
 
-负责模型调用、工具调度、权限检查、审批、任务状态和结果回传的 OpenHarness 进程。Docker 模式下它仍运行在宿主机。
+负责模型调用、工具调度、权限审批、任务状态、diff 展示和结果回传的宿主进程。
 
 ### 3.3 Agent 工作负载
 
-Agent 为完成任务而触发的实际操作，包括：
+包括：
 
-- Shell 命令；
+- 短命令和 argv 进程；
 - 后台进程；
-- 文件读取、写入、编辑和搜索；
+- Read、Write、Edit、Glob 和 Grep；
 - Hook 和 Cron 命令；
 - LSP、ripgrep 和 MCP stdio 子进程；
-- Agent 通过 `TerminalOpen` 创建的交互终端。
+- Agent 通过 `TerminalOpen` 创建的交互终端；
+- 非隔离子 Agent 及隔离 worktree 子 Agent 发起的上述操作。
 
 ### 3.4 用户集成终端
 
-用户在 Desktop 终端面板中打开并手动输入命令的终端。它与 Agent 创建的终端不是同一个会话，但默认使用相同的运行环境，方便用户复现 Agent 的命令和问题。
+用户在 Desktop 终端面板中创建并手动操作的终端。它和 Agent Terminal 是不同会话，但默认附着到同一个执行环境。
 
 ### 3.5 Agent Terminal
 
-Agent 通过以下工具组合创建和控制的交互终端：
+Agent 通过下面的工具组合创建和操作的交互终端：
 
 ```text
 TerminalOpen → JobSend → JobRead / JobWait / JobCancel
 ```
 
-它用于 REPL、交互式 CLI，以及需要保留会话状态的命令。
+### 3.6 有效执行环境
 
-### 3.6 执行环境
-
-执行环境是 Agent 工具与本机或 Docker 后端之间的统一边界。它负责：
-
-- 启动、验证和关闭环境；
-- 执行短命令和 argv 进程；
-- 创建交互终端；
-- 读取、写入、编辑和搜索文件；
-- 解析当前环境中的路径；
-- 提供当前环境的真实信息；
-- 强制执行挂载、网络和资源边界。
-
-Agent 核心和各业务工具不应散落 `if local`、`if docker` 分支，也不应直接拼接 `docker exec`。新增 WSL、SSH 或远程容器时，应增加新的执行环境实现，而不是修改 Agent 的决策流程。
-
-概念接口如下，具体 TypeScript 类型在实现计划中落定：
+有效执行环境是工具与具体后端之间唯一的运行边界：
 
 ```text
 ExecutionEnvironment
@@ -84,170 +81,192 @@ ExecutionEnvironment
 ├─ execShell / execProcess
 ├─ openTerminal
 ├─ fileOperations
-├─ resolvePath
-└─ environmentInfo
+├─ resolvePath / presentPath
+├─ environmentInfo
+└─ acquireLease / releaseLease
 ```
 
-## 4. 配置边界
+`LocalEnvironment` 和 `DockerEnvironment` 实现同一契约。Agent 核心和业务工具不能散落 `if local`、`if docker`，也不能直接拼接 `docker exec`。未来增加 WSL、SSH 或远程容器时，应增加执行环境实现。
 
-### 4.1 智能体运行环境
+## 4. 配置模型
 
-建议取值：
+### 4.1 复用现有 Sandbox 配置
+
+Desktop 不新增第二个 Agent 环境真值。设置页“智能体运行环境”写入现有字段：
 
 ```text
-local   本机
-docker  Docker 沙箱
+本机：
+sandbox.enabled = false
+
+Docker：
+sandbox.enabled = true
+sandbox.backend = "docker"
+sandbox.failIfUnavailable = true
 ```
 
-它决定所有 Agent 工作负载的执行边界。
+Desktop 当前只展示“本机”和“Docker”。现有 SRT 配置继续服务 CLI 等高级入口，不在本次 Desktop 设置改造范围内。
 
-### 4.2 集成终端 Shell
+### 4.2 Terminal 配置
 
-可选 Shell 由终端目标环境决定：
+新增用户设置：
 
-```text
-本机：PowerShell | Command Prompt | Git Bash
-Docker：/bin/sh | /bin/bash（镜像中存在时）
+```ts
+terminal: {
+  localShell?: string;
+  dockerShell?: "/bin/sh" | "/bin/bash";
+}
 ```
 
-该配置只决定用户集成终端在目标环境中启动哪个 Shell，不直接控制 Agent 的普通 Shell 工具。Windows 的 `powershell.exe` 通常不存在于 Linux 容器中，因此 Docker 模式不能继续沿用宿主 PowerShell 配置。
+本机和 Docker 的 Shell 偏好分别保存。Docker Shell 必须在目标容器中探测存在后才能使用。
 
-用户集成终端默认跟随 Agent 运行环境。终端“新建”菜单提供一次性的“在本机打开”入口，供用户管理 Docker、Git 或宿主文件；该入口不改变 Agent 的运行环境，也不改变后续终端的默认行为。
+现有 `ProjectRecord.defaultShell` 继续作为项目级本机 Shell 覆盖，不改写为 Docker Shell。旧值无需迁移文件，读取时按“本机 Shell”解释。
 
-本机和 Docker 的 Shell 偏好应分别保存。例如用户从“本机 + PowerShell”切到“Docker + Bash”，再切回本机时，仍恢复 PowerShell，不能把 Bash 当作本机配置。
-
-### 4.3 推荐组合
-
-| Agent 运行环境 | 默认用户集成终端 | Agent 命令 | Agent Terminal |
-|---|---|---|---|
-| 本机 | 用户选择的本机 Shell | 宿主 Shell | 本机默认 Shell，或 Agent 显式指定的本机 Shell |
-| Docker | 用户选择的容器 Shell | 容器 `/bin/sh` | 容器 Shell |
-
-默认用户集成终端与 Agent 使用同一个环境，但它们仍是相互独立的会话。需要宿主终端时，用户通过“在本机打开”显式创建，而不是让全局默认长期处于混合环境。
-
-这里统一的是 **环境、工作目录和路径风格**，不是强制所有入口使用同一个 Shell 名称。例如 Docker 中 Agent 普通命令固定通过 `/bin/sh -c` 执行，而用户集成终端可以选择镜像中真实存在的 `/bin/bash`。
-
-切换运行环境只影响后续创建的 Agent Runtime 和终端，不迁移已经运行的进程或终端会话。存在活跃任务时应阻止切换并说明原因；没有活跃任务时关闭旧 Runtime，再按新环境创建。
-
-## 5. Docker 模式的运行流程
+Shell 解析顺序：
 
 ```text
-用户发送请求
+本机用户终端：请求显式 shell
+              > ProjectRecord.defaultShell
+              > settings.terminal.localShell
+              > 操作系统默认 Shell
+
+Docker 用户终端：请求显式 shell
+                > settings.terminal.dockerShell
+                > /bin/sh
+
+Docker Agent Terminal：Agent 显式请求的 /bin/sh 或 /bin/bash
+                     > /bin/sh
+```
+
+Agent 在 Docker 中不能请求宿主可执行文件。其他 Shell 路径只有通过容器内存在性检查和允许列表后才能使用。
+
+### 4.3 Session 环境快照
+
+新增会话运行元数据：
+
+```ts
+metadata.runtime.executionEnvironment?: "local" | "docker";
+metadata.runtime.executionConfigHash?: string;
+```
+
+新会话创建时保存当时解析出的环境类型和配置指纹。已有会话缺少该字段时，在第一次 warm 前按当前有效设置解析并写入快照。
+
+全局默认设置变化只影响之后创建的会话。已有会话保留自己的快照，直到用户明确执行“使用当前默认环境重新启动会话”。
+
+### 4.4 配置优先级
+
+环境解析使用唯一入口 `resolveExecutionEnvironmentConfig()`，优先级由低到高为：
+
+1. 默认值；
+2. 用户级 `settings.json`；
+3. 项目级 `settings.json`，项目外会话跳过；
+4. 会话环境快照或会话级覆盖；
+5. `OPENHARNESS_SANDBOX_*` 环境变量；
+6. CLI 显式覆盖。
+
+进程环境变量和 CLI 覆盖属于运行时运维控制，可以暂时覆盖会话快照，但不得静默改写持久化快照。
+
+### 4.5 协议兼容
+
+Terminal 协议现有 `runtime: "local" | "sandbox"` 保持兼容：
+
+- `local` 表示显式宿主终端；
+- `sandbox` 表示附着到所属会话的有效 Docker 环境。
+
+Desktop 内部的环境类型使用 `local | docker`。协议层只在边界处完成 `docker → sandbox` 映射，不能把二者作为两套独立配置。
+
+## 5. 环境创建与切换事务
+
+### 5.1 新会话
+
+```text
+解析候选配置
     ↓
-宿主机上的 Agent 控制程序
-    ├─ 调用模型
-    ├─ 判断权限和审批
-    ├─ 维护会话与任务状态
-    └─ 调度 Agent 工具
-            ↓
-      Docker 沙箱路由
-            ↓
-      项目容器 /workspace
-            ├─ /bin/sh 命令
-            ├─ 文件读写和搜索
-            ├─ 后台进程
-            ├─ Agent Terminal
-            └─ 默认用户集成终端
-            ↓
-      输出返回宿主 Agent
-            ↓
-      Agent 向用户回答
-```
-
-### 5.1 容器生命周期
-
-启动 Agent Runtime 时，根据项目目录和会话范围准备 Docker 容器。项目级复用模式可保留容器供同一项目的后续会话使用；临时模式在 Runtime 结束时停止并删除容器。
-
-### 5.2 工作区挂载
-
-Windows 项目：
-
-```text
-D:\code\personal-project\OpenHarness-ts
-```
-
-容器内对应：
-
-```text
-/workspace
-```
-
-两边指向同一批项目文件，不是复制两份。容器默认不应看到 Windows 用户目录、桌面或工作区之外的其他宿主路径。
-
-### 5.3 命令执行
-
-Agent 发起：
-
-```bash
-pnpm test
-```
-
-Docker 模式下等价于：
-
-```text
-docker exec -w /workspace <container> /bin/sh -c "pnpm test"
-```
-
-Shell 工具接收整段命令文本，不能可靠地把 PowerShell 命令自动翻译成 POSIX 命令。因此必须在生成命令之前把真实执行环境告诉 Agent。
-
-### 5.4 文件工具
-
-`Read`、`Write`、`Edit`、`Glob` 和 `Grep` 根据当前执行环境解释路径。Docker 模式统一接受和返回容器路径：
-
-```text
-绝对路径：/workspace/src/index.ts
-相对路径：src/index.ts，以 /workspace 为基准
-```
-
-路径规范化、`..`、符号链接和实际文件操作都依据容器文件系统判断。允许访问的根目录是实际挂载到容器的 `/workspace` 和 `/opt/openharness/skills`；文件工具不先使用 Windows 路径规则解释 `/workspace/...`。
-
-权限批准和 diff 展示仍由宿主控制面编排。只有 Desktop 需要在资源管理器中打开文件等宿主操作时，环境层才根据真实挂载信息把容器路径转换为宿主路径。批准不等于自动增加 Docker 挂载。
-
-## 6. Agent 如何使用运行环境
-
-Agent 核心不需要理解 Docker 的实现方式。执行环境启动成功后生成一份有效环境信息，系统提示词把它告诉 Agent；工具调用则进入同一个执行环境实例。
-
-```text
-用户配置
+校验挂载与 Docker 配置
     ↓
-启动并验证执行环境
+准备候选环境
+    ↓
+执行健康探测
     ↓
 生成 EffectiveEnvironmentInfo
-    ├─ 注入 Agent 系统提示词
-    └─ 绑定 Shell、文件和终端工具
+    ↓
+保存 Session 环境快照
+    ↓
+发布环境句柄并创建 Agent
 ```
 
-环境信息必须来自已经启动并验证的真实环境，不能只根据用户选择推测。Docker 没有成功启动时，不得向 Agent 宣称当前运行在 Docker 中。
+任一步失败都关闭候选环境，不创建 Agent，不执行任何宿主回退命令。
 
-环境信息包括：
+### 5.2 修改全局默认环境
 
-- 运行环境类型；
-- 宿主系统和实际执行系统；
-- Shell 及其命令语法；
-- 路径风格；
-- 当前工作目录；
-- Home 和临时目录；
-- 项目目录、用户级 Skill 目录及其读写方式；
-- 网络模式；
-- Git 仓库和分支信息；
-- 当前环境的已知限制。
+设置页切换全局默认值时：
 
-环境信息不枚举可执行文件。Agent 需要某个程序时，可以在当前环境中按需检查。
+1. 归一化候选设置；
+2. 校验 Docker CLI、daemon、镜像、挂载和保留路径；
+3. 准备并探测候选环境；
+4. 使用临时文件加原子 rename 保存设置；
+5. 发布新的全局默认值；
+6. 关闭仅用于预检的候选环境。
 
-### 6.1 本机模式应注入
+失败时保留旧设置，并在 UI 显示具体原因。已有会话和终端不会迁移。
+
+### 5.3 重新启动已有会话
+
+只有会话没有活跃工作负载时才能切换。活跃工作负载包括：
+
+- 正在执行的 Agent run；
+- 后台 Shell；
+- Agent Terminal；
+- 跟随 Agent 环境的用户终端；
+- 共享该环境的子 Agent。
+
+显式宿主终端不占用 Docker 环境，因此不阻止切换。
+
+切换顺序为：准备并探测目标环境 → 原子更新会话快照和活动环境指针 → 释放旧环境。发布前失败时继续使用旧环境；发布后清理失败只记录清理错误，不能把新环境回滚成不一致状态。
+
+### 5.4 可复用容器配置不匹配
+
+配置指纹不匹配时返回 `rebuild_required`，不复用旧容器，也不静默删除。Desktop 显示旧容器与新配置不一致，并提供明确的“重建沙箱”操作。
+
+重建前必须确认该容器没有环境 lease 或活跃工作负载。重建只删除 OHS 通过名称和 label 双重验证的目标容器。
+
+## 6. 环境信息
+
+环境信息来自已启动并验证的环境：
+
+```ts
+EffectiveEnvironmentInfo {
+  kind: "local" | "docker";
+  hostOs: string;
+  executionOs: string;
+  shell: string;
+  shellDialect: "powershell" | "cmd" | "posix";
+  pathStyle: "windows" | "posix";
+  cwd: string;
+  homeDir: string;
+  tempDir: string;
+  mounts: Array<{ path: string; mode: "ro" | "rw"; purpose: string }>;
+  networkMode: string;
+  git?: { repository: boolean; branch?: string };
+  limitations: string[];
+}
+```
+
+环境信息不枚举可执行文件，也不暴露完整 `PATH`、凭据或秘密环境变量。Agent 需要某个程序时，在当前环境中按需检查。
+
+本机示例：
 
 ```text
 # Execution Environment
 - Runtime: local
 - OS: Windows
 - Shell: PowerShell
-- Working directory: D:\code\project
 - Path style: Windows
+- Working directory: D:\code\project
 - Home directory: C:\Users\<user>
 - Temporary directory: C:\Users\<user>\AppData\Local\Temp
 ```
 
-### 6.2 Docker 模式应注入
+Docker 示例：
 
 ```text
 # Execution Environment
@@ -255,234 +274,355 @@ Agent 核心不需要理解 Docker 的实现方式。执行环境启动成功后
 - Host OS: Windows
 - Execution OS: Linux
 - Shell: /bin/sh
-- Working directory: /workspace
 - Path style: POSIX
+- Working directory: /workspace
 - Home directory: /root
 - Temporary directory: /tmp
 - Mounts:
   - /workspace: read-write
   - /opt/openharness/skills: read-write
-- Network: <effective mode>
+- Network: bridge
 - Host paths outside the effective mount list are unavailable
 ```
 
-“宿主环境”和“执行环境”必须分开描述，且以执行环境作为命令和路径的依据。Shell 工具不会翻译任意 PowerShell/POSIX 命令，文件工具也不要求 Agent 提供宿主路径。
+Agent 系统提示词和全部工具必须绑定同一个 `ExecutionEnvironment`。不能先按宿主生成提示词，再把工具切换到 Docker。
 
-## 7. 用户级 Skill 在 Docker 中的访问
+## 7. Docker 挂载模型
 
-用户级 Skill 默认存放在宿主配置目录：
+### 7.1 受管挂载
 
-```text
-~/.openharness-ts/skills
+用结构化类型代替内部原始 `-v` 字符串：
+
+```ts
+ManagedMount {
+  purpose: "workspace" | "user_skills";
+  source: string;
+  target: "/workspace" | "/opt/openharness/skills";
+  mode: "rw";
+}
 ```
 
-Skill 的发现、注册和 `SKILL.md` 读取继续由宿主 Agent 控制程序完成。为了让 Docker 内的 Agent 命令能够直接读取 Skill 的 `references`、执行 `scripts` 并使用 `assets`，当前阶段在启动容器时挂载整个用户级 Skill 目录：
+所有平台的 Docker 工作目录统一为 `/workspace`。Windows、macOS 和 Linux 的差异只存在于宿主 `source`。
+
+| 用途 | 宿主来源 | 容器目标 | 模式 |
+|---|---|---|---|
+| 项目会话 | 项目规范化绝对路径 | `/workspace` | rw |
+| 项目外根会话 | 当前根会话的受管 `xN` 目录 | `/workspace` | rw |
+| 用户级 Skill | `getSkillsDir()` 的规范化结果 | `/opt/openharness/skills` | rw |
+
+启动前必须安全创建用户级 Skill 目录。工作区必须已经存在且为目录，不能由 Docker `-v` 隐式创建。
+
+### 7.2 `extraMounts`
+
+Desktop 受管 Docker 环境当前不支持 `sandbox.docker.extraMounts`。解析到非空值时，预检直接失败并说明需要移除额外挂载。
+
+CLI 原有高级 Sandbox 流程可以继续支持 `extraMounts`，但不属于本文的 Desktop 隔离承诺。Desktop 不能在存在任意额外挂载时显示“只开放工作区和 Skills”。
+
+保留目标 `/workspace` 和 `/opt/openharness/skills` 不能被其他挂载覆盖，不能挂载 Docker Socket，也不能启用 privileged 容器。
+
+### 7.3 配置指纹
+
+可复用容器的配置指纹至少包含：
+
+- 镜像；
+- 网络、DNS 和代理；
+- CPU 与内存限制；
+- 每个受管挂载的规范化 source、target、mode 和 purpose；
+- 容器内进程监督协议版本。
+
+Skill 文件内容变化不改变指纹，因为 bind mount 会立即反映内容；Skill 根目录或挂载模式变化必须改变指纹。
+
+### 7.4 文件系统影响
+
+容器可以直接修改两个 rw 挂载中的宿主文件。容器自身 `/tmp`、`/root` 等未挂载路径不会直接修改宿主文件，但网络请求、端口和资源消耗仍可能产生外部影响。
+
+## 8. 路径契约与文件工具
+
+### 8.1 模型可见路径
+
+Docker 模式下所有 Agent 输入和工具结果使用 POSIX 容器路径：
 
 ```text
-宿主：~/.openharness-ts/skills
-容器：/opt/openharness/skills
-模式：读写
+工作区绝对路径：/workspace/src/index.ts
+工作区相对路径：src/index.ts
+用户 Skill：    /opt/openharness/skills/review/SKILL.md
 ```
 
-Agent 在 Docker 中加载 Skill 后，收到的 `Skill root` 必须是容器路径 `/opt/openharness/skills/<skill-name>`，不能继续返回宿主 Windows 路径。Skill 脚本默认从该目录读取资源；任务产物仍应优先写入 `/workspace` 或容器 `/tmp`。
+相对路径以 `/workspace` 为基准。
 
-### 7.1 当前阶段接受的风险
+### 8.2 文件操作
 
-读写挂载意味着 Docker 内的 Agent 可以修改、创建或删除用户级 Skill，并且变更立即持久化到宿主机。这些修改会影响其他项目和后续会话，风险范围大于普通项目文件。
+Read、Write、Edit、Glob 和 Grep 通过 `ExecutionEnvironment.fileOperations` 执行。Docker 后端在容器中完成：
 
-当前阶段明确接受这项风险，以换取以下能力：
+- 路径解析与规范化；
+- `..` 越界检查；
+- 符号链接真实目标检查；
+- 文件读写；
+- Glob 和 Grep 搜索。
 
-- Skill 中引用的相对路径可以直接使用；
-- Skill 附带脚本无需额外复制即可运行和更新；
-- 用户可以让 Agent 安装、修改和调试用户级 Skill；
-- 项目级复用容器不需要在每次 Skill 调用时重新挂载。
+允许的根目录来自真实挂载表，即 `/workspace` 和 `/opt/openharness/skills`。文件工具不先使用 Windows `node:path` 解释 `/workspace/...`。
 
-### 7.2 当前阶段最低防护
+### 8.3 宿主路径展示
 
-即使采用读写挂载，也必须保留以下约束：
+只有 Desktop 需要用资源管理器打开文件、展示宿主位置或生成宿主侧 diff 时，才调用 `environment.toHostPath(containerPath)`。转换必须基于真实挂载表，不能靠字符串猜测。
 
-- 只挂载用户级 `skills` 子目录，不能挂载整个 `~/.openharness-ts`；
-- 不把 `credentials.json`、数据库、会话记录、用户配置或其他宿主目录暴露给容器；
-- 用户级 Skill 不得存放密码、Token、私钥等秘密；
-- 环境提示词明确说明用户级 Skill 是宿主持久资源，修改会影响其他项目和未来会话；
-- Docker 不可用时，Skill 脚本不得静默回退到宿主机执行。
+无法映射的容器路径不提供宿主“打开文件”操作。权限批准不能自动创建新挂载。
 
-必须明确：读写挂载本身已经把修改能力交给容器。普通 Shell 命令无法可靠判断是在修改项目还是用户级 Skill，因此当前阶段不能承诺对每次 Skill 修改单独触发路径级审批；这属于本阶段接受的风险，而不是已有安全保护。
+## 9. Skill 访问与路径
 
-### 7.3 后续安全演进
+### 9.1 加载和挂载
 
-后续可以在不改变 Skill 目录结构的前提下，将挂载策略收紧为：
+Skill 的发现、注册和 `SKILL.md` 内容读取继续由宿主控制面完成。Docker 启动时把 `getSkillsDir()` 返回的用户级 Skill 根目录读写挂载到 `/opt/openharness/skills`。
 
-1. 整个用户级 Skill 目录只读挂载；或
-2. 只把当前调用的 Skill 按需、只读暴露给容器。
+读写挂载允许 Agent 安装、修改和删除用户级 Skill，变更会影响其他项目和后续会话。用户级 Skill 不得保存 Token、密码或私钥。
 
-这两项属于后续安全增强，不作为当前阶段的交付要求。
+### 9.2 Skill 路径呈现
 
-## 8. 不在项目中工作的会话
+SkillRegistry 内部保留规范化宿主来源路径。Skill 工具通过当前环境的 `presentPath()` 生成模型可用路径：
 
-“不在项目中工作”不表示会话没有工作目录。Desktop 在创建会话前为它分配独立的受管工作区：
+| Skill 来源 | `Skill file` | `Skill root` |
+|---|---|---|
+| 用户级 | `/opt/openharness/skills/<name>/SKILL.md` | `/opt/openharness/skills/<name>` |
+| 项目级 | `/workspace/<relative>/SKILL.md` | `/workspace/<relative>` |
+| Bundled | `(embedded)` | `(embedded)` |
+| 未挂载的 Plugin Skill | `(unavailable in this environment)` | `(unavailable in this environment)` |
+
+`Skill file` 和 `Skill root` 使用同一个通用路径呈现函数。Skill 工具本身不包含 Windows 或 Docker 特殊分支，也不能把无法访问的宿主绝对路径伪装成可用路径。
+
+Plugin Skill 的 Markdown 正文仍可由宿主返回；附带引用和脚本在 Plugin 根目录未挂载时明确标记不可用。本阶段不新增 Plugin 目录挂载。
+
+### 9.3 运行中变更
+
+- 已有文件的修改通过 bind mount 立即对容器可见；
+- Skill 工具每次调用前刷新磁盘定义；
+- ListSkills 每次调用前刷新目录清单；
+- 系统提示词中的 Skill 摘要在 Agent Runtime 创建时生成，新建或删除 Skill 后需重建 Runtime 才更新；
+- Skill 内容更新不要求重建 Docker 容器；
+- Skill 根路径或挂载配置变化按配置指纹处理。
+
+## 10. 容器所有权与 lease
+
+### 10.1 Environment Manager
+
+daemon 持有唯一 `ExecutionEnvironmentManager`。Agent Runtime、Agent Terminal 和用户沙箱终端只能向 Manager 获取环境句柄，不能各自调用 `startSandboxRuntime()` 创建容器。
+
+环境记录包含：
 
 ```text
-Windows：%USERPROFILE%\Documents\OpenHarness\YYYY-MM-DD\xN
-Docker： /workspace
+environmentId
+state: preparing | ready | draining | stopped | failed
+workspaceOwnerId
+configHash
+containerId
+leases
+activeJobs
 ```
 
-会话不保存 `projectId`，但始终保存有效的 `cwd`，并在元数据中标记：
+### 10.2 Workspace Owner
+
+`workspaceOwnerId` 决定哪些消费者共享环境：
+
+- 项目复用模式：规范化项目工作区；
+- 非复用模式：根会话 ID；
+- 项目外根会话及其 fork：项目外根会话 ID；
+- 非隔离子 Agent：继承父环境；
+- 隔离 worktree 子 Agent：以自己的 worktree 路径形成新 owner。
+
+同一 owner 与同一 `configHash` 只创建一个环境记录。
+
+### 10.3 Lease 规则
+
+以下消费者取得 lease：
+
+- 根 Agent Runtime；
+- 共享环境的子 Agent Runtime；
+- Agent Terminal；
+- 跟随 Agent 环境的用户终端。
+
+后台进程记录为 `activeJobs`，由创建它的 Runtime 管理。关闭一个终端只释放自己的 lease，不能停止其他终端或 Agent 使用的环境。
+
+环境只有在 lease 为零且 activeJobs 已清理后才能释放。可复用容器释放环境句柄时保留容器，但必须停止本次 Runtime 启动的残留进程；临时容器在最后一个 lease 释放后停止并删除。
+
+## 11. 交互终端
+
+### 11.1 用户终端
+
+默认用户终端取得当前会话的环境 lease：
+
+```text
+本机会话   → 本机 PTY
+Docker 会话 → 当前 Docker 环境中的 PTY
+```
+
+终端“新建”菜单额外提供“在本机打开”。显式宿主终端使用 `runtime: local`，不改变 Agent 环境。
+
+### 11.2 Agent Terminal
+
+Agent Terminal 始终从 Agent 当前环境取得 lease。Docker 模式下忽略宿主 Shell 配置，只允许已经验证存在的容器 Shell。
+
+### 11.3 Docker PTY
+
+Docker 交互终端必须使用真实 PTY/TTY 通道，不能用普通 stdin/stdout pipe 冒充。后端需支持：
+
+- 交互 Shell，例如 `/bin/sh -i` 或 `/bin/bash -i`；
+- 输入和实时输出；
+- resize 和 `SIGWINCH`；
+- Ctrl-C/interrupt；
+- EOF；
+- terminate；
+- 关闭单个 exec 会话时停止其容器内进程组，不停止共享容器。
+
+当前 `LocalTerminalProvider.createSandboxTerminal()` 的普通管道实现不满足该契约，应列为待替换实现。
+
+### 11.4 Terminal 协议的项目外支持
+
+`TerminalCreateRequest` 和 `TerminalSessionInfo` 的 `projectId` 改为可选。创建请求必须能由以下任一作用域解析：
+
+```text
+项目终端：projectId
+会话终端：sessionId
+```
+
+服务端从 ProjectStore 或 SessionStore 解析可信 cwd，不信任渲染进程任意提供的 cwd。若请求同时携带 cwd，只允许它等于解析后的 cwd。
+
+Agent Terminal Host 使用所属 Agent 环境的 cwd，不要求会话具有 projectId。因此项目外会话能够创建 Agent Terminal 和用户集成终端。
+
+## 12. 项目外会话、fork 与子 Agent
+
+### 12.1 根会话
+
+独立创建的项目外根会话在系统 Documents 下分配独立目录：
+
+```text
+%USERPROFILE%\Documents\OpenHarness\YYYY-MM-DD\xN
+```
+
+会话没有 projectId，但保存 cwd 和：
 
 ```text
 workspaceMode: outside_project
+workspaceOwnerId: outside-root-session-id
 ```
 
-Agent Runtime、Docker Sandbox、文件工具和终端继续以 `cwd + sessionId` 工作，不需要单独实现一套 Projectless Runtime。
+Docker 只把该 `xN` 目录挂载为 `/workspace`，不能挂载整个 Documents。
 
-### 8.1 配置继承
+### 12.2 Fork
 
-项目外工作区没有项目身份，因此智能体运行环境和终端默认值必须来自用户全局配置，并允许会话级覆盖：
+项目外 fork 有意继承源会话 cwd 和 workspaceOwnerId，以保持文件连续性。它有新的 sessionId，但不分配新的 `xN` 目录。
 
-```text
-用户全局配置
-    ↓
-可选的会话覆盖
-    ↓
-项目外 Agent Runtime
-```
+“不同项目外会话不共享目录”只适用于独立创建的根会话，不适用于 fork。
 
-不能要求项目外受管目录预先存在项目级 `settings.json`，也不能因为缺少项目配置就退回本机执行。
+### 12.3 子 Agent
 
-### 8.2 Docker 挂载
+非隔离子 Agent 继承父 cwd、workspaceOwnerId 和执行环境。隔离子 Agent 获得新的 Git worktree 时，使用该 worktree 作为 workspace，并取得新的环境 owner；无法创建 worktree 时按现有 child environment 规则共享父工作区。
 
-Docker 只挂载当前会话的独立 `xN` 目录：
+### 12.4 清理
 
-```text
-正确：...\OpenHarness\2026-09-07\x1 → /workspace
-错误：整个 %USERPROFILE%\Documents → /workspace
-```
-
-用户级 Skill 仍按第 7 节挂载到 `/opt/openharness/skills`。项目外会话由此同时拥有一个隔离的可写工作区和完整的用户级 Skill 能力。
-
-### 8.3 功能边界
-
-项目外会话正常支持：
-
-- Agent Shell、后台命令和文件工具；
-- Agent Terminal；
-- 跟随 Agent 环境的用户集成终端；
-- 用户级 Skill；
-- 在 `/workspace` 中生成和保存结果。
-
-项目外工作区默认不是 Git 仓库，因此 branch、worktree 和 Git review 等功能应隐藏或显示为不可用。这是正常能力差异，不应阻断普通 Agent 工作。
-
-### 8.4 生命周期与清理
-
-- 会话创建失败时，只自动删除本次刚分配且仍为空的目录；
-- 会话创建成功后保留工作区，确保会话恢复时仍能访问原文件；
+- 会话创建失败时，只删除本次刚分配且仍为空的目录；
 - 归档会话不删除工作区；
-- 删除会话默认也不删除非空工作区，避免误删用户生成的文件；
-- 删除工作区应作为明确的独立操作展示目录位置，并在执行前请求用户确认。
+- 删除一个 fork 不删除共享工作区；
+- 删除根会话时，只要仍有 fork、子会话或活跃环境引用，就不能删除工作区；
+- 默认删除会话不删除非空工作区；
+- 删除工作区是独立操作，显示绝对路径并请求用户确认。
 
-## 9. 自然语言文件请求
+项目外工作区默认不是 Git 仓库，branch、worktree 和 review 功能显示为不可用；普通 Agent、文件和终端能力继续工作。
 
-Docker 模式下，未指定明确路径的文件请求默认以 `/workspace` 为范围。
+## 13. 自然语言宿主路径请求
 
-例如用户说：
+Docker 模式下，未指定路径的文件请求默认以 `/workspace` 为范围。
 
-```text
-看看我的桌面有哪些文档
-```
+用户说“看看我的桌面有哪些文档”时，当前版本：
 
-Docker 容器没有 Windows 桌面概念。按当前产品期望，Agent 应：
+1. 不访问 Windows Desktop；
+2. 在 `/workspace` 查找；
+3. 明确说明实际查找范围是 Docker 工作区。
 
-1. 不访问 `C:\Users\<user>\Desktop`；
-2. 在 `/workspace` 中查找文档；
-3. 在回复中说明查找范围是当前 Docker 沙箱工作区，而不是宿主机桌面。
+当前版本不支持临时或动态挂载宿主桌面等额外目录。用户明确要求访问未挂载宿主目录时，Agent说明该目录在当前沙箱不可见，并提示用户把所需文件复制到工作区或切换到本机环境。
 
-示例回复：
+权限批准不能让容器访问未挂载目录，也不会动态重建容器。
 
-```text
-当前任务运行在 Docker 沙箱中。我已在沙箱工作区 /workspace 中查找文档；宿主机桌面未挂载，因此没有访问。
-```
+## 14. Fail-closed 范围
 
-如果用户明确要求访问真实 Windows 桌面，需要同时满足：
+Docker 环境不可用、配置不匹配或环境句柄失效时，以下入口全部失败：
 
-- 用户明确授权；
-- OpenHarness 建立范围明确的显式挂载；
-- 根据用途选择只读或读写；
-- Agent 的环境信息中公布对应的容器路径。
+- Bash 和 argv 进程；
+- 后台 Shell；
+- Read、Write、Edit、Glob 和 Grep；
+- Agent Terminal；
+- 默认用户集成终端；
+- Hook 和 Cron；
+- LSP 和 ripgrep；
+- MCP stdio；
+- 子 Agent 和计划任务恢复后发起的工作负载；
+- 用户级 Skill 脚本。
 
-仅有一次权限批准不能让容器凭空访问未挂载的目录。
+失败结果应包含环境类型、失败阶段和可操作原因，不启动对应宿主进程。显式选择的宿主终端不属于 Docker fail-closed 范围。
 
-## 10. 失败策略
-
-用户选择 Docker 沙箱意味着用户依赖这个隔离边界，因此应采用 fail-closed 策略：Docker 不可用时停止执行并明确报错。
-
-```text
-Docker 可用     → 在容器内执行
-Docker 不可用   → 报错并提示检查 Docker
-不允许          → 静默回退到宿主机
-```
-
-这条规则必须覆盖 Shell、后台进程、文件工具、Agent Terminal、Hook、Cron、LSP 和 MCP stdio，不能只覆盖普通 `Bash`。
-
-## 11. 当前实现
+## 15. 当前实现与差距
 
 当前已经具备：
 
-- Docker Runtime 启动与项目容器复用；
-- Windows 工作区挂载到 `/workspace`；
-- `Bash`、后台进程、Hook、Cron、LSP 和 MCP stdio 的统一沙箱进程入口；
-- Docker active 时，文件工具在容器内实际读写与搜索；
-- 容器内命令使用 `/bin/sh -c`；
-- Terminal Provider 已实现 `runtime: "sandbox"` 分支。
+- Docker Runtime 启动和容器复用；
+- Windows 工作区到 `/workspace` 的挂载；
+- Bash、后台进程、Hook、Cron、LSP 和 MCP stdio 的 Sandbox 进程入口；
+- Docker active 时文件工具在容器内读写与搜索；
+- 容器配置 hash 和不匹配拒绝复用；
+- 项目外根会话的受管 cwd；
+- Skill 的宿主发现和按调用刷新；
+- Terminal Provider 的初步 `runtime: sandbox` 分支。
 
-当前仍有以下差距：
+进入实现前已经确认的差距：
 
-1. 设置页“运行环境”仍是静态占位，没有保存或应用配置。
-2. Desktop 用户集成终端固定传入 `runtime: "local"`。
-3. Agent Terminal 同样固定传入 `runtime: "local"`，因此可能绕过 Agent 的 Docker 执行边界。
-4. Agent 系统提示词目前主要根据宿主机生成环境信息。Windows + Docker 模式下，模型可能收到 Windows、PowerShell 和宿主绝对路径，但命令实际由容器 `/bin/sh` 执行。
-5. Docker 设置允许不可用时降级到宿主机；作为桌面“运行环境”选择使用时，需要强制 fail-closed。
-6. 用户级 Skill 目前由宿主发现并读取，但整个用户 Skill 目录尚未以读写方式挂载到 Docker，Skill 附带的引用、脚本和资源不能保证在容器中可访问。
-7. Desktop 已支持项目外会话：创建独立受管 `cwd`、保存 `outside_project` 元数据，并让右侧工具把该目录作为当前工作区；Docker 环境设置和终端跟随策略仍需按本文接线。
-8. 执行位置的选择目前分散在 Sandbox、文件工具和 Terminal Provider 中，还没有形成供所有工具共同使用的执行环境接口。
-9. Docker 文件工具当前仍从宿主 `cwd` 解析路径；要采用本文的容器路径契约，需要改为依据有效执行环境处理 `/workspace` 和 `/opt/openharness/skills`。
+1. 设置页运行环境仍是静态占位。
+2. Desktop 用户终端和 Agent Terminal 都固定为 local。
+3. Docker Terminal 使用普通 pipe，缺少真实 PTY。
+4. DaemonTerminalService 要求 projectId，项目外终端会失败。
+5. Agent 提示词目前按宿主环境生成，并且早于 Sandbox attach。
+6. 文件工具仍先以宿主路径解析输入。
+7. Sandbox Session 是全局 Map，没有共享环境 lease/ref-count 生命周期。
+8. 用户 Skill 目录尚未以受管 rw 方式挂载。
+9. Skill file/root 当前返回宿主路径。
+10. `extraMounts` 仍可直接形成任意 `-v` 参数。
+11. Docker 配置目前允许不可用时降级宿主。
+12. 会话元数据没有 executionEnvironment 快照和 config hash。
+13. 项目外 fork 会共享 cwd，但旧验收没有区分根会话和派生会话。
 
-## 12. 目标行为矩阵
+## 16. 目标行为矩阵
 
-| 操作 | 本机环境 | Docker 沙箱环境 |
+| 操作 | 本机环境 | Docker 环境 |
 |---|---|---|
-| Agent 短命令 | 宿主 Shell | 容器 `/bin/sh` |
-| Agent 后台命令 | 宿主进程 | 容器进程 |
-| Agent TerminalOpen | 本机终端 | 容器终端 |
-| Read/Write/Edit | 宿主文件系统，使用宿主路径 | 容器文件系统，接受 `/workspace` 和 `/opt/openharness/skills` 路径 |
-| Glob/Grep | 宿主工作区，使用宿主路径 | 容器文件系统，接受容器路径 |
-| Hook/Cron | 宿主进程 | 容器进程 |
-| LSP/MCP stdio | 宿主进程 | 容器进程 |
-| 默认用户集成终端 | 用户选择的本机 Shell | 用户选择的容器 Shell，工作目录为 `/workspace` |
-| 显式宿主终端 | 用户选择的本机 Shell | 用户选择的本机 Shell，不改变 Agent 环境 |
-| 用户级 Skill | 直接访问宿主 Skill 目录 | `/opt/openharness/skills` 读写挂载 |
-| 项目外会话 | 独立受管 `cwd` | 只把该 `cwd` 挂载为 `/workspace` |
-| Git worktree 管理 | 宿主机 | 宿主机 |
-| Desktop/daemon | 宿主机 | 宿主机 |
+| Agent 短命令 | 宿主 Shell | 容器 `/bin/sh -c` |
+| Agent 后台命令 | 宿主进程 | 当前容器进程 |
+| Agent Terminal | 本机 PTY | 当前容器 PTY |
+| Read/Write/Edit | 宿主路径 | 容器路径与容器 IO |
+| Glob/Grep | 宿主路径 | 容器路径与容器搜索 |
+| 默认用户终端 | 配置的本机 Shell | 配置的容器 Shell |
+| 显式宿主终端 | 配置的本机 Shell | 配置的本机 Shell |
+| 用户级 Skill | 宿主 Skill 目录 | `/opt/openharness/skills` rw |
+| 项目外根会话 | 独立受管 cwd | 独立 cwd → `/workspace` |
+| 项目外 fork | 继承源 cwd | 共享源环境 owner |
+| 非隔离子 Agent | 继承父环境 | 继承父环境 |
+| 隔离 worktree 子 Agent | 独立 worktree | 独立 worktree 环境 |
+| Git worktree 管理 | 宿主基础设施 | 宿主基础设施 |
+| Desktop/daemon | 宿主 | 宿主 |
 
-## 13. UI 文案建议
-
-为了减少歧义，可以把设置项写成：
+## 17. UI 文案
 
 ```text
 智能体运行环境
-选择 Agent 的命令、文件工具和后台任务在本机还是 Docker 沙箱中运行。
+选择 Agent 的命令、文件工具、后台任务和默认终端在本机还是 Docker 沙箱中运行。
+
+本机
+直接使用当前系统环境。
+
+Docker 沙箱
+当前工作区和用户级 Skills 将读写挂载到容器。容器中的修改会同步到宿主文件。
 
 集成终端 Shell
-选择新终端在当前 Agent 环境中使用的 Shell。Docker 模式只显示镜像内可用的 Shell。
+选择新终端在当前 Agent 环境中使用的 Shell。Docker 模式只显示容器内可用的 Shell。
 ```
 
-Docker 选项可补充说明：
-
-```text
-项目目录将挂载到容器的 /workspace。Agent 和默认集成终端都在容器中运行，宿主机其他目录默认不可见。
-```
-
-终端“新建”菜单提供：
+终端菜单：
 
 ```text
 新建终端
@@ -490,66 +630,68 @@ Docker 选项可补充说明：
 └─ 在本机打开
 ```
 
-## 14. 验收标准
+配置不匹配：
 
-### 14.1 环境信息
+```text
+现有沙箱与当前配置不一致，需要重建后才能使用。重建会清除容器内部未挂载的数据，但不会删除工作区和用户级 Skill 文件。
+```
 
-- 本机模式下，Agent 看见宿主 OS、Shell 和宿主工作目录。
-- Docker 模式下，Agent 看见 Linux、`/bin/sh` 和 `/workspace`。
-- Docker 模式同时标明宿主 OS，但不能让宿主信息覆盖有效执行环境。
-- 环境信息只在目标环境启动并验证成功后生成，并与本轮工具绑定的环境一致。
-- 环境信息包括有效挂载、路径风格、目录、网络和限制，不枚举可执行文件。
+## 18. 验收与测试分层
 
-### 14.2 执行边界
+### 18.1 单元测试
 
-- Docker 模式下，`Bash`、后台命令和 Agent Terminal 均能通过 `pwd` 得到 `/workspace`。
-- Docker 模式下，通过 Agent Terminal 创建文件后，文件出现在挂载的宿主项目目录中。
-- Docker 模式下，Agent 无法通过任何命令或文件工具访问未挂载的 Windows 桌面。
-- Docker 不可用时，Agent 工具明确失败，宿主机上没有对应命令被启动。
-- Docker 模式下，文件工具可以直接读取 `/workspace/...` 和 `/opt/openharness/skills/...`，并返回容器路径。
-- Docker 模式下，相对文件路径以 `/workspace` 为基准，`..` 和符号链接不能越过有效挂载边界。
-- Shell、文件工具和终端使用同一个有效执行环境实例，不能各自重新判断或静默切换运行位置。
+- 配置优先级覆盖所有六层来源；
+- 旧 `ProjectRecord.defaultShell` 只作为本机 Shell；
+- 旧会话缺少环境字段时生成一次快照；
+- `local/docker` 与 Terminal `local/sandbox` 映射唯一；
+- `/workspace`、Skills、相对路径、`..` 和符号链接边界；
+- Skill file/root 对用户级、项目级、Bundled 和未挂载 Plugin 的呈现；
+- `extraMounts` 在 Desktop 模式被拒绝；
+- 保留挂载目标、Docker Socket 和 privileged 配置被拒绝；
+- 配置指纹包含规范化受管挂载；
+- Environment Manager 的 owner、lease、activeJobs 和状态迁移；
+- 项目外根会话、fork、非隔离 child 和 worktree child 的 owner 规则。
 
-### 14.3 终端一致性与显式例外
+### 18.2 协议与服务集成测试
 
-- Docker Agent 环境下，新建的默认用户集成终端进入同一个容器，并以 `/workspace` 为工作目录。
-- Docker Agent 环境下，用户集成终端只能选择镜像中可用的 `/bin/sh` 或 `/bin/bash`。
-- 修改“集成终端 Shell”不会改变 Agent 普通命令固定使用的 `/bin/sh -c`。
-- 本机与 Docker 的 Shell 偏好分别保存，切换回来时恢复各自上次的选择。
-- 用户可以显式新建本机 PowerShell，但该终端清楚标记为“本机”，且不改变 Agent 环境。
-- Agent TerminalOpen 不提供宿主例外，Docker 模式下必须始终进入当前 Agent 容器。
-- 有活跃任务时不能切换 Agent 环境；切换不会迁移已经打开的终端会话。
+- TerminalCreateRequest 支持 projectId 或 sessionId 作用域；
+- 服务端拒绝与项目或会话不一致的 cwd；
+- 项目外用户终端和 Agent Terminal 能创建；
+- 关闭单个终端只释放自己的 lease；
+- 全局默认设置只影响新会话；
+- 会话环境切换在活跃工作存在时被拒绝；
+- 候选环境准备或设置保存失败时保留旧环境；
+- `rebuild_required` 不复用、不删除错误容器；
+- Skill/ListSkills 的刷新时机符合第 9.3 节；
+- 每个 fail-closed 入口都断言没有调用宿主 spawn。
 
-### 14.4 自然语言路径
+### 18.3 真实 Docker E2E
 
-- Docker 模式下，“查找文档”等未指定路径的请求以 `/workspace` 为默认范围。
-- Docker 模式下，“我的桌面”等宿主语义不会触发对真实 Windows 桌面的访问。
-- 回复中明确说明实际查找的是沙箱工作区。
+- Windows、Linux 和 macOS 支持环境中的容器 cwd 都是 `/workspace`；
+- Bash、文件工具、Agent Terminal 和默认用户终端使用同一 container ID；
+- Read/Write/Edit/Glob/Grep 直接接受容器路径；
+- 工作区和用户 Skill 的写入同步到宿主；
+- 未挂载宿主目录不可见；
+- 用户 Skill 目录不存在时能安全创建并挂载；
+- 配置 hash 不匹配返回 `rebuild_required`；
+- Docker PTY 支持交互、resize、Ctrl-C、EOF 和 terminate；
+- 关闭一个终端不影响 Agent 或其他终端；
+- 最后一个临时环境 lease 释放后容器被删除；
+- 可复用容器保留，但本 Runtime 的残留进程被清理；
+- 项目外根会话挂载自己的 xN，fork 共享，独立根会话不共享；
+- Docker 不可用时所有受管入口 fail-closed。
 
-### 14.5 用户级 Skill
+仅在具有对应平台和 Docker daemon 的 CI Job 中运行真实 E2E；其他环境明确 skip，不把 skip 计为通过证据。
 
-- Docker 中可以通过 `/opt/openharness/skills` 访问完整用户级 Skill 目录。
-- Skill 工具在 Docker 环境返回容器可用的 `Skill root`，不返回无法使用的宿主绝对路径。
-- 修改用户级 Skill 后，宿主目录立即看到相同变更，后续 Agent Runtime 能加载新内容。
-- 容器不能借助该挂载访问 `~/.openharness-ts` 下除 `skills` 以外的文件。
-- Docker 不可用时，用户级 Skill 脚本不会在宿主机上执行。
+## 19. 不在本阶段范围内
 
-### 14.6 项目外会话
-
-- 创建项目外会话时，先分配独立受管 `cwd`，再创建 Agent Runtime。
-- Docker 中的 `pwd` 返回 `/workspace`，宿主侧只挂载当前会话的 `xN` 目录。
-- 两个项目外会话不会共享同一个 `xN` 工作区。
-- 项目外会话继承用户全局运行环境配置，不依赖项目级设置文件。
-- 项目外会话可以使用 Agent Terminal、默认用户集成终端和用户级 Skill。
-- 归档或删除会话不会静默删除其中的用户文件。
-
-## 15. 不在本设计范围内
-
-- 自动挂载 Windows 桌面、下载目录或整个用户目录；
-- 在 Docker 镜像内安装 PowerShell；
-- 自动把显式创建的本机终端切换回 Docker；
+- 动态挂载桌面、下载目录或其他任意宿主目录；
+- Desktop 受管环境中的 `extraMounts`；
+- 用户 Skill 的只读或按需挂载；
+- Plugin 根目录自动挂载；
+- Docker 镜像内安装 PowerShell；
+- Shell 语法自动翻译；
+- 环境信息枚举全部可执行文件或完整 PATH；
 - 把 Desktop、daemon 或完整 Agent 控制程序迁入 Docker；
-- 在 Shell 工具层翻译 PowerShell 与 POSIX 命令。
-- 在环境信息中枚举全部可执行文件或完整 `PATH` 内容。
-- 当前阶段实现用户级 Skill 的只读挂载或按需暴露。
-- 为项目外工作区自动初始化 Git 仓库。
+- 为项目外工作区自动初始化 Git 仓库；
+- Desktop 的 SRT 环境选项。
