@@ -502,6 +502,10 @@ export class DetachedProcessSupervisor {
         settings: this.taskSettings.get(taskId),
         policy: this.taskPolicies.get(taskId),
         env: task.env,
+        owner: {
+          kind: task.type === "agent" ? "agent" : "background",
+          id: task.id,
+        },
         detached,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -512,6 +516,10 @@ export class DetachedProcessSupervisor {
         settings: this.taskSettings.get(taskId),
         policy: this.taskPolicies.get(taskId),
         env: task.env,
+        owner: {
+          kind: task.type === "agent" ? "agent" : "background",
+          id: task.id,
+        },
         detached,
         hostShell: "system",
         stdio: ["pipe", "pipe", "pipe"],

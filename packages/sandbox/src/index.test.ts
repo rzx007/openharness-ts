@@ -12,7 +12,13 @@ import {
   buildDockerSupervisedArgv,
   createProcess,
   DOCKER_CONFIG_HASH_LABEL,
+  DOCKER_CREATED_BY_GENERATION_LABEL,
+  DOCKER_CREATED_BY_OWNER_LABEL,
+  DOCKER_ENVIRONMENT_ID_LABEL,
+  DOCKER_INSTALLATION_LABEL,
+  DOCKER_REUSABLE_LABEL,
   DOCKER_WORKSPACE_LABEL,
+  DOCKER_WORKSPACE_OWNER_LABEL,
   dockerContainerName,
   dockerReusableContainerName,
   dockerSandboxConfigHash,
@@ -38,6 +44,15 @@ import {
   acquireSandboxSessionAlias,
   toContainerWorkspacePath,
 } from "./index.js";
+
+const TEST_ENVIRONMENT_IDENTITY = {
+  installationId: "install-1",
+  daemonOwnerId: "daemon-1",
+  daemonGeneration: 7,
+  environmentId: "environment-1",
+  workspaceOwnerId: "project:d:/repo",
+  configHash: "config-1",
+};
 
 describe("normalizeSandboxConfig", () => {
   it("fills defaults and preserves nested overrides", () => {
@@ -390,6 +405,7 @@ describe("docker backend argv builders", () => {
       sessionId: "abc/123",
       cwd: "D:/repo",
       dockerCommand: "/bin/docker",
+      identity: TEST_ENVIRONMENT_IDENTITY,
       config: {
         enabled: true,
         backend: "docker",
@@ -412,6 +428,12 @@ describe("docker backend argv builders", () => {
     expect(argv[argv.indexOf("--name") + 1]).toBe("openharness-sandbox-abc-123");
     expect(argv).toContain("--label");
     expect(argv).toContain(`${DOCKER_WORKSPACE_LABEL}=${resolve("D:/repo")}`);
+    expect(argv).toContain(`${DOCKER_INSTALLATION_LABEL}=install-1`);
+    expect(argv).toContain(`${DOCKER_WORKSPACE_OWNER_LABEL}=project:d:/repo`);
+    expect(argv).toContain(`${DOCKER_REUSABLE_LABEL}=false`);
+    expect(argv).toContain(`${DOCKER_CREATED_BY_OWNER_LABEL}=daemon-1`);
+    expect(argv).toContain(`${DOCKER_CREATED_BY_GENERATION_LABEL}=7`);
+    expect(argv).toContain(`${DOCKER_ENVIRONMENT_ID_LABEL}=environment-1`);
     expect(argv[argv.indexOf("--cpus") + 1]).toBe("2");
     expect(argv[argv.indexOf("--memory") + 1]).toBe("4g");
     expect(argv[argv.indexOf("--dns") + 1]).toBe("1.1.1.1");
@@ -538,7 +560,14 @@ describe("docker backend argv builders", () => {
       containerName: "oh-s",
       cwd,
       workspaceRoot: root,
-      env: { X: "1", PATH: "C:\\Windows\\System32" },
+      env: {
+        X: "1",
+        PATH: "C:\\Windows\\System32",
+        OPENHARNESS_DAEMON_OWNER_ID: "forged",
+      },
+      identity: TEST_ENVIRONMENT_IDENTITY,
+      owner: { kind: "background", id: "task-1" },
+      executionId: "internal-1",
       argv: ["bash", "-lc", "echo hi"],
     });
 
@@ -546,6 +575,13 @@ describe("docker backend argv builders", () => {
     expect(argv[argv.indexOf("-w") + 1]).toBe(hostPathToContainerPath(cwd, root));
     expect(argv).toContain("X=1");
     expect(argv).not.toContain("PATH=C:\\Windows\\System32");
+    expect(argv).not.toContain("OPENHARNESS_DAEMON_OWNER_ID=forged");
+    expect(argv).toContain("OPENHARNESS_INSTALLATION_ID=install-1");
+    expect(argv).toContain("OPENHARNESS_DAEMON_OWNER_ID=daemon-1");
+    expect(argv).toContain("OPENHARNESS_DAEMON_GENERATION=7");
+    expect(argv).toContain("OPENHARNESS_ENVIRONMENT_ID=environment-1");
+    expect(argv).toContain("OPENHARNESS_EXECUTION_KIND=background");
+    expect(argv).toContain("OPENHARNESS_EXECUTION_ID=task-1");
     expect(argv.slice(-4)).toEqual(["oh-s", "bash", "-lc", "echo hi"]);
   });
 
@@ -588,6 +624,8 @@ describe("docker backend argv builders", () => {
       executionCwd: "/workspace",
       shell: "/bin/sh",
       executionId: "terminal-1",
+      identity: TEST_ENVIRONMENT_IDENTITY,
+      owner: { kind: "terminal", id: "terminal-record-1" },
       signal: async () => {},
       close: async () => {},
     });
@@ -604,6 +642,10 @@ describe("docker backend argv builders", () => {
       "-w",
       "/workspace",
     ]);
+    expect(target.args).toContain("OPENHARNESS_DAEMON_OWNER_ID=daemon-1");
+    expect(target.args).toContain("OPENHARNESS_DAEMON_GENERATION=7");
+    expect(target.args).toContain("OPENHARNESS_EXECUTION_KIND=terminal");
+    expect(target.args).toContain("OPENHARNESS_EXECUTION_ID=terminal-record-1");
     expect(target.args).toContain("OPENHARNESS_PTY_ID=terminal-1");
     expect(target.args).toContain("ohs-project");
     expect(target.args).toContain("/bin/sh");

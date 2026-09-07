@@ -37,7 +37,12 @@ maybeDescribe("Docker PTY shared environment e2e", () => {
     const settings = dockerSettings();
     const sessionId = `pty-${Date.now()}`;
     const manager = new ExecutionEnvironmentManager();
-    const create = async () => await createExecutionEnvironment({
+    const daemonIdentity = {
+      installationId: `terminal-e2e-${sessionId}`,
+      daemonOwnerId: `terminal-e2e:${process.pid}`,
+      daemonGeneration: 1,
+    };
+    const create = async (identity: import("@openharness/environment").ExecutionEnvironmentIdentity) => await createExecutionEnvironment({
       config: resolveExecutionEnvironmentConfig({
         surface: "desktop_managed",
         settings,
@@ -51,16 +56,19 @@ maybeDescribe("Docker PTY shared environment e2e", () => {
       }),
       sessionId,
       userSkillsRoot: join(workspace, "skills"),
+      identity,
     });
     const agentLease = await manager.acquire({
       ownerId: `session:${sessionId}`,
       configHash: "pty-e2e",
+      daemonIdentity,
       consumer: { kind: "agent", id: sessionId },
       create,
     });
     const terminalLease = await manager.acquire({
       ownerId: `session:${sessionId}`,
       configHash: "pty-e2e",
+      daemonIdentity,
       consumer: { kind: "terminal", id: "terminal" },
       create,
     });
@@ -120,6 +128,7 @@ maybeDescribe("Docker PTY shared environment e2e", () => {
       activeTerminalLease = await manager.acquire({
         ownerId: `session:${sessionId}`,
         configHash: "pty-e2e",
+        daemonIdentity,
         consumer: { kind: "terminal", id: "terminate-terminal" },
         create,
       });

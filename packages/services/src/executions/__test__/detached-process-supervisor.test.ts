@@ -61,6 +61,40 @@ afterEach(async () => {
 });
 
 describe("scoped DetachedProcessSupervisor", () => {
+  it("marks a Docker background process with its durable task id", async () => {
+    const cwd = tempTasksDir();
+    let seenOwner: unknown;
+    setActiveSandboxSession({
+      backend: "docker",
+      cwd,
+      active: true,
+      start: async () => {},
+      stop: async () => {},
+      execCommand: async (_argv, options) => {
+        seenOwner = options.owner;
+        throw new Error("captured owner");
+      },
+    }, { cwd, sessionId: "s1" });
+    const manager = makeManager();
+
+    await expect(manager.startShellExecution({
+      id: "task-durable-1",
+      command: "echo hi",
+      description: "owned",
+      cwd,
+      sessionId: "s1",
+      settings: {
+        model: "test",
+        apiFormat: "openai",
+        maxTurns: 1,
+        permission: { mode: "default" },
+        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      },
+    })).rejects.toThrow("captured owner");
+
+    expect(seenOwner).toEqual({ kind: "background", id: "task-durable-1" });
+  });
+
   it("returns isolated managers per cwd", () => {
     const cwdA = join(tempTasksDir(), "repo-a");
     const cwdB = join(tempTasksDir(), "repo-b");

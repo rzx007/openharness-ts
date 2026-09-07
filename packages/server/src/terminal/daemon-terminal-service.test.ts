@@ -47,6 +47,7 @@ describe("DaemonTerminalService scoped environments", () => {
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/workspace",
       shell: "/bin/sh",
+      owner: { kind: "terminal", id: terminal.id },
     }));
     expect(terminal).toMatchObject({
       scope: { kind: "session", sessionId: session.id },

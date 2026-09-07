@@ -15,6 +15,7 @@ import type {
   SandboxSession,
 } from "./types.js";
 import type { ManagedDockerMount } from "./managed-mounts.js";
+import type { ExecutionEnvironmentIdentity } from "@openharness/environment";
 
 export interface SandboxRuntimeOptions {
   settings: Settings;
@@ -26,6 +27,7 @@ export interface SandboxRuntimeOptions {
   reporter?: SandboxRuntimeReporter;
   /** Host-managed mounts that users cannot override; always mounted read-only. */
   managedMounts?: readonly ManagedDockerMount[];
+  identity?: ExecutionEnvironmentIdentity;
 }
 
 export interface StartedSandboxRuntime {
@@ -105,6 +107,7 @@ export async function startSandboxRuntime(
     deps: options.deps,
     reporter: options.reporter,
     managedMounts: options.managedMounts,
+    identity: options.identity,
   });
   try {
     await session.start();

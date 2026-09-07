@@ -1,6 +1,11 @@
 import type { ChildProcess, StdioOptions } from "node:child_process";
 import type { SandboxConfig, Settings } from "@openharness/core";
-import type { EnvironmentPtyTarget, EnvironmentTerminalPrepareOptions } from "@openharness/environment";
+import type {
+  EnvironmentExecutionOwner,
+  EnvironmentPtyTarget,
+  EnvironmentTerminalPrepareOptions,
+  ExecutionEnvironmentIdentity,
+} from "@openharness/environment";
 
 export type SandboxBackend = "srt" | "docker";
 export type SandboxPlatform = "linux" | "wsl" | "macos" | "windows" | "unknown";
@@ -127,6 +132,7 @@ export interface ShellSpawnOptions {
   settings?: Settings;
   stdio?: StdioOptions;
   env?: Record<string, string>;
+  owner?: EnvironmentExecutionOwner;
   signal?: AbortSignal;
   detached?: boolean;
 }
@@ -135,6 +141,7 @@ export interface SandboxSession {
   readonly backend: SandboxBackend;
   readonly cwd: string;
   readonly active: boolean;
+  readonly identity?: ExecutionEnvironmentIdentity;
   start(): Promise<void>;
   stop(): Promise<void>;
   stopSync?(): void;

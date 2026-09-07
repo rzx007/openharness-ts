@@ -9,6 +9,11 @@ describe("createSessionEnvironmentAcquirer", () => {
     const acquirer = createSessionEnvironmentAcquirer({
       manager: { acquire } as any,
       store: { getSession: () => session },
+      daemonIdentity: {
+        installationId: "install-1",
+        daemonOwnerId: "daemon-1",
+        daemonGeneration: 7,
+      },
     });
 
     const result = await acquirer(session, {
@@ -27,6 +32,11 @@ describe("createSessionEnvironmentAcquirer", () => {
     expect(acquire).toHaveBeenCalledWith(expect.objectContaining({
       ownerId: "project:d:/repo",
       configHash: expect.any(String),
+      daemonIdentity: {
+        installationId: "install-1",
+        daemonOwnerId: "daemon-1",
+        daemonGeneration: 7,
+      },
       consumer: { kind: "agent", id: "s1" },
       create: expect.any(Function),
     }));

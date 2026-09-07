@@ -1,6 +1,7 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import type { Settings } from "../index";
 import { getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath } from "./paths";
+import { writeJsonFileAtomically } from "./atomic-json-write.js";
 
 const DEFAULT_SETTINGS: Settings = {
   model: "minimax/minimax-m2.5:free",
@@ -160,12 +161,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   // 确保配置目录存在，若不存在则递归创建
   await mkdir(configDir, { recursive: true });
 
-  // 将设置对象写入 JSON 文件，使用 UTF-8 编码和缩进格式化
-  await writeFile(
-    configPath,
-    JSON.stringify(settings, null, 2),
-    "utf-8",
-  );
+  await writeJsonFileAtomically(configPath, settings);
 }
 
 export async function loadProjectSettings(projectRoot?: string): Promise<Partial<Settings> | null> {
@@ -179,11 +175,7 @@ export async function saveProjectSettings(
   const configDir = getProjectConfigDir(projectRoot);
   const configPath = getProjectSettingsFilePath(projectRoot);
   await mkdir(configDir, { recursive: true });
-  await writeFile(
-    configPath,
-    JSON.stringify(settings, null, 2),
-    "utf-8",
-  );
+  await writeJsonFileAtomically(configPath, settings);
 }
 
 function loadFromEnv(): SettingsPatch {

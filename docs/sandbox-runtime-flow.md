@@ -1,6 +1,6 @@
 # Agent 运行环境与 Docker 调用链
 
-> 状态：第二期实现说明。Desktop 使用统一 `ExecutionEnvironment` 和共享 lease；CLI 高级模式继续保留原有 SRT/Docker 能力。
+> 状态：第三期 3A 实现说明。Desktop 已具备统一 `ExecutionEnvironment`、共享 lease、原子 Settings 保存和 daemon 启动孤儿清理；CLI 高级模式继续保留原有 SRT/Docker 能力。
 
 ## 1. 两个设置互不混用
 
@@ -20,6 +20,12 @@
 ```text
 Desktop 启动内置 daemon
   → executionSurface = desktop_managed
+  → 取得现有 application owner lease
+  → 从 daemon 数据目录派生 installation ID
+  → reconcileDockerOrphans()
+       删除本 installation 的旧临时容器
+       清理复用容器中的旧 daemon exec
+       未验证资源只报告，不删除
   → daemon 按 Session.cwd 读取 Settings
   → resolveExecutionEnvironmentConfig()
        local  → 本机环境
@@ -146,7 +152,11 @@ bundled < plugin < user < project
 
 daemon 持有唯一的内存 `ExecutionEnvironmentManager`。workspace owner 和 config hash 决定环境复用；config hash 不进入容器名。同 owner 有活动 lease 时若请求另一份配置，会返回 `environment_config_in_use`，不会启动第二个版本。
 
-底层 Docker 后端也保留 CLI 的 workspace 复用容器：容器名只由 owner/workspace 决定，不包含配置 hash。发现同名、可确认属于 OpenHarness 且 hash 过期的容器时，删除旧容器并按最新配置重建，不同时保留多个版本。无法确认 owner 的同名容器不会被删除，启动会 fail-closed。
+Desktop 管理的容器记录 installation、workspace owner、config hash、environment ID 和创建者 daemon 身份。容器内 exec 记录当前 daemon owner ID + generation、environment ID、execution kind 和 execution ID。正常关闭后 generation 可能重新从 1 开始，因此判断旧 exec 必须同时比较 owner ID 和 generation。
+
+底层 Docker 后端也保留 CLI 的 workspace 复用容器：容器名只由 owner/workspace 决定，不包含 config hash。发现同名、可确认属于当前 installation/workspace owner 且 hash 过期的容器时，删除旧容器并按最新配置重建，不同时保留多个版本。缺少新身份 label 或无法确认 owner 的同名容器不会被自动删除，启动会 fail-closed。
+
+Settings 使用同目录临时文件和原子 rename。rename 前崩溃时保留完整旧配置，rename 后崩溃时读取完整新配置；系统不另存切换状态或旧环境版本。
 
 ## 9. Desktop 与 CLI 的边界
 
@@ -172,7 +182,7 @@ pnpm --filter @openharness/tools e2e:docker
 pnpm --filter @openharness/terminal-node e2e:docker
 ```
 
-覆盖 `/workspace` cwd、容器内 Shell、五个文件工具、工作区/用户 Skills 双向写入、未挂载路径拒绝、容器复用与最新配置替换、网络隔离和进程清理。PTY E2E 额外覆盖 `tty -s`、输入输出、resize、Ctrl-C、EOF、terminate 和关闭单个终端后 Agent lease 继续工作。外网 bridge 用例仅在显式设置 `OPENHARNESS_E2E_DOCKER_NETWORK=1` 时运行。
+覆盖 `/workspace` cwd、容器内 Shell、五个文件工具、工作区/用户 Skills 双向写入、未挂载路径拒绝、容器复用与最新配置替换、网络隔离和进程清理。PTY E2E 额外覆盖 `tty -s`、输入输出、resize、Ctrl-C、EOF、terminate 和关闭单个终端后 Agent lease 继续工作。Sandbox orphan E2E 覆盖旧临时容器删除、复用容器旧 exec 清理、当前 exec 保留和其他 installation 不误删。外网 bridge 用例仅在显式设置 `OPENHARNESS_E2E_DOCKER_NETWORK=1` 时运行。
 
 ## 11. 交互终端调用链
 
@@ -192,4 +202,4 @@ Terminal HTTP 新客户端发送显式判别 scope。旧请求只有 projectId �
 
 ## 12. 后续阶段
 
-第三期实现运行中 draining/switching、持久化切换恢复、孤儿清理和更完整的热刷新。仍只保留单一最新容器版本，不支持旧环境并存。
+第三期 3A 已完成，继续采用“保存后重启生效”。3B–3D 分别处理 Native Plugin 环境化、Skill/工作区生命周期和具备真实 Docker daemon 的跨平台 CI。无需重启的热切换暂缓并单独评估；系统仍不支持旧环境并存或持久 lease。

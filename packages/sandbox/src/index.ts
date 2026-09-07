@@ -78,6 +78,23 @@ export {
 } from "./srt-adapter.js";
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
 export {
+  listManagedDockerResources,
+  planDockerOrphanReconciliation,
+  reconcileDockerOrphans,
+} from "./docker-orphan-reconciler.js";
+export type {
+  DockerCleanupAction,
+  DockerCommandResult,
+  DockerCommandRunner,
+  DockerManagedContainer,
+  DockerManagedExecution,
+  DockerManagedResourceInventory,
+  DockerReconciliationDiagnostic,
+  DockerReconciliationPlan,
+  DockerReconciliationReport,
+  ReconcileDockerOrphansInput,
+} from "./docker-orphan-reconciler.js";
+export {
   buildDockerExecArgs,
   buildDockerPtyTarget,
   buildDockerBuildArgs,
@@ -85,8 +102,14 @@ export {
   buildDockerRunArgs,
   buildDockerSupervisedArgv,
   DOCKER_CONFIG_HASH_LABEL,
+  DOCKER_CREATED_BY_GENERATION_LABEL,
+  DOCKER_CREATED_BY_OWNER_LABEL,
+  DOCKER_ENVIRONMENT_ID_LABEL,
+  DOCKER_INSTALLATION_LABEL,
   DOCKER_MANAGED_LABEL,
+  DOCKER_REUSABLE_LABEL,
   DOCKER_WORKSPACE_LABEL,
+  DOCKER_WORKSPACE_OWNER_LABEL,
   dockerDefaultDockerfilePath,
   dockerContainerName,
   dockerReusableContainerName,
