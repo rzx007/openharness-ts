@@ -17,6 +17,49 @@ describe("createExecutionEnvironment", () => {
     );
   });
 
+  it("creates a fail-closed WSL process and terminal environment", async () => {
+    const workspace = "D:\\Code Space\\ohs";
+    const spawnWslProcess = vi.fn(() => ({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      stdin: { write: vi.fn(), end: vi.fn() },
+      once: vi.fn(),
+    }) as any);
+    const settings = baseSettings();
+    const handle = await createExecutionEnvironment({
+      config: {
+        mode: "wsl",
+        kind: "wsl",
+        failClosed: true,
+        cwd: workspace,
+        sandbox: {} as any,
+      },
+      settings,
+      binding: createWorkspaceBinding({
+        kind: "wsl",
+        hostRoot: workspace,
+        executionRoot: "/mnt/d/Code Space/ohs",
+      }),
+      sessionId: "session-wsl",
+      userSkillsRoot: "C:\\Users\\me\\.openharness-ts\\skills",
+    }, {
+      preflightWsl: vi.fn(async () => {}),
+      spawnWslProcess,
+    });
+
+    expect(handle.info).toMatchObject({ kind: "wsl", executionOs: "Linux", pathStyle: "posix" });
+    await handle.process.execShell("pwd");
+    expect(spawnWslProcess).toHaveBeenCalledWith(expect.objectContaining({
+      argv: ["/bin/sh", "-lc", "pwd"],
+      cwd: "/mnt/d/Code Space/ohs",
+    }));
+    await expect(handle.terminal.prepare({ cols: 80, rows: 24 })).resolves.toMatchObject({
+      command: "wsl.exe",
+      args: ["--cd", "/mnt/d/Code Space/ohs"],
+      executionCwd: "/mnt/d/Code Space/ohs",
+    });
+  });
+
   it("publishes Docker facts only after the runtime is ready", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "ohs-environment-workspace-"));
     const skills = join(workspace, "user-skills");

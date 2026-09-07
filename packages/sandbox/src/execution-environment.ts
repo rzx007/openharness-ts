@@ -34,6 +34,11 @@ import {
   type SandboxRuntimeOptions,
   type StartedSandboxRuntime,
 } from "./lifecycle.js";
+import {
+  createWslPathResolver,
+  preflightWsl,
+  spawnWslProcess,
+} from "./wsl-environment.js";
 
 export interface CreateExecutionEnvironmentInput {
   config: ResolvedExecutionEnvironmentConfig;
@@ -51,6 +56,8 @@ export interface CreateExecutionEnvironmentDependencies {
   ) => Promise<StartedSandboxRuntime>;
   createShellProcess?: typeof createShellProcess;
   createProcess?: typeof createProcess;
+  preflightWsl?: typeof preflightWsl;
+  spawnWslProcess?: typeof spawnWslProcess;
 }
 
 export async function createExecutionEnvironment(
@@ -64,6 +71,13 @@ export async function createExecutionEnvironment(
   if (input.config.kind === "local") {
     input.onEvent?.("probe");
     const handle = createLocalHandle(input, dependencies);
+    input.onEvent?.("ready");
+    return handle;
+  }
+  if (input.config.kind === "wsl") {
+    await (dependencies.preflightWsl ?? preflightWsl)();
+    input.onEvent?.("probe");
+    const handle = createWslHandle(input, dependencies);
     input.onEvent?.("ready");
     return handle;
   }
@@ -97,6 +111,72 @@ export async function createExecutionEnvironment(
   );
   input.onEvent?.("ready");
   return handle;
+}
+
+function createWslHandle(
+  input: CreateExecutionEnvironmentInput,
+  dependencies: CreateExecutionEnvironmentDependencies,
+): ExecutionEnvironmentHandle {
+  const paths = createWslPathResolver(input.binding);
+  return {
+    info: {
+      kind: "wsl",
+      hostOs: "Windows",
+      executionOs: "Linux",
+      shell: "/bin/sh",
+      shellDialect: "posix",
+      pathStyle: "posix",
+      cwd: input.binding.executionRoot,
+      homeDir: "/home",
+      tempDir: "/tmp",
+      mounts: [{ path: input.binding.executionRoot, mode: "rw", purpose: "workspace" }],
+      networkMode: "host",
+      limitations: ["WSL filesystem project roots are not supported yet"],
+    },
+    workspace: input.binding,
+    process: createWslProcessExecutor(input, dependencies),
+    terminal: {
+      async prepare(options) {
+        const cwd = (await paths.resolve(options.cwd ?? input.binding.executionRoot, "execute"))
+          .executionPath;
+        return {
+          command: "wsl.exe",
+          args: ["--cd", cwd],
+          hostCwd: input.binding.hostRoot,
+          executionCwd: cwd,
+          shell: "default",
+          async signal() {},
+          async close() {},
+        };
+      },
+    },
+    files: unavailableFileSystem(),
+    paths,
+    async release() {},
+  };
+}
+
+function createWslProcessExecutor(
+  input: CreateExecutionEnvironmentInput,
+  dependencies: CreateExecutionEnvironmentDependencies,
+): EnvironmentProcessExecutor {
+  const run = dependencies.spawnWslProcess ?? spawnWslProcess;
+  return {
+    async execShell(command, options = {}) {
+      return adaptChildProcess(run({
+        argv: ["/bin/sh", "-lc", command],
+        cwd: options.cwd ?? input.binding.executionRoot,
+        env: options.env,
+      }));
+    },
+    async execProcess(argv, options = {}) {
+      return adaptChildProcess(run({
+        argv,
+        cwd: options.cwd ?? input.binding.executionRoot,
+        env: options.env,
+      }));
+    },
+  };
 }
 
 function createLocalHandle(

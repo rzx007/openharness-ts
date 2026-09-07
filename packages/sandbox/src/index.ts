@@ -146,3 +146,11 @@ export {
 export type { CreateProcessOptions, CreateShellProcessOptions, HostShellLauncher } from "./shell.js";
 export { startSandboxRuntime } from "./lifecycle.js";
 export type { SandboxRuntimeOptions, StartedSandboxRuntime } from "./lifecycle.js";
+export {
+  WslEnvironmentUnavailableError,
+  createWslPathResolver,
+  hostPathToWslPath,
+  preflightWsl,
+  spawnWslProcess,
+  wslPathToHostPath,
+} from "./wsl-environment.js";

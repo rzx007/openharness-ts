@@ -13,6 +13,14 @@ export interface ResolveExecutionEnvironmentConfigInput {
 
 export type ResolvedExecutionEnvironmentConfig =
   | {
+      mode: "wsl";
+      kind: "wsl";
+      backend?: undefined;
+      failClosed: true;
+      cwd: string;
+      sandbox: ResolvedSandboxConfig;
+    }
+  | {
       mode: "local";
       kind: "local";
       backend?: undefined;

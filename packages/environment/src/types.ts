@@ -1,4 +1,4 @@
-export type ExecutionEnvironmentKind = "local" | "docker";
+export type ExecutionEnvironmentKind = "local" | "wsl" | "docker";
 
 export interface WorkspaceBinding {
   kind: ExecutionEnvironmentKind;
@@ -184,12 +184,14 @@ export function createWorkspaceBinding(
   if (!binding.hostRoot.trim() || !binding.executionRoot.trim()) {
     throw new Error("Workspace roots must be non-empty");
   }
-  if (binding.kind === "docker") {
+  if (binding.kind === "docker" || binding.kind === "wsl") {
     if (
       !binding.executionRoot.startsWith("/") ||
       binding.executionRoot.includes("\\")
     ) {
-      throw new Error("Docker execution root must be an absolute POSIX path");
+      throw new Error(
+        `${binding.kind === "wsl" ? "WSL" : "Docker"} execution root must be an absolute POSIX path`,
+      );
     }
   } else if (
     comparableLocalPath(binding.hostRoot) !==
