@@ -32,7 +32,13 @@ export class DaemonTerminalService {
     this.provider = new LocalTerminalProvider({
       resolveCwd: async (input) => {
         if (input.cwd) return resolve(input.cwd);
-        const project = this.store.getProject(input.projectId);
+        const projectId = input.scope?.kind === "project"
+          ? input.scope.projectId
+          : input.projectId;
+        if (!projectId) {
+          throw new DaemonTerminalError(400, "Session-scoped terminal cwd is not resolved.");
+        }
+        const project = this.store.getProject(projectId);
         if (!project)
           throw new DaemonTerminalError(
             404,
@@ -45,7 +51,7 @@ export class DaemonTerminalService {
 
   async create(input: TerminalCreateRequest): Promise<TerminalSessionInfo> {
     return await this.provider.create({
-      projectId: requireValue(input.projectId, "projectId"),
+      projectId: input.projectId,
       runtime: input.runtime,
       cols: input.cols,
       rows: input.rows,

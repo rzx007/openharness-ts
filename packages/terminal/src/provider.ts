@@ -21,6 +21,7 @@ export type {
   TerminalSessionStatus,
   TerminalSignal,
   TerminalSignalRequest,
+  TerminalScope,
   TerminalSource,
   TerminalWaitResult,
   TerminalWriteRequest,

@@ -114,7 +114,8 @@ export function createTerminalRoutes(
       const body = await readJson(c);
       try {
         const terminal = await terminals.create({
-          projectId: text(body.projectId),
+          scope: readTerminalScope(body),
+          projectId: optionalText(body.projectId),
           runtime: readRuntime(body.runtime),
           cols: numberValue(body.cols, 80),
           rows: numberValue(body.rows, 24),
@@ -192,6 +193,30 @@ export function createTerminalRoutes(
         return terminalError(error, 404);
       }
     });
+}
+
+function readTerminalScope(body: Record<string, unknown>): {
+  kind: "project";
+  projectId: string;
+} | {
+  kind: "session";
+  sessionId: string;
+} {
+  if (body.scope && typeof body.scope === "object" && !Array.isArray(body.scope)) {
+    const scope = body.scope as Record<string, unknown>;
+    if (scope.kind === "project" && optionalText(scope.projectId)) {
+      return { kind: "project", projectId: optionalText(scope.projectId)! };
+    }
+    if (scope.kind === "session" && optionalText(scope.sessionId)) {
+      return { kind: "session", sessionId: optionalText(scope.sessionId)! };
+    }
+    throw new DaemonTerminalError(400, "terminal scope must contain a valid projectId or sessionId.");
+  }
+  const projectId = optionalText(body.projectId);
+  const sessionId = optionalText(body.sessionId);
+  if (sessionId) return { kind: "session", sessionId };
+  if (projectId) return { kind: "project", projectId };
+  throw new DaemonTerminalError(400, "terminal scope is required.");
 }
 
 function terminalError(error: unknown, fallbackStatus: number): Response {

@@ -99,7 +99,8 @@ export class LocalTerminalProvider implements TerminalProvider {
     const info: TerminalSessionInfo = {
       id,
       name: normalizeTerminalName(input.name),
-      projectId: input.projectId,
+      scope: resolveTerminalScope(input),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       runtime: "local",
       source: input.source ?? "user",
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -178,7 +179,8 @@ export class LocalTerminalProvider implements TerminalProvider {
       const info: TerminalSessionInfo = {
         id,
         name: normalizeTerminalName(input.name),
-        projectId: input.projectId,
+        scope: resolveTerminalScope(input),
+        ...(input.projectId ? { projectId: input.projectId } : {}),
         runtime: "sandbox",
         source: input.source ?? "user",
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -369,6 +371,13 @@ export class LocalTerminalProvider implements TerminalProvider {
       | (LocalTerminalSession & { pty: IPty })
       | (SandboxTerminalSession & { child: ChildProcess });
   }
+}
+
+function resolveTerminalScope(input: TerminalCreateRequest) {
+  if (input.scope) return input.scope;
+  if (input.sessionId) return { kind: "session" as const, sessionId: input.sessionId };
+  if (input.projectId) return { kind: "project" as const, projectId: input.projectId };
+  throw new Error("Terminal scope is required.");
 }
 
 function isTerminalStatus(status: TerminalSessionInfo["status"]): boolean {
