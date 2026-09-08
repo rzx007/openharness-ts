@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 const stylesheet = readFileSync(new URL("./assets/main.css", import.meta.url), "utf8")
+const conversationPage = readFileSync(
+  new URL("./components/desktop/conversation-page/conversation-page.tsx", import.meta.url),
+  "utf8"
+)
 
 describe("Markdown table styles", () => {
   it("flattens Streamdown's table chrome and keeps the data region scrollable", () => {
@@ -20,6 +24,19 @@ describe("Markdown table styles", () => {
     )
     expect(stylesheet).toMatch(
       /\[data-streamdown="table-wrapper"\]\s+\[data-streamdown="link"\]\s*\{[^}]*word-break:\s*break-word;/s
+    )
+  })
+
+  it("gives assistant Markdown a wider, compact reading layout", () => {
+    expect(conversationPage).toContain("max-w-[960px]")
+    expect(stylesheet).toMatch(
+      /\.assistant-markdown \[data-streamdown="list-item"\]\s*\{[^}]*padding-block:\s*0;/s
+    )
+    expect(stylesheet).toMatch(
+      /\.assistant-markdown \[data-streamdown="blockquote"\]\s*\{[^}]*margin:\s*0\.6rem 0;/s
+    )
+    expect(stylesheet).toMatch(
+      /\.assistant-markdown \[data-streamdown="link"\]\s*\{[^}]*overflow-wrap:\s*anywhere;/s
     )
   })
 })

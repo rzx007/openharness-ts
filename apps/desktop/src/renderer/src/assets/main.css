@@ -477,6 +477,37 @@
     text-decoration-color: currentColor;
   }
 
+  /* Assistant transcript — compact editorial rhythm without changing file previews */
+  .assistant-markdown [data-streamdown="heading-1"] {
+    margin-block: 0.45rem 0.4rem;
+  }
+
+  .assistant-markdown [data-streamdown="heading-2"] {
+    margin-block: 1rem 0.35rem;
+  }
+
+  .assistant-markdown [data-streamdown="heading-3"] {
+    margin-block: 0.8rem 0.3rem;
+  }
+
+  .assistant-markdown [data-streamdown="list-item"] {
+    padding-block: 0;
+  }
+
+  .assistant-markdown [data-streamdown="blockquote"] {
+    margin: 0.6rem 0;
+    padding-block: 0.15rem;
+  }
+
+  .assistant-markdown [data-streamdown="paragraph"] {
+    margin-block: 0;
+  }
+
+  .assistant-markdown [data-streamdown="link"] {
+    color: var(--file-link);
+    overflow-wrap: anywhere;
+  }
+
   /* Horizontal rule — subtle */
   .desktop-streamdown [data-streamdown="horizontal-rule"] {
     margin: 1rem 0;
