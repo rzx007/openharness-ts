@@ -1,3 +1,5 @@
+import type { ShellDescriptor } from "./shell-descriptor.js";
+
 export type ExecutionEnvironmentKind = "local" | "wsl";
 
 export interface WorkspaceBinding {
@@ -36,6 +38,8 @@ export interface EffectiveEnvironmentInfo {
   networkMode: string;
   git?: { repository: boolean; branch?: string };
   limitations: string[];
+  /** Canonical shell contract. Legacy scalar shell fields remain during migration. */
+  shellDescriptor?: ShellDescriptor;
 }
 
 export interface EnvironmentProcessResult {
