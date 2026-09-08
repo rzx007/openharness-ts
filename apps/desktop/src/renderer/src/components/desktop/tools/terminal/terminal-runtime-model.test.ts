@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
+
+import type { DesktopTerminalCreateInput } from "@shared/terminal-types"
 
 import { resolveTerminalCreateTarget } from "./terminal-runtime-model"
 
@@ -6,12 +8,17 @@ describe("resolveTerminalCreateTarget", () => {
   const session = { id: "s1", projectId: undefined }
 
   it("uses the session execution environment by default", () => {
-    expect(resolveTerminalCreateTarget({
+    const target = resolveTerminalCreateTarget({
       session,
-    })).toEqual({
+    })
+
+    expect(target).toEqual({
       runtime: "environment",
       scope: { kind: "session", sessionId: "s1" },
     })
+    expectTypeOf(target.scope).toEqualTypeOf<
+      NonNullable<DesktopTerminalCreateInput["scope"]>
+    >()
   })
 
   it("uses the environment for native sessions too", () => {

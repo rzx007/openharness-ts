@@ -61,7 +61,7 @@ export function RuntimeSettingControl(): React.JSX.Element {
       .finally(() => setSaving(false))
   }
 
-  const notice = runtimeEnvironmentNotice(environment, restartRequired)
+  const notice = runtimeEnvironmentNotice(restartRequired)
   return (
     <div className="flex flex-col items-end gap-1.5" aria-busy={loading || saving}>
       <Select

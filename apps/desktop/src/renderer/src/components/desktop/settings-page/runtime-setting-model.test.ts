@@ -8,8 +8,8 @@ describe("runtime setting model", () => {
     expect(runtimeEnvironmentLabel("wsl")).toBe("WSL")
   })
 
-  it("explains restart and unsupported states", () => {
-    expect(runtimeEnvironmentNotice("wsl", true)).toContain("重启")
-    expect(runtimeEnvironmentNotice("native", false)).toBeNull()
+  it("explains whether an environment change needs a restart", () => {
+    expect(runtimeEnvironmentNotice(true)).toContain("重启")
+    expect(runtimeEnvironmentNotice(false)).toBeNull()
   })
 })

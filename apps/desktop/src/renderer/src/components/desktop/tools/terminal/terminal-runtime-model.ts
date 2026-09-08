@@ -3,7 +3,8 @@ import type { DesktopTerminalCreateInput } from "@shared/terminal-types"
 
 export function resolveTerminalCreateTarget(input: {
   session: Pick<DesktopSessionRecord, "id" | "projectId">
-}): Pick<DesktopTerminalCreateInput, "runtime" | "scope"> {
+}): Pick<DesktopTerminalCreateInput, "runtime"> &
+  Required<Pick<DesktopTerminalCreateInput, "scope">> {
   return {
     runtime: "environment",
     scope: { kind: "session", sessionId: input.session.id },

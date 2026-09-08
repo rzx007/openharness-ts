@@ -9,10 +9,7 @@ export function runtimeEnvironmentLabel(environment: DesktopAgentEnvironment): s
   return LABELS[environment]
 }
 
-export function runtimeEnvironmentNotice(
-  environment: DesktopAgentEnvironment,
-  restartRequired: boolean
-): string | null {
+export function runtimeEnvironmentNotice(restartRequired: boolean): string | null {
   if (restartRequired) return "已保存，重启 OpenHarness 后生效。"
   return null
 }
