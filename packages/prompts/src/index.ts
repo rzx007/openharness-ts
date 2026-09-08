@@ -1,4 +1,11 @@
-import { readFile, access, readdir, mkdir, writeFile, rm } from "node:fs/promises";
+import {
+  readFile,
+  access,
+  readdir,
+  mkdir,
+  writeFile,
+  rm,
+} from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { platform, machine, homedir, hostname } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -29,7 +36,8 @@ export interface EnvironmentInfo {
   hostname: string;
 }
 
-const DEFAULT_IDENTITY = "You are OpenHarness, an open-source AI coding assistant CLI. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.";
+const DEFAULT_IDENTITY =
+  "You are OpenHarness, an open-source AI coding assistant CLI. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.";
 
 const LONG_RUNNING_SHELL_GUIDANCE =
   " - Use Shell only for short-lived commands. For long-running shell commands such as dev servers, watchers, installs, builds, migrations, docker compose, or anything likely to keep running, use BackgroundShellCreate, then follow progress with JobWait or JobRead.";
@@ -74,7 +82,9 @@ function invariantGuidance(includeBackgroundShell: boolean): string {
     : INVARIANT_GUIDANCE.replace(`${LONG_RUNNING_SHELL_GUIDANCE}\n`, "");
 }
 
-export function resolveInvariantGuidance(includeBackgroundShell: boolean = true): string {
+export function resolveInvariantGuidance(
+  includeBackgroundShell: boolean = true,
+): string {
   return invariantGuidance(includeBackgroundShell);
 }
 
@@ -115,22 +125,27 @@ const BLOCKING_PROMPT_FILE_PATTERNS: Array<{
   {
     code: "ignore_higher_priority_instructions",
     message: "Attempts to ignore or override higher-priority instructions.",
-    pattern: /\b(?:ignore|disregard|override|bypass)\b.{0,80}\b(?:system|developer|previous|prior|above|higher[-\s]?priority)\b.{0,80}\b(?:instruction|instructions|rule|rules|message|messages)\b/i,
+    pattern:
+      /\b(?:ignore|disregard|override|bypass)\b.{0,80}\b(?:system|developer|previous|prior|above|higher[-\s]?priority)\b.{0,80}\b(?:instruction|instructions|rule|rules|message|messages)\b/i,
   },
   {
     code: "reveal_sensitive_context",
-    message: "Attempts to reveal hidden prompts, credentials, or sensitive context.",
-    pattern: /\b(?:reveal|print|dump|show|exfiltrate|leak)\b.{0,80}\b(?:system prompt|developer message|hidden prompt|secret|secrets|token|tokens|api key|password|credentials?)\b/i,
+    message:
+      "Attempts to reveal hidden prompts, credentials, or sensitive context.",
+    pattern:
+      /\b(?:reveal|print|dump|show|exfiltrate|leak)\b.{0,80}\b(?:system prompt|developer message|hidden prompt|secret|secrets|token|tokens|api key|password|credentials?)\b/i,
   },
   {
     code: "disable_permission_controls",
     message: "Attempts to disable approval, permission, or sandbox controls.",
-    pattern: /\b(?:auto[-\s]?approve|always approve|never ask|without asking|without approval|without permission|disable sandbox|bypass sandbox|bypass permission|ignore permission)\b/i,
+    pattern:
+      /\b(?:auto[-\s]?approve|always approve|never ask|without asking|without approval|without permission|disable sandbox|bypass sandbox|bypass permission|ignore permission)\b/i,
   },
   {
     code: "force_tool_execution",
     message: "Attempts to force unsafe tool execution without user control.",
-    pattern: /\b(?:run|execute|delete|modify|overwrite)\b.{0,80}\b(?:without approval|without permission|without asking|even if denied|silently)\b/i,
+    pattern:
+      /\b(?:run|execute|delete|modify|overwrite)\b.{0,80}\b(?:without approval|without permission|without asking|even if denied|silently)\b/i,
   },
 ];
 
@@ -158,7 +173,8 @@ export interface UserProfilePendingUpdate {
 }
 
 export type PersonalPromptFileName = "SOUL.md" | "USER.md";
-export type PersonalPromptFileStatus = "loaded" | "missing" | "empty" | "blocked" | "error";
+export type PersonalPromptFileStatus =
+  "loaded" | "missing" | "empty" | "blocked" | "error";
 
 export interface PersonalPromptFileDiagnostic {
   file: PersonalPromptFileName;
@@ -211,13 +227,33 @@ export function buildWorkStyleSection(style: WorkStyle = "practical"): string {
 - This communication style does not reduce investigation, implementation, validation, safety, or permission requirements.`;
 }
 
-export async function getEnvironmentInfo(cwd?: string): Promise<EnvironmentInfo> {
+export function buildMarkdownPresentationSection(): string {
+  return `# Markdown Presentation
+
+- Lead with the outcome, then provide only the explanation needed.
+- Prefer short paragraphs for simple answers. Do not add headings or lists by default.
+- Use flat lists only for genuinely parallel items, steps, options, or comparisons.
+- Use only a few major sections for complex answers; do not turn every point into a heading.
+- Use tables only when repeated fields benefit from comparison. Put long explanations in prose or lists.
+- Use descriptive link text instead of placing long raw URLs on separate lines.
+- Use blockquotes only for a genuinely distinct note or warning, not as decoration for every item.
+- Follow an explicit format requested by the user or required for a skill's deliverable.`;
+}
+
+export async function getEnvironmentInfo(
+  cwd?: string,
+): Promise<EnvironmentInfo> {
   const workDir = cwd ?? process.cwd();
   const shellLauncher = resolveHostShellLauncher();
   const [isGit, gitBranch] = await detectGitInfo(workDir);
 
   return {
-    osName: platform() === "win32" ? "Windows" : platform() === "darwin" ? "macOS" : "Linux",
+    osName:
+      platform() === "win32"
+        ? "Windows"
+        : platform() === "darwin"
+          ? "macOS"
+          : "Linux",
     osVersion: platform(),
     platformMachine: machine(),
     shell: describeHostShellLauncher(shellLauncher),
@@ -320,7 +356,9 @@ export function formatEffectiveEnvironmentSection(
     }
   }
   if (env.git?.repository) {
-    lines.push(`- Git: yes${env.git.branch ? ` (branch: ${env.git.branch})` : ""}`);
+    lines.push(
+      `- Git: yes${env.git.branch ? ` (branch: ${env.git.branch})` : ""}`,
+    );
   }
   if (env.limitations.length > 0) {
     lines.push("", "## Environment Limitations");
@@ -399,7 +437,10 @@ export function scanPersonalPromptFile(content: string): PromptFileScanIssue[] {
 async function inspectPersonalPromptFile(
   file: PersonalPromptFileName,
   maxChars: number,
-): Promise<{ diagnostic: PersonalPromptFileDiagnostic; content: string | null }> {
+): Promise<{
+  diagnostic: PersonalPromptFileDiagnostic;
+  content: string | null;
+}> {
   const path = join(getConfigDir(), file);
   try {
     const raw = await readFile(path, "utf-8");
@@ -461,16 +502,24 @@ async function inspectPersonalPromptFile(
         maxChars,
         truncated: false,
         issues: [],
-        message: error instanceof Error ? error.message : "Unable to read personal prompt file.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to read personal prompt file.",
       },
       content: null,
     };
   }
 }
 
-export async function inspectPersonalPromptFiles(): Promise<PersonalPromptFileDiagnostic[]> {
+export async function inspectPersonalPromptFiles(): Promise<
+  PersonalPromptFileDiagnostic[]
+> {
   const soul = await inspectPersonalPromptFile("SOUL.md", MAX_SOUL_CHARS);
-  const user = await inspectPersonalPromptFile("USER.md", MAX_USER_PROFILE_CHARS);
+  const user = await inspectPersonalPromptFile(
+    "USER.md",
+    MAX_USER_PROFILE_CHARS,
+  );
   return [soul.diagnostic, user.diagnostic];
 }
 
@@ -501,12 +550,17 @@ export async function initializePersonalPromptFiles(): Promise<PersonalPromptIni
   return { configDir, created, skipped };
 }
 
-export async function loadSoulMd(maxChars: number = MAX_SOUL_CHARS): Promise<string | null> {
+export async function loadSoulMd(
+  maxChars: number = MAX_SOUL_CHARS,
+): Promise<string | null> {
   return (await inspectPersonalPromptFile("SOUL.md", maxChars)).content;
 }
 
-export async function loadUserProfile(maxChars: number = MAX_USER_PROFILE_CHARS): Promise<string | null> {
-  const content = (await inspectPersonalPromptFile("USER.md", maxChars)).content;
+export async function loadUserProfile(
+  maxChars: number = MAX_USER_PROFILE_CHARS,
+): Promise<string | null> {
+  const content = (await inspectPersonalPromptFile("USER.md", maxChars))
+    .content;
   if (!content) return null;
   return /^#\s+User Profile\b/i.test(content)
     ? content
@@ -530,21 +584,32 @@ function pendingUserProfileUpdatePath(id: string): string {
 
 let userProfileWriteQueue: Promise<void> = Promise.resolve();
 
-export async function appendUserProfileUpdate(rawContent: string): Promise<string> {
+export async function appendUserProfileUpdate(
+  rawContent: string,
+): Promise<string> {
   const content = rawContent.trim();
   if (!content) throw new Error("Cannot append an empty USER.md update.");
 
-  const blocking = scanPersonalPromptFile(content).find((issue) => issue.severity === "block");
+  const blocking = scanPersonalPromptFile(content).find(
+    (issue) => issue.severity === "block",
+  );
   if (blocking) {
     throw new Error(`Blocked USER.md update: ${blocking.code}`);
   }
 
-  const write = userProfileWriteQueue.then(() => appendValidatedUserProfileUpdate(content));
-  userProfileWriteQueue = write.then(() => undefined, () => undefined);
+  const write = userProfileWriteQueue.then(() =>
+    appendValidatedUserProfileUpdate(content),
+  );
+  userProfileWriteQueue = write.then(
+    () => undefined,
+    () => undefined,
+  );
   return await write;
 }
 
-async function appendValidatedUserProfileUpdate(content: string): Promise<string> {
+async function appendValidatedUserProfileUpdate(
+  content: string,
+): Promise<string> {
   const userProfilePath = join(getConfigDir(), "USER.md");
   let existing = "";
   try {
@@ -559,13 +624,11 @@ async function appendValidatedUserProfileUpdate(content: string): Promise<string
   return userProfilePath;
 }
 
-export async function queueUserProfileUpdate(
-  input: {
-    content: string;
-    source?: string;
-    reason?: string;
-  },
-): Promise<UserProfilePendingUpdate> {
+export async function queueUserProfileUpdate(input: {
+  content: string;
+  source?: string;
+  reason?: string;
+}): Promise<UserProfilePendingUpdate> {
   const content = input.content.trim();
   if (!content) throw new Error("Cannot queue an empty USER.md update.");
   const issues = scanPersonalPromptFile(content);
@@ -583,11 +646,17 @@ export async function queueUserProfileUpdate(
   };
 
   await mkdir(getUserProfilePendingDir(), { recursive: true });
-  await writeFile(pendingUserProfileUpdatePath(update.id), JSON.stringify(update, null, 2) + "\n", "utf-8");
+  await writeFile(
+    pendingUserProfileUpdatePath(update.id),
+    JSON.stringify(update, null, 2) + "\n",
+    "utf-8",
+  );
   return update;
 }
 
-function isUserProfilePendingUpdate(value: unknown): value is UserProfilePendingUpdate {
+function isUserProfilePendingUpdate(
+  value: unknown,
+): value is UserProfilePendingUpdate {
   const candidate = value as Partial<UserProfilePendingUpdate> | null;
   return Boolean(
     candidate &&
@@ -598,7 +667,9 @@ function isUserProfilePendingUpdate(value: unknown): value is UserProfilePending
   );
 }
 
-export async function listPendingUserProfileUpdates(): Promise<UserProfilePendingUpdate[]> {
+export async function listPendingUserProfileUpdates(): Promise<
+  UserProfilePendingUpdate[]
+> {
   let entries: string[];
   try {
     entries = await readdir(getUserProfilePendingDir());
@@ -610,7 +681,9 @@ export async function listPendingUserProfileUpdates(): Promise<UserProfilePendin
   for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
     const id = entry.slice(0, -".json".length);
     try {
-      const parsed = JSON.parse(await readFile(pendingUserProfileUpdatePath(id), "utf-8")) as unknown;
+      const parsed = JSON.parse(
+        await readFile(pendingUserProfileUpdatePath(id), "utf-8"),
+      ) as unknown;
       if (isUserProfilePendingUpdate(parsed)) updates.push(parsed);
     } catch {
       // Ignore malformed pending proposals; callers can remove them manually.
@@ -619,7 +692,9 @@ export async function listPendingUserProfileUpdates(): Promise<UserProfilePendin
   return updates.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-export async function approvePendingUserProfileUpdate(id: string): Promise<string | null> {
+export async function approvePendingUserProfileUpdate(
+  id: string,
+): Promise<string | null> {
   const path = pendingUserProfileUpdatePath(id);
   let update: UserProfilePendingUpdate;
   try {
@@ -644,7 +719,8 @@ export async function buildSystemPrompt(
 
   const claudeMd = await loadClaudeMdPrompt(env.cwd);
   const sections = [BASE_SYSTEM_PROMPT, envSection];
-  if (customPrompt?.trim()) sections.push(`# Custom Instructions\n\n${customPrompt.trim()}`);
+  if (customPrompt?.trim())
+    sections.push(`# Custom Instructions\n\n${customPrompt.trim()}`);
   if (claudeMd) sections.push(claudeMd);
 
   return sections.join("\n\n");
@@ -776,9 +852,11 @@ export async function buildRuntimeSystemPrompt(
     includeDelegation?: boolean;
     /** Whether to mention background-shell and job tools in invariant guidance. */
     includeBackgroundShell?: boolean;
+    /** Whether to guide the model toward compact, readable Markdown. */
+    includeMarkdownPresentation?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
     environmentInfo?: EffectiveEnvironmentInfo;
-  } = {}
+  } = {},
 ): Promise<string> {
   return renderPromptLayers(await buildPromptLayers(options));
 }
@@ -795,14 +873,16 @@ export async function buildPromptLayers(
     memoryContent?: string;
     includeDelegation?: boolean;
     includeBackgroundShell?: boolean;
+    includeMarkdownPresentation?: boolean;
     skillsList?: Array<{ name: string; description: string }>;
     environmentInfo?: EffectiveEnvironmentInfo;
-  } = {}
+  } = {},
 ): Promise<PromptLayers> {
-  const { buildTaggedPromptSegments, taggedSegmentsToLayers } = await import(
-    "./prompt-segments-assembly.js"
+  const { buildTaggedPromptSegments, taggedSegmentsToLayers } =
+    await import("./prompt-segments-assembly.js");
+  const layers = taggedSegmentsToLayers(
+    await buildTaggedPromptSegments(options),
   );
-  const layers = taggedSegmentsToLayers(await buildTaggedPromptSegments(options));
 
   if (options.memoryContent?.trim()) {
     layers.volatile.push(`# Project Memory\n\n${options.memoryContent.trim()}`);
