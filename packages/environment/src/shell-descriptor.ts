@@ -23,7 +23,7 @@ export interface ShellDescriptor {
   };
 }
 
-export interface ShellResultMetadata {
+export interface ShellResultMetadata extends Record<string, unknown> {
   shellFamily: ShellDescriptor["family"];
   shellDialect: ShellDescriptor["dialect"];
   shellExecutable: string;

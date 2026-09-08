@@ -134,6 +134,7 @@ export async function createOpenHarnessRuntime(
     ? undefined
     : childEnvironment !== undefined && jobs !== undefined;
   const baseToolRegistry = createDefaultToolRegistry({
+    environment: options.executionEnvironment,
     schedules: schedules !== undefined,
     terminal: terminal !== undefined,
     jobs: jobs !== undefined,

@@ -1,6 +1,6 @@
 import { resolveSandboxPolicy, type HostShellLauncher } from "@openharness/sandbox";
 import { describe, expect, it, vi } from "vitest";
-import { createBashTool } from "../bash.js";
+import { createShellTool as createBashTool } from "../shell.js";
 import type {
   ShellExecContext,
   ShellExecRequest,
@@ -30,7 +30,12 @@ describe("createBashTool", () => {
     const toolResult = await tool.execute({ command: "pwd" }, {
       cwd: "/workspace",
       environment: {
-        info: { kind: "wsl", shellDialect: "posix" },
+        info: {
+          kind: "wsl",
+          shell: "/bin/sh",
+          shellDialect: "posix",
+          pathStyle: "posix",
+        },
         workspace: { hostRoot: "D:\\repo", executionRoot: "/workspace" },
         process: { execShell },
         paths: {
@@ -48,6 +53,117 @@ describe("createBashTool", () => {
     expect(toolResult).toEqual({
       content: [{ type: "text", text: "/workspace" }],
       isError: false,
+      metadata: {
+        shellFamily: "posix",
+        shellDialect: "posix-sh",
+        shellExecutable: "/bin/sh",
+        shellDisplayName: "POSIX Shell",
+        pathStyle: "posix",
+        exitCode: 0,
+        status: "completed",
+      },
+    });
+  });
+
+  it("rejects cmd.exe syntax before executing in a PowerShell environment", async () => {
+    const legacy = fakeExecutor(result({ output: "host" }));
+    const execShell = vi.fn();
+    const tool = createBashTool(legacy);
+
+    const toolResult = await tool.execute({ command: "dir /B 2>nul" }, {
+      cwd: "D:\\repo",
+      environment: {
+        info: {
+          kind: "local",
+          hostOs: "Windows",
+          executionOs: "Windows",
+          shell: "Windows PowerShell (powershell.exe)",
+          shellDialect: "powershell",
+          pathStyle: "windows",
+          cwd: "D:\\repo",
+          homeDir: "C:\\Users\\test",
+          tempDir: "C:\\Temp",
+          mounts: [],
+          networkMode: "host",
+          limitations: [],
+        },
+        workspace: { hostRoot: "D:\\repo", executionRoot: "D:\\repo" },
+        process: { execShell },
+        paths: {
+          resolve: async (path: string) => ({
+            executionPath: path,
+            mountPurpose: "workspace",
+            mountMode: "rw",
+          }),
+        },
+      },
+    } as any);
+
+    expect(execShell).not.toHaveBeenCalled();
+    expect(toolResult.isError).toBe(true);
+    expect(toolResult.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("Shell dialect mismatch"),
+    });
+    expect(toolResult.metadata).toMatchObject({
+      shellFamily: "powershell",
+      shellDialect: "windows-powershell",
+      shellDisplayName: "PowerShell",
+      pathStyle: "windows",
+      status: "failed",
+    });
+  });
+
+  it("returns the environment shell and exit status as metadata", async () => {
+    const execShell = vi.fn(async () => ({
+      onOutput(listener: (chunk: Uint8Array) => void) {
+        listener(new TextEncoder().encode("ok\n"));
+        return () => {};
+      },
+      wait: async () => ({ exitCode: 0 }),
+      write: vi.fn(),
+      end: vi.fn(),
+      signal: vi.fn(async () => {}),
+    }));
+    const tool = createBashTool(fakeExecutor(result()));
+
+    const toolResult = await tool.execute({ command: "printf ok" }, {
+      cwd: "/repo",
+      environment: {
+        info: {
+          kind: "local",
+          hostOs: "Linux",
+          executionOs: "Linux",
+          shell: "/bin/bash",
+          shellDialect: "posix",
+          pathStyle: "posix",
+          cwd: "/repo",
+          homeDir: "/home/test",
+          tempDir: "/tmp",
+          mounts: [],
+          networkMode: "host",
+          limitations: [],
+        },
+        workspace: { hostRoot: "/repo", executionRoot: "/repo" },
+        process: { execShell },
+        paths: {
+          resolve: async (path: string) => ({
+            executionPath: path,
+            mountPurpose: "workspace",
+            mountMode: "rw",
+          }),
+        },
+      },
+    } as any);
+
+    expect(toolResult.metadata).toEqual({
+      shellFamily: "posix",
+      shellDialect: "bash",
+      shellExecutable: "/bin/bash",
+      shellDisplayName: "Bash",
+      pathStyle: "posix",
+      exitCode: 0,
+      status: "completed",
     });
   });
 

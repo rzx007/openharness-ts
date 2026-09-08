@@ -1,5 +1,9 @@
 import type { ToolDefinition } from "@openharness/core";
 import {
+  shellResultMetadata,
+  type ShellDescriptor,
+} from "@openharness/environment";
+import {
   describeHostShellLauncher,
   resolveHostShellLauncher,
   type HostShellLauncher,
@@ -10,11 +14,15 @@ import type { ShellExecSpec, ShellExecutor } from "./types.js";
 
 export { decodeShellChunk, formatOutput, looksLikeUtf16Le } from "./output.js";
 
-export function createBashTool(executor: ShellExecutor = defaultShellExecutor): ToolDefinition {
+export function createShellTool(
+  shellOrExecutor?: ShellDescriptor | ShellExecutor,
+  executor: ShellExecutor = defaultShellExecutor,
+): ToolDefinition {
+  const shell = isShellExecutor(shellOrExecutor) ? undefined : shellOrExecutor;
+  const effectiveExecutor = isShellExecutor(shellOrExecutor) ? shellOrExecutor : executor;
   return {
-    name: "Bash",
-    description:
-      "Execute a short-lived shell command using the environment's active shell. On Windows this may be bash.exe, PowerShell, or cmd; check the Environment shell facts before choosing syntax. For long-running commands such as dev servers, watchers, installs, builds, migrations, docker compose, or commands likely to take more than a brief moment, use BackgroundShellCreate and then JobWait or JobRead instead of blocking Bash.",
+    name: "Shell",
+    description: createShellDescription(shell),
     inputSchema: {
       type: "object",
       properties: {
@@ -61,7 +69,7 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
                 jobId: created.jobId,
                 jobKind: "shell",
                 label: created.label,
-                note: "Bash was converted to a background job because the command looks long-running. Use JobWait for bounded progress or JobRead for output snapshots.",
+                note: "Shell was converted to a background job because the command looks long-running. Use JobWait for bounded progress or JobRead for output snapshots.",
               }),
             }],
           };
@@ -76,7 +84,7 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
         return await executeInEnvironment(command, input, context);
       }
 
-      const spec = await executor.resolve({
+      const spec = await effectiveExecutor.resolve({
         command: input.command as string,
         timeoutMs: input.timeout as number | undefined,
         workdir: input.workdir as string | undefined,
@@ -93,7 +101,7 @@ export function createBashTool(executor: ShellExecutor = defaultShellExecutor): 
         };
       }
 
-      const result = await executor.run(spec, context.abortSignal);
+      const result = await effectiveExecutor.run(spec, context.abortSignal);
       if (result.status === "interrupted") {
         return {
           content: [{ type: "text", text: formatInterruptedOutput(result.output, spec.maxOutputChars) }],
@@ -126,6 +134,20 @@ async function executeInEnvironment(
     return { content: [{ type: "text" as const, text: "command is required" }], isError: true };
   }
   const environment = context.environment!;
+  const descriptor = environment.info.shellDescriptor ?? legacyShellDescriptor(environment.info);
+  const shell = descriptorHostLauncher(descriptor);
+  const problems = diagnoseShellDialectMismatch(command, shell);
+  if (problems.length > 0) {
+    return {
+      content: [{
+        type: "text" as const,
+        text: formatShellDialectMismatch({ shell, problems }),
+      }],
+      isError: true,
+      failureKind: "command" as const,
+      metadata: shellResultMetadata(descriptor, null, "failed"),
+    };
+  }
   const rawWorkdir = typeof input.workdir === "string" && input.workdir.trim()
     ? input.workdir.trim()
     : environment.workspace.executionRoot;
@@ -159,17 +181,24 @@ async function executeInEnvironment(
         return {
           content: [{ type: "text" as const, text: formatTimeoutOutput(output, timeoutMs, 12_000) }],
           isError: true,
+          metadata: shellResultMetadata(descriptor, result.exitCode, "timed_out"),
         };
       }
       if (context.abortSignal?.aborted) {
         return {
           content: [{ type: "text" as const, text: formatInterruptedOutput(output, 12_000) }],
           isError: true,
+          metadata: shellResultMetadata(descriptor, result.exitCode, "interrupted"),
         };
       }
       return {
         content: [{ type: "text" as const, text: formatted }],
         isError: result.exitCode !== 0,
+        metadata: shellResultMetadata(
+          descriptor,
+          result.exitCode,
+          result.exitCode === 0 ? "completed" : "failed",
+        ),
       };
     } finally {
       stopListening();
@@ -179,6 +208,7 @@ async function executeInEnvironment(
     return {
       content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
       isError: true,
+      metadata: shellResultMetadata(descriptor, null, "failed"),
     };
   } finally {
     clearTimeout(timer);
@@ -186,7 +216,63 @@ async function executeInEnvironment(
   }
 }
 
-export const bashTool: ToolDefinition = createBashTool();
+function isShellExecutor(value: ShellDescriptor | ShellExecutor | undefined): value is ShellExecutor {
+  return Boolean(value && "resolve" in value && "run" in value);
+}
+
+function descriptorHostLauncher(descriptor: ShellDescriptor): HostShellLauncher {
+  if (descriptor.family === "powershell") return { kind: "powershell", bin: descriptor.executable };
+  if (descriptor.family === "cmd") return { kind: "cmd", bin: descriptor.executable };
+  return descriptor.dialect === "bash"
+    ? { kind: "bash", bin: descriptor.executable }
+    : { kind: "posix-sh" };
+}
+
+function legacyShellDescriptor(info: {
+  shell: string;
+  shellDialect: "powershell" | "cmd" | "posix";
+  pathStyle: "windows" | "posix";
+  tempDir: string;
+}): ShellDescriptor {
+  if (info.shellDialect === "powershell") {
+    return {
+      family: "powershell", dialect: /pwsh/i.test(info.shell) ? "pwsh" : "windows-powershell",
+      executable: info.shell, argsPrefix: [], displayName: "PowerShell",
+      pathStyle: info.pathStyle, tempDir: info.tempDir,
+      capabilities: { conditionalAndOr: /pwsh/i.test(info.shell), supportsLoginShell: false },
+    };
+  }
+  if (info.shellDialect === "cmd") {
+    return {
+      family: "cmd", dialect: "cmd", executable: info.shell, argsPrefix: [],
+      displayName: "Command Prompt", pathStyle: info.pathStyle, tempDir: info.tempDir,
+      capabilities: { conditionalAndOr: true, supportsLoginShell: false },
+    };
+  }
+  return {
+    family: "posix", dialect: /bash/i.test(info.shell) ? "bash" : "posix-sh",
+    executable: info.shell, argsPrefix: [], displayName: /bash/i.test(info.shell) ? "Bash" : "POSIX Shell",
+    pathStyle: info.pathStyle, tempDir: info.tempDir,
+    capabilities: { conditionalAndOr: true, supportsLoginShell: true },
+  };
+}
+
+export const shellTool: ToolDefinition = createShellTool();
+
+export function createShellDescription(shell?: ShellDescriptor): string {
+  const background = "For long-running commands such as dev servers, watchers, installs, builds, migrations, docker compose, or commands likely to take more than a brief moment, use BackgroundShellCreate and then JobWait or JobRead.";
+  if (!shell) return `Execute a short-lived command using the execution environment's resolved shell. ${background}`;
+  if (shell.dialect === "windows-powershell") {
+    return `Execute a short-lived command with ${shell.displayName}. Use PowerShell syntax and Windows paths. Prefer native PowerShell pipelines such as Get-Content -Raw -LiteralPath and ConvertFrom-Json for object and JSON processing. Use curl.exe when the native curl executable is intended. Avoid embedding multiline programs in python -c. Do not use Bash heredoc syntax. ${background}`;
+  }
+  if (shell.dialect === "pwsh") {
+    return `Execute a short-lived command with ${shell.displayName}. Use PowerShell syntax and ${shell.pathStyle} paths. Prefer native PowerShell pipelines such as Get-Content -Raw -LiteralPath and ConvertFrom-Json for object and JSON processing. PowerShell 7 supports && and ||. Avoid embedding multiline programs in python -c. Do not use Bash heredoc syntax. ${background}`;
+  }
+  if (shell.dialect === "cmd") {
+    return `Execute a short-lived command with Command Prompt. Use cmd.exe syntax and Windows paths. ${background}`;
+  }
+  return `Execute a short-lived command with ${shell.displayName}. Use ${shell.dialect} syntax and POSIX paths. ${background}`;
+}
 
 function shouldCreateBackgroundShell(command: string, context: Parameters<ToolDefinition["execute"]>[1]): boolean {
   return Boolean(context.backgroundShell && context.sessionId && context.toolCallId && isLikelyLongRunningCommand(command));
@@ -225,7 +311,9 @@ export function diagnoseShellDialectMismatch(
   command: string,
   shell: HostShellLauncher = resolveHostShellLauncher(),
 ): ShellDialectProblem[] {
-  if (shell.kind === "bash" || shell.kind === "posix-sh") return [];
+  const isLegacyWindowsPowerShell = shell.kind === "powershell"
+    && /powershell(?:\.exe)?/i.test(shell.bin)
+    && !/pwsh(?:\.exe)?/i.test(shell.bin);
 
   const checks: Array<{
     code: string;
@@ -239,49 +327,95 @@ export function diagnoseShellDialectMismatch(
       pattern: /\/dev\/null\b/i,
       message: "uses `/dev/null`, which is a POSIX null device path.",
       suggestion: shell.kind === "powershell" ? "Use `$null` in PowerShell." : "Use `NUL` in cmd.exe.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "posix-temp-path",
       pattern: /(^|[\s"'=])\/tmp(?:\/|\b)/i,
       message: "uses `/tmp`, which is a POSIX temp path.",
       suggestion: shell.kind === "powershell" ? "Use `$env:TEMP` or a Windows path." : "Use `%TEMP%` or a Windows path.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "posix-root-path",
       pattern: /(^|[\s"'=])\/(?:home|mnt|var|etc|usr|bin)(?:\/|\b)/i,
       message: "uses an absolute POSIX path.",
       suggestion: "Use the workspace path shown in the Environment section or another confirmed Windows path.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "ls-la",
       pattern: /(^|[;&|]\s*)ls\s+-[A-Za-z]*[al][A-Za-z]*(?:\s|$)/,
       message: "uses `ls -la` style flags, which are Bash/POSIX syntax.",
       suggestion: shell.kind === "powershell" ? "Use `Get-ChildItem -Force`." : "Use `dir /a`.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "head",
       pattern: /(^|[;&|]\s*)head(?:\s+-\d+|\s+-n\b|\s|$)/,
       message: "uses `head`, which is not a built-in Windows shell command.",
       suggestion: shell.kind === "powershell" ? "Pipe to `Select-Object -First N`." : "Use a cmd-compatible command or run through bash.exe.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "find-root",
       pattern: /(^|[;&|]\s*)find\s+\/(?:\s|$)/,
       message: "uses POSIX `find /` syntax.",
       suggestion: shell.kind === "powershell" ? "Use `Get-ChildItem -Recurse` from a confirmed directory." : "Use `dir /s` from a confirmed directory.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "cd-root",
       pattern: /(^|[;&|]\s*)cd\s+\/(?:\s|$)/,
       message: "uses `cd /`, which means filesystem root in POSIX shells.",
       suggestion: "Use a Windows drive path such as `C:\\` or the current workspace path.",
+      shells: ["powershell", "cmd"],
     },
     {
       code: "powershell-control-operator",
       pattern: /(^|\s)(?:&&|\|\|)(?=\s|$)/,
       message: "uses Bash-style `&&` or `||` command chaining.",
       suggestion: "Use separate PowerShell commands or explicit `if ($LASTEXITCODE -eq 0) { ... }` logic.",
+      shells: isLegacyWindowsPowerShell ? ["powershell"] : [],
+    },
+    {
+      code: "cmd-dir-switch",
+      pattern: /(^|[;&|]\s*)dir\s+\/[a-z]+(?:\s|$)/i,
+      message: "uses cmd.exe-style `dir /...` switches.",
+      suggestion: "Use `Get-ChildItem` with PowerShell parameters such as `-Name` or `-Force`.",
       shells: ["powershell"],
+    },
+    {
+      code: "cmd-null-device",
+      pattern: /(?:^|\s)\d*>\s*nul(?:\s|$)/i,
+      message: "redirects output to the cmd.exe `NUL` device.",
+      suggestion: shell.kind === "powershell"
+        ? "Use `$null` in PowerShell redirections."
+        : "Use `/dev/null` in POSIX shell redirections.",
+      shells: ["powershell", "bash", "posix-sh"],
+    },
+    {
+      code: "powershell-cmdlet",
+      pattern: /(^|[;&|]\s*)(?:Get-ChildItem|Select-Object|Where-Object|ForEach-Object|Set-Location)(?:\s|$)/i,
+      message: "uses a PowerShell cmdlet.",
+      suggestion: shell.kind === "cmd"
+        ? "Use a cmd.exe built-in or invoke PowerShell explicitly."
+        : "Use the corresponding POSIX command.",
+      shells: ["cmd", "bash", "posix-sh"],
+    },
+    {
+      code: "powershell-env",
+      pattern: /\$env:[A-Za-z_][A-Za-z0-9_]*/i,
+      message: "uses PowerShell environment-variable syntax.",
+      suggestion: shell.kind === "cmd" ? "Use `%NAME%` in cmd.exe." : "Use `$NAME` in POSIX shells.",
+      shells: ["cmd", "bash", "posix-sh"],
+    },
+    {
+      code: "powershell-null",
+      pattern: /\$null\b/i,
+      message: "uses the PowerShell `$null` value.",
+      suggestion: shell.kind === "cmd" ? "Use `NUL` in cmd.exe." : "Use `/dev/null` for POSIX redirection.",
+      shells: ["cmd", "bash", "posix-sh"],
     },
   ];
 
@@ -303,22 +437,20 @@ function diagnoseShellCommand(
   spec: ShellExecSpec,
 ): ShellDialectMismatch | null {
   const shell = spec.hostShell;
-  if (shell.kind === "bash" || shell.kind === "posix-sh") return null;
-
   const problems = diagnoseShellDialectMismatch(spec.command, shell);
   return problems.length > 0 ? { shell, problems } : null;
 }
 
 function formatShellDialectMismatch(mismatch: ShellDialectMismatch): string {
   const lines = [
-    `Shell dialect mismatch: the active shell is ${describeHostShellLauncher(mismatch.shell)}, but this command looks like Bash/POSIX syntax.`,
+    `Shell dialect mismatch: the active shell is ${describeHostShellLauncher(mismatch.shell)}, but this command uses syntax from another shell.`,
     "",
     "Problems:",
   ];
   for (const problem of mismatch.problems) {
     lines.push(`- ${problem.message} ${problem.suggestion}`);
   }
-  lines.push("", "Rewrite the command using the active shell syntax, or configure/install bash.exe before using Bash syntax.");
+  lines.push("", "Rewrite the command using the active shell syntax.");
   return lines.join("\n");
 }
 
