@@ -22,6 +22,7 @@ import {
   formatValue,
   isTurnComplete,
   summarizeToolCall,
+  toolDisplayName,
   type AssistantContentUnit,
   type ChangedFile,
 } from "./message-render-model"
@@ -368,7 +369,7 @@ function ToolActivityGroup({ tools }: { tools: ToolUnit[] }): React.JSX.Element 
                 {active ? (
                   <div className="mb-2 overflow-hidden rounded-md border bg-muted/30">
                     <div className="border-b px-3 py-1.5 text-xs">
-                      {tool.call.toolName || "Tool"}
+                      {toolDisplayName(tool.call, tool.result)}
                     </div>
                     <pre className="max-h-56 overflow-auto px-3 py-2 font-mono text-xs leading-5 whitespace-pre-wrap">
                       {formatValue(output)}

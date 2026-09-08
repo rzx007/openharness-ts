@@ -210,6 +210,27 @@ export function summarizeToolCall(part: DesktopSessionPart): { name: string; det
   return { name, detail: summarizeToolInput(part.input) }
 }
 
+export function toolDisplayName(call: DesktopSessionPart, result?: DesktopSessionPart): string {
+  const rawName = call.toolName || "Tool"
+  const normalized = rawName.toLocaleLowerCase().replace(/[-_]/g, "")
+  if (!/^(?:bash|shell|exec|command)$/.test(normalized)) return rawName
+
+  const metadata = result?.metadata ?? call.metadata
+  if (typeof metadata.shellDisplayName === "string" && metadata.shellDisplayName.trim()) {
+    return metadata.shellDisplayName
+  }
+  const dialect = metadata.shellDialect
+  if (dialect === "powershell" || dialect === "windows-powershell") return "PowerShell"
+  if (dialect === "pwsh") return "PowerShell 7"
+  if (dialect === "cmd") return "Command Prompt"
+  if (dialect === "bash") return "Bash"
+  if (dialect === "posix" || dialect === "posix-sh" || dialect === "zsh") {
+    const shell = metadata.shell
+    return typeof shell === "string" && /bash/i.test(shell) ? "Bash" : "POSIX Shell"
+  }
+  return "Shell"
+}
+
 function summarizeLocalOcr(part: DesktopSessionPart): { name: string; detail?: string } {
   const metadata = recordValue(part.metadata.attachmentOcr)
   if (part.status === "failed" || part.isError) {
