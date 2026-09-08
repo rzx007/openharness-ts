@@ -57,10 +57,9 @@ export async function buildTaggedPromptSegments(
 ): Promise<TaggedPromptSegment[]> {
   const segments: TaggedPromptSegment[] = [];
   const promptCwd = options.cwd ?? process.cwd();
-  const env = await getEnvironmentInfo(promptCwd);
   const envSection = options.environmentInfo
     ? formatEffectiveEnvironmentSection(options.environmentInfo)
-    : formatEnvironmentSection(env);
+    : formatEnvironmentSection(await getEnvironmentInfo(promptCwd));
 
   pushSegment(segments, "stable", "system", (await loadSoulMd()) ?? getDefaultIdentity());
   pushSegment(

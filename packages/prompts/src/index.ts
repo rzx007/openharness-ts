@@ -32,7 +32,7 @@ export interface EnvironmentInfo {
 const DEFAULT_IDENTITY = "You are OpenHarness, an open-source AI coding assistant CLI. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.";
 
 const LONG_RUNNING_SHELL_GUIDANCE =
-  " - Use Bash only for short-lived commands. For long-running shell commands such as dev servers, watchers, installs, builds, migrations, docker compose, or anything likely to keep running, use BackgroundShellCreate, then follow progress with JobWait or JobRead.";
+  " - Use Shell only for short-lived commands. For long-running shell commands such as dev servers, watchers, installs, builds, migrations, docker compose, or anything likely to keep running, use BackgroundShellCreate, then follow progress with JobWait or JobRead.";
 
 const INVARIANT_GUIDANCE = `IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming.
 
@@ -58,7 +58,7 @@ const INVARIANT_GUIDANCE = `IMPORTANT: You must NEVER generate or guess URLs for
 Carefully consider the reversibility and blast radius of actions. For hard-to-reverse actions, check with the user first.
 
 # Using your tools
- - Do NOT use Bash to run commands when a relevant dedicated tool is provided.
+ - Do NOT use Shell to run commands when a relevant dedicated tool is provided.
 ${LONG_RUNNING_SHELL_GUIDANCE}
  - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
 
@@ -298,17 +298,19 @@ export function formatEnvironmentSection(env: EnvironmentInfo): string {
 export function formatEffectiveEnvironmentSection(
   env: EffectiveEnvironmentInfo,
 ): string {
+  const descriptor = env.shellDescriptor;
   const lines = [
     "# Execution Environment",
     `- Runtime: ${env.kind}`,
     `- Host OS: ${env.hostOs}`,
     `- Execution OS: ${env.executionOs}`,
-    `- Shell: ${env.shell}`,
-    `- Shell dialect: ${env.shellDialect}`,
-    `- Path style: ${env.pathStyle}`,
+    `- Shell: ${descriptor?.displayName ?? env.shell}`,
+    `- Shell executable: ${descriptor?.executable ?? env.shell}`,
+    `- Shell dialect: ${descriptor?.dialect ?? env.shellDialect}`,
+    `- Path style: ${descriptor?.pathStyle ?? env.pathStyle}`,
     `- Working directory: ${env.cwd}`,
     `- Home directory: ${env.homeDir}`,
-    `- Temporary directory: ${env.tempDir}`,
+    `- Temporary directory: ${descriptor?.tempDir ?? env.tempDir}`,
     `- Network: ${env.networkMode}`,
   ];
   if (env.mounts.length > 0) {

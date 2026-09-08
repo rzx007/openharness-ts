@@ -105,6 +105,11 @@ describe("effective execution environment prompt", () => {
       ],
       networkMode: "host",
       limitations: [],
+      shellDescriptor: {
+        family: "posix", dialect: "posix-sh", executable: "/bin/sh",
+        argsPrefix: ["-lc"], displayName: "POSIX Shell", pathStyle: "posix", tempDir: "/tmp",
+        capabilities: { conditionalAndOr: true, supportsLoginShell: true },
+      },
     };
 
     const prompt = await buildRuntimeSystemPrompt({
@@ -113,7 +118,9 @@ describe("effective execution environment prompt", () => {
     });
 
     expect(prompt).toContain("Execution OS: Linux");
-    expect(prompt).toContain("Shell: /bin/sh");
+    expect(prompt).toContain("Shell: POSIX Shell");
+    expect(prompt).not.toContain("Use Bash only");
+    expect(prompt).toContain("Shell executable: /bin/sh");
     expect(prompt).toContain("Working directory: /mnt/d/workspace");
     expect(prompt).toContain("/mnt/c/Users/me/.openharness-ts/skills: rw");
     expect(prompt).not.toContain(`Working directory: ${process.cwd()}`);
