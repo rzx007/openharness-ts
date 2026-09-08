@@ -38,6 +38,11 @@ import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
 import { normalizeToolInput, validateToolInput } from "./tool-input-schema";
 import { ToolFailureMemory } from "./tool-failure-memory";
+import {
+  applyTrajectoryTracker,
+  createTrajectoryLoopControl,
+  DefaultTrajectoryTracker,
+} from "./trajectory/tracker";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
@@ -332,6 +337,10 @@ export class QueryEngine implements IQueryEngine {
 
     let turnCount = 0;
     const failedToolCalls = new ToolFailureMemory();
+    const trajectoryTracker = this.options.trajectoryTrackerFactory === false
+      ? undefined
+      : this.options.trajectoryTrackerFactory?.() ?? new DefaultTrajectoryTracker();
+    const trajectoryControl = createTrajectoryLoopControl();
     const failedCallsByTool = new Map<string, number>();
     const blockedTools = new Set<string>();
     let recoveryToolTurnsRemaining: number | null = null;
@@ -358,12 +367,16 @@ export class QueryEngine implements IQueryEngine {
       const visibleTools = this.visibleToolRegistry().getAll();
       const tools = forcedFinalTurn
         ? []
-        : visibleTools.filter((tool) => !blockedTools.has(tool.name));
+        : visibleTools.filter((tool) =>
+          !blockedTools.has(tool.name) && !trajectoryControl.hiddenTools.includes(tool.name));
       const finalizing = forcedFinalTurn
         || (blockedTools.size > 0 && tools.length === 0);
-      const system = finalizing
+      const recoverySystem = finalizing
         ? appendSystemGuidance(turnSystemPrompt, RECOVERY_FINALIZATION_PROMPT)
         : turnSystemPrompt;
+      const system = trajectoryControl.guidance
+        ? appendSystemGuidance(recoverySystem, trajectoryControl.guidance)
+        : recoverySystem;
       const stream = this.apiClient.streamMessage({
         model: this.model,
         messages: this.messages,
@@ -451,6 +464,11 @@ export class QueryEngine implements IQueryEngine {
           });
           yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
         }
+        // Single removable integration point: commenting out this statement disables trajectory decisions.
+        applyTrajectoryTracker(trajectoryTracker, {
+          calls: toolUses.map((toolUse, index) => ({ toolUse, result: results[index]! })),
+        }, trajectoryControl);
+        if (trajectoryControl.forceFinal) forceFinalResponse = true;
         if (recoveringAtTurnStart && recoveryToolTurnsRemaining !== null) {
           recoveryToolTurnsRemaining--;
           if (recoveryToolTurnsRemaining <= 0) {

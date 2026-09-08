@@ -423,6 +423,8 @@ export interface QueryEngineOptions {
   skillRegistry?: unknown;
   memoryRetriever?: MemoryRetriever;
   executionEnvironment?: import("@openharness/environment").ExecutionEnvironmentHandle;
+  /** Optional per-run trajectory policy factory. False disables the default tracker. */
+  trajectoryTrackerFactory?: false | (() => import("../engine/trajectory/tracker").TrajectoryTracker);
 }
 
 export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";
