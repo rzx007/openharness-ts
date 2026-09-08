@@ -165,6 +165,7 @@ function ConversationPane({
         completedSessionId = await startSession(submittedContent, {
           skillInvocation: skill?.skillInvocation,
           attachments,
+          sourceDraftText: content,
         })
       }
       const currentSessionId = useDesktopSessionStore.getState().activeSessionId

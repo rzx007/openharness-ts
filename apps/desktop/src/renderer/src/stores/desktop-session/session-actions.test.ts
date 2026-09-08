@@ -155,6 +155,39 @@ describe("desktop session actions", () => {
     })
   })
 
+  it("clears the migrated slash-command draft using its original text", async () => {
+    const session = emptySessionView("session-slash").session
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          create: vi.fn(async () => session),
+          open: vi.fn(async () => emptySessionView(session.id, 1)),
+          sendPrompt: vi.fn(async () => undefined),
+        },
+      },
+    })
+    resetNewConversationState()
+    useDesktopSessionStore.setState({
+      composerDraftsByScope: {
+        "new-conversation": { text: "/archify AI新闻", attachments: [] },
+      },
+    })
+
+    await useDesktopSessionStore.getState().startSession("AI新闻", {
+      sourceDraftText: "/archify AI新闻",
+      skillInvocation: {
+        name: "archify",
+        commandName: "archify",
+        source: "project",
+        invocationSource: "slash",
+      },
+    })
+
+    expect(
+      useDesktopSessionStore.getState().composerDraftsByScope[`session:${session.id}`]?.text
+    ).toBe("")
+  })
+
   it("clears the migrated first-prompt draft while sending is still pending", async () => {
     const session = emptySessionView("session-created").session
     let resolveSend!: () => void

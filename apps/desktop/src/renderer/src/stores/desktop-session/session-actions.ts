@@ -515,6 +515,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
     async startSession(content, options) {
       const prompt = content.trim()
+      const sourceDraftText = options?.sourceDraftText?.trim() || prompt
       const attachmentDrafts = [...(options?.attachments ?? [])]
       if (attachmentDrafts.some((attachment) => attachment.status !== "ready")) return null
       const attachments = attachmentDrafts.flatMap((attachment) =>
@@ -654,7 +655,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         })
         if (clearedFirstPromptDraft) {
-          clearFirstPromptDraft(session.id, prompt, attachmentDrafts)
+          clearFirstPromptDraft(session.id, sourceDraftText, attachmentDrafts)
         }
         const openResult = ownsCurrentPage ? await openPrimarySession(session.id) : "cancelled"
         if (openResult === "failed") {
@@ -674,7 +675,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           })),
           ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
         })
-        clearFirstPromptDraft(session.id, prompt, attachmentDrafts)
+        clearFirstPromptDraft(session.id, sourceDraftText, attachmentDrafts)
         const keepLocalAcknowledgement = get().activeSessionId === session.id
         set((state) => {
           const sessionRuntimes = updateSessionRuntime(
@@ -766,9 +767,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         })
         if (confirmed && startedSessionId) {
-          clearFirstPromptDraft(startedSessionId, prompt, attachmentDrafts)
+          clearFirstPromptDraft(startedSessionId, sourceDraftText, attachmentDrafts)
         } else if (startedSessionId && clearedFirstPromptDraft) {
-          restoreFirstPromptDraft(startedSessionId, prompt, attachmentDrafts)
+          restoreFirstPromptDraft(startedSessionId, sourceDraftText, attachmentDrafts)
         }
         if (confirmed) return startedSessionId
         throw error
