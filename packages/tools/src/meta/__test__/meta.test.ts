@@ -5,7 +5,7 @@ import { briefTool } from "../brief.js";
 import { configTool } from "../config.js";
 import { toolSearchTool } from "../tool-search.js";
 import { askUserTool } from "../ask-user.js";
-import { listSkillsTool, skillTool } from "../skill.js";
+import { hostPathDirectory, listSkillsTool, skillTool } from "../skill.js";
 import { ToolRegistry } from "@openharness/core";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
 import { hostPathToWslPath } from "@openharness/sandbox";
@@ -145,6 +145,15 @@ describe("toolSearchTool", () => {
 });
 
 describe("skillTool", () => {
+  it("derives a Skill root using the path's own platform syntax", () => {
+    expect(hostPathDirectory("C:\\Users\\ruanz\\skills\\review\\SKILL.md")).toBe(
+      "C:\\Users\\ruanz\\skills\\review",
+    );
+    expect(hostPathDirectory("/home/ruanz/skills/review/SKILL.md")).toBe(
+      "/home/ruanz/skills/review",
+    );
+  });
+
   it("resolves skills by commandName through the shared registry", async () => {
     const registry = new SkillRegistry();
     registry.register(makeSkill({

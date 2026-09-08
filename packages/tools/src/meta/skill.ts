@@ -1,9 +1,15 @@
 import type { ToolDefinition } from "@openharness/core";
 import type { SkillDefinition, SkillRegistry } from "@openharness/skills";
-import { dirname } from "node:path";
+import { posix, win32 } from "node:path";
 
 type SkillRegistryInstance = InstanceType<typeof SkillRegistry>;
 type SkillVisibility = "model" | "user" | "all";
+
+const WINDOWS_HOST_PATH = /^(?:[a-zA-Z]:[\\/]|\\\\)/;
+
+export function hostPathDirectory(path: string): string {
+  return WINDOWS_HOST_PATH.test(path) ? win32.dirname(path) : posix.dirname(path);
+}
 
 export const skillTool: ToolDefinition = {
   name: "Skill",
@@ -143,8 +149,8 @@ function formatLoadedSkill(
       (context.environment ? "(unavailable in this environment)" : skill.path);
   const skillRoot = embedded
     ? "(embedded)"
-    : context.environment?.paths.presentHostPath(dirname(skill.path)) ??
-      (context.environment ? "(unavailable in this environment)" : dirname(skill.path));
+    : context.environment?.paths.presentHostPath(hostPathDirectory(skill.path)) ??
+      (context.environment ? "(unavailable in this environment)" : hostPathDirectory(skill.path));
   const unavailable = !embedded && context.environment &&
     (skillFile.startsWith("(unavailable") || skillRoot.startsWith("(unavailable"));
   return [
