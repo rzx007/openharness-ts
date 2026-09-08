@@ -141,7 +141,7 @@ describe("getEnvironmentInfo (homeDir bug fix)", () => {
   it("describes the actual shell tool launcher on Windows", async () => {
     const env = await getEnvironmentInfo(process.cwd());
     if (process.platform === "win32") {
-      expect(env.shell).toMatch(/(?:bash\.exe -c|powershell\.exe -NoLogo -NoProfile -Command|cmd\.exe \/d \/s \/c)/i);
+      expect(env.shell).toMatch(/(?:pwsh\.exe -NoLogo -NoProfile -Command|powershell\.exe -NoLogo -NoProfile -Command|cmd\.exe \/d \/s \/c)/i);
       expect(env.shellCommandRules?.join("\n")).toMatch(/Shell tool commands run/);
     }
   });

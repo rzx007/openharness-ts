@@ -233,7 +233,7 @@ export function describeHostShellLauncher(shell: HostShellLauncher = resolveHost
 
 /**
  * 解析宿主平台 shell：
- * - Windows：优先 bash.exe（非 login `-c`），否则 PowerShell / cmd
+ * - Windows：优先 PowerShell 7，其次 Windows PowerShell，最后 cmd
  * - POSIX：`/bin/sh -c`
  *
  * 探测结果进程内缓存。
@@ -265,8 +265,8 @@ function detectHostShell(): HostShellLauncher {
     return cachedHostShell;
   }
 
-  if (isUsableCommand("bash.exe", ["-c", "exit 0"])) {
-    cachedHostShell = { kind: "bash", bin: "bash.exe" };
+  if (isUsableCommand("pwsh.exe")) {
+    cachedHostShell = { kind: "powershell", bin: "pwsh.exe" };
     return cachedHostShell;
   }
 
