@@ -28,7 +28,7 @@ describe("Markdown table styles", () => {
   })
 
   it("gives assistant Markdown a wider, compact reading layout", () => {
-    expect(conversationPage).toContain("max-w-[960px]")
+    expect(conversationPage).toContain("max-w-190")
     expect(stylesheet).toMatch(
       /\.assistant-markdown \[data-streamdown="list-item"\]\s*\{[^}]*padding-block:\s*0;/s
     )
