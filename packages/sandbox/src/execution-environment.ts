@@ -13,7 +13,8 @@ import type {
 } from "@openharness/environment";
 import type { ResolvedExecutionEnvironmentConfig } from "./execution-config.js";
 import { signalProcessTree } from "./process-control.js";
-import { createProcess, createShellProcess, describeHostShellLauncher, resolveHostShellLauncher } from "./shell.js";
+import { createProcess, createShellProcess, resolveHostShellLauncher, resolveShellDescriptor } from "./shell.js";
+import type { ShellDescriptor } from "@openharness/environment";
 import { createWslPathResolver, preflightWsl, spawnWslProcess } from "./wsl-environment.js";
 
 export interface CreateExecutionEnvironmentInput {
@@ -45,13 +46,18 @@ export async function createExecutionEnvironment(
     return handle;
   }
   input.onEvent?.("probe");
-  const handle = createLocalHandle(input, dependencies);
+  const handle = await createLocalHandle(input, dependencies);
   input.onEvent?.("ready");
   return handle;
 }
 
 function createWslHandle(input: CreateExecutionEnvironmentInput, dependencies: CreateExecutionEnvironmentDependencies): ExecutionEnvironmentHandle {
   const paths = createWslPathResolver(input.binding);
+  const shellDescriptor: ShellDescriptor = {
+    family: "posix", dialect: "posix-sh", executable: "/bin/sh", argsPrefix: ["-lc"],
+    displayName: "POSIX Shell", pathStyle: "posix", tempDir: "/tmp",
+    capabilities: { conditionalAndOr: true, supportsLoginShell: true },
+  };
   return {
     info: {
       kind: "wsl", hostOs: "Windows", executionOs: "Linux", shell: "/bin/sh",
@@ -59,6 +65,7 @@ function createWslHandle(input: CreateExecutionEnvironmentInput, dependencies: C
       homeDir: "/home", tempDir: "/tmp",
       mounts: [{ path: input.binding.executionRoot, mode: "rw", purpose: "workspace" }],
       networkMode: "host", limitations: ["WSL filesystem project roots are not supported yet"],
+      shellDescriptor,
     },
     workspace: input.binding,
     process: createWslProcessExecutor(input, dependencies),
@@ -87,20 +94,21 @@ function createWslProcessExecutor(input: CreateExecutionEnvironmentInput, depend
   };
 }
 
-function createLocalHandle(input: CreateExecutionEnvironmentInput, dependencies: CreateExecutionEnvironmentDependencies): ExecutionEnvironmentHandle {
-  const shell = resolveHostShellLauncher();
+async function createLocalHandle(input: CreateExecutionEnvironmentInput, dependencies: CreateExecutionEnvironmentDependencies): Promise<ExecutionEnvironmentHandle> {
+  const shellDescriptor = await resolveShellDescriptor({ platform: platform(), tempDir: tmpdir() });
   return {
     info: {
       kind: "local", hostOs: hostOsName(), executionOs: hostOsName(),
-      shell: describeHostShellLauncher(shell),
-      shellDialect: shell.kind === "powershell" ? "powershell" : shell.kind === "cmd" ? "cmd" : "posix",
-      pathStyle: platform() === "win32" ? "windows" : "posix", cwd: input.binding.executionRoot,
+      shell: [shellDescriptor.executable, ...shellDescriptor.argsPrefix].join(" "),
+      shellDialect: shellDescriptor.family === "powershell" ? "powershell" : shellDescriptor.family === "cmd" ? "cmd" : "posix",
+      pathStyle: shellDescriptor.pathStyle, cwd: input.binding.executionRoot,
       homeDir: homedir(), tempDir: tmpdir(),
       mounts: [{ path: input.binding.executionRoot, mode: "rw", purpose: "workspace" }],
       networkMode: "host", limitations: [],
+      shellDescriptor,
     },
     workspace: input.binding,
-    process: createLocalProcessExecutor(input, dependencies),
+    process: createLocalProcessExecutor(input, dependencies, shellDescriptor),
     terminal: createLocalTerminalFactory(input), files: unavailableFileSystem(),
     paths: createLocalPathResolver(input.binding), async release() {},
   };
@@ -114,12 +122,12 @@ function createLocalTerminalFactory(input: CreateExecutionEnvironmentInput): Env
   } };
 }
 
-function createLocalProcessExecutor(input: CreateExecutionEnvironmentInput, dependencies: CreateExecutionEnvironmentDependencies): EnvironmentProcessExecutor {
+function createLocalProcessExecutor(input: CreateExecutionEnvironmentInput, dependencies: CreateExecutionEnvironmentDependencies, shellDescriptor: ShellDescriptor): EnvironmentProcessExecutor {
   return {
     async execShell(command, options = {}) {
       return adaptChildProcess(await (dependencies.createShellProcess ?? createShellProcess)(command, {
         cwd: input.binding.hostRoot, sessionId: input.sessionId, settings: input.settings,
-        env: options.env, signal: options.signal, stdio: ["pipe", "pipe", "pipe"],
+        env: options.env, signal: options.signal, stdio: ["pipe", "pipe", "pipe"], shellDescriptor,
       }));
     },
     async execProcess(argv, options = {}) {

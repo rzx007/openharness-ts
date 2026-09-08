@@ -20,6 +20,6 @@ export { buildSrtRuntimeConfig, shellJoin, shellQuote, wrapCommandForSrt } from 
 export type { SrtRuntimeConfig, WrappedSrtCommand } from "./srt-adapter.js";
 export { signalProcessTree, terminateProcessTree } from "./process-control.js";
 export type { ProcessSignal } from "./process-control.js";
-export { createProcess, createShellProcess, describeHostShellLauncher, resolveHostShellLauncher, resolveShellArgv, resetHostShellCacheForTests } from "./shell.js";
+export { createProcess, createShellProcess, describeHostShellLauncher, resolveHostShellLauncher, resolveShellArgv, resolveShellDescriptor, resetHostShellCacheForTests } from "./shell.js";
 export type { CreateProcessOptions, CreateShellProcessOptions, HostShellLauncher } from "./shell.js";
 export { WslEnvironmentUnavailableError, createWslPathResolver, hostPathToWslPath, preflightWsl, spawnWslProcess, wslPathToHostPath } from "./wsl-environment.js";

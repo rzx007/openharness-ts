@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess, type StdioOptions } from "node:chi
 import { resolve } from "node:path";
 import { loadSettings, type Settings } from "@openharness/core";
 import type { EnvironmentExecutionOwner } from "@openharness/environment";
+import { shellArgv, type ShellDescriptor } from "@openharness/environment";
 import { getSrtAvailability } from "./availability.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { bindProcessAbortSignal } from "./process-control.js";
@@ -21,6 +22,7 @@ export interface CreateShellProcessOptions {
   detached?: boolean;
   /** Host shell selection policy. */
   hostShell?: "preferred" | "system";
+  shellDescriptor?: ShellDescriptor;
 }
 
 export interface CreateProcessOptions extends CreateShellProcessOptions {}
@@ -69,7 +71,11 @@ export async function createShellProcess(
     ? () => spawnSystemShell(command, options)
     : undefined;
   return createResolvedProcess(
-    options.hostShell === "system" ? resolveSystemShellArgv(command) : resolveShellArgv(command),
+    options.hostShell === "system"
+      ? resolveSystemShellArgv(command)
+      : options.shellDescriptor
+        ? shellArgv(options.shellDescriptor, command)
+        : resolveShellArgv(command),
     options,
     settings,
     policy,
@@ -112,6 +118,104 @@ async function createResolvedProcess(
 
 export function resolveHostShellLauncher(): HostShellLauncher {
   return detectHostShell();
+}
+
+export interface ResolveShellDescriptorInput {
+  platform?: NodeJS.Platform;
+  tempDir: string;
+  configuredExecutable?: string;
+  probe?: (executable: string) => Promise<{ version: string } | null>;
+}
+
+export async function resolveShellDescriptor(
+  input: ResolveShellDescriptorInput,
+): Promise<ShellDescriptor> {
+  const targetPlatform = input.platform ?? process.platform;
+  const probe = input.probe ?? probeShellExecutable;
+  const configured = input.configuredExecutable?.trim();
+  if (configured) {
+    const result = await probe(configured);
+    if (!result) throw new Error(`Configured shell is unavailable: ${configured}`);
+    return descriptorForExecutable(configured, result.version, targetPlatform, input.tempDir);
+  }
+
+  if (targetPlatform === "win32") {
+    for (const executable of ["pwsh.exe", "powershell.exe", process.env.ComSpec || "cmd.exe"]) {
+      const result = await probe(executable);
+      if (result) return descriptorForExecutable(executable, result.version, targetPlatform, input.tempDir);
+    }
+    throw new Error("No supported Windows shell is available (pwsh.exe, powershell.exe, cmd.exe).");
+  }
+
+  const configuredPosix = process.env.SHELL;
+  const candidates = configuredPosix ? [configuredPosix, "/bin/sh"] : ["/bin/sh"];
+  for (const executable of candidates) {
+    const result = await probe(executable);
+    if (result) return descriptorForExecutable(executable, result.version, targetPlatform, input.tempDir);
+  }
+  throw new Error("No supported POSIX shell is available.");
+}
+
+async function probeShellExecutable(executable: string): Promise<{ version: string } | null> {
+  const lower = executable.toLowerCase();
+  const args = lower.includes("powershell") || lower.includes("pwsh")
+    ? ["-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"]
+    : lower.endsWith("cmd.exe") || lower === "cmd"
+      ? ["/d", "/s", "/c", "ver"]
+      : ["-c", "printf %s \"${BASH_VERSION:-${ZSH_VERSION:-sh}}\""];
+  try {
+    const result = spawnSync(executable, args, {
+      windowsHide: true,
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    if (result.status !== 0) return null;
+    return { version: String(result.stdout || "").trim() || "unknown" };
+  } catch {
+    return null;
+  }
+}
+
+function descriptorForExecutable(
+  executable: string,
+  version: string,
+  targetPlatform: NodeJS.Platform,
+  tempDir: string,
+): ShellDescriptor {
+  const lower = executable.toLowerCase().replace(/\\/g, "/");
+  if (/(^|\/)pwsh(?:\.exe)?$/.test(lower)) {
+    return {
+      family: "powershell", dialect: "pwsh", executable,
+      argsPrefix: ["-NoLogo", "-NoProfile", "-Command"],
+      displayName: `PowerShell ${version}`, version,
+      pathStyle: "windows", tempDir,
+      capabilities: { conditionalAndOr: true, supportsLoginShell: false },
+    };
+  }
+  if (/(^|\/)powershell(?:\.exe)?$/.test(lower)) {
+    return {
+      family: "powershell", dialect: "windows-powershell", executable,
+      argsPrefix: ["-NoLogo", "-NoProfile", "-Command"],
+      displayName: `Windows PowerShell ${version}`, version,
+      pathStyle: "windows", tempDir,
+      capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+    };
+  }
+  if (/(^|\/)cmd(?:\.exe)?$/.test(lower)) {
+    return {
+      family: "cmd", dialect: "cmd", executable,
+      argsPrefix: ["/d", "/s", "/c"], displayName: "Command Prompt", version,
+      pathStyle: "windows", tempDir,
+      capabilities: { conditionalAndOr: true, supportsLoginShell: false },
+    };
+  }
+  const dialect = /(^|\/)zsh$/.test(lower) ? "zsh" : /(^|\/)bash$/.test(lower) ? "bash" : "posix-sh";
+  return {
+    family: "posix", dialect, executable,
+    argsPrefix: ["-lc"], displayName: dialect === "posix-sh" ? "POSIX Shell" : dialect,
+    version, pathStyle: targetPlatform === "win32" ? "windows" : "posix", tempDir,
+    capabilities: { conditionalAndOr: true, supportsLoginShell: true },
+  };
 }
 
 export function describeHostShellLauncher(shell: HostShellLauncher = resolveHostShellLauncher()): string {
