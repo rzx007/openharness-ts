@@ -264,7 +264,7 @@ export function createShellDescription(shell?: ShellDescriptor): string {
   const background = "For long-running commands such as dev servers, watchers, installs, builds, migrations, docker compose, or commands likely to take more than a brief moment, use BackgroundShellCreate and then JobWait or JobRead.";
   if (!shell) return `Execute a short-lived command using the execution environment's resolved shell. ${background}`;
   if (shell.dialect === "windows-powershell") {
-    return `Execute a short-lived command with ${shell.displayName}. Use PowerShell syntax and Windows paths. Prefer native PowerShell pipelines such as Get-Content -Raw -LiteralPath and ConvertFrom-Json for object and JSON processing. Use curl.exe when the native curl executable is intended. Avoid embedding multiline programs in python -c. Do not use Bash heredoc syntax. ${background}`;
+    return `Execute a short-lived command with ${shell.displayName}. Use PowerShell syntax and Windows paths. Prefer native PowerShell pipelines such as Get-Content -Raw -Encoding UTF8 -LiteralPath and ConvertFrom-Json for object and JSON processing. ConvertFrom-Json does not support -Depth in Windows PowerShell 5.1. Use curl.exe when the native curl executable is intended. Avoid embedding multiline programs in python -c. Do not use Bash heredoc syntax; use a PowerShell here-string piped to python - when multiline Python is unavoidable. ${background}`;
   }
   if (shell.dialect === "pwsh") {
     return `Execute a short-lived command with ${shell.displayName}. Use PowerShell syntax and ${shell.pathStyle} paths. Prefer native PowerShell pipelines such as Get-Content -Raw -LiteralPath and ConvertFrom-Json for object and JSON processing. PowerShell 7 supports && and ||. Avoid embedding multiline programs in python -c. Do not use Bash heredoc syntax. ${background}`;
@@ -370,6 +370,15 @@ export function diagnoseShellDialectMismatch(
       pattern: /(^|[;&|]\s*)cd\s+\/(?:\s|$)/,
       message: "uses `cd /`, which means filesystem root in POSIX shells.",
       suggestion: "Use a Windows drive path such as `C:\\` or the current workspace path.",
+      shells: ["powershell", "cmd"],
+    },
+    {
+      code: "bash-heredoc",
+      pattern: /(?:^|\s)<<-?\s*['"]?[A-Za-z_][\w-]*['"]?/m,
+      message: "uses Bash heredoc syntax.",
+      suggestion: shell.kind === "powershell"
+        ? "Use a PowerShell here-string piped to the command instead."
+        : "Use a cmd-compatible input method.",
       shells: ["powershell", "cmd"],
     },
     {

@@ -321,6 +321,23 @@ describe("createBashTool", () => {
       text: expect.stringContaining("Shell dialect mismatch"),
     });
   });
+
+  it("rejects Bash heredoc before PowerShell executes it", async () => {
+    const run = vi.fn(async () => result());
+    const executor: ShellExecutor = {
+      async resolve(request) {
+        return spec({ command: request.command, hostShell: { kind: "powershell", bin: "powershell.exe" } });
+      },
+      run,
+    };
+    const tool = createBashTool(executor);
+
+    const toolResult = await tool.execute({ command: "python - <<'PY'\nprint('ok')\nPY" }, { cwd: process.cwd() });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(toolResult.isError).toBe(true);
+    expect(toolResult.content[0]).toMatchObject({ text: expect.stringContaining("heredoc") });
+  });
 });
 
 function fakeExecutor(

@@ -184,6 +184,30 @@ describe("skillTool", () => {
     expect(text).not.toContain("C:\\Users\\");
   });
 
+  it("appends the active shell reminder after third-party skill content", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({ name: "portable", content: "```bash\npython - <<'PY'\nPY\n```" }));
+    const result = await skillTool.execute!({ name: "portable" }, {
+      cwd: "C:\\workspace",
+      skillRegistry: registry,
+      environment: {
+        info: {
+          shellDescriptor: {
+            family: "powershell", dialect: "windows-powershell", executable: "powershell.exe",
+            argsPrefix: ["-NoLogo", "-NoProfile", "-Command"], displayName: "Windows PowerShell 5.1",
+            pathStyle: "windows", tempDir: "C:\\Temp",
+            capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+          },
+        },
+      },
+    } as any);
+    const text = (result.content[0] as any).text as string;
+    expect(text.indexOf("</skill-content>")).toBeLessThan(text.indexOf("Current execution shell"));
+    expect(text).toContain("Windows PowerShell 5.1");
+    expect(text).toContain("examples must be translated");
+    expect(text).toContain("ConvertFrom-Json has no -Depth parameter");
+  });
+
   it("marks unmounted plugin resources unavailable while retaining their Markdown", async () => {
     const registry = new SkillRegistry();
     registry.register(makeSkill({

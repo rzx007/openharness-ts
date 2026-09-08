@@ -53,4 +53,16 @@ describe("diagnoseShellDialectMismatch", () => {
   it("allows conditional operators in PowerShell 7", () => {
     expect(diagnoseShellDialectMismatch("git status && git diff", pwsh)).toEqual([]);
   });
+
+  it("describes PowerShell 5.1 JSON and UTF-8 constraints", async () => {
+    const { createShellDescription } = await import("./shell.js");
+    const description = createShellDescription({
+      family: "powershell", dialect: "windows-powershell", executable: "powershell.exe",
+      argsPrefix: ["-NoLogo", "-NoProfile", "-Command"], displayName: "Windows PowerShell 5.1",
+      version: "5.1", pathStyle: "windows", tempDir: "C:\\Temp",
+      capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+    });
+    expect(description).toContain("Get-Content -Raw -Encoding UTF8 -LiteralPath");
+    expect(description).toContain("ConvertFrom-Json does not support -Depth");
+  });
 });

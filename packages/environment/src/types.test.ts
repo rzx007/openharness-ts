@@ -15,13 +15,20 @@ describe("ShellDescriptor", () => {
       capabilities: { conditionalAndOr: false, supportsLoginShell: false },
     };
 
-    expect(shellArgv(shell, "Get-Location")).toEqual([
-      "powershell.exe",
-      "-NoLogo",
-      "-NoProfile",
-      "-Command",
-      "Get-Location",
-    ]);
+    const argv = shellArgv(shell, "Get-Location");
+    expect(argv.slice(0, 4)).toEqual(["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]);
+    expect(argv.at(-1)).toContain("Get-Location");
+  });
+
+  it("initializes UTF-8 before a Windows PowerShell command", () => {
+    const shell: ShellDescriptor = {
+      family: "powershell", dialect: "windows-powershell", executable: "powershell.exe",
+      argsPrefix: ["-NoLogo", "-NoProfile", "-Command"], displayName: "Windows PowerShell 5.1",
+      pathStyle: "windows", tempDir: "C:\\Temp",
+      capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+    };
+    expect(shellArgv(shell, "Write-Output '中文'").at(-1)).toContain("OutputEncoding");
+    expect(shellArgv(shell, "Write-Output '中文'").at(-1)).toContain("Write-Output '中文'");
   });
 });
 

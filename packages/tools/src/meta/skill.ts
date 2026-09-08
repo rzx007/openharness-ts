@@ -160,5 +160,29 @@ function formatLoadedSkill(
     "<skill-content>",
     skill.content,
     "</skill-content>",
+    ...skillShellReminder(context),
   ].join("\n");
+}
+
+function skillShellReminder(
+  context: Parameters<ToolDefinition["execute"]>[1],
+): string[] {
+  const shell = context.environment?.info?.shellDescriptor;
+  if (!shell) return [];
+  const lines = [
+    "",
+    "<execution-environment-reminder>",
+    `Current execution shell: ${shell.displayName} (${shell.dialect}).`,
+    `Current path style: ${shell.pathStyle}; temporary directory: ${shell.tempDir}.`,
+    "Shell-specific examples must be translated to the current execution shell; preserve their intent instead of copying incompatible syntax.",
+  ];
+  if (shell.dialect === "windows-powershell") {
+    lines.push(
+      "Windows PowerShell 5.1: use Get-Content -Raw -Encoding UTF8 -LiteralPath for UTF-8 JSON; ConvertFrom-Json has no -Depth parameter; Bash heredoc syntax is invalid.",
+    );
+  } else if (shell.dialect === "pwsh") {
+    lines.push("PowerShell: prefer native object pipelines and do not use Bash heredoc syntax.");
+  }
+  lines.push("</execution-environment-reminder>");
+  return lines;
 }

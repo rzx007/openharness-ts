@@ -34,7 +34,10 @@ export interface ShellResultMetadata extends Record<string, unknown> {
 }
 
 export function shellArgv(shell: ShellDescriptor, command: string): string[] {
-  return [shell.executable, ...shell.argsPrefix, command];
+  const script = shell.dialect === "windows-powershell"
+    ? `$utf8 = New-Object System.Text.UTF8Encoding($false); [Console]::InputEncoding = $utf8; [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; ${command}`
+    : command;
+  return [shell.executable, ...shell.argsPrefix, script];
 }
 
 export function shellResultMetadata(
