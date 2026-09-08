@@ -9,7 +9,8 @@ describe("createDefaultToolRegistry", () => {
     const registry = createDefaultToolRegistry();
     const tools = registry.getAll();
     const names = tools.map((t) => t.name);
-    expect(names).toContain("Bash");
+    expect(names).toContain("Shell");
+    expect(names).not.toContain("Bash");
     expect(names).toContain("Read");
     expect(names).toContain("Write");
     expect(names).toContain("Edit");
@@ -120,7 +121,8 @@ describe("createDefaultToolRegistry", () => {
 
   it("can retrieve individual tools", () => {
     const registry = createDefaultToolRegistry();
-    expect(registry.get("Bash")).toBeDefined();
+    expect(registry.get("Shell")).toBeDefined();
+    expect(registry.get("Bash")).toBeUndefined();
     expect(registry.get("Read")).toBeDefined();
     expect(registry.get("Write")).toBeDefined();
     expect(registry.get("Edit")).toBeDefined();
@@ -172,7 +174,8 @@ describe("createDefaultToolRegistry", () => {
 
   it("has() works for registered tools", () => {
     const registry = createDefaultToolRegistry();
-    expect(registry.has("Bash")).toBe(true);
+    expect(registry.has("Shell")).toBe(true);
+    expect(registry.has("Bash")).toBe(false);
     expect(registry.has("nope")).toBe(false);
   });
 });

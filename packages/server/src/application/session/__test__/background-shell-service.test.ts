@@ -112,7 +112,14 @@ function createTaskService(options: {
 describe("BackgroundShellService", () => {
   it("holds a background environment lease until the process finishes", async () => {
     const release = vi.fn(async () => {});
-    const acquireEnvironment = vi.fn(async () => ({ release }));
+    const acquireEnvironment = vi.fn(async () => ({
+      release,
+      workspace: { executionRoot: "/mnt/d/repo" },
+      process: {
+        execShell: vi.fn(),
+        execProcess: vi.fn(),
+      },
+    }));
     const { service, listeners } = createTaskService({ acquireEnvironment });
 
     const result = await service.create({

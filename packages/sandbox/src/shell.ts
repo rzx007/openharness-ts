@@ -1,11 +1,12 @@
 import { spawn, spawnSync, type ChildProcess, type StdioOptions } from "node:child_process";
 import { resolve } from "node:path";
 import { loadSettings, type Settings } from "@openharness/core";
+import type { EnvironmentExecutionOwner } from "@openharness/environment";
+import { shellArgv, type ShellDescriptor } from "@openharness/environment";
 import { getSrtAvailability } from "./availability.js";
-import { SandboxUnavailableError } from "./docker-backend.js";
+import { SandboxUnavailableError } from "./errors.js";
 import { bindProcessAbortSignal } from "./process-control.js";
 import { resolveSandboxPolicy } from "./policy.js";
-import { getActiveSandboxSession } from "./session.js";
 import { wrapCommandForSrt } from "./srt-adapter.js";
 import type { SandboxPolicy } from "./types.js";
 
@@ -15,11 +16,13 @@ export interface CreateShellProcessOptions {
   settings?: Settings;
   policy?: SandboxPolicy;
   env?: Record<string, string>;
+  owner?: EnvironmentExecutionOwner;
   stdio?: StdioOptions;
   signal?: AbortSignal;
   detached?: boolean;
-  /** Host-only shell policy. Docker always uses /bin/sh; SRT follows the host platform. */
+  /** Host shell selection policy. */
   hostShell?: "preferred" | "system";
+  shellDescriptor?: ShellDescriptor;
 }
 
 export interface CreateProcessOptions extends CreateShellProcessOptions {}
@@ -39,7 +42,7 @@ export async function createProcess(
     sessionId: options.sessionId,
     settings,
   });
-  return createResolvedProcess(argv, argv, options, settings, policy);
+  return createResolvedProcess(argv, options, settings, policy);
 }
 
 export type HostShellLauncher =
@@ -68,8 +71,11 @@ export async function createShellProcess(
     ? () => spawnSystemShell(command, options)
     : undefined;
   return createResolvedProcess(
-    options.hostShell === "system" ? resolveSystemShellArgv(command) : resolveShellArgv(command),
-    resolveContainerShellArgv(command),
+    options.hostShell === "system"
+      ? resolveSystemShellArgv(command)
+      : options.shellDescriptor
+        ? shellArgv(options.shellDescriptor, command)
+        : resolveShellArgv(command),
     options,
     settings,
     policy,
@@ -84,7 +90,6 @@ function resolveSystemShellArgv(command: string): string[] {
 
 async function createResolvedProcess(
   hostArgv: string[],
-  containerArgv: string[],
   options: CreateProcessOptions,
   settings: Settings,
   policy: SandboxPolicy,
@@ -93,27 +98,6 @@ async function createResolvedProcess(
   const sandbox = policy.config;
   const spawnLocal = () => spawnHostOverride?.() ?? spawnHost(hostArgv, options);
   if (!sandbox.enabled) return spawnLocal();
-
-  if (sandbox.backend === "docker") {
-    const session = getActiveSandboxSession({
-      cwd: policy.scope.cwd,
-      sessionId: policy.scope.sessionId,
-    });
-    if (session?.backend === "docker" && session.active && session.execCommand) {
-      return session.execCommand(containerArgv, {
-        cwd: options.cwd,
-        settings,
-        env: options.env,
-        stdio: options.stdio,
-        signal: options.signal,
-        detached: options.detached,
-      });
-    }
-    if (sandbox.failIfUnavailable) {
-      throw new SandboxUnavailableError("Docker sandbox session is not running");
-    }
-    return spawnLocal();
-  }
 
   const availability = getSrtAvailability(policy.config);
   if (!availability.available) {
@@ -131,13 +115,107 @@ async function createResolvedProcess(
   return child;
 }
 
-/** Linux container shell — used for docker exec, independent of host platform. */
-export function resolveContainerShellArgv(command: string): string[] {
-  return ["/bin/sh", "-c", command];
-}
 
 export function resolveHostShellLauncher(): HostShellLauncher {
   return detectHostShell();
+}
+
+export interface ResolveShellDescriptorInput {
+  platform?: NodeJS.Platform;
+  tempDir: string;
+  configuredExecutable?: string;
+  probe?: (executable: string) => Promise<{ version: string } | null>;
+}
+
+export async function resolveShellDescriptor(
+  input: ResolveShellDescriptorInput,
+): Promise<ShellDescriptor> {
+  const targetPlatform = input.platform ?? process.platform;
+  const probe = input.probe ?? probeShellExecutable;
+  const configured = input.configuredExecutable?.trim();
+  if (configured) {
+    const result = await probe(configured);
+    if (!result) throw new Error(`Configured shell is unavailable: ${configured}`);
+    return descriptorForExecutable(configured, result.version, targetPlatform, input.tempDir);
+  }
+
+  if (targetPlatform === "win32") {
+    for (const executable of ["pwsh.exe", "powershell.exe", process.env.ComSpec || "cmd.exe"]) {
+      const result = await probe(executable);
+      if (result) return descriptorForExecutable(executable, result.version, targetPlatform, input.tempDir);
+    }
+    throw new Error("No supported Windows shell is available (pwsh.exe, powershell.exe, cmd.exe).");
+  }
+
+  const configuredPosix = process.env.SHELL;
+  const candidates = configuredPosix ? [configuredPosix, "/bin/sh"] : ["/bin/sh"];
+  for (const executable of candidates) {
+    const result = await probe(executable);
+    if (result) return descriptorForExecutable(executable, result.version, targetPlatform, input.tempDir);
+  }
+  throw new Error("No supported POSIX shell is available.");
+}
+
+async function probeShellExecutable(executable: string): Promise<{ version: string } | null> {
+  const lower = executable.toLowerCase();
+  const args = lower.includes("powershell") || lower.includes("pwsh")
+    ? ["-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"]
+    : lower.endsWith("cmd.exe") || lower === "cmd"
+      ? ["/d", "/s", "/c", "ver"]
+      : ["-c", "printf %s \"${BASH_VERSION:-${ZSH_VERSION:-sh}}\""];
+  try {
+    const result = spawnSync(executable, args, {
+      windowsHide: true,
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    if (result.status !== 0) return null;
+    return { version: String(result.stdout || "").trim() || "unknown" };
+  } catch {
+    return null;
+  }
+}
+
+function descriptorForExecutable(
+  executable: string,
+  version: string,
+  targetPlatform: NodeJS.Platform,
+  tempDir: string,
+): ShellDescriptor {
+  const lower = executable.toLowerCase().replace(/\\/g, "/");
+  if (/(^|\/)pwsh(?:\.exe)?$/.test(lower)) {
+    return {
+      family: "powershell", dialect: "pwsh", executable,
+      argsPrefix: ["-NoLogo", "-NoProfile", "-Command"],
+      displayName: `PowerShell ${version}`, version,
+      pathStyle: "windows", tempDir,
+      capabilities: { conditionalAndOr: true, supportsLoginShell: false },
+    };
+  }
+  if (/(^|\/)powershell(?:\.exe)?$/.test(lower)) {
+    return {
+      family: "powershell", dialect: "windows-powershell", executable,
+      argsPrefix: ["-NoLogo", "-NoProfile", "-Command"],
+      displayName: `Windows PowerShell ${version}`, version,
+      pathStyle: "windows", tempDir,
+      capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+    };
+  }
+  if (/(^|\/)cmd(?:\.exe)?$/.test(lower)) {
+    return {
+      family: "cmd", dialect: "cmd", executable,
+      argsPrefix: ["/d", "/s", "/c"], displayName: "Command Prompt", version,
+      pathStyle: "windows", tempDir,
+      capabilities: { conditionalAndOr: true, supportsLoginShell: false },
+    };
+  }
+  const dialect = /(^|\/)zsh$/.test(lower) ? "zsh" : /(^|\/)bash$/.test(lower) ? "bash" : "posix-sh";
+  return {
+    family: "posix", dialect, executable,
+    argsPrefix: ["-lc"], displayName: dialect === "posix-sh" ? "POSIX Shell" : dialect,
+    version, pathStyle: targetPlatform === "win32" ? "windows" : "posix", tempDir,
+    capabilities: { conditionalAndOr: true, supportsLoginShell: true },
+  };
 }
 
 export function describeHostShellLauncher(shell: HostShellLauncher = resolveHostShellLauncher()): string {
@@ -155,10 +233,10 @@ export function describeHostShellLauncher(shell: HostShellLauncher = resolveHost
 
 /**
  * 解析宿主平台 shell：
- * - Windows：优先 bash.exe（非 login `-c`），否则 PowerShell / cmd
+ * - Windows：优先 PowerShell 7，其次 Windows PowerShell，最后 cmd
  * - POSIX：`/bin/sh -c`
  *
- * 探测结果进程内缓存；docker 路径请用 {@link resolveContainerShellArgv}。
+ * 探测结果进程内缓存。
  */
 export function resolveShellArgv(command: string): string[] {
   const shell = detectHostShell();
@@ -187,8 +265,8 @@ function detectHostShell(): HostShellLauncher {
     return cachedHostShell;
   }
 
-  if (isUsableCommand("bash.exe", ["-c", "exit 0"])) {
-    cachedHostShell = { kind: "bash", bin: "bash.exe" };
+  if (isUsableCommand("pwsh.exe")) {
+    cachedHostShell = { kind: "powershell", bin: "pwsh.exe" };
     return cachedHostShell;
   }
 

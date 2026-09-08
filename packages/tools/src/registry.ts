@@ -7,6 +7,7 @@ import {
   createWorkflowTool,
 } from "./agent/index.js";
 import type { AgentDefinition, WorkflowRunRepository } from "@openharness/coordinator";
+import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 import { feishuPushTool } from "./channels/index.js";
 import {
   fileEditTool,
@@ -45,8 +46,8 @@ import {
   scheduleUpdateTool,
 } from "./schedule/index.js";
 import { grepTool, lspTool } from "./search/index.js";
-import { bashTool } from "./shell/index.js";
-import { backgroundShellCreateTool } from "./background-shell/index.js";
+import { createShellTool } from "./shell/index.js";
+import { createBackgroundShellTool } from "./background-shell/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
 import { terminalTools } from "./terminal/index.js";
 import { jobTools } from "./job/index.js";
@@ -60,6 +61,7 @@ export function createDefaultToolRegistry(
     childEnvironment?: boolean;
     agentDefinitions?: AgentDefinition[];
     workflowRepository?: WorkflowRunRepository;
+    environment?: ExecutionEnvironmentHandle;
   } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
@@ -72,7 +74,7 @@ export function createDefaultToolRegistry(
   };
   const environment = (): ToolExecutionSpec => ({
     domain: "environment",
-    supportedEnvironments: ["local", "docker"],
+    supportedEnvironments: ["local", "wsl"],
   });
   const localEnvironment = (): ToolExecutionSpec => ({
     domain: "environment",
@@ -80,10 +82,13 @@ export function createDefaultToolRegistry(
   });
   const controlPlane = (network = false): ToolExecutionSpec => ({
     domain: "control_plane",
-    supportedEnvironments: ["local", "docker"],
+    supportedEnvironments: ["local", "wsl"],
     ...(network ? { network: true } : {}),
   });
-  registerBuiltin(bashTool, environment());
+  registerBuiltin(
+    createShellTool(options.environment?.info.shellDescriptor, undefined),
+    environment(),
+  );
   registerBuiltin(fileReadTool, environment());
   registerBuiltin(fileWriteTool, environment());
   registerBuiltin(fileEditTool, environment());
@@ -100,7 +105,10 @@ export function createDefaultToolRegistry(
   registerBuiltin(askUserTool, controlPlane());
   registerBuiltin(briefTool, controlPlane());
   if (options.backgroundShell !== false) {
-    registerBuiltin(backgroundShellCreateTool, environment());
+    registerBuiltin(
+      createBackgroundShellTool(options.environment?.info.shellDescriptor),
+      environment(),
+    );
   }
   registerBuiltin(enterPlanModeTool, controlPlane());
   registerBuiltin(exitPlanModeTool, controlPlane());

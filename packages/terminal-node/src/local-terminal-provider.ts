@@ -58,7 +58,7 @@ export class LocalTerminalProvider implements TerminalProvider {
   async create(input: TerminalCreateRequest): Promise<TerminalSessionInfo> {
     const id = randomUUID();
     const resolvedCwd = await this.options.resolveCwd(input);
-    const target = input.runtime === "sandbox"
+    const target = input.runtime === "environment"
       ? await this.requireEnvironmentTarget(input, resolvedCwd, id)
       : createHostTerminalTarget({
           cwd: resolvedCwd,
@@ -276,7 +276,7 @@ export class LocalTerminalProvider implements TerminalProvider {
     terminalId: string,
   ): Promise<EnvironmentPtyTarget> {
     if (!this.options.resolveTarget) {
-      throw new Error("Sandbox terminal target resolver is not configured.");
+      throw new Error("Execution environment terminal target resolver is not configured.");
     }
     return await this.options.resolveTarget(input, cwd, terminalId);
   }

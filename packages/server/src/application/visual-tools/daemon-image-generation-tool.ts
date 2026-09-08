@@ -38,7 +38,7 @@ export function createDaemonImageGenerationTool(
     name: "ImageGeneration",
     execution: {
       domain: "control_plane",
-      supportedEnvironments: ["local", "docker"],
+      supportedEnvironments: ["local", "wsl"],
       network: true,
     },
     description:

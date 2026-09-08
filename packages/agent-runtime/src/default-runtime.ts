@@ -134,6 +134,7 @@ export async function createOpenHarnessRuntime(
     ? undefined
     : childEnvironment !== undefined && jobs !== undefined;
   const baseToolRegistry = createDefaultToolRegistry({
+    environment: options.executionEnvironment,
     schedules: schedules !== undefined,
     terminal: terminal !== undefined,
     jobs: jobs !== undefined,
@@ -201,9 +202,10 @@ export async function createOpenHarnessRuntime(
   });
 
   const hookExecutor = new HookExecutor({
-    cwd: hostCwd,
+    cwd: options.executionEnvironment?.workspace.executionRoot ?? hostCwd,
     sessionId: options.sessionId,
     settings,
+    processExecutor: options.executionEnvironment?.process,
   });
   const runtimeModel = resolveRuntimeModel(settings, configuration);
 
@@ -257,25 +259,14 @@ export async function createOpenHarnessRuntime(
     .setQueryEngine(queryEngine)
     .build(settings);
 
+  await attachSandboxRuntime(
+    bundle,
+    hostCwd,
+    options.sandboxReporter,
+    options.sessionId,
+  );
   if (options.executionEnvironment) {
-    bundle.sandboxStatus = options.executionEnvironment.info.kind === "docker"
-      ? {
-          state: "active",
-          enabled: true,
-          active: true,
-          backend: "docker",
-          containerCwd: options.executionEnvironment.workspace.executionRoot,
-          networkMode: options.executionEnvironment.info.networkMode,
-        }
-      : { state: "off", enabled: false, active: false };
     bundle.addCleanup(() => options.executionEnvironment?.release());
-  } else {
-    await attachSandboxRuntime(
-      bundle,
-      hostCwd,
-      options.sandboxReporter,
-      options.sessionId,
-    );
   }
   return bundle;
 }

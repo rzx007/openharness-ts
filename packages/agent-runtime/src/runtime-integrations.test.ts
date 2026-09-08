@@ -12,16 +12,16 @@ describe("MCP execution domains", () => {
     expect(selectMcpServersForEnvironment(SERVERS)).toEqual(SERVERS);
   });
 
-  it("keeps stdio and remote MCP in a networked Docker environment", () => {
+  it("keeps stdio and remote MCP in a networked WSL environment", () => {
     expect(selectMcpServersForEnvironment(SERVERS, {
-      kind: "docker",
-      networkMode: "bridge",
+      kind: "wsl",
+      networkMode: "host",
     })).toEqual(SERVERS);
   });
 
-  it("keeps stdio MCP but removes remote MCP in a network-isolated Docker environment", () => {
+  it("keeps stdio MCP but removes remote MCP in a network-isolated WSL environment", () => {
     expect(selectMcpServersForEnvironment(SERVERS, {
-      kind: "docker",
+      kind: "wsl",
       networkMode: "none",
     })).toEqual({ local: SERVERS.local });
   });

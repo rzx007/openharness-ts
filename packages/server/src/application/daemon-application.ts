@@ -12,7 +12,6 @@ import {
   type ObservableJobProducer,
 } from "@openharness/agent-runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
-import { ExecutionEnvironmentManager } from "@openharness/sandbox";
 import {
   readSessionRuntimeConfig,
   type AttachmentLimits,
@@ -184,7 +183,6 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly workflows: SessionWorkflowRunRepository;
   readonly retention: ApplicationRetentionService;
   private readonly attachmentResources: SessionAttachmentResources;
-  private readonly environmentManager = new ExecutionEnvironmentManager();
 
   private readonly eventPublisher: SessionEventPublisher;
   private readonly transcriptProjection: SessionTranscriptProjection;
@@ -290,7 +288,7 @@ export class DaemonApplication implements DurableAgentApplication {
         }),
       );
       const acquireSessionEnvironment = options.executionSurface === "desktop_managed"
-        ? createSessionEnvironmentAcquirer({ manager: this.environmentManager, store })
+        ? createSessionEnvironmentAcquirer()
         : undefined;
       this.terminals = new DaemonTerminalService(store, {
         getSettingsForCwd: async (cwd) =>
@@ -389,6 +387,7 @@ export class DaemonApplication implements DurableAgentApplication {
                   command: input.command,
                   description: input.description,
                   settings: input.settings,
+                  shellDescriptor: input.shellDescriptor,
                   origin: "tool",
                 });
                 return { jobId: execution.id, label: execution.description };
@@ -863,9 +862,9 @@ export class DaemonApplication implements DurableAgentApplication {
        */
       // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
       this.startupRecovery = Promise.all([
-        this.attachments.recover(),
-        this.backgroundShells.reconcileActiveTasks(DAEMON_RESTART_TASK_REASON),
-      ])
+          this.attachments.recover(),
+          this.backgroundShells.reconcileActiveTasks(DAEMON_RESTART_TASK_REASON),
+        ])
         .then(() => recoverInterruptedWorkflows({ workflows: this.workflows }))
         .then(
           () => {
@@ -931,11 +930,6 @@ export class DaemonApplication implements DurableAgentApplication {
     }
     try {
       await closeExecutionRuntimes();
-    } catch (error) {
-      failures.push(error);
-    }
-    try {
-      await this.environmentManager.dispose();
     } catch (error) {
       failures.push(error);
     }

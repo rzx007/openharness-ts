@@ -8,9 +8,28 @@ import {
   parseFileReference,
   parseInlineFileReference,
   summarizeToolCall,
+  toolDisplayName,
 } from "./message-render-model"
 
 describe("message render model", () => {
+  it("uses result metadata for the actual shell display name", () => {
+    const call = toolPart("Shell", { command: "Get-ChildItem" })
+    const result = {
+      ...toolPart("Shell", {}),
+      type: "tool_result" as const,
+      metadata: { shellDialect: "pwsh", shellDisplayName: "PowerShell 7.6" },
+    }
+
+    expect(toolDisplayName(call, result)).toBe("PowerShell 7.6")
+    expect(toolDisplayName(toolPart("Bash", {}), {
+      ...toolPart("Bash", {}),
+      type: "tool_result",
+      metadata: { shellDialect: "powershell", shell: "powershell.exe" },
+    })).toBe("PowerShell")
+    expect(toolDisplayName(toolPart("Bash", {}))).toBe("Shell")
+    expect(toolDisplayName(toolPart("Read", {}))).toBe("Read")
+  })
+
   it("preserves commentary and final-answer phase metadata", () => {
     const part = {
       ...toolPart("Read", {}),

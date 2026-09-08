@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig, Settings, ToolDefinition } from "@openharness/core";
+import type { EnvironmentProcessExecutor } from "@openharness/environment";
 import type { SandboxPolicy } from "@openharness/sandbox";
 import { SandboxStdioClientTransport } from "./sandbox-stdio-transport.js";
 
@@ -89,6 +90,7 @@ export class McpClientManager {
     settings?: Settings;
     sessionId?: string;
     policy?: SandboxPolicy;
+    processExecutor?: EnvironmentProcessExecutor;
   } = {}) {}
 
   async connect(name: string, config: McpServerConfig): Promise<McpConnection> {
@@ -193,6 +195,7 @@ export class McpClientManager {
           settings: this.options.settings,
           sessionId: this.options.sessionId,
           policy: this.options.policy,
+          processExecutor: this.options.processExecutor,
         });
     }
   }

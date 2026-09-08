@@ -1,9 +1,14 @@
-import type { ContextBucketId, ContextLedgerSegment, WorkStyle } from "@openharness/core";
+import type {
+  ContextBucketId,
+  ContextLedgerSegment,
+  WorkStyle,
+} from "@openharness/core";
 import type { EffectiveEnvironmentInfo } from "@openharness/environment";
 import { loadLocalRules } from "@openharness/personalization";
 import type { PromptLayers, PromptPermissionMode } from "./index.js";
 import {
   buildDelegationSection,
+  buildMarkdownPresentationSection,
   buildPermissionModeSection,
   buildWorkStyleSection,
   formatEnvironmentSection,
@@ -34,6 +39,7 @@ export interface PromptSegmentsAssemblyOptions {
   passes?: number;
   includeDelegation?: boolean;
   includeBackgroundShell?: boolean;
+  includeMarkdownPresentation?: boolean;
   skillsList?: Array<{ name: string; description: string }>;
   environmentInfo?: EffectiveEnvironmentInfo;
 }
@@ -57,18 +63,30 @@ export async function buildTaggedPromptSegments(
 ): Promise<TaggedPromptSegment[]> {
   const segments: TaggedPromptSegment[] = [];
   const promptCwd = options.cwd ?? process.cwd();
-  const env = await getEnvironmentInfo(promptCwd);
   const envSection = options.environmentInfo
     ? formatEffectiveEnvironmentSection(options.environmentInfo)
-    : formatEnvironmentSection(env);
+    : formatEnvironmentSection(await getEnvironmentInfo(promptCwd));
 
-  pushSegment(segments, "stable", "system", (await loadSoulMd()) ?? getDefaultIdentity());
+  pushSegment(
+    segments,
+    "stable",
+    "system",
+    (await loadSoulMd()) ?? getDefaultIdentity(),
+  );
   pushSegment(
     segments,
     "stable",
     "system",
     resolveInvariantGuidance(options.includeBackgroundShell !== false),
   );
+  if (options.includeMarkdownPresentation !== false) {
+    pushSegment(
+      segments,
+      "stable",
+      "system",
+      buildMarkdownPresentationSection(),
+    );
+  }
   pushSegment(segments, "stable", "system", envSection);
   pushSegment(
     segments,
@@ -76,7 +94,12 @@ export async function buildTaggedPromptSegments(
     "system",
     buildPermissionModeSection(options.permissionMode ?? "default"),
   );
-  pushSegment(segments, "stable", "system", buildWorkStyleSection(options.workStyle ?? "practical"));
+  pushSegment(
+    segments,
+    "stable",
+    "system",
+    buildWorkStyleSection(options.workStyle ?? "practical"),
+  );
 
   if (options.fastMode) {
     pushSegment(
@@ -132,7 +155,9 @@ export async function buildTaggedPromptSegments(
   return segments;
 }
 
-export function taggedSegmentsToLayers(segments: TaggedPromptSegment[]): PromptLayers {
+export function taggedSegmentsToLayers(
+  segments: TaggedPromptSegment[],
+): PromptLayers {
   const layers: PromptLayers = { stable: [], context: [], volatile: [] };
   for (const segment of segments) {
     layers[segment.layer].push(segment.text);

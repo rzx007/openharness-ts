@@ -424,7 +424,7 @@ daemon 创建并控制附件版 `Read`，因此同时传入 `trustedToolOverride
 
 覆盖 Tool 是普通不可变定义，不拥有需要单独释放的生命周期。附件存储、OCR worker 和缓存仍由 daemon/application 层创建和关闭。Agent Runtime 不释放这些服务。
 
-移除 `attachmentResourceRoot` 后，Agent shell 和 Docker sandbox 不再自动看到附件存储目录。未来若需要 shell 操作附件，应单独设计显式的“导出附件到受控工作目录”工具，不恢复隐式目录挂载。
+移除 `attachmentResourceRoot` 后，Agent shell 和任何执行环境都不会自动看到附件存储目录。未来若需要 shell 操作附件，应单独设计显式的“导出附件到受控工作目录”工具，不恢复隐式目录暴露。
 
 ## 13. 测试范围
 

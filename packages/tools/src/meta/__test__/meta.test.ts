@@ -5,9 +5,10 @@ import { briefTool } from "../brief.js";
 import { configTool } from "../config.js";
 import { toolSearchTool } from "../tool-search.js";
 import { askUserTool } from "../ask-user.js";
-import { listSkillsTool, skillTool } from "../skill.js";
+import { hostPathDirectory, listSkillsTool, skillTool } from "../skill.js";
 import { ToolRegistry } from "@openharness/core";
 import { SkillRegistry, type SkillDefinition } from "@openharness/skills";
+import { hostPathToWslPath } from "@openharness/sandbox";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -100,16 +101,16 @@ describe("toolSearchTool", () => {
   it("finds matching tools", async () => {
     const registry = new ToolRegistry();
     registry.register({
-      name: "Bash",
+      name: "Shell",
       description: "Run shell commands",
       inputSchema: {},
       async execute() {
         return { content: [] };
       },
     });
-    const result = await toolSearchTool.execute!({ query: "bash" }, { cwd: process.cwd(), toolRegistry: registry });
+    const result = await toolSearchTool.execute!({ query: "shell" }, { cwd: process.cwd(), toolRegistry: registry });
     const text = (result.content[0] as any).text;
-    expect(text).toContain("Bash");
+    expect(text).toContain("Shell");
   });
 
   it("returns no matches message", async () => {
@@ -133,7 +134,7 @@ describe("toolSearchTool", () => {
     const result = await toolSearchTool.execute!({ query: "dynamic" }, { cwd: process.cwd(), toolRegistry: registry });
     const text = (result.content[0] as any).text;
     expect(text).toContain("PluginDynamicTool");
-    expect(text).not.toContain("Bash");
+    expect(text).not.toContain("Shell");
   });
 
   it("fails when no runtime registry is provided", async () => {
@@ -144,6 +145,15 @@ describe("toolSearchTool", () => {
 });
 
 describe("skillTool", () => {
+  it("derives a Skill root using the path's own platform syntax", () => {
+    expect(hostPathDirectory("C:\\Users\\ruanz\\skills\\review\\SKILL.md")).toBe(
+      "C:\\Users\\ruanz\\skills\\review",
+    );
+    expect(hostPathDirectory("/home/ruanz/skills/review/SKILL.md")).toBe(
+      "/home/ruanz/skills/review",
+    );
+  });
+
   it("resolves skills by commandName through the shared registry", async () => {
     const registry = new SkillRegistry();
     registry.register(makeSkill({
@@ -169,25 +179,42 @@ describe("skillTool", () => {
       path: "C:\\Users\\ruanz\\.openharness-ts\\skills\\review\\SKILL.md",
       content: "# review",
     }));
-    const presentHostPath = (hostPath: string) => {
-      const normalized = hostPath.replace(/\\/g, "/");
-      const marker = "/.openharness-ts/skills/";
-      const offset = normalized.indexOf(marker);
-      return offset >= 0
-        ? `/opt/openharness/skills/${normalized.slice(offset + marker.length)}`
-        : undefined;
-    };
+    const presentHostPath = (hostPath: string) => hostPathToWslPath(hostPath);
 
     const result = await skillTool.execute!({ name: "review" }, {
-      cwd: "/workspace",
+      cwd: "/mnt/d/workspace",
       skillRegistry: registry,
       environment: { paths: { presentHostPath } },
     } as any);
 
     const text = (result.content[0] as any).text;
-    expect(text).toContain("Skill file: /opt/openharness/skills/review/SKILL.md");
-    expect(text).toContain("Skill root: /opt/openharness/skills/review");
+    expect(text).toContain("Skill file: /mnt/c/Users/ruanz/.openharness-ts/skills/review/SKILL.md");
+    expect(text).toContain("Skill root: /mnt/c/Users/ruanz/.openharness-ts/skills/review");
     expect(text).not.toContain("C:\\Users\\");
+  });
+
+  it("appends the active shell reminder after third-party skill content", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({ name: "portable", content: "```bash\npython - <<'PY'\nPY\n```" }));
+    const result = await skillTool.execute!({ name: "portable" }, {
+      cwd: "C:\\workspace",
+      skillRegistry: registry,
+      environment: {
+        info: {
+          shellDescriptor: {
+            family: "powershell", dialect: "windows-powershell", executable: "powershell.exe",
+            argsPrefix: ["-NoLogo", "-NoProfile", "-Command"], displayName: "Windows PowerShell 5.1",
+            pathStyle: "windows", tempDir: "C:\\Temp",
+            capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+          },
+        },
+      },
+    } as any);
+    const text = (result.content[0] as any).text as string;
+    expect(text.indexOf("</skill-content>")).toBeLessThan(text.indexOf("Current execution shell"));
+    expect(text).toContain("Windows PowerShell 5.1");
+    expect(text).toContain("examples must be translated");
+    expect(text).toContain("ConvertFrom-Json has no -Depth parameter");
   });
 
   it("marks unmounted plugin resources unavailable while retaining their Markdown", async () => {
@@ -200,7 +227,7 @@ describe("skillTool", () => {
     }));
 
     const result = await skillTool.execute!({ name: "plugin-review" }, {
-      cwd: "/workspace",
+      cwd: "/mnt/d/workspace",
       skillRegistry: registry,
       environment: { paths: { presentHostPath: () => undefined } },
     } as any);
@@ -325,6 +352,30 @@ describe("listSkillsTool", () => {
       const text = (result.content[0] as any).text;
       expect(text).toContain("agent-skill — Project agent skill");
       expect(text).toContain("source=project");
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
+      else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refreshes WSL project Skills from the host workspace root", async () => {
+    const previousConfigDir = process.env.OPENHARNESS_CONFIG_DIR;
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oh-wsl-project-skills-"));
+    process.env.OPENHARNESS_CONFIG_DIR = path.join(dir, "config");
+    try {
+      const skillDir = path.join(dir, ".agents", "skills", "wsl-project-skill");
+      await fs.mkdir(path.join(dir, ".git"), { recursive: true });
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.writeFile(path.join(skillDir, "SKILL.md"), "---\ndescription: WSL project skill\n---\n\nBody.", "utf8");
+
+      const result = await listSkillsTool.execute!({ visibility: "all" }, {
+        cwd: "/mnt/c/host-project",
+        skillRegistry: new SkillRegistry(),
+        environment: { workspace: { hostRoot: dir } },
+      } as any);
+
+      expect((result.content[0] as { text: string }).text).toContain("wsl-project-skill — WSL project skill");
     } finally {
       if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
       else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;

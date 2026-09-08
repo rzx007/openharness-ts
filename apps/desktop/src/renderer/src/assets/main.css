@@ -11,8 +11,7 @@
 /* "Microsoft YaHei UI", "Microsoft YaHei",  */
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans:
-    "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 
   --text-xs: var(--ui-font-size-xs);
@@ -478,6 +477,37 @@
     text-decoration-color: currentColor;
   }
 
+  /* Assistant transcript — compact editorial rhythm without changing file previews */
+  .assistant-markdown [data-streamdown="heading-1"] {
+    margin-block: 0.45rem 0.4rem;
+  }
+
+  .assistant-markdown [data-streamdown="heading-2"] {
+    margin-block: 1rem 0.35rem;
+  }
+
+  .assistant-markdown [data-streamdown="heading-3"] {
+    margin-block: 0.8rem 0.3rem;
+  }
+
+  .assistant-markdown [data-streamdown="list-item"] {
+    padding-block: 0;
+  }
+
+  .assistant-markdown [data-streamdown="blockquote"] {
+    margin: 0.6rem 0;
+    padding-block: 0.15rem;
+  }
+
+  .assistant-markdown [data-streamdown="paragraph"] {
+    margin-block: 0;
+  }
+
+  .assistant-markdown [data-streamdown="link"] {
+    color: var(--file-link);
+    overflow-wrap: anywhere;
+  }
+
   /* Horizontal rule — subtle */
   .desktop-streamdown [data-streamdown="horizontal-rule"] {
     margin: 1rem 0;
@@ -487,8 +517,29 @@
   /* Tables — clean */
   .desktop-streamdown [data-streamdown="table-wrapper"] {
     position: relative;
+    display: block;
     margin: 1rem 0;
-    overflow: auto;
+    padding: 0;
+    overflow: visible;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none;
+  }
+
+  .desktop-streamdown [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) {
+    position: absolute;
+    top: -0.25rem;
+    right: 0;
+    z-index: 1;
+    gap: 0.125rem;
+    transform: translateY(-100%);
+  }
+
+  .desktop-streamdown [data-streamdown="table-wrapper"] > div:last-child {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -500,7 +551,7 @@
     border-collapse: collapse;
     color: var(--content-foreground);
     font-size: var(--ui-font-size);
-    line-height: 1.55;
+    line-height: 1.45;
   }
 
   .desktop-streamdown [data-streamdown="table-wrapper"] thead {
@@ -517,11 +568,16 @@
   }
 
   .desktop-streamdown [data-streamdown="table-wrapper"] td {
-    padding: 0.78rem 0.75rem;
+    padding: 0.55rem 0.75rem;
     border-bottom: 1px solid color-mix(in oklab, var(--border) 46%, transparent);
     text-align: left;
     vertical-align: top;
+    overflow-wrap: anywhere;
     background: transparent;
+  }
+
+  .desktop-streamdown [data-streamdown="table-wrapper"] [data-streamdown="link"] {
+    word-break: break-word;
   }
 
   .desktop-streamdown [data-streamdown="table-wrapper"] tbody tr:last-child td {

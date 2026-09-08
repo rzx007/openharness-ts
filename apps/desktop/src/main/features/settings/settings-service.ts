@@ -1,6 +1,5 @@
 import type { OpenHarnessClient } from "@openharness/client"
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
+import { preflightWsl } from "@openharness/sandbox"
 
 import {
   buildDesktopSettingsSnapshot,
@@ -24,13 +23,13 @@ import {
   type DesktopPreferences,
 } from "./desktop-preferences"
 
-const execFileAsync = promisify(execFile)
 type SettingsClient = Pick<OpenHarnessClient, "getSettings" | "patchSettings">
 
 export interface DesktopSettingsServiceDependencies {
   daemonClient(): Promise<SettingsClient>
   refreshDaemonClient(): Promise<SettingsClient>
-  preflightDocker(): Promise<void>
+  preflightWsl(): Promise<void>
+  platform: NodeJS.Platform
   getPreferences: typeof getDesktopPreferences
   patchPreferences: typeof patchDesktopPreferences
 }
@@ -38,7 +37,8 @@ export interface DesktopSettingsServiceDependencies {
 const defaultDependencies: DesktopSettingsServiceDependencies = {
   daemonClient: () => desktopSessionService.daemonClient(),
   refreshDaemonClient: () => desktopSessionService.refreshDaemonClient(),
-  preflightDocker: preflightDesktopDocker,
+  preflightWsl,
+  platform: process.platform,
   getPreferences: getDesktopPreferences,
   patchPreferences: patchDesktopPreferences,
 }
@@ -92,20 +92,20 @@ export class DesktopSettingsService {
   async updateAgentEnvironment(
     input: UpdateDesktopAgentEnvironmentInput
   ): Promise<DesktopSettingsSnapshot> {
-    if (input.environment !== "local" && input.environment !== "docker") {
-      throw new Error("未知的智能体运行环境，请选择本机或 Docker 沙箱。")
+    if (input.environment !== "native" && input.environment !== "wsl") {
+      throw new Error("未知的智能体运行环境，请选择本机或 WSL。")
     }
-    if (input.environment === "docker") await this.dependencies.preflightDocker()
+    if (input.environment === "wsl") {
+      if (this.dependencies.platform !== "win32") throw new Error("WSL 仅可在 Windows 上使用。")
+      await this.dependencies.preflightWsl()
+    }
     return this.withDaemonRetry(async (client) => {
       const settings = await client.patchSettings({
-        sandbox: {
-          enabled: input.environment === "docker",
-          backend: "docker",
-          failIfUnavailable: true,
-        },
+        agentEnvironment: { kind: input.environment },
       })
       return buildDesktopSettingsSnapshot(settings, this.dependencies.getPreferences(), {
         restartRequired: true,
+        wslSupported: this.dependencies.platform === "win32",
       })
     })
   }
@@ -115,10 +115,14 @@ export class DesktopSettingsService {
   ): Promise<DesktopSettingsSnapshot> {
     try {
       return await this.withDaemonRetry(async (client) =>
-        buildDesktopSettingsSnapshot(await client.getSettings(), preferences)
+        buildDesktopSettingsSnapshot(await client.getSettings(), preferences, {
+          wslSupported: this.dependencies.platform === "win32",
+        })
       )
     } catch {
-      return buildDesktopSettingsSnapshot({}, preferences)
+      return buildDesktopSettingsSnapshot({}, preferences, {
+        wslSupported: this.dependencies.platform === "win32",
+      })
     }
   }
 
@@ -141,14 +145,3 @@ export class DesktopSettingsService {
 
 export const desktopSettingsService = new DesktopSettingsService()
 
-export async function preflightDesktopDocker(): Promise<void> {
-  try {
-    await execFileAsync("docker", ["info", "--format", "{{.ServerVersion}}"], {
-      timeout: 10_000,
-      windowsHide: true,
-    })
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
-    throw new Error(`Docker 不可用，请确认 Docker Desktop 已启动。${detail ? ` ${detail}` : ""}`)
-  }
-}

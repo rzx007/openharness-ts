@@ -7,7 +7,7 @@ import type {
 export const terminalOpenTool: ToolDefinition = {
   name: "TerminalOpen",
   description:
-    "Open a persistent interactive terminal in this session's working directory. Prefer Bash for a single non-interactive command; use this for long-running or interactive processes.",
+    "Open a persistent interactive terminal in this session's working directory. Prefer Shell for a single non-interactive command; use this for long-running or interactive processes.",
   inputSchema: {
     type: "object",
     properties: {

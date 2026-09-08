@@ -1,5 +1,7 @@
 # 对话附件阶段 6：文本与代码资源实现计划
 
+> 状态：历史计划。Docker 只读挂载步骤已被后续宿主 `attachment://` 工具覆盖设计取代。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 支持安全的文本与代码附件、小文件有界内联、大文件通过现有 `Read` 按行读取，并在 Provider 执行前阻止 PDF、Office、压缩包和其他二进制文档。

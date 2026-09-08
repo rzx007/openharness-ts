@@ -25,6 +25,8 @@ export type LoadStatus = "idle" | "loading" | "ready" | "error"
 export interface SubmitPromptOptions {
   skillInvocation?: SkillInvocationMetadata
   attachments?: readonly DesktopAttachmentDraft[]
+  /** Exact composer text before slash-command parsing; used only to clear a migrated first draft. */
+  sourceDraftText?: string
 }
 
 export interface PendingPromptAttachmentSnapshot extends DesktopPromptAttachmentInput {

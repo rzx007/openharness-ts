@@ -61,9 +61,10 @@ export async function installRuntimeIntegrations(
   }
 
   const mcpManager = new McpClientManager({
-    cwd: options.cwd,
+    cwd: options.executionEnvironment?.workspace.executionRoot ?? options.cwd,
     settings: options.settings,
     sessionId: options.sessionId,
+    processExecutor: options.executionEnvironment?.process,
   });
   runtime.addCleanup(() => mcpManager.disconnectAll());
   const mcpServers = selectMcpServersForEnvironment(
@@ -89,12 +90,12 @@ export async function installRuntimeIntegrations(
         execution: server?.type === "http" || server?.type === "sse"
           ? {
               domain: "control_plane",
-              supportedEnvironments: ["local", "docker"],
+              supportedEnvironments: ["local", "wsl"],
               network: true,
             }
           : {
               domain: "environment",
-              supportedEnvironments: ["local", "docker"],
+              supportedEnvironments: ["local", "wsl"],
             },
       }, {
         kind: "mcp",

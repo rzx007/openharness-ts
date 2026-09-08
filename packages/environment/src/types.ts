@@ -1,4 +1,6 @@
-export type ExecutionEnvironmentKind = "local" | "docker";
+import type { ShellDescriptor } from "./shell-descriptor.js";
+
+export type ExecutionEnvironmentKind = "local" | "wsl";
 
 export interface WorkspaceBinding {
   kind: ExecutionEnvironmentKind;
@@ -36,6 +38,8 @@ export interface EffectiveEnvironmentInfo {
   networkMode: string;
   git?: { repository: boolean; branch?: string };
   limitations: string[];
+  /** Canonical shell contract. Legacy scalar shell fields remain during migration. */
+  shellDescriptor?: ShellDescriptor;
 }
 
 export interface EnvironmentProcessResult {
@@ -48,6 +52,7 @@ export interface EnvironmentProcess {
   write(data: string | Uint8Array): void;
   end(): void;
   onOutput(listener: (chunk: Uint8Array) => void): () => void;
+  onErrorOutput?(listener: (chunk: Uint8Array) => void): () => void;
   wait(): Promise<EnvironmentProcessResult>;
   signal(signal: "interrupt" | "terminate"): Promise<void>;
 }
@@ -55,7 +60,13 @@ export interface EnvironmentProcess {
 export interface EnvironmentProcessOptions {
   cwd?: string;
   env?: Record<string, string>;
+  owner?: EnvironmentExecutionOwner;
   signal?: AbortSignal;
+}
+
+export interface EnvironmentExecutionOwner {
+  kind: "agent" | "terminal" | "background" | "hook" | "mcp";
+  id: string;
 }
 
 export interface EnvironmentProcessExecutor {
@@ -72,6 +83,7 @@ export interface EnvironmentProcessExecutor {
 export interface EnvironmentTerminalPrepareOptions {
   cwd?: string;
   shell?: string;
+  owner?: EnvironmentExecutionOwner;
   cols: number;
   rows: number;
 }
@@ -149,13 +161,6 @@ export interface ExecutionEnvironmentConsumer {
   id: string;
 }
 
-export interface ExecutionEnvironmentLease extends ExecutionEnvironmentHandle {
-  readonly environmentId: string;
-  readonly ownerId: string;
-  readonly leaseId: string;
-  readonly consumer: ExecutionEnvironmentConsumer;
-}
-
 export type ToolExecutionDomain = "environment" | "control_plane";
 
 export function createWorkspaceBinding(
@@ -164,12 +169,14 @@ export function createWorkspaceBinding(
   if (!binding.hostRoot.trim() || !binding.executionRoot.trim()) {
     throw new Error("Workspace roots must be non-empty");
   }
-  if (binding.kind === "docker") {
+  if (binding.kind === "wsl") {
     if (
       !binding.executionRoot.startsWith("/") ||
       binding.executionRoot.includes("\\")
     ) {
-      throw new Error("Docker execution root must be an absolute POSIX path");
+      throw new Error(
+        "WSL execution root must be an absolute POSIX path",
+      );
     }
   } else if (
     comparableLocalPath(binding.hostRoot) !==

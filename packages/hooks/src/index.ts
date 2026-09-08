@@ -8,7 +8,9 @@ import type {
   StreamMessageParams,
   Settings,
 } from "@openharness/core";
+import { canonicalToolName } from "@openharness/core";
 import { createShellProcess } from "@openharness/sandbox";
+import type { EnvironmentProcessExecutor } from "@openharness/environment";
 
 export type { HookEvent, HookType, HookDefinition, HookResult };
 
@@ -32,6 +34,7 @@ export interface HookExecutorOptions {
   cwd?: string;
   sessionId?: string;
   settings?: Settings;
+  processExecutor?: EnvironmentProcessExecutor;
 }
 
 /**
@@ -103,7 +106,12 @@ function fnmatch(name: string, pattern: string): boolean {
 function matchSubject(payload: Record<string, unknown>): string {
   const tool = payload.tool_name ?? payload.tool;
   const subject = tool ?? payload.prompt ?? payload.event ?? "";
-  return String(subject ?? "");
+  const value = String(subject ?? "");
+  return tool !== undefined ? canonicalToolName(value) : value;
+}
+
+function canonicalHookMatcher(matcher: string): string {
+  return matcher === "Bash" ? "Shell" : matcher;
 }
 
 /** Parse a hook model response into `{ ok, reason }`, mirroring Python. */
@@ -135,6 +143,7 @@ export class HookExecutor implements IHookExecutor {
   private cwd: string;
   private sessionId?: string;
   private settings?: Settings;
+  private processExecutor?: EnvironmentProcessExecutor;
 
   constructor(options?: HookExecutorOptions) {
     this.client = options?.client;
@@ -142,6 +151,7 @@ export class HookExecutor implements IHookExecutor {
     this.cwd = options?.cwd ?? process.cwd();
     this.sessionId = options?.sessionId;
     this.settings = options?.settings;
+    this.processExecutor = options?.processExecutor;
   }
 
   /** Inject (or replace) the model client used for prompt/agent hooks. */
@@ -212,7 +222,7 @@ export class HookExecutor implements IHookExecutor {
     const subject = context ? matchSubject(context) : "";
     const filtered = [...this.hooks.values()].filter((h) => {
       if (h.event !== event || !h.enabled) return false;
-      if (h.matcher && context) return fnmatch(subject, h.matcher);
+      if (h.matcher && context) return fnmatch(subject, canonicalHookMatcher(h.matcher));
       return true;
     });
     // Stable sort by descending priority (default 0).
@@ -280,6 +290,30 @@ export class HookExecutor implements IHookExecutor {
     const env: Record<string, string> = {};
     if (event) env.OPENHARNESS_HOOK_EVENT = event;
     if (payload) env.OPENHARNESS_HOOK_PAYLOAD = JSON.stringify(payload);
+
+    if (this.processExecutor) {
+      try {
+        const proc = await this.processExecutor.execShell(resolved, {
+          cwd: this.cwd,
+          env,
+          signal,
+        });
+        let output = "";
+        const stop = proc.onOutput((chunk) => { output += new TextDecoder().decode(chunk); });
+        const stopErrors = proc.onErrorOutput?.((chunk) => { output += new TextDecoder().decode(chunk); });
+        proc.end();
+        const result = await proc.wait();
+        stop();
+        stopErrors?.();
+        const success = result.exitCode === 0;
+        return {
+          blocked: blockOnFailure && !success,
+          ...(!success ? { reason: output.trim() || `command hook failed with exit code ${result.exitCode ?? 1}` } : {}),
+        };
+      } catch (error) {
+        return { blocked: blockOnFailure, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }
 
     let proc: Awaited<ReturnType<typeof createShellProcess>>;
     try {

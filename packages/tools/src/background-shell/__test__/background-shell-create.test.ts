@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { backgroundShellCreateTool } from "../background-shell-tools.js";
+import { backgroundShellCreateTool, createBackgroundShellTool } from "../background-shell-tools.js";
+
+const shellDescriptor = {
+  family: "powershell", dialect: "windows-powershell",
+  executable: "powershell.exe", argsPrefix: ["-NoLogo", "-NoProfile", "-Command"],
+  displayName: "Windows PowerShell 5.1", version: "5.1",
+  pathStyle: "windows", tempDir: "C:\\Temp",
+  capabilities: { conditionalAndOr: false, supportsLoginShell: false },
+} as const;
 
 describe("BackgroundShellCreate", () => {
   it("is discoverable for long-running bash or shell commands", () => {
@@ -30,7 +38,8 @@ describe("BackgroundShellCreate", () => {
 
   it("delegates creation to the host and returns its durable job id", async () => {
     const create = vi.fn(async () => ({ jobId: "task-durable", label: "print output" }));
-    const result = await backgroundShellCreateTool.execute(
+    const tool = createBackgroundShellTool(shellDescriptor);
+    const result = await tool.execute(
       { description: "print output", command: 'node -e "process.stdout.write(\'ok\')"' },
       {
         cwd: "/repo",
@@ -55,7 +64,9 @@ describe("BackgroundShellCreate", () => {
       command: 'node -e "process.stdout.write(\'ok\')"',
       description: "print output",
       settings: { model: "test" },
+      shellDescriptor,
     });
+    expect(tool.description).toContain("Windows PowerShell 5.1");
   });
 
   it("fails before launching when the tool call has no stable identity", async () => {

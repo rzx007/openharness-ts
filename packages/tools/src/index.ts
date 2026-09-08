@@ -1,7 +1,7 @@
 export { createDefaultToolRegistry } from "./registry.js";
 export {
-  bashTool,
-  createBashTool,
+  shellTool,
+  createShellTool,
   defaultShellExecutor,
   DefaultShellExecutor,
   type ShellExecContext,

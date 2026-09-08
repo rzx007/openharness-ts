@@ -6,6 +6,7 @@ import type {
   PermissionSettings,
   PathRuleConfig,
 } from "@openharness/core";
+import { canonicalToolName, canonicalToolNames } from "@openharness/core";
 import { isAbsolute, posix, relative, resolve } from "node:path";
 
 export type {
@@ -20,7 +21,7 @@ export type {
  * 只读工具集：swarm worker（teammate）对这些工具自动放行，无需父进程开 full_auto。
  * 包含文件、Web、已安排任务和统一 Jobs 观察工具。JobSend/JobCancel 会改变后台工作，
  * 不属于只读集合。
- * 不含 Write/Edit/Bash 等写/执行类工具。
+ * 不含 Write/Edit/Shell 等写/执行类工具。
  */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "Read",
@@ -73,9 +74,12 @@ export class PermissionChecker implements IPermissionChecker {
 
   constructor(options: PermissionCheckOptions) {
     this.mode = options.mode;
-    this.rules = options.rules ?? [];
-    this.allowedTools = new Set(options.allowedTools ?? []);
-    this.deniedTools = new Set(options.deniedTools ?? []);
+    this.rules = (options.rules ?? []).map((rule) => ({
+      ...rule,
+      ...(rule.tool ? { tool: canonicalToolName(rule.tool) } : {}),
+    }));
+    this.allowedTools = new Set(canonicalToolNames(options.allowedTools ?? []));
+    this.deniedTools = new Set(canonicalToolNames(options.deniedTools ?? []));
     this.pathStyle = options.pathStyle ?? (process.platform === "win32" ? "windows" : "posix");
     this.pathRules = options.pathRules ?? [];
     if (
@@ -85,7 +89,7 @@ export class PermissionChecker implements IPermissionChecker {
       throw new Error("invalid_execution_path_rule: Windows absolute paths are not valid in a POSIX environment");
     }
     this.deniedCommands = options.deniedCommands ?? [];
-    this.autoApproveTools = new Set(options.autoApproveTools ?? []);
+    this.autoApproveTools = new Set(canonicalToolNames(options.autoApproveTools ?? []));
     this.untrustedToolNames = new Set(options.untrustedToolNames ?? []);
     this.trustedLocalReadOnlyToolNames = options.trustedLocalReadOnlyToolNames
       ? new Set(options.trustedLocalReadOnlyToolNames)
@@ -100,6 +104,7 @@ export class PermissionChecker implements IPermissionChecker {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<PermissionDecision> {
+    toolName = canonicalToolName(toolName);
     if (this.mode === "full_auto") {
       return { action: "allow", reason: "Full auto mode" };
     }
@@ -110,7 +115,7 @@ export class PermissionChecker implements IPermissionChecker {
 
     // 全部否决类检查先行（deniedTools/deniedCommands/pathRules 的 deny），
     // 任何放行机制（autoApprove/allowedTools/pathRules allow）都不得短路它们
-    // ——否则 autoApprove("Bash") 会让 rm -rf 黑名单失效、autoApprove("Read")
+    // ——否则 autoApprove("Shell") 会让 rm -rf 黑名单失效、autoApprove("Read")
     // 会绕过 .env 类路径保护。
     if (this.deniedCommands.length > 0 && typeof input.command === "string") {
       for (const pattern of this.deniedCommands) {

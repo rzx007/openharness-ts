@@ -3,6 +3,9 @@ import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 import { PassThrough, type Stream } from "node:stream";
 import type { Settings } from "@openharness/core";
+import type { EnvironmentProcess, EnvironmentProcessExecutor } from "@openharness/environment";
+import { EventEmitter } from "node:events";
+import { Writable } from "node:stream";
 import { createProcess, type SandboxPolicy } from "@openharness/sandbox";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
@@ -16,11 +19,12 @@ export interface SandboxStdioClientTransportOptions extends StdioServerParameter
   settings?: Settings;
   sessionId?: string;
   policy?: SandboxPolicy;
+  processExecutor?: EnvironmentProcessExecutor;
 }
 
 /**
  * MCP stdio transport that starts the server through OpenHarness' process
- * factory, so Docker/SRT/fail-closed rules apply to MCP servers too.
+ * factory, so local SRT and execution-environment rules apply to MCP servers too.
  */
 export class SandboxStdioClientTransport implements Transport {
   onclose?: () => void;
@@ -47,9 +51,10 @@ export class SandboxStdioClientTransport implements Transport {
       ...this.options.env,
     };
     const stderr = this.stderrStream ? "pipe" : this.options.stderr ?? "inherit";
-    const child = await createProcess(
-      [this.options.command, ...(this.options.args ?? [])],
-      {
+    const argv = [this.options.command, ...(this.options.args ?? [])];
+    const child = this.options.processExecutor
+      ? adaptEnvironmentProcess(await this.options.processExecutor.execProcess(argv, { cwd, env }))
+      : await createProcess(argv, {
         cwd,
         settings: this.options.settings,
         sessionId: this.options.sessionId,
@@ -57,8 +62,7 @@ export class SandboxStdioClientTransport implements Transport {
         env,
         stdio: ["pipe", "pipe", stderr as IOType],
         detached: false,
-      },
-    );
+      });
     this.process = child;
 
     await new Promise<void>((resolve, reject) => {
@@ -159,6 +163,42 @@ export class SandboxStdioClientTransport implements Transport {
       }
     }
   }
+}
+
+function adaptEnvironmentProcess(process: EnvironmentProcess): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  const mutable = child as unknown as { pid?: number; exitCode: number | null; killed: boolean };
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  child.stdout = stdout;
+  child.stderr = stderr;
+  child.stdin = new Writable({
+    write(chunk, _encoding, callback) {
+      try { process.write(chunk); callback(); } catch (error) { callback(error as Error); }
+    },
+    final(callback) { process.end(); callback(); },
+  });
+  mutable.pid = process.pid;
+  mutable.exitCode = null;
+  mutable.killed = false;
+  child.kill = (() => { mutable.killed = true; void process.signal("terminate"); return true; }) as ChildProcess["kill"];
+  const stop = process.onOutput((chunk) => stdout.write(chunk));
+  const stopErrors = process.onErrorOutput?.((chunk) => stderr.write(chunk));
+  queueMicrotask(() => child.emit("spawn"));
+  void process.wait().then((result) => {
+    stop();
+    stopErrors?.();
+    mutable.exitCode = result.exitCode;
+    stdout.end();
+    stderr.end();
+    child.emit("close", result.exitCode, result.signal ?? null);
+  }).catch((error) => {
+    stop();
+    stopErrors?.();
+    child.emit("error", error);
+    child.emit("close", 1, null);
+  });
+  return child;
 }
 
 function sleep(ms: number): Promise<void> {

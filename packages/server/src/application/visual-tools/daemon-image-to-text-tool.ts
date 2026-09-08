@@ -30,7 +30,7 @@ export function createDaemonImageToTextTool(options: {
     name: "ImageToText",
     execution: {
       domain: "control_plane",
-      supportedEnvironments: ["local", "docker"],
+      supportedEnvironments: ["local", "wsl"],
     },
     description:
       "Describe an image or extract visible text. Accepts an authorized daemon attachment, a local image path, or a public HTTP(S) image URL.",

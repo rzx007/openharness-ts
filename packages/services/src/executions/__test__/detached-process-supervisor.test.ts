@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDetachedProcessSupervisor, resetExecutionRuntimes, DetachedProcessSupervisor } from "../index.js";
-import { resolveSandboxPolicy, setActiveSandboxSession } from "@openharness/sandbox";
+import { resolveSandboxPolicy } from "@openharness/sandbox";
 
 const NODE = process.execPath;
 let testConfigDir: string;
@@ -14,7 +14,6 @@ beforeAll(() => {
   testConfigDir = mkdtempSync(join(tmpdir(), "oh-execution-config-"));
   process.env.OPENHARNESS_CONFIG_DIR = testConfigDir;
 });
-
 afterAll(() => {
   if (previousConfigDir === undefined) delete process.env.OPENHARNESS_CONFIG_DIR;
   else process.env.OPENHARNESS_CONFIG_DIR = previousConfigDir;
@@ -52,7 +51,6 @@ function makeManager(): DetachedProcessSupervisor {
 }
 
 afterEach(async () => {
-  setActiveSandboxSession(null);
   resetExecutionRuntimes();
   while (managers.length) {
     const mgr = managers.pop()!;
@@ -108,6 +106,22 @@ describe("scoped DetachedProcessSupervisor", () => {
 });
 
 describe("DetachedProcessSupervisor real execution", () => {
+  it("keeps a background shell on the supplied execution environment", async () => {
+    const mgr = makeManager();
+    const task = await mgr.startShellExecution({
+      command: "pwd",
+      description: "environment shell",
+      cwd: "/mnt/d/repo",
+      processExecutor: {
+        execShell: async () => environmentProcess("/mnt/d/repo\n"),
+        execProcess: async () => environmentProcess(""),
+      },
+    });
+
+    await waitFor(() => mgr.getExecution(task.id)?.status === "completed");
+    expect(mgr.readOutput(task.id)).toBe("/mnt/d/repo\n");
+  });
+
   it("starts one process for concurrent requests with the same explicit job id", async () => {
     const mgr = makeManager();
     const options = {
@@ -154,9 +168,10 @@ describe("DetachedProcessSupervisor real execution", () => {
     await waitFor(() => mgr.getExecution(first.id)?.status === "completed");
   });
 
-  it("records a failed task and rejects when strict Docker sandbox is unavailable", async () => {
+  it("records a failed task and rejects when strict SRT sandbox is unavailable", async () => {
     const mgr = makeManager();
-    await expect(mgr.startShellExecution({
+    let failure = "";
+    await mgr.startShellExecution({
       command: "echo must-not-run-on-host",
       description: "strict sandbox",
       cwd: process.cwd(),
@@ -166,15 +181,16 @@ describe("DetachedProcessSupervisor real execution", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
-    })).rejects.toThrow("Docker sandbox session is not running");
+    }).catch((error) => { failure = error instanceof Error ? error.message : String(error); });
+    expect(failure).toBeTruthy();
 
     const [task] = mgr.listExecutions("failed");
     expect(task).toMatchObject({
       status: "failed",
       exitCode: 1,
-      metadata: { status_note: "Docker sandbox session is not running" },
+      metadata: { status_note: failure },
     });
     expect(mgr.readOutput(task!.id)).toContain("[spawn error]");
   });
@@ -192,7 +208,7 @@ describe("DetachedProcessSupervisor real execution", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
     });
 
@@ -218,7 +234,7 @@ describe("DetachedProcessSupervisor real execution", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
     });
 
@@ -492,6 +508,22 @@ describe("DetachedProcessSupervisor real execution", () => {
     await expect(mgr.writeInput(task.id, "late")).rejects.toThrow(/does not accept input/);
   });
 });
+
+function environmentProcess(output: string) {
+  return {
+    write() {},
+    end() {},
+    onOutput(listener: (chunk: Uint8Array) => void) {
+      setImmediate(() => listener(Buffer.from(output)));
+      return () => {};
+    },
+    async wait() {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { exitCode: 0 };
+    },
+    async signal() {},
+  };
+}
 
 describe("DetachedProcessSupervisor.awaitExecution", () => {
   it("returns immediately for an already-terminal task with its output/status", async () => {

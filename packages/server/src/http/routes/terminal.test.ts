@@ -65,7 +65,7 @@ describe("Terminal routes", () => {
       body: JSON.stringify({
         scope: { kind: "session", sessionId: "session-1" },
         projectId: "project-1",
-        runtime: "sandbox",
+        runtime: "environment",
         cols: 120,
         rows: 32,
         name: "Sandbox",
@@ -80,7 +80,7 @@ describe("Terminal routes", () => {
     expect(create).toHaveBeenCalledWith({
       scope: { kind: "session", sessionId: "session-1" },
       projectId: "project-1",
-      runtime: "sandbox",
+      runtime: "environment",
       cols: 120,
       rows: 32,
       name: "Sandbox",
@@ -92,7 +92,7 @@ describe("Terminal routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       terminal: {
         id: "terminal-1",
-        runtime: "sandbox",
+        runtime: "environment",
         source: "agent",
         sessionId: "session-1",
       },
@@ -122,7 +122,7 @@ describe("Terminal routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         scope: { kind: "session", sessionId: "outside-1" },
-        runtime: "sandbox",
+        runtime: "environment",
         cols: 100,
         rows: 30,
       }),

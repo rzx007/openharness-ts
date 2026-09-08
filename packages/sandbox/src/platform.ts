@@ -29,9 +29,3 @@ export function supportsSandboxRuntime(platformName: SandboxPlatform): boolean {
   return platformName === "linux" || platformName === "wsl" || platformName === "macos";
 }
 
-export function supportsDockerSandbox(platformName: SandboxPlatform): boolean {
-  return platformName === "linux" ||
-    platformName === "wsl" ||
-    platformName === "macos" ||
-    platformName === "windows";
-}

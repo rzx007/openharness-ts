@@ -1,6 +1,7 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import type { Settings } from "../index";
 import { getConfigDir, getConfigFilePath, getProjectConfigDir, getProjectSettingsFilePath } from "./paths";
+import { writeJsonFileAtomically } from "./atomic-json-write.js";
 
 const DEFAULT_SETTINGS: Settings = {
   model: "minimax/minimax-m2.5:free",
@@ -22,7 +23,6 @@ const DEFAULT_SETTINGS: Settings = {
   },
   sandbox: {
     enabled: false,
-    backend: "srt",
     failIfUnavailable: false,
     filesystem: {
       allowRead: ["."],
@@ -37,24 +37,12 @@ const DEFAULT_SETTINGS: Settings = {
       deniedDomains: [],
       strictDomainPolicy: false,
     },
-    docker: {
-      image: "openharness-sandbox:latest",
-      autoBuildImage: true,
-      cpuLimit: 0,
-      memoryLimit: "",
-      dns: [],
-      extraMounts: [],
-      extraEnv: {},
-      containerNamePrefix: "openharness-sandbox",
-      reuseContainer: false,
-    },
     srt: {
       runtimeCommand: "srt",
     },
   },
-  terminal: {
-    dockerShell: "/bin/sh",
-  },
+  agentEnvironment: { kind: "native" },
+  terminal: {},
   daemon: {
     autoStart: false,
   },
@@ -123,6 +111,12 @@ export async function loadSettings(
     envSettings.sandbox,
     cliOverrides?.sandbox,
   );
+  merged.agentEnvironment = {
+    ...DEFAULT_SETTINGS.agentEnvironment,
+    ...fileSettings?.agentEnvironment,
+    ...envSettings.agentEnvironment,
+    ...cliOverrides?.agentEnvironment,
+  } as NonNullable<Settings["agentEnvironment"]>;
   merged.terminal = {
     ...DEFAULT_SETTINGS.terminal,
     ...fileSettings?.terminal,
@@ -160,12 +154,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   // 确保配置目录存在，若不存在则递归创建
   await mkdir(configDir, { recursive: true });
 
-  // 将设置对象写入 JSON 文件，使用 UTF-8 编码和缩进格式化
-  await writeFile(
-    configPath,
-    JSON.stringify(settings, null, 2),
-    "utf-8",
-  );
+  await writeJsonFileAtomically(configPath, settings);
 }
 
 export async function loadProjectSettings(projectRoot?: string): Promise<Partial<Settings> | null> {
@@ -179,11 +168,7 @@ export async function saveProjectSettings(
   const configDir = getProjectConfigDir(projectRoot);
   const configPath = getProjectSettingsFilePath(projectRoot);
   await mkdir(configDir, { recursive: true });
-  await writeFile(
-    configPath,
-    JSON.stringify(settings, null, 2),
-    "utf-8",
-  );
+  await writeJsonFileAtomically(configPath, settings);
 }
 
 function loadFromEnv(): SettingsPatch {
@@ -204,6 +189,9 @@ function loadFromEnv(): SettingsPatch {
   if (process.env.OPENHARNESS_MAX_TURNS !== undefined) result.maxTurns = parseInt(process.env.OPENHARNESS_MAX_TURNS, 10);
   const sandbox = buildSandboxEnvOverrides();
   if (sandbox !== undefined) result.sandbox = sandbox;
+  if (process.env.OPENHARNESS_AGENT_ENVIRONMENT === "native" || process.env.OPENHARNESS_AGENT_ENVIRONMENT === "wsl") {
+    result.agentEnvironment = { kind: process.env.OPENHARNESS_AGENT_ENVIRONMENT };
+  }
 
   return result;
 }
@@ -212,10 +200,6 @@ function buildSandboxEnvOverrides(): Partial<NonNullable<Settings["sandbox"]>> |
   const sandbox: Partial<NonNullable<Settings["sandbox"]>> = {};
   if (process.env.OPENHARNESS_SANDBOX_ENABLED !== undefined) {
     sandbox.enabled = parseBooleanEnv(process.env.OPENHARNESS_SANDBOX_ENABLED);
-  }
-  if (process.env.OPENHARNESS_SANDBOX_BACKEND !== undefined) {
-    const backend = process.env.OPENHARNESS_SANDBOX_BACKEND;
-    if (backend === "srt" || backend === "docker") sandbox.backend = backend;
   }
   if (process.env.OPENHARNESS_SANDBOX_FAIL_IF_UNAVAILABLE !== undefined) {
     sandbox.failIfUnavailable = parseBooleanEnv(
@@ -228,42 +212,11 @@ function buildSandboxEnvOverrides(): Partial<NonNullable<Settings["sandbox"]>> |
       sandbox.network = { mode };
     }
   }
-  if (process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE !== undefined) {
-    sandbox.docker = { image: process.env.OPENHARNESS_SANDBOX_DOCKER_IMAGE };
-  }
-  const dockerEnv: NonNullable<NonNullable<Settings["sandbox"]>["docker"]> = {
-    ...(sandbox.docker ?? {}),
-  };
-  if (process.env.OPENHARNESS_SANDBOX_DOCKER_DNS !== undefined) {
-    dockerEnv.dns = parseListEnv(process.env.OPENHARNESS_SANDBOX_DOCKER_DNS);
-  }
-  const extraEnv: Record<string, string> = { ...(dockerEnv.extraEnv ?? {}) };
-  if (process.env.OPENHARNESS_SANDBOX_HTTP_PROXY !== undefined) {
-    extraEnv.HTTP_PROXY = process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
-    extraEnv.http_proxy = process.env.OPENHARNESS_SANDBOX_HTTP_PROXY;
-  }
-  if (process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY !== undefined) {
-    extraEnv.HTTPS_PROXY = process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
-    extraEnv.https_proxy = process.env.OPENHARNESS_SANDBOX_HTTPS_PROXY;
-  }
-  if (process.env.OPENHARNESS_SANDBOX_NO_PROXY !== undefined) {
-    extraEnv.NO_PROXY = process.env.OPENHARNESS_SANDBOX_NO_PROXY;
-    extraEnv.no_proxy = process.env.OPENHARNESS_SANDBOX_NO_PROXY;
-  }
-  if (Object.keys(extraEnv).length > 0) dockerEnv.extraEnv = extraEnv;
-  if (Object.keys(dockerEnv).length > 0) sandbox.docker = dockerEnv;
   return Object.keys(sandbox).length > 0 ? sandbox : undefined;
 }
 
 function parseBooleanEnv(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
-}
-
-function parseListEnv(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function mergeSandboxConfig(
@@ -274,12 +227,10 @@ function mergeSandboxConfig(
     if (!config) continue;
     const filesystem = result.filesystem;
     const network = result.network;
-    const docker = result.docker;
     const srt = result.srt;
     Object.assign(result, config);
     result.filesystem = { ...filesystem, ...config.filesystem };
     result.network = { ...network, ...config.network };
-    result.docker = { ...docker, ...config.docker };
     result.srt = { ...srt, ...config.srt };
   }
   return result;
@@ -342,6 +293,7 @@ const TOP_LEVEL_SETTINGS_FIELDS = new Set([
   "hooks",
   "memory",
   "sandbox",
+  "agentEnvironment",
   "terminal",
   "mcpServers",
   "plugins",
@@ -382,14 +334,13 @@ function validateSettingsFields(
   ], configPath);
   assertNestedFields(settings, "sandbox", [
     "enabled",
-    "backend",
     "failIfUnavailable",
     "enabledPlatforms",
     "filesystem",
     "network",
-    "docker",
     "srt",
   ], configPath);
+  assertNestedFields(settings, "agentEnvironment", ["kind"], configPath);
   const sandbox = recordValue(settings.sandbox);
   if (sandbox) {
     assertNestedFields(sandbox, "filesystem", [
@@ -405,20 +356,9 @@ function validateSettingsFields(
       "deniedDomains",
       "strictDomainPolicy",
     ], configPath, "settings.sandbox");
-    assertNestedFields(sandbox, "docker", [
-      "image",
-      "autoBuildImage",
-      "cpuLimit",
-      "memoryLimit",
-      "dns",
-      "extraMounts",
-      "extraEnv",
-      "containerNamePrefix",
-      "reuseContainer",
-    ], configPath, "settings.sandbox");
     assertNestedFields(sandbox, "srt", ["runtimeCommand"], configPath, "settings.sandbox");
   }
-  assertNestedFields(settings, "terminal", ["localShell", "dockerShell"], configPath);
+  assertNestedFields(settings, "terminal", ["localShell"], configPath);
   assertNestedFields(settings, "plugins", ["enabled"], configPath);
   assertNestedFields(settings, "daemon", ["autoStart"], configPath);
   assertNestedFields(settings, "childBudget", [

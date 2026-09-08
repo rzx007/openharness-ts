@@ -2,10 +2,9 @@ import type { SandboxConfig } from "@openharness/core";
 import type { ResolvedSandboxConfig } from "./types.js";
 
 export function normalizeSandboxConfig(config?: SandboxConfig): ResolvedSandboxConfig {
-  const backend = config?.backend ?? "srt";
   return {
     enabled: config?.enabled ?? false,
-    backend,
+    backend: "srt",
     failIfUnavailable: config?.failIfUnavailable ?? false,
     enabledPlatforms: config?.enabledPlatforms ?? [],
     filesystem: {
@@ -20,17 +19,6 @@ export function normalizeSandboxConfig(config?: SandboxConfig): ResolvedSandboxC
       allowedDomains: config?.network?.allowedDomains ?? [],
       deniedDomains: config?.network?.deniedDomains ?? [],
       strictDomainPolicy: config?.network?.strictDomainPolicy ?? false,
-    },
-    docker: {
-      image: config?.docker?.image ?? "openharness-sandbox:latest",
-      autoBuildImage: config?.docker?.autoBuildImage ?? true,
-      cpuLimit: config?.docker?.cpuLimit ?? 0,
-      memoryLimit: config?.docker?.memoryLimit ?? "",
-      dns: config?.docker?.dns ?? [],
-      extraMounts: config?.docker?.extraMounts ?? [],
-      extraEnv: config?.docker?.extraEnv ?? {},
-      containerNamePrefix: config?.docker?.containerNamePrefix ?? "openharness-sandbox",
-      reuseContainer: config?.docker?.reuseContainer ?? false,
     },
     srt: {
       runtimeCommand: config?.srt?.runtimeCommand ?? "srt",

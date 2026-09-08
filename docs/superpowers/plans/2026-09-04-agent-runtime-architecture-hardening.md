@@ -334,7 +334,7 @@ EOF
 在 `docs/agent-sdk.md`「定位」末或「非目标」前加一句：
 
 ```markdown
-发布包的 peerDependencies 标为 optional，是安装人体工程学；实现已 bundle，不要假设可以替换 `@openharness/core` / `@openharness/tools` 等 peer 实现。细节见 [Agent Framework Capability Boundary](./agent-framework-capability-boundary.md#发布形式)。
+发布包的 peerDependencies 标为 optional，是安装人体工程学；实现已 bundle，不要假设可以替换 `@openharness/core` / `@openharness/tools` 等 peer 实现。细节见 [Agent Framework Capability Boundary](../../agent-framework-capability-boundary.md)。
 ```
 
 （若本地 markdown 锚点与标题 slug 不一致，改用完整相对链接不加锚点。）

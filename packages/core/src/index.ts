@@ -128,6 +128,17 @@ export { AgentChildBudgetExceededError } from "./types/runtime";
 
 export { AgentRunNotAcceptingInputError, RuntimeBundle } from "./types/runtime";
 export {
+  applyTrajectoryTracker,
+  createTrajectoryLoopControl,
+  DefaultTrajectoryTracker,
+} from "./engine/trajectory/tracker";
+export type {
+  TrajectoryCall,
+  TrajectoryEvent,
+  TrajectoryLoopControl,
+  TrajectoryTracker,
+} from "./engine/trajectory/tracker";
+export {
   AgentSession,
   createAgentSession,
   type AgentSessionOptions,
@@ -207,6 +218,9 @@ export type {
 } from "./context-budget";
 export {
   assertNoRemovedLifecycleToolNames,
+  canonicalToolName,
+  canonicalToolNames,
+  RESERVED_SHELL_TOOL_NAMES,
   normalizeToolName,
   normalizeToolNames,
   resolveAllowedToolNames,

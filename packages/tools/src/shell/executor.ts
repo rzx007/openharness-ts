@@ -2,7 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import {
   classifySandboxFailure,
   createShellProcess,
-  getActiveSandboxSession,
   resolveSandboxPolicy,
   resolveHostShellLauncher,
   SandboxUnavailableError,
@@ -10,7 +9,6 @@ import {
   type CreateShellProcessOptions,
   type HostShellLauncher,
   type SandboxPolicy,
-  type SandboxSession,
 } from "@openharness/sandbox";
 import { decodeShellChunk, DEFAULT_MAX_OUTPUT_CHARS } from "./output.js";
 import type {
@@ -33,20 +31,17 @@ type ShellProcessFactory = (
 
 export interface DefaultShellExecutorDependencies {
   createProcess?: ShellProcessFactory;
-  getActiveSession?: (scope: { cwd: string; sessionId?: string }) => SandboxSession | null;
   resolveHostShell?: () => HostShellLauncher;
   killProcessTree?: (child: ChildProcess) => void;
 }
 
 export class DefaultShellExecutor implements ShellExecutor {
   private readonly createProcess: ShellProcessFactory;
-  private readonly getActiveSession: NonNullable<DefaultShellExecutorDependencies["getActiveSession"]>;
   private readonly resolveHostShell: NonNullable<DefaultShellExecutorDependencies["resolveHostShell"]>;
   private readonly killProcessTree: NonNullable<DefaultShellExecutorDependencies["killProcessTree"]>;
 
   constructor(dependencies: DefaultShellExecutorDependencies = {}) {
     this.createProcess = dependencies.createProcess ?? createShellProcess;
-    this.getActiveSession = dependencies.getActiveSession ?? getActiveSandboxSession;
     this.resolveHostShell = dependencies.resolveHostShell ?? resolveHostShellLauncher;
     this.killProcessTree = dependencies.killProcessTree ?? ((child) => signalProcessTree(child, "SIGKILL"));
   }
@@ -58,9 +53,6 @@ export class DefaultShellExecutor implements ShellExecutor {
       sessionId: context.sessionId,
       settings: context.settings,
     });
-    const activeSession = policy.enabled && policy.backend === "docker"
-      ? this.getActiveSession({ cwd: policy.scope.cwd, sessionId: policy.scope.sessionId })
-      : null;
 
     return {
       command: request.command,
@@ -72,7 +64,7 @@ export class DefaultShellExecutor implements ShellExecutor {
       settings: context.settings,
       policy,
       hostShell: this.resolveHostShell(),
-      runner: resolveRunner(policy, activeSession),
+      runner: resolveRunner(policy),
     };
   }
 
@@ -187,13 +179,9 @@ export const defaultShellExecutor: ShellExecutor = new DefaultShellExecutor();
 
 function resolveRunner(
   policy: SandboxPolicy,
-  activeSession: SandboxSession | null,
 ): ShellRunnerSpec {
   if (!policy.enabled) {
     return { mode: "host", fallbackToHost: false };
-  }
-  if (policy.backend === "docker" && activeSession?.backend === "docker" && activeSession.active) {
-    return { mode: "sandbox-active", backend: "docker", fallbackToHost: false };
   }
   return {
     mode: policy.failClosed ? "sandbox-required" : "sandbox-preferred",

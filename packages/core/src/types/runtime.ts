@@ -423,6 +423,8 @@ export interface QueryEngineOptions {
   skillRegistry?: unknown;
   memoryRetriever?: MemoryRetriever;
   executionEnvironment?: import("@openharness/environment").ExecutionEnvironmentHandle;
+  /** Optional per-run trajectory policy factory. False disables the default tracker. */
+  trajectoryTrackerFactory?: false | (() => import("../engine/trajectory/tracker").TrajectoryTracker);
 }
 
 export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";
@@ -435,12 +437,9 @@ export interface RuntimeSandboxStatus {
   platform?: string;
   reason?: string;
   degraded?: boolean;
-  containerName?: string;
-  containerCwd?: string;
   networkMode?: string;
   dns?: string[];
   proxy?: "configured" | "not configured";
-  reuseContainer?: boolean;
 }
 
 export class RuntimeBundle {

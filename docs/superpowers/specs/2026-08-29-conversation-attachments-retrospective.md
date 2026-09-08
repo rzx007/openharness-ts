@@ -1,5 +1,7 @@
 # 对话附件功能完整复盘
 
+> 当前说明：本文记录 2026-08-29 当时轨迹；Docker 会话资源目录方案后来已删除，现行附件边界见 [附件能力退出 Agent Runtime](./2026-09-02-attachment-tool-overrides-design.md)。
+
 > 日期：2026-08-29  
 > 范围：从附件领域模型、上传与持久化，到图片原生输入、OCR 降级、安全文本读取、生命周期治理和设置页发布收口  
 > 当前分支：`codex/attachment-release-closeout`

@@ -41,7 +41,7 @@ const session = {
       systemPrompt: "session prompt",
       maxTurns: 7,
       allowedTools: ["Read", 1],
-      disallowedTools: ["Bash", null],
+      disallowedTools: ["Shell", null],
       effort: "high",
       pluginsEnabled: false,
     },
@@ -62,7 +62,7 @@ describe("createDaemonAgentLoader", () => {
     const agent = { loadHistory: vi.fn(), close: vi.fn(async () => {}) } as any;
     const createAgent = vi.fn(async () => agent);
     const loader = createDaemonAgentLoader({
-      settings: { model: "default-model", sandbox: { enabled: true, backend: "docker" } } as any,
+      settings: { model: "default-model", agentEnvironment: { kind: "wsl" }, sandbox: { enabled: false } } as any,
       executionSurface: "desktop_managed",
       createAgent,
     })!;
@@ -155,7 +155,7 @@ describe("createDaemonAgentLoader", () => {
       systemPrompt: "session prompt",
       maxTurns: 7,
       hostToolCeiling: ["Read"],
-      disallowedTools: ["Bash"],
+      disallowedTools: ["Shell"],
       effort: "high",
       pluginsEnabled: false,
       capabilityOverrides: {
@@ -228,7 +228,6 @@ describe("createDaemonAgentLoader", () => {
       model: "cwd-model",
       sandbox: {
         enabled: cwd === "/repo",
-        backend: "docker",
       },
     } as any));
     const loader = createDaemonAgentLoader({
@@ -244,7 +243,6 @@ describe("createDaemonAgentLoader", () => {
       model: "cwd-model",
       sandbox: {
         enabled: true,
-        backend: "docker",
       },
     });
   });
@@ -291,7 +289,7 @@ describe("createDaemonAgentLoader", () => {
             ...session.metadata.runtime,
             sessionMode: "coordinator",
             systemPrompt: "Keep updates short.",
-            allowedTools: ["Bash"],
+            allowedTools: ["Shell"],
           },
         },
       },
@@ -305,7 +303,7 @@ describe("createDaemonAgentLoader", () => {
     expect(options.systemPrompt).toContain("Workers spawned via the Agent tool");
     expect(options.systemPrompt).toContain("## Additional Session Instructions");
     expect(options.systemPrompt).toContain("Keep updates short.");
-    expect(options.hostToolCeiling).toEqual(["Bash"]);
+    expect(options.hostToolCeiling).toEqual(["Shell"]);
     expect(options.roleAllowedTools).toEqual([
       "Agent",
       "JobList",
@@ -318,7 +316,7 @@ describe("createDaemonAgentLoader", () => {
     expect(getCoordinatorUserContext).toHaveBeenCalledWith(
       [],
       expect.stringContaining(".openharness-ts"),
-      { enabled: true, hostToolCeiling: ["Bash"] },
+      { enabled: true, hostToolCeiling: ["Shell"] },
     );
   });
 

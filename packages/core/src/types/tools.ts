@@ -3,7 +3,7 @@ import type { Settings } from "./settings";
 import type { AgentExecutionContext, AgentScheduleEffects } from "./runtime";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
-import type { ExecutionEnvironmentHandle } from "@openharness/environment";
+import type { ExecutionEnvironmentHandle, ShellDescriptor } from "@openharness/environment";
 
 export interface McpAuthConfigureInput {
   serverName: string;
@@ -30,6 +30,7 @@ export interface AgentBackgroundShellHost {
     command: string;
     description: string;
     settings?: Settings;
+    shellDescriptor?: ShellDescriptor;
   }): Promise<{
     jobId: string;
     label: string;
@@ -87,7 +88,7 @@ export interface ToolExecutionResult extends ToolResult {
 
 export interface ToolExecutionSpec {
   domain: "environment" | "control_plane";
-  supportedEnvironments?: Array<"local" | "docker">;
+  supportedEnvironments?: Array<"local" | "wsl">;
   /** Whether this control-plane tool needs outbound network access. */
   network?: boolean;
 }

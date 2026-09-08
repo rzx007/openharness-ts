@@ -14,7 +14,7 @@ describe("notifyForSessionViewChange", () => {
   const snapshot = vi.fn<() => Promise<DesktopSettingsSnapshot>>(async () => ({
     workStyle: "practical" as const,
     notificationMode: "when_unfocused" as const,
-    agentEnvironment: "local" as const,
+    agentEnvironment: "native" as const,
     restartRequired: false,
     defaultOpenerId: null,
     defaultTerminalShellId: null,
@@ -82,7 +82,7 @@ describe("notifyForSessionViewChange", () => {
     snapshot.mockResolvedValueOnce({
       workStyle: "practical",
       notificationMode: "never",
-      agentEnvironment: "local",
+      agentEnvironment: "native",
       restartRequired: false,
       defaultOpenerId: null,
       defaultTerminalShellId: null,
@@ -100,7 +100,7 @@ describe("notifyForSessionViewChange", () => {
     snapshot.mockResolvedValueOnce({
       workStyle: "practical",
       notificationMode: "always",
-      agentEnvironment: "local",
+      agentEnvironment: "native",
       restartRequired: false,
       defaultOpenerId: null,
       defaultTerminalShellId: null,

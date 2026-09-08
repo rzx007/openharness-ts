@@ -1,9 +1,15 @@
 import type { ToolDefinition } from "@openharness/core";
 import type { SkillDefinition, SkillRegistry } from "@openharness/skills";
-import { dirname } from "node:path";
+import { posix, win32 } from "node:path";
 
 type SkillRegistryInstance = InstanceType<typeof SkillRegistry>;
 type SkillVisibility = "model" | "user" | "all";
+
+const WINDOWS_HOST_PATH = /^(?:[a-zA-Z]:[\\/]|\\\\)/;
+
+export function hostPathDirectory(path: string): string {
+  return WINDOWS_HOST_PATH.test(path) ? win32.dirname(path) : posix.dirname(path);
+}
 
 export const skillTool: ToolDefinition = {
   name: "Skill",
@@ -72,7 +78,11 @@ export const listSkillsTool: ToolDefinition = {
 };
 
 async function resolveSkillRegistry(
-  context: { cwd: string; skillRegistry?: unknown },
+  context: {
+    cwd: string;
+    skillRegistry?: unknown;
+    environment?: { workspace: { hostRoot: string } };
+  },
   options: { refreshFilesystem?: boolean } = {},
 ) {
   const sharedRegistry = context.skillRegistry as SkillRegistryInstance | undefined;
@@ -86,7 +96,9 @@ async function resolveSkillRegistry(
   return createSkillRegistrySnapshot({
     baseline,
     userDir: getSkillsDir(),
-    projectDirs: await findProjectSkillDirs(context.cwd),
+    projectDirs: await findProjectSkillDirs(
+      context.environment?.workspace?.hostRoot ?? context.cwd,
+    ),
   });
 }
 
@@ -137,8 +149,8 @@ function formatLoadedSkill(
       (context.environment ? "(unavailable in this environment)" : skill.path);
   const skillRoot = embedded
     ? "(embedded)"
-    : context.environment?.paths.presentHostPath(dirname(skill.path)) ??
-      (context.environment ? "(unavailable in this environment)" : dirname(skill.path));
+    : context.environment?.paths.presentHostPath(hostPathDirectory(skill.path)) ??
+      (context.environment ? "(unavailable in this environment)" : hostPathDirectory(skill.path));
   const unavailable = !embedded && context.environment &&
     (skillFile.startsWith("(unavailable") || skillRoot.startsWith("(unavailable"));
   return [
@@ -154,5 +166,29 @@ function formatLoadedSkill(
     "<skill-content>",
     skill.content,
     "</skill-content>",
+    ...skillShellReminder(context),
   ].join("\n");
+}
+
+function skillShellReminder(
+  context: Parameters<ToolDefinition["execute"]>[1],
+): string[] {
+  const shell = context.environment?.info?.shellDescriptor;
+  if (!shell) return [];
+  const lines = [
+    "",
+    "<execution-environment-reminder>",
+    `Current execution shell: ${shell.displayName} (${shell.dialect}).`,
+    `Current path style: ${shell.pathStyle}; temporary directory: ${shell.tempDir}.`,
+    "Shell-specific examples must be translated to the current execution shell; preserve their intent instead of copying incompatible syntax.",
+  ];
+  if (shell.dialect === "windows-powershell") {
+    lines.push(
+      "Windows PowerShell 5.1: use Get-Content -Raw -Encoding UTF8 -LiteralPath for UTF-8 JSON; ConvertFrom-Json has no -Depth parameter; Bash heredoc syntax is invalid.",
+    );
+  } else if (shell.dialect === "pwsh") {
+    lines.push("PowerShell: prefer native object pipelines and do not use Bash heredoc syntax.");
+  }
+  lines.push("</execution-environment-reminder>");
+  return lines;
 }

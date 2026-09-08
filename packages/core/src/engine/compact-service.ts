@@ -53,7 +53,7 @@ const PTL_RETRY_MARKER = "[earlier conversation truncated for compaction retry]"
  * 未列入的工具结果一律保留（避免误删关键状态）。
  */
 const MICROCOMPACTABLE_TOOLS = new Set([
-  "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+  "Shell", "Bash", "Read", "Write", "Edit", "Glob", "Grep",
   "WebFetch", "WebSearch",
 ]);
 
@@ -165,7 +165,7 @@ export interface CompactContext {
   recentFiles?: string[];
   /** 当前计划 / TODO 内容。 */
   plan?: string;
-  /** 工具调用摘要（从历史自动统计，如 `Read×12, Bash×5`）。 */
+  /** 工具调用摘要（从历史自动统计，如 `Read×12, Shell×5`）。 */
   workLog?: string;
   /** 业务层提供的有界补充章节；core 只负责统一清洗和限额。 */
   supplementalSections?: CompactContextSection[];

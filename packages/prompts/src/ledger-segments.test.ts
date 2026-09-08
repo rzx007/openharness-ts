@@ -22,7 +22,9 @@ describe("buildPromptLedgerSegments", () => {
       includeDelegation: true,
       skillsList: [{ name: "foo", description: "bar" }],
     });
-    expect(segments.some((s) => s.bucket === "skills" && s.text.includes("foo"))).toBe(true);
+    expect(
+      segments.some((s) => s.bucket === "skills" && s.text.includes("foo")),
+    ).toBe(true);
     expect(segments.some((s) => s.bucket === "subagents")).toBe(true);
     expect(segments.some((s) => s.bucket === "system")).toBe(true);
   });
@@ -42,6 +44,18 @@ describe("buildPromptLedgerSegments", () => {
     expect(delegationSegs[0]?.layer).toBe("stable");
   });
 
+  it("puts one Markdown presentation policy in the stable system bucket", async () => {
+    const tagged = await buildTaggedPromptSegments({ cwd: tmpDir });
+    const presentation = tagged.filter((segment) =>
+      segment.text.includes("# Markdown Presentation"),
+    );
+    expect(presentation).toHaveLength(1);
+    expect(presentation[0]).toMatchObject({
+      layer: "stable",
+      bucket: "system",
+    });
+  });
+
   it("does not put full memory preview into segments by default", async () => {
     const segments = await buildPromptLedgerSegments({ cwd: tmpDir });
     expect(segments.every((s) => s.bucket !== "conversation")).toBe(true);
@@ -52,7 +66,9 @@ describe("buildPromptLedgerSegments", () => {
       cwd: tmpDir,
       memoryContent: "remember this secret preview",
     });
-    expect(segments.every((s) => !s.text.includes("remember this secret preview"))).toBe(true);
+    expect(
+      segments.every((s) => !s.text.includes("remember this secret preview")),
+    ).toBe(true);
     expect(segments.every((s) => s.bucket !== "conversation")).toBe(true);
   });
 
@@ -61,8 +77,10 @@ describe("buildPromptLedgerSegments", () => {
       cwd: tmpDir,
       memoryReminderText: "Relevant memory: user prefers TypeScript.",
     });
-    expect(segments.some((s) => s.bucket === "conversation" && s.text.includes("TypeScript"))).toBe(
-      true,
-    );
+    expect(
+      segments.some(
+        (s) => s.bucket === "conversation" && s.text.includes("TypeScript"),
+      ),
+    ).toBe(true);
   });
 });

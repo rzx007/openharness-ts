@@ -90,7 +90,7 @@ export async function configureDiscoveredExtensions(
   discovery: OpenHarnessExtensionDiscovery,
   context: {
     cwd: string;
-    environmentKind?: "local" | "docker";
+    environmentKind?: "local" | "wsl";
     toolRegistry: IToolRegistry;
     hookExecutor: IHookExecutor;
     addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void;

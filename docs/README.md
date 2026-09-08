@@ -111,9 +111,9 @@
 ### 工具、扩展与执行环境
 
 - [Permission Flow](./permission-flow.md)：权限请求、durable decision 和取消。
-- [Sandbox Runtime Flow](./sandbox-runtime-flow.md)：命令和文件工具实际在哪里执行。
-- [Sandbox Runtime Design](./sandbox-runtime-design.md)：Sandbox 的详细设计。
-- [LSP Client 设计](./lsp-client-design.md)：把当前正则/ripgrep 近似实现替换成真实语言服务器连接，说明协议库选型、Runtime 生命周期、文档状态、沙箱路径、权限和分阶段验收。
+- [Agent 运行环境调用链](./sandbox-runtime-flow.md)：Native/WSL 中命令、文件和终端实际在哪里执行。
+- [Native / WSL 运行环境与 SRT](./sandbox-runtime-design.md)：运行位置与本机 SRT 权限边界。
+- [LSP Client 设计](./lsp-client-design.md)：把当前正则/ripgrep 近似实现替换成真实语言服务器连接，说明协议库选型、Runtime 生命周期、环境路径、权限和分阶段验收。
 - [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
 - [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：下一版 Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换流程。
 - [Native Plugin v1 与 Claude Code Converter 实施计划](./superpowers/plans/2026-08-25-native-plugin-and-claude-converter.md)：按 Native schema、安装激活、格式硬切、Converter core 和 Claude 转换闭环拆分的可执行任务。
@@ -126,7 +126,7 @@
 - [Product Surface Integration](./product-surface-integration.md)：各种上层产品共同使用 Application 的规则。
 - [TUI Flow](./tui-flow.md)：TUI 怎样连接 daemon 和渲染运行状态。
 - [Desktop Agent Message Rendering](./desktop-agent-message-rendering.md)：Desktop 消息和文件变更展示。
-- [Desktop Terminal PTY](./desktop-terminal-pty-design.md)：Desktop 终端、PTY、IPC 和 Sandbox。
+- [Desktop Terminal PTY](./desktop-terminal-pty-design.md)：Desktop 终端、PTY、IPC 和 Native/WSL 环境跟随。
 
 ## 第 3 层：端到端流程
 
@@ -141,7 +141,7 @@
 | Workflow 拆任务、调度、持久化和恢复 | [Coordinator 硬调度器调用链](./coordinator-hard-scheduler-flow.md) |
 | Job 创建后怎样 read/wait/send/cancel | [Jobs Protocol](./jobs-protocol.md) |
 | 客户端首次同步、断线重连和去重 | [Client Sync Flow](./client-sync-flow.md) |
-| Sandbox 中怎样启动和停止进程 | [Sandbox Runtime Flow](./sandbox-runtime-flow.md) |
+| Agent 在 Native/WSL 中怎样启动和停止进程 | [Agent 运行环境调用链](./sandbox-runtime-flow.md) |
 | 定时任务到点后怎样启动 Agent | [Scheduled Tasks Flow](./scheduled-tasks-flow.md) |
 | TUI 怎样 attach daemon | [TUI Flow](./tui-flow.md) |
 

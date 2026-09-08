@@ -230,16 +230,16 @@ describe("autoApproveTools (swarm worker read-only auto-approval)", () => {
     ).toBe("allow");
   });
 
-  it("deniedCommands 优先于 autoApprove(Bash 进放行名单也拦黑名单命令)", async () => {
+  it("migrates legacy Bash permission entries to Shell without weakening denied commands", async () => {
     const checker = new PermissionChecker({
       mode: "default",
       autoApproveTools: ["Bash"],
       deniedCommands: ["rm -rf*"],
     });
     expect(
-      (await checker.checkTool("Bash", { command: "rm -rf /" })).action,
+      (await checker.checkTool("Shell", { command: "rm -rf /" })).action,
     ).toBe("deny");
-    expect((await checker.checkTool("Bash", { command: "ls" })).action).toBe(
+    expect((await checker.checkTool("Shell", { command: "ls" })).action).toBe(
       "allow",
     );
   });

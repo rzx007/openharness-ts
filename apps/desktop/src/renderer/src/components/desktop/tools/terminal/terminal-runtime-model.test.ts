@@ -1,31 +1,29 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
+
+import type { DesktopTerminalCreateInput } from "@shared/terminal-types"
 
 import { resolveTerminalCreateTarget } from "./terminal-runtime-model"
 
 describe("resolveTerminalCreateTarget", () => {
   const session = { id: "s1", projectId: undefined }
 
-  it("uses a session-scoped Docker terminal by default", () => {
-    expect(resolveTerminalCreateTarget({
-      agentEnvironment: "docker",
+  it("uses the session execution environment by default", () => {
+    const target = resolveTerminalCreateTarget({
       session,
-      explicitHost: false,
-    })).toEqual({
-      runtime: "sandbox",
+    })
+
+    expect(target).toEqual({
+      runtime: "environment",
       scope: { kind: "session", sessionId: "s1" },
     })
+    expectTypeOf(target.scope).toEqualTypeOf<
+      NonNullable<DesktopTerminalCreateInput["scope"]>
+    >()
   })
 
-  it("uses local runtime for local environments and explicit host requests", () => {
+  it("uses the environment for native sessions too", () => {
     expect(resolveTerminalCreateTarget({
-      agentEnvironment: "local",
       session,
-      explicitHost: false,
-    })).toMatchObject({ runtime: "local" })
-    expect(resolveTerminalCreateTarget({
-      agentEnvironment: "docker",
-      session,
-      explicitHost: true,
-    })).toMatchObject({ runtime: "local" })
+    })).toMatchObject({ runtime: "environment" })
   })
 })

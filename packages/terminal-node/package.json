@@ -14,14 +14,12 @@
     "build": "exit 0",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
-    "e2e:docker": "vitest run --config ../../vitest.e2e.config.ts e2e/docker-pty.e2e.test.ts",
     "clean": "rimraf dist"
   },
   "dependencies": {
     "@openharness/core": "workspace:*",
     "@openharness/environment": "workspace:*",
     "@openharness/jobs": "workspace:*",
-    "@openharness/sandbox": "workspace:*",
     "@openharness/terminal": "workspace:*",
     "node-pty": "^1.0.0"
   },

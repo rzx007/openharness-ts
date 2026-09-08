@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  bashTool,
-  createBashTool,
+  shellTool as bashTool,
+  createShellTool as createBashTool,
   decodeShellChunk,
   formatOutput,
   looksLikeUtf16Le,
-} from "../bash.js";
+} from "../shell.js";
 import type { ShellExecSpec } from "../types.js";
 
 describe("bashTool", () => {

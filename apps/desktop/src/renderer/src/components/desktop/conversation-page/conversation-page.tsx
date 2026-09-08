@@ -165,6 +165,7 @@ function ConversationPane({
         completedSessionId = await startSession(submittedContent, {
           skillInvocation: skill?.skillInvocation,
           attachments,
+          sourceDraftText: content,
         })
       }
       const currentSessionId = useDesktopSessionStore.getState().activeSessionId
@@ -406,7 +407,7 @@ function ConversationPane({
           >
             <MessageScroller className="min-h-0 min-w-0 flex-1">
               <MessageScrollerViewport className="overflow-x-hidden">
-                <MessageScrollerContent className="mx-auto min-h-full w-full max-w-190 min-w-0 gap-6 px-6 pt-7 pb-5 text-content-foreground">
+                <MessageScrollerContent className="mx-auto min-h-full w-full max-w-[960px] min-w-0 gap-6 px-6 pt-7 pb-5 text-content-foreground">
                   {openingSession && !sessionView ? (
                     <ConversationTranscriptSkeleton />
                   ) : (

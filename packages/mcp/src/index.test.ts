@@ -276,7 +276,7 @@ describe("McpClientManager", () => {
         apiFormat: "openai",
         maxTurns: 1,
         permission: { mode: "default" },
-        sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+        sandbox: { enabled: true, failIfUnavailable: true },
       },
       sessionId: "s1",
       policy,

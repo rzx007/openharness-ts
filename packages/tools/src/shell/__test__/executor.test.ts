@@ -3,7 +3,6 @@ import type { Settings } from "@openharness/core";
 import {
   SandboxPolicyDeniedError,
   type HostShellLauncher,
-  type SandboxSession,
 } from "@openharness/sandbox";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -34,58 +33,26 @@ describe("DefaultShellExecutor.resolve", () => {
     });
   });
 
-  it("records an active Docker sandbox as the resolved runner", async () => {
-    const executor = new DefaultShellExecutor({
-      resolveHostShell: () => posixShell,
-      getActiveSession: () => activeDockerSession(),
-    });
-
-    const spec = await executor.resolve({
-      command: "pwd",
-      workdir: "D:\\project",
-      timeoutMs: 5_000,
-      env: { CI: "1" },
-    }, {
-      cwd: "D:\\workspace",
-      sessionId: "session-2",
-      settings: settings({ enabled: true, backend: "docker" }),
-    });
-
-    expect(spec).toMatchObject({
-      cwd: "D:\\project",
-      timeoutMs: 5_000,
-      env: { CI: "1" },
-      runner: {
-        mode: "sandbox-active",
-        backend: "docker",
-        fallbackToHost: false,
-      },
-    });
-  });
-
-  it("makes sandbox fallback explicit when no Docker session is active", async () => {
-    const executor = new DefaultShellExecutor({
-      resolveHostShell: () => posixShell,
-      getActiveSession: () => null,
-    });
+  it("makes SRT fallback explicit when the local sandbox is enabled", async () => {
+    const executor = new DefaultShellExecutor({ resolveHostShell: () => posixShell });
 
     const preferred = await executor.resolve({ command: "pwd" }, {
       cwd: "D:\\workspace",
-      settings: settings({ enabled: true, backend: "docker", failIfUnavailable: false }),
+      settings: settings({ enabled: true, failIfUnavailable: false }),
     });
     const required = await executor.resolve({ command: "pwd" }, {
       cwd: "D:\\workspace",
-      settings: settings({ enabled: true, backend: "docker", failIfUnavailable: true }),
+      settings: settings({ enabled: true, failIfUnavailable: true }),
     });
 
     expect(preferred.runner).toEqual({
       mode: "sandbox-preferred",
-      backend: "docker",
+      backend: "srt",
       fallbackToHost: true,
     });
     expect(required.runner).toEqual({
       mode: "sandbox-required",
-      backend: "docker",
+      backend: "srt",
       fallbackToHost: false,
     });
   });
@@ -209,22 +176,9 @@ function processExecutor(script: string): DefaultShellExecutor {
   });
 }
 
-function activeDockerSession(): SandboxSession {
+function settings(sandbox: NonNullable<Settings["sandbox"]>): Settings {
   return {
-    backend: "docker",
-    cwd: "D:\\project",
-    active: true,
-    async start() {},
-    async stop() {},
-  };
-}
-
-function settings(sandbox: Settings["sandbox"]): Settings {
-  return {
-    model: "test",
-    apiFormat: "openai",
-    maxTurns: 1,
-    permission: { mode: "default" },
-    sandbox,
+    model: "test", apiFormat: "openai", maxTurns: 1,
+    permission: { mode: "default" }, sandbox,
   };
 }

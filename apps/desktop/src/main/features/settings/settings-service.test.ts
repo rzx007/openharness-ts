@@ -6,7 +6,8 @@ import { DesktopSettingsService } from "./settings-service"
 const defaultSnapshot = {
   workStyle: "practical",
   notificationMode: "when_unfocused",
-  agentEnvironment: "local",
+  agentEnvironment: "native",
+  wslSupported: false,
   restartRequired: false,
   defaultOpenerId: null,
   defaultTerminalShellId: null,
@@ -56,18 +57,18 @@ describe("buildDesktopSettingsSnapshot", () => {
     })
   })
 
-  it("reports Docker and unsupported SRT settings explicitly", () => {
+  it("uses only the explicit agent environment setting", () => {
     expect(buildDesktopSettingsSnapshot({
-      sandbox: { enabled: true, backend: "docker" },
-    })).toMatchObject({ agentEnvironment: "docker" })
+      agentEnvironment: { kind: "wsl" },
+    })).toMatchObject({ agentEnvironment: "wsl" })
     expect(buildDesktopSettingsSnapshot({
-      sandbox: { enabled: true, backend: "srt" },
-    })).toMatchObject({ agentEnvironment: "unsupported_srt" })
+      agentEnvironment: { kind: "unexpected" },
+    })).toMatchObject({ agentEnvironment: "native" })
   })
 })
 
 describe("DesktopSettingsService.updateAgentEnvironment", () => {
-  it("preflights Docker before saving fail-closed settings", async () => {
+  it("preflights WSL before saving the global environment", async () => {
     const calls: string[] = []
     const patchSettings = vi.fn(async (patch) => {
       calls.push("patch")
@@ -76,32 +77,52 @@ describe("DesktopSettingsService.updateAgentEnvironment", () => {
     const service = new DesktopSettingsService({
       daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
       refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      preflightDocker: async () => { calls.push("preflight") },
+      preflightWsl: async () => { calls.push("preflight") },
+      platform: "win32",
       getPreferences: preferences,
       patchPreferences: vi.fn(),
     })
 
-    const result = await service.updateAgentEnvironment({ environment: "docker" })
+    const result = await service.updateAgentEnvironment({ environment: "wsl" })
 
     expect(calls).toEqual(["preflight", "patch"])
     expect(patchSettings).toHaveBeenCalledWith({
-      sandbox: { enabled: true, backend: "docker", failIfUnavailable: true },
+      agentEnvironment: { kind: "wsl" },
     })
-    expect(result).toMatchObject({ agentEnvironment: "docker", restartRequired: true })
+    expect(result).toMatchObject({ agentEnvironment: "wsl", restartRequired: true, wslSupported: true })
   })
 
-  it("does not save settings when Docker preflight fails", async () => {
+  it("does not save settings when WSL preflight fails", async () => {
     const patchSettings = vi.fn()
     const service = new DesktopSettingsService({
       daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
       refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      preflightDocker: async () => { throw new Error("Docker daemon is not running") },
+      preflightWsl: async () => { throw new Error("WSL is not installed") },
+      platform: "win32",
       getPreferences: preferences,
       patchPreferences: vi.fn(),
     })
 
-    await expect(service.updateAgentEnvironment({ environment: "docker" }))
-      .rejects.toThrow("Docker daemon is not running")
+    await expect(service.updateAgentEnvironment({ environment: "wsl" }))
+      .rejects.toThrow("WSL is not installed")
+    expect(patchSettings).not.toHaveBeenCalled()
+  })
+
+  it("rejects WSL on macOS and Linux without probing", async () => {
+    const patchSettings = vi.fn()
+    const preflightWsl = vi.fn(async () => {})
+    const service = new DesktopSettingsService({
+      daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
+      refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
+      preflightWsl,
+      platform: "darwin",
+      getPreferences: preferences,
+      patchPreferences: vi.fn(),
+    })
+
+    await expect(service.updateAgentEnvironment({ environment: "wsl" }))
+      .rejects.toThrow("WSL 仅可在 Windows 上使用")
+    expect(preflightWsl).not.toHaveBeenCalled()
     expect(patchSettings).not.toHaveBeenCalled()
   })
 })

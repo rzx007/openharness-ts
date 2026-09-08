@@ -184,7 +184,19 @@ describe("SessionTranscriptProjection", () => {
     const applied = projection.projectStreamEvent(state, {
       type: "tool_use_end",
       toolUseId: "tool-1",
-      result: { output: "ok", isError: false },
+      result: {
+        output: "ok",
+        isError: false,
+        metadata: {
+          shellFamily: "powershell",
+          shellDialect: "pwsh",
+          shellExecutable: "pwsh.exe",
+          shellDisplayName: "PowerShell 7.6",
+          pathStyle: "windows",
+          exitCode: 0,
+          status: "completed",
+        },
+      },
     });
 
     expect(applied.completedToolName).toBe("shell");
@@ -197,9 +209,28 @@ describe("SessionTranscriptProjection", () => {
       toolUseId: "tool-1",
       toolName: "shell",
       input: { cmd: "pwd" },
-      output: { output: "ok", isError: false },
+      output: {
+        output: "ok",
+        isError: false,
+        metadata: {
+          shellFamily: "powershell",
+          shellDialect: "pwsh",
+          shellExecutable: "pwsh.exe",
+          shellDisplayName: "PowerShell 7.6",
+          pathStyle: "windows",
+          exitCode: 0,
+          status: "completed",
+        },
+      },
       isError: false,
       metadata: {
+        shellFamily: "powershell",
+        shellDialect: "pwsh",
+        shellExecutable: "pwsh.exe",
+        shellDisplayName: "PowerShell 7.6",
+        pathStyle: "windows",
+        exitCode: 0,
+        status: "completed",
         toolCallId: "tool-1",
         toolAttemptId: "tool_attempt_tool-1_1",
         outcome: "completed",

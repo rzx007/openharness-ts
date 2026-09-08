@@ -451,7 +451,7 @@ Context 数据库路径不进入 Prompt、工具结果或普通 status 输出。
 
 - 模型不获得数据库路径。
 - Write/Edit 具有硬拒绝。
-- 启用 SRT/Docker 时把 daemon 配置根加入 deny-write。
+- 启用 SRT 时把 daemon 配置根加入 deny-write；WSL 运行位置仍由 permission/approval 控制，不能直接获得 daemon 配置根写权限。
 - 非 sandbox 的 Bash 仍受权限系统控制；不宣称能够抵御主动恶意脚本。
 
 ## `SOUL.md` 边界
