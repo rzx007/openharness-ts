@@ -1,5 +1,7 @@
 # Agent 执行环境第三阶段 3A 生命周期加固实现计划
 
+> 状态：历史计划。容器 identity、复用和孤儿回收实现均已删除；当前方案见 [Native / WSL 智能体运行环境设计](../specs/2026-09-07-native-wsl-execution-environment-design.md)。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:executing-plans 内联逐任务实现此计划。步骤使用复选框（`- [ ]`）语法跟踪进度；不调度子代理。
 
 **目标：** 在继续采用“保存设置后重启生效”的前提下，补齐 settings 原子写、Docker 运行身份、daemon 启动孤儿清理和真实 Docker 验证，不引入数据库表、持久切换状态或热切换协议。

@@ -1,6 +1,6 @@
 # Security and Trust Boundaries
 
-> 状态：当前认证、权限、Sandbox、Secret、Owner 和 Channel ACL 的权威总览。最后核对：2026-08-23。
+> 状态：当前认证、权限、运行环境/SRT、Secret、Owner 和 Channel ACL 的权威总览。最后核对：2026-09-08。
 
 ## 先分清六道门
 
@@ -8,12 +8,12 @@
 客户端能不能连接 daemon？       -> Bearer token
 这个进程能不能写这份数据库？    -> Application Owner
 这个 Tool 这一次能不能执行？     -> Permission
-模型启动的进程能碰哪些资源？     -> Sandbox
+模型启动的进程在哪里、能碰什么？ -> ExecutionEnvironment + SRT
 外部聊天是谁发来的？             -> Channel ACL
 Provider 密钥放在哪里、谁能看？  -> Credential Storage / host
 ```
 
-它们解决不同问题，不能互相代替。拿到 daemon token 不代表所有 Tool 自动批准；Sandbox 已开启也不代表可以接受陌生 Bot 用户；Owner 只能阻止双写，不能认证远程客户端。
+它们解决不同问题，不能互相代替。拿到 daemon token 不代表所有 Tool 自动批准；选择 WSL 或启用 SRT 也不代表可以接受陌生 Bot 用户；Owner 只能阻止双写，不能认证远程客户端。
 
 ## 信任边界
 
@@ -26,7 +26,9 @@ Provider 密钥放在哪里、谁能看？  -> Credential Storage / host
 Durable Agent Application ---- Credential Storage / provider
        |  Permission decision
        v
-Agent Runtime ---- Sandbox ---- 文件、进程、网络、Git、MCP
+Agent Runtime ---- ExecutionEnvironment ---- 文件、进程、终端、Git、MCP
+                         |
+                   Native 可选 SRT
 ```
 
 ## Daemon Bearer token
@@ -60,7 +62,7 @@ Runtime 发 permission.requested
 
 Permission 决定“允许不允许做”，不保证操作成功，也不证明操作没有在超时前发生。
 
-## Sandbox
+## 运行环境与 SRT Sandbox
 
 运行环境决定模型发起的文件和进程在 Native 还是 WSL 中执行；可选 SRT 为 Native 进程增加本机权限边界。Docker Agent Runtime 已移除，WSL 本身不等于安全沙箱。
 
@@ -69,7 +71,7 @@ Permission 决定“允许不允许做”，不保证操作成功，也不证明
 - Terminal、child worktree 和后台进程必须由宿主显式提供能力，Kernel 不创建隐藏后门。
 - 运行位置使用 `agentEnvironment.kind = native | wsl`；`sandbox` 只保留 SRT 配置，不接受 backend、Docker 或旧 runtime 字段。
 
-详细行为见 [Sandbox Runtime Flow](./sandbox-runtime-flow.md)。
+详细行为见 [Agent 运行环境调用链](./sandbox-runtime-flow.md)。
 
 ## Provider Secret
 

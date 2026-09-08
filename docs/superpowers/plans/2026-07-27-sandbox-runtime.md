@@ -1,5 +1,7 @@
 # OpenHarness TS Sandbox Runtime Implementation Plan
 
+> 状态：历史计划。Docker Agent Runtime 已移除；当前方案见 [Native / WSL 智能体运行环境设计](../specs/2026-09-07-native-wsl-execution-environment-design.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or an equivalent checklist-driven implementation loop. Update checkboxes as work completes.
 
 **Goal:** Port the Python OpenHarness sandbox execution model into TS: a configurable sandbox layer for shell execution, Docker network modes, and host file-tool boundary checks.

@@ -1,5 +1,7 @@
 # Agent 执行环境第一期实现计划
 
+> 状态：历史计划，Docker 路线已被 [Native / WSL 方案](../specs/2026-09-07-native-wsl-execution-environment-design.md) 取代。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 交付 Desktop 的本机/Docker 运行环境选择，使 Docker 模式下所有仍可调用的 Agent 本地工作负载都在容器中执行，并统一使用 `/workspace` 与 `/opt/openharness/skills`。

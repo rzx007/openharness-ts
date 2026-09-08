@@ -1,5 +1,7 @@
 # Native / WSL 智能体运行环境实现计划
 
+> 状态：已完成并合并到 `main`（2026-09-08）。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 用轻量 Native / WSL 会话环境替换 Docker Agent Runtime，保留独立 SRT 能力并彻底删除 Docker 专属代码。

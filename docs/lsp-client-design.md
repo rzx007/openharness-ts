@@ -48,7 +48,7 @@ OpenHarness 不自己实现语言语义，也不手写 JSON-RPC framing。
 4. 文件请求前发送正确的 didOpen/didChange，并维护递增版本。
 5. diagnostics 来自 publish 或 pull diagnostics，不用执行编译命令伪造。
 6. Tool 对外继续使用宿主机路径和 1-based 行列号。
-7. 进程启动继续经过 `@openharness/sandbox`，不能绕过现有执行边界。
+7. 进程启动经过当前 `ExecutionEnvironment.process`；Native 环境中的 SRT 策略仍由底层进程工厂执行。
 8. Runtime 关闭时先 shutdown/exit 语言服务器，再停止沙箱。
 9. 服务器未配置、未安装、崩溃、超时和不支持操作必须返回不同错误。
 10. `Lsp` 保持只读；任何 WorkspaceEdit 只预览，不直接修改文件。
@@ -159,14 +159,14 @@ const lspManager = new LspManager({
   cwd,
   settings,
   sessionId: options.sessionId,
-  pathMapper: sandboxRuntime.pathMapper,
+  pathMapper: executionEnvironment.paths,
 });
 
 runtime.queryEngine.setLspHost(lspManager);
 runtime.addCleanup(() => lspManager.close());
 ```
 
-LspManager 构造时不启动进程。第一次有适用请求时才延迟启动，这保证沙箱已经完成初始化，也避免没有使用 LSP 的会话承担启动成本。
+LspManager 构造时不启动进程。第一次有适用请求时才延迟启动，这保证执行环境已经就绪，也避免没有使用 LSP 的会话承担启动成本。
 
 ### `@openharness/tools`
 
@@ -362,7 +362,7 @@ return startPromise;
 
 shutdown 超时后终止进程，但 cleanup 仍继续，不让一个失联 server 阻塞整个 Runtime 关闭。
 
-Runtime cleanup 注册顺序必须通过测试保证：LSP 先退出，Sandbox 后停止。不能先停容器再尝试给容器内 server 发送 shutdown。
+Runtime cleanup 注册顺序必须通过测试保证：LSP 先退出，执行环境后释放。不能先终止 WSL 环境进程再尝试给其中的 server 发送 shutdown。
 
 ## 文档同步
 
@@ -405,15 +405,15 @@ interface OpenDocumentState {
 
 ### 宿主机与执行环境
 
-Docker 中的语言服务器看不到宿主机路径：
+WSL 中的语言服务器使用 Linux 路径：
 
 ```text
 host:      D:\code\project\src\a.ts
-execution: /workspace/src/a.ts
-uri:       file:///workspace/src/a.ts
+execution: /mnt/d/repo/src/a.ts
+uri:       file:///mnt/d/repo/src/a.ts
 ```
 
-因此 Sandbox Runtime 需要提供明确路径映射：
+因此 `ExecutionEnvironment` 需要提供明确路径映射：
 
 ```ts
 export interface ExecutionPathMapper {
@@ -426,7 +426,7 @@ export interface ExecutionPathMapper {
 
 映射失败、URI scheme 不是 `file`、或者返回路径越过 workspace 时，结果不能直接交给模型。第一版返回明确的 unsupported/external location 标记；默认不读取外部内容。
 
-如果现有 Sandbox 尚不能提供可靠双向映射，第一阶段先支持 host/SRT，并对 Docker 明确 fail-closed。不能在 Docker 模式下发送宿主机 URI 后假装查询成功。
+路径转换必须复用 `ExecutionEnvironment.paths`。不能在 WSL 模式下发送 Windows URI 后假装查询成功。当前只支持 Windows 盘符项目；WSL Linux 文件系统项目在 Git/worktree 和路径映射完整接入前明确拒绝。
 
 ### 行列号
 
@@ -609,13 +609,13 @@ Tool 把 code 转成可操作提示，并设置合适的 `failureKind`：
 
 1. Tool input 不能设置 command、args 或 env。
 2. 文件路径必须在 Runtime cwd 内，并在 services 再做一次 canonical path 校验。
-3. server 进程必须通过 sandbox-aware `createProcess`。
+3. server 进程必须通过当前环境的 `process.execProcess`。
 4. 项目级 server 配置必须经过与项目插件同等级别的信任门控。
 5. 默认拒绝 `workspace/applyEdit`。
 6. 默认不执行 server 请求的 workspace command。
 7. rename、formatting 和 code action 第一版只返回预览；真正写盘必须走 Edit/Write 权限。
 8. 服务器返回的外部 URI 默认不读取。
-9. 环境变量只传显式允许的配置，不把整个宿主环境无条件复制给容器。
+9. 环境变量只传显式允许的配置，不把整个宿主环境无条件复制给 WSL 进程。
 10. 日志不得记录文件完整内容或敏感 initializationOptions。
 
 语言服务器本身可能加载项目插件、扫描 workspace 或启动子进程；“请求是只读”不代表 server 进程天然安全。沙箱和项目配置信任仍然是硬边界。
@@ -626,9 +626,9 @@ Tool 把 code 转成可操作提示，并设置合适的 `failureKind`：
 
 - server ID；
 - workspace root；
-- execution backend；
+- execution environment；
 - state；
-- PID 或容器进程标识；
+- PID 或环境进程标识；
 - initialize duration；
 - advertised capabilities 摘要；
 - open document count；
@@ -705,7 +705,7 @@ import {
 
 - Windows 盘符路径到 file URI；
 - URI percent encoding 和中文路径；
-- host/container 双向映射；
+- host/WSL 双向映射；
 - 返回 workspace 外路径时 fail-closed；
 - Tool 1-based 到 LSP 0-based；
 - UTF-16 中 emoji 前后的 character；
@@ -743,7 +743,7 @@ const message = greet("OpenHarness");
 - 多次请求复用同一个 server；
 - Runtime 关闭后没有遗留进程。
 
-Docker E2E 在路径映射实现后单独启用，验证 server binary 位于容器、URI 使用容器路径、结果返回宿主路径，以及容器停止前 server 已完成收束。
+WSL E2E 在路径映射实现后单独启用，验证 server 在 WSL 中启动、URI 使用 POSIX 路径、结果按契约呈现，以及环境释放前 server 已完成收束。
 
 ## 分阶段实施
 
@@ -777,14 +777,14 @@ Docker E2E 在路径映射实现后单独启用，验证 server binary 位于容
 
 阶段出口：失败不再表现为空结果，长时间运行无进程和 listener 泄漏。
 
-### 阶段 3：Sandbox 路径闭环
+### 阶段 3：执行环境路径闭环
 
-1. Sandbox 暴露双向 path mapper。
+1. `ExecutionEnvironment.paths` 暴露双向 path mapper。
 2. LSP cwd、URI 和返回路径全部走 mapper。
-3. 增加 Docker image/server 安装策略。
-4. Docker E2E。
+3. 增加 WSL server 可用性探测和安装指引。
+4. WSL E2E。
 
-阶段出口：Docker 模式与 host 模式返回相同宿主路径结果。
+阶段出口：WSL 模式与 Native 模式返回一致的语义结果，并使用各自环境的路径表示。
 
 ### 阶段 4：多语言和高级只读能力
 
@@ -805,8 +805,8 @@ Docker E2E 在路径映射实现后单独启用，验证 server binary 位于容
 4. didOpen/didChange/version 有测试证明。
 5. server capability、timeout、crash 和未安装都有明确错误。
 6. Node 24 ESM import 测试通过。
-7. host 模式路径和坐标正确。
-8. 若 README 宣称支持 Docker，则 Docker 双向路径映射和 E2E 已通过；否则必须明确标注 Docker 尚未支持。
+7. Native 模式路径和坐标正确。
+8. 若 README 宣称支持 WSL LSP，则 Windows/WSL 双向路径映射和 E2E 已通过；否则必须明确标注 WSL LSP 尚未支持。
 9. `Lsp` 保持只读，server applyEdit 和 command 不会绕过权限。
 10. 文档、Settings schema、Tool schema、契约测试索引和 README 与实现同步。
 
@@ -819,4 +819,3 @@ Docker E2E 在路径映射实现后单独启用，验证 server binary 位于容
 - [vscode-jsonrpc README](https://github.com/microsoft/vscode-languageserver-node/blob/main/jsonrpc/README.md)
 - [Language Server Protocol specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/)
 - [Node 24 ESM compatibility report for older vscode-jsonrpc](https://github.com/microsoft/vscode-languageserver-node/issues/1740)
-

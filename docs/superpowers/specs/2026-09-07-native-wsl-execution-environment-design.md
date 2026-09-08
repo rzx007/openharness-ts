@@ -1,5 +1,7 @@
 # Native / WSL 智能体运行环境设计
 
+> 状态：当前实现，最后核对：2026-09-08。
+
 ## 目标与边界
 
 OpenHarness Desktop 不再使用 Docker 承载 Agent 工作负载。Agent、文件工具、后台 Shell 和集成终端统一运行在当前配置选择的环境中：默认使用宿主系统；Windows 用户可以改选 WSL。

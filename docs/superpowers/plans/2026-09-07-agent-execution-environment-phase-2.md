@@ -1,5 +1,7 @@
 # Agent 运行环境第二期：统一终端体验实现计划
 
+> 状态：历史计划，Docker 终端与共享 lease 已删除；当前终端见 [Desktop 终端与 PTY](../../desktop-terminal-pty-design.md)。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 让 Agent Terminal 和用户默认集成终端跟随当前 Agent 环境，在 Docker 中使用真实 PTY，并让项目、项目外会话、fork 和非隔离子 Agent 通过内存 lease 安全共享同一个环境。
