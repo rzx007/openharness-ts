@@ -1,8 +1,11 @@
 import type { ToolDefinition } from "@openharness/core";
+import type { ShellDescriptor } from "@openharness/environment";
+import { createShellDescription } from "../shell/index.js";
 
-export const backgroundShellCreateTool: ToolDefinition = {
+export function createBackgroundShellTool(shell?: ShellDescriptor): ToolDefinition {
+return {
   name: "BackgroundShellCreate",
-  description: "Start a detached background shell/bash command for long-running work such as dev servers, watchers, installs, builds, migrations, docker compose, or any command that should not block the conversation. Returns a jobId; use JobWait for bounded progress, JobRead for output snapshots, and JobCancel to stop it.",
+  description: `Start a detached background command for long-running work. ${createShellDescription(shell)} Returns a jobId; use JobWait for bounded progress, JobRead for output snapshots, and JobCancel to stop it.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -38,6 +41,7 @@ export const backgroundShellCreateTool: ToolDefinition = {
         cwd: context.environment?.workspace.hostRoot ?? context.cwd,
         sessionId: context.sessionId,
         settings: context.settings,
+        ...(shell ? { shellDescriptor: shell } : {}),
       });
       return {
         content: [{
@@ -56,6 +60,9 @@ export const backgroundShellCreateTool: ToolDefinition = {
     }
   },
 };
+}
+
+export const backgroundShellCreateTool: ToolDefinition = createBackgroundShellTool();
 
 function readRequiredString(value: unknown, name: string): { value: string } | { error: string } {
   return typeof value === "string" && value.trim()

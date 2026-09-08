@@ -5,6 +5,7 @@ import type { Settings } from "@openharness/core";
 import type {
   ExecutionEnvironmentConsumer,
   ExecutionEnvironmentHandle,
+  ShellDescriptor,
 } from "@openharness/environment";
 import type {
   SessionExecutionRecord,
@@ -185,6 +186,7 @@ export class BackgroundShellService {
     description?: string;
     settings?: Settings;
     origin?: "http" | "tool";
+    shellDescriptor?: ShellDescriptor;
   }): Promise<{ execution: DetachedProcessExecution | SessionExecutionRecord; created: boolean }> {
     const scope = this.resolveScope(input, { requireActiveSession: true });
     const requestId = input.requestId.trim();
@@ -268,6 +270,12 @@ export class BackgroundShellService {
           settings,
           { kind: "background", id: reservation.task.id },
         );
+        if (input.shellDescriptor && !sameShellDescriptor(
+          input.shellDescriptor,
+          environmentLease.info.shellDescriptor,
+        )) {
+          throw new BackgroundShellError(409, "Background shell no longer matches the owning session shell.");
+        }
       }
       task = await manager.startShellExecution({
         id: reservation.task.id,
@@ -408,6 +416,17 @@ function bindEnvironmentProcessExecutor(environment: ExecutionEnvironmentHandle)
     execProcess: (argv: string[], options = {}) =>
       environment.process.execProcess(argv, { ...options, cwd }),
   } satisfies typeof environment.process;
+}
+
+function sameShellDescriptor(
+  expected: ShellDescriptor,
+  actual: ShellDescriptor | undefined,
+): boolean {
+  return Boolean(actual
+    && expected.family === actual.family
+    && expected.dialect === actual.dialect
+    && expected.executable === actual.executable
+    && expected.argsPrefix.join("\0") === actual.argsPrefix.join("\0"));
 }
 
 function shellRequestFingerprint(input: {

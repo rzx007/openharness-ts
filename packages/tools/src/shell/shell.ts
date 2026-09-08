@@ -59,6 +59,7 @@ export function createShellTool(
             cwd: backgroundCwd,
             sessionId: context.sessionId!,
             settings: context.settings,
+            ...(shell ? { shellDescriptor: shell } : {}),
           });
           return {
             content: [{

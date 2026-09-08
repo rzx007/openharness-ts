@@ -47,7 +47,7 @@ import {
 } from "./schedule/index.js";
 import { grepTool, lspTool } from "./search/index.js";
 import { createShellTool } from "./shell/index.js";
-import { backgroundShellCreateTool } from "./background-shell/index.js";
+import { createBackgroundShellTool } from "./background-shell/index.js";
 import { webFetchTool, webSearchTool } from "./web/index.js";
 import { terminalTools } from "./terminal/index.js";
 import { jobTools } from "./job/index.js";
@@ -105,7 +105,10 @@ export function createDefaultToolRegistry(
   registerBuiltin(askUserTool, controlPlane());
   registerBuiltin(briefTool, controlPlane());
   if (options.backgroundShell !== false) {
-    registerBuiltin(backgroundShellCreateTool, environment());
+    registerBuiltin(
+      createBackgroundShellTool(options.environment?.info.shellDescriptor),
+      environment(),
+    );
   }
   registerBuiltin(enterPlanModeTool, controlPlane());
   registerBuiltin(exitPlanModeTool, controlPlane());
