@@ -38,7 +38,7 @@ describe("createDefaultNodeAgent", () => {
             toolUse: {
               type: "tool_use" as const,
               id: "permission-test-tool",
-              name: "Bash",
+              name: "Shell",
               input: { command: "echo must-not-run" },
             },
           };

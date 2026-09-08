@@ -546,7 +546,7 @@ describe("programmatic agent SDK", () => {
             toolUse: {
               type: "tool_use" as const,
               id: "tool-sdk-1",
-              name: "Bash",
+              name: "Shell",
               input: { command: "echo should-not-run" },
             },
           };
@@ -763,7 +763,7 @@ describe("programmatic agent SDK", () => {
     }
   });
 
-  it("runs Coordinator -> Workflow -> worker -> Read/Bash/Edit with worker tools", async () => {
+  it("runs Coordinator -> Workflow -> worker -> Read/Shell/Edit with worker tools", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "openharness-sdk-coordinator-workflow-"));
     const targetFile = join(cwd, "target.txt");
     writeFileSync(targetFile, "alpha\n", "utf-8");
@@ -786,7 +786,7 @@ describe("programmatic agent SDK", () => {
           return;
         }
 
-        if (usedTools.includes("Read") && usedTools.includes("Bash") && usedTools.includes("Edit")) {
+        if (usedTools.includes("Read") && usedTools.includes("Shell") && usedTools.includes("Edit")) {
           const workerResults = params.messages
             .filter((message) => message.type === "tool_result")
             .map((message) => message.type === "tool_result"
@@ -799,7 +799,7 @@ describe("programmatic agent SDK", () => {
           expect(workerResults).toContain("1: alpha");
           expect(workerResults).toContain("bash-ok");
           expect(workerResults).toContain("Successfully edited");
-          yield { type: "text_delta" as const, delta: "worker completed Read/Bash/Edit" };
+          yield { type: "text_delta" as const, delta: "worker completed Read/Shell/Edit" };
           yield { type: "complete" as const, stopReason: "end_turn" };
           return;
         }
@@ -819,7 +819,7 @@ describe("programmatic agent SDK", () => {
             toolUse: {
               type: "tool_use" as const,
               id: "worker-bash",
-              name: "Bash",
+              name: "Shell",
               input: { command: "echo bash-ok", workdir: cwd, timeout: 10_000 },
             },
           };
@@ -885,13 +885,13 @@ describe("programmatic agent SDK", () => {
     try {
       const result = await agent.submitMessage("run coordinator workflow").result;
 
-      expect(result.output).toContain("worker completed Read/Bash/Edit");
+      expect(result.output).toContain("worker completed Read/Shell/Edit");
       expect(readFileSync(targetFile, "utf-8")).toBe("beta\n");
       expect(events.some((event) => event.type === "child.created")).toBe(true);
       expect(events
         .filter((event) => event.type === "tool.started")
         .map((event) => event.type === "tool.started" ? event.data.toolUse.name : ""))
-        .toEqual(expect.arrayContaining(["Workflow", "Read", "Bash", "Edit"]));
+        .toEqual(expect.arrayContaining(["Workflow", "Read", "Shell", "Edit"]));
     } finally {
       await agent.close();
       rmSync(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
@@ -935,7 +935,7 @@ describe("programmatic agent SDK", () => {
           return;
         }
 
-        if (usedTools.includes("Bash")) {
+        if (usedTools.includes("Shell")) {
           yield { type: "text_delta" as const, delta: latestToolResultText(params.messages) };
           yield { type: "complete" as const, stopReason: "end_turn" };
           return;
@@ -947,7 +947,7 @@ describe("programmatic agent SDK", () => {
             toolUse: {
               type: "tool_use" as const,
               id: "forbidden-bash",
-              name: "Bash",
+              name: "Shell",
               input: { command: "echo should-not-run", workdir: cwd },
             },
           };
@@ -983,7 +983,7 @@ describe("programmatic agent SDK", () => {
     try {
       const result = await agent.submitMessage("spawn restricted worker").result;
 
-      expect(result.output).toContain("Unknown tool: Bash");
+      expect(result.output).toContain("Unknown tool: Shell");
       expect(result.output).not.toContain("should-not-run");
     } finally {
       await agent.close();

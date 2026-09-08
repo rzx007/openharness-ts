@@ -101,16 +101,16 @@ describe("toolSearchTool", () => {
   it("finds matching tools", async () => {
     const registry = new ToolRegistry();
     registry.register({
-      name: "Bash",
+      name: "Shell",
       description: "Run shell commands",
       inputSchema: {},
       async execute() {
         return { content: [] };
       },
     });
-    const result = await toolSearchTool.execute!({ query: "bash" }, { cwd: process.cwd(), toolRegistry: registry });
+    const result = await toolSearchTool.execute!({ query: "shell" }, { cwd: process.cwd(), toolRegistry: registry });
     const text = (result.content[0] as any).text;
-    expect(text).toContain("Bash");
+    expect(text).toContain("Shell");
   });
 
   it("returns no matches message", async () => {
@@ -134,7 +134,7 @@ describe("toolSearchTool", () => {
     const result = await toolSearchTool.execute!({ query: "dynamic" }, { cwd: process.cwd(), toolRegistry: registry });
     const text = (result.content[0] as any).text;
     expect(text).toContain("PluginDynamicTool");
-    expect(text).not.toContain("Bash");
+    expect(text).not.toContain("Shell");
   });
 
   it("fails when no runtime registry is provided", async () => {

@@ -79,7 +79,7 @@ describe("resolveAutoApproveTools", () => {
     expect(tools.has("JobList")).toBe(true);
     expect(tools.has("WebFetch")).toBe(true);
     expect(tools.has("Write")).toBe(false);
-    expect(tools.has("Bash")).toBe(false);
+    expect(tools.has("Shell")).toBe(false);
     expect(tools.size).toBe(READ_ONLY_TOOLS.size - LOCAL_READ_ONLY_TOOLS.size);
   });
 
@@ -160,8 +160,8 @@ describe("resolveEffectiveAllowedTools", () => {
   it("intersects host ceiling with role tools", () => {
     expect(resolveEffectiveAllowedTools({
       hostToolCeiling: ["Read", "Agent"],
-      roleAllowedTools: ["*", "Bash", "Edit"],
-      knownToolNames: ["Read", "Agent", "Bash", "Edit"],
+      roleAllowedTools: ["*", "Shell", "Edit"],
+      knownToolNames: ["Read", "Agent", "Shell", "Edit"],
     })).toEqual({ kind: "only", names: new Set(["Read", "Agent"]) });
 
     expect(resolveEffectiveAllowedTools({
@@ -172,14 +172,14 @@ describe("resolveEffectiveAllowedTools", () => {
 
     expect(resolveEffectiveAllowedTools({
       hostToolCeiling: ["Read"],
-      roleAllowedTools: ["Bash"],
-      knownToolNames: ["Read", "Bash"],
+      roleAllowedTools: ["Shell"],
+      knownToolNames: ["Read", "Shell"],
     })).toEqual({ kind: "only", names: new Set() });
   });
 
   it("represents an unrestricted limit explicitly", () => {
     expect(resolveEffectiveAllowedTools({
-      knownToolNames: ["Read", "Bash"],
+      knownToolNames: ["Read", "Shell"],
     })).toEqual({ kind: "all" });
   });
 });
@@ -211,7 +211,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       },
     });
 
-    expect(runtime.toolRegistry.has("Bash")).toBe(true);
+    expect(runtime.toolRegistry.has("Shell")).toBe(true);
     expect(runtime.toolRegistry.has("Read")).toBe(true);
     expect(runtime.toolRegistry.has("Write")).toBe(true);
     expect(runtime.toolRegistry.has("TerminalOpen")).toBe(true);
@@ -452,7 +452,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     const runtime = await createOpenHarnessRuntime({
       settings: {
         ...BASE_SETTINGS,
-        permission: { mode: "default", allowedTools: ["Bash"] },
+        permission: { mode: "default", allowedTools: ["Shell"] },
       },
       configuration: {
         client: {
@@ -488,7 +488,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
       expect(runtime.toolRegistry.get("DynamicAllowed")).toBeDefined();
       expect(runtime.toolRegistry.get("DynamicDenied")).toBeUndefined();
       expect(runtime.toolRegistry.get("ToolSearch")).toBeDefined();
-      expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
+      expect(runtime.toolRegistry.get("Shell")).toBeUndefined();
     } finally {
       await runtime.close();
     }
@@ -511,7 +511,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
     try {
       const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
       expect(names).toEqual(["Read", "Agent"]);
-      expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
+      expect(runtime.toolRegistry.get("Shell")).toBeUndefined();
       expect(runtime.toolRegistry.get("Edit")).toBeUndefined();
     } finally {
       await runtime.close();
@@ -528,14 +528,14 @@ describe("createOpenHarnessRuntime tool visibility", () => {
           },
         },
         hostToolCeiling: ["Read"],
-        roleAllowedTools: ["Bash"],
+        roleAllowedTools: ["Shell"],
       },
     });
 
     try {
       expect(runtime.toolRegistry.getAll()).toEqual([]);
       expect(runtime.toolRegistry.get("Read")).toBeUndefined();
-      expect(runtime.toolRegistry.get("Bash")).toBeUndefined();
+      expect(runtime.toolRegistry.get("Shell")).toBeUndefined();
     } finally {
       await runtime.close();
     }
@@ -566,7 +566,7 @@ describe("createOpenHarnessRuntime tool visibility", () => {
 
     try {
       const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
-      expect(names).toContain("Bash");
+      expect(names).toContain("Shell");
       expect(names).toContain("Read");
       expect(names).toContain("DynamicMcpTool");
       expect(names).not.toContain("Write");
@@ -585,15 +585,15 @@ describe("createOpenHarnessRuntime tool visibility", () => {
             yield { type: "complete" as const, stopReason: "end_turn" as const };
           },
         },
-        hostToolCeiling: ["Bash", "Edit", "ToolSearch"],
+        hostToolCeiling: ["Shell", "Edit", "ToolSearch"],
         disallowedTools: ["ToolSearch"],
       },
     });
 
     try {
       const names = runtime.toolRegistry.getAll().map((tool) => tool.name);
-      expect(names).toEqual(["Bash", "Edit"]);
-      expect(runtime.toolRegistry.get("Bash")).toBeDefined();
+      expect(names).toEqual(["Shell", "Edit"]);
+      expect(runtime.toolRegistry.get("Shell")).toBeDefined();
       expect(runtime.toolRegistry.get("Edit")).toBeDefined();
       expect(runtime.toolRegistry.get("ToolSearch")).toBeUndefined();
     } finally {

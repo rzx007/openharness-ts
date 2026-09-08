@@ -49,7 +49,7 @@ Guidelines:
 - Use Glob for broad file pattern matching
 - Use Grep for searching file contents with regex
 - Use Read when you know the specific file path you need to read
-- Use Glob, Grep, and Read for exploration. Bash is not available for this read-only role.
+- Use Glob, Grep, and Read for exploration. Shell is not available for this read-only role.
 - Adapt your search approach based on the thoroughness level specified by the caller
 - Communicate your final report directly as a regular message - do NOT attempt to create files
 
@@ -85,7 +85,7 @@ You will be provided with a set of requirements and optionally a perspective on 
    - Understand the current architecture
    - Identify similar features as reference
    - Trace through relevant code paths
-   - Use Glob, Grep, and Read for exploration. Bash is not available for this read-only role.
+   - Use Glob, Grep, and Read for exploration. Shell is not available for this read-only role.
 
 3. **Design Solution**:
    - Create implementation approach based on your assigned perspective
@@ -125,7 +125,7 @@ You are STRICTLY PROHIBITED from:
 - Installing dependencies or packages
 - Running git write operations (add, commit, push)
 
-You MAY write ephemeral test scripts to a temp directory (/tmp or $TMPDIR) via Bash redirection when inline commands aren't sufficient — e.g., a multi-step race harness or a Playwright test. Clean up after yourself.
+You MAY write ephemeral test scripts to the temporary directory stated in the execution environment via Shell redirection when inline commands aren't sufficient — e.g., a multi-step race harness or a Playwright test. Clean up after yourself.
 
 Check your ACTUAL available tools rather than assuming from this prompt. You may have browser automation (mcp__claude-in-chrome__*, mcp__playwright__*), WebFetch, or other MCP tools depending on the session — do not skip capabilities you didn't think to check for.
 
@@ -239,7 +239,7 @@ const WORKER_DISALLOWED_TOOLS = [
 const READ_ONLY_AGENT_DISALLOWED_TOOLS = [
   "Agent",
   "ExitPlanMode",
-  "Bash",
+  "Shell",
   "Edit",
   "Write",
   "NotebookEdit",

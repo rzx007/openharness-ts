@@ -8,6 +8,7 @@ import type {
   StreamMessageParams,
   Settings,
 } from "@openharness/core";
+import { canonicalToolName } from "@openharness/core";
 import { createShellProcess } from "@openharness/sandbox";
 import type { EnvironmentProcessExecutor } from "@openharness/environment";
 
@@ -105,7 +106,12 @@ function fnmatch(name: string, pattern: string): boolean {
 function matchSubject(payload: Record<string, unknown>): string {
   const tool = payload.tool_name ?? payload.tool;
   const subject = tool ?? payload.prompt ?? payload.event ?? "";
-  return String(subject ?? "");
+  const value = String(subject ?? "");
+  return tool !== undefined ? canonicalToolName(value) : value;
+}
+
+function canonicalHookMatcher(matcher: string): string {
+  return matcher === "Bash" ? "Shell" : matcher;
 }
 
 /** Parse a hook model response into `{ ok, reason }`, mirroring Python. */
@@ -216,7 +222,7 @@ export class HookExecutor implements IHookExecutor {
     const subject = context ? matchSubject(context) : "";
     const filtered = [...this.hooks.values()].filter((h) => {
       if (h.event !== event || !h.enabled) return false;
-      if (h.matcher && context) return fnmatch(subject, h.matcher);
+      if (h.matcher && context) return fnmatch(subject, canonicalHookMatcher(h.matcher));
       return true;
     });
     // Stable sort by descending priority (default 0).

@@ -207,6 +207,9 @@ export type {
 } from "./context-budget";
 export {
   assertNoRemovedLifecycleToolNames,
+  canonicalToolName,
+  canonicalToolNames,
+  RESERVED_SHELL_TOOL_NAMES,
   normalizeToolName,
   normalizeToolNames,
   resolveAllowedToolNames,

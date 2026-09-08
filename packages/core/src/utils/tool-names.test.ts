@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   assertNoRemovedLifecycleToolNames,
+  canonicalToolName,
+  canonicalToolNames,
   normalizeToolName,
   normalizeToolNames,
   resolveAllowedToolNames,
 } from "./tool-names.js";
+
+describe("shell tool name migration", () => {
+  it("canonicalizes Bash references without registering an alias", () => {
+    expect(canonicalToolName("Bash")).toBe("Shell");
+    expect(canonicalToolName("Read")).toBe("Read");
+    expect(canonicalToolNames(["Read", "Bash", "Shell"])).toEqual(["Read", "Shell"]);
+  });
+});
 
 describe("tool name normalization", () => {
   it("keeps tool names exact", () => {
@@ -21,7 +31,7 @@ describe("tool name normalization", () => {
 
   it("deduplicates normalized names and treats '*' as an unrestricted allowlist", () => {
     expect(normalizeToolNames(["Bash", "Bash", "Edit", "Edit"]))
-      .toEqual(["Bash", "Edit"]);
+      .toEqual(["Shell", "Edit"]);
     expect(resolveAllowedToolNames(["JobWait", "*", "Read"]))
       .toEqual([]);
   });

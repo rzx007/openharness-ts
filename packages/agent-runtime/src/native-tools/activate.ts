@@ -1,4 +1,4 @@
-import type { IToolRegistry } from "@openharness/core";
+import { RESERVED_SHELL_TOOL_NAMES, type IToolRegistry } from "@openharness/core";
 import type { LoadedNativePlugin, PluginDiagnostic } from "@openharness/plugins";
 import { formatNativeToolAuditEvent, NativeToolCallGuard, type NativeToolAuditEvent } from "./guard.js";
 import { NativeToolHost, NativeToolHostError, type NativeToolHostState } from "./tool-host.js";
@@ -83,6 +83,9 @@ export async function activateNativePluginTools(
   try {
     const definitions = await host.start();
     for (const definition of definitions) {
+      if (RESERVED_SHELL_TOOL_NAMES.has(definition.name)) {
+        throw new NativeToolHostError("tool_name_conflict", `Native Tool name is reserved: ${definition.name}`);
+      }
       if (context.toolRegistry.has(definition.name)) {
         throw new NativeToolHostError("tool_name_conflict", `Native Tool name is already registered: ${definition.name}`);
       }

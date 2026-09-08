@@ -67,7 +67,7 @@ describe("getCoordinatorUserContext", () => {
     process.env.OPENHARNESS_COORDINATOR_MODE = "1";
     const ctx = getCoordinatorUserContext([{ name: "db" }, { name: "web" }], "/tmp/pad");
     const content = ctx.workerToolsContext!;
-    expect(content).toContain("Bash");
+    expect(content).toContain("Shell");
     expect(content).toContain("Skill");
     expect(content).toContain("JobList");
     expect(content).toContain("JobRead");
@@ -81,7 +81,7 @@ describe("getCoordinatorUserContext", () => {
     process.env.OPENHARNESS_COORDINATOR_SIMPLE = "true";
     expect(isSimpleMode()).toBe(true);
     const content = getCoordinatorUserContext().workerToolsContext!;
-    expect(content).toContain("Bash, Edit, Read");
+    expect(content).toContain("Edit, Read, Shell");
     expect(content).not.toContain("WebSearch");
   });
 
@@ -92,7 +92,7 @@ describe("getCoordinatorUserContext", () => {
     }).workerToolsContext!;
 
     expect(content).toContain("Grep, Read");
-    expect(content).not.toContain("Bash");
+    expect(content).not.toContain("Shell");
     expect(content).not.toContain("Edit");
   });
 
@@ -123,7 +123,7 @@ describe("getCoordinatorSystemPrompt", () => {
   it("swaps in the simple capabilities under OPENHARNESS_COORDINATOR_SIMPLE", () => {
     process.env.OPENHARNESS_COORDINATOR_SIMPLE = "1";
     const prompt = getCoordinatorSystemPrompt();
-    expect(prompt).toContain("Workers have access to Bash, Read, and Edit tools");
+    expect(prompt).toContain("Workers have access to Shell, Read, and Edit tools");
     expect(prompt).not.toContain("project skills via the Skill tool");
   });
 });

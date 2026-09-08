@@ -26,6 +26,16 @@ const REMOVED_LIFECYCLE_TOOL_REPLACEMENTS: Record<string, string | undefined> =
     terminal_close: "JobCancel",
   };
 
+export const RESERVED_SHELL_TOOL_NAMES = new Set(["Shell", "Bash"]);
+
+export function canonicalToolName(name: string): string {
+  return name.trim() === "Bash" ? "Shell" : name.trim();
+}
+
+export function canonicalToolNames(names: readonly string[]): string[] {
+  return [...new Set(names.map(canonicalToolName).filter(Boolean))];
+}
+
 /** Reject only lifecycle names removed by the Jobs hard cut; unknown plugin tools remain valid. */
 export function assertNoRemovedLifecycleToolNames(
   tools: readonly string[],
@@ -61,7 +71,7 @@ export function normalizeToolName(
   tool: string,
   knownToolNames: readonly string[] = [],
 ): string | undefined {
-  const trimmed = tool.trim();
+  const trimmed = canonicalToolName(tool);
   if (!trimmed) return undefined;
   if (trimmed === "*") return "*";
 

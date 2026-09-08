@@ -383,7 +383,7 @@ describe("HookExecutor — matcher filtering", () => {
       matcher: "Bash",
     });
     const matched = executor.getHooksForEvent("pre_tool_use", {
-      tool_name: "Bash",
+      tool_name: "Shell",
     });
     expect(matched).toHaveLength(1);
   });

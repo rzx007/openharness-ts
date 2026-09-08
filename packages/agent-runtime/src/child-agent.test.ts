@@ -160,13 +160,13 @@ describe("AgentChildManager", () => {
       agent: "Explore",
       cwd: "/repo",
       allowedTools: ["Read", "Grep"],
-      disallowedTools: ["Bash"],
+      disallowedTools: ["Shell"],
     });
 
     expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
       hostToolCeiling: ["Agent"],
       roleAllowedTools: ["Read", "Grep"],
-      disallowedTools: ["Write", "Bash"],
+      disallowedTools: ["Write", "Shell"],
     });
     await manager.closeAll();
   });

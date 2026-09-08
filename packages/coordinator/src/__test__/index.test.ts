@@ -227,7 +227,7 @@ describe("AgentDefinitions", () => {
       expect(getAgentDefinition(name)?.disallowedTools).toEqual([
         "Agent",
         "ExitPlanMode",
-        "Bash",
+        "Shell",
         "Edit",
         "Write",
         "NotebookEdit",

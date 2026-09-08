@@ -10,7 +10,7 @@ import { resolveAllowedToolNames } from "@openharness/core";
 
 /** worker 可用工具全集（TS 工具名，对齐 Python _WORKER_TOOLS 语义）。 */
 const WORKER_TOOLS = [
-  "Bash",
+  "Shell",
   "Read",
   "Edit",
   "Write",
@@ -24,7 +24,7 @@ const WORKER_TOOLS = [
   "Skill",
 ] as const;
 
-const SIMPLE_WORKER_TOOLS = ["Bash", "Read", "Edit"] as const;
+const SIMPLE_WORKER_TOOLS = ["Shell", "Read", "Edit"] as const;
 
 const TRUTHY = new Set(["1", "true", "yes"]);
 export const COORDINATOR_SIMPLE_MODE_ENV = "OPENHARNESS_COORDINATOR_SIMPLE";
@@ -107,7 +107,7 @@ export const RICH_CAPABILITIES =
   "and project skills via the Skill tool. Delegate skill invocations (e.g. /commit, /verify) to workers.";
 
 const SIMPLE_CAPABILITIES =
-  "Workers have access to Bash, Read, and Edit tools, plus MCP tools from configured MCP servers.";
+  "Workers have access to Shell, Read, and Edit tools, plus MCP tools from configured MCP servers.";
 
 /**
  * coordinator system prompt：静态常量是富版本；简单模式把 §3 的能力句换成
