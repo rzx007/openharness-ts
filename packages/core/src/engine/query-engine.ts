@@ -37,6 +37,7 @@ import {
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
 import { normalizeToolInput, validateToolInput } from "./tool-input-schema";
+import { ToolFailureMemory } from "./tool-failure-memory";
 
 const MAX_COMPACT_OUTPUT_TOKENS = 20_000;
 const COMPACT_SUMMARIZER_SYSTEM_PROMPT = "You are a conversation summarizer.";
@@ -330,7 +331,7 @@ export class QueryEngine implements IQueryEngine {
     const turnSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
 
     let turnCount = 0;
-    const failedUnsafeCalls = new Set<string>();
+    const failedToolCalls = new ToolFailureMemory();
     const failedCallsByTool = new Map<string, number>();
     const blockedTools = new Set<string>();
     let recoveryToolTurnsRemaining: number | null = null;
@@ -418,7 +419,7 @@ export class QueryEngine implements IQueryEngine {
           toolUses,
           options.signal,
           options.execution,
-          failedUnsafeCalls,
+          failedToolCalls,
           blockedTools,
         );
         for (let i = 0; i < results.length; i++) {
@@ -426,7 +427,7 @@ export class QueryEngine implements IQueryEngine {
           const toolUse = toolUses[i]!;
           const tool = this.visibleToolRegistry().get(toolUse.name);
           if (result.isError && (!tool || tool.safeToRetry !== true)) {
-            failedUnsafeCalls.add(toolCallSignature(toolUse));
+            failedToolCalls.recordFailure(toolUse.name, toolUse.input);
           }
           const recoveryGuard = result.metadata?.recoveryGuard;
           if (recoveryGuard) {
@@ -440,6 +441,7 @@ export class QueryEngine implements IQueryEngine {
             }
           } else {
             failedCallsByTool.delete(toolUse.name);
+            failedToolCalls.noteEvidence();
           }
           this.messages.push({
             type: "tool_result",
@@ -596,7 +598,7 @@ export class QueryEngine implements IQueryEngine {
     toolUses: ToolUseBlock[],
     signal?: AbortSignal,
     execution?: AgentExecutionContext,
-    failedUnsafeCalls?: ReadonlySet<string>,
+    failedToolCalls?: ToolFailureMemory,
     blockedTools?: ReadonlySet<string>,
   ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = new Array(toolUses.length);
@@ -627,7 +629,7 @@ export class QueryEngine implements IQueryEngine {
         continue;
       }
 
-      if (failedUnsafeCalls?.has(toolCallSignature(toolUse))) {
+      if (failedToolCalls?.shouldReplayFailure(toolUse.name, toolUse.input)) {
         results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
@@ -986,10 +988,6 @@ export class QueryEngine implements IQueryEngine {
       inspect: (name) => registry.inspect(name),
     };
   }
-}
-
-function toolCallSignature(toolUse: ToolUseBlock): string {
-  return `${toolUse.name}:${stableJson(toolUse.input)}`;
 }
 
 function appendSystemGuidance(
