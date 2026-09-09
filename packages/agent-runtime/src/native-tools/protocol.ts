@@ -1,17 +1,16 @@
 import type { OpenHarnessPluginPermissions } from "@openharness/plugins";
+import type {
+  NativeToolDefinition,
+  NativeToolInvocationContext,
+  NativeToolPluginIdentity,
+} from "@openharness/plugins/sdk";
 
-export interface NativeToolRegistration {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  safeToRetry?: boolean;
-}
+export type NativeToolRegistration = Pick<
+  NativeToolDefinition,
+  "name" | "description" | "inputSchema" | "safeToRetry"
+>;
 
-export interface NativeToolCallContext {
-  cwd: string;
-  sessionId?: string;
-  deadline: number;
-}
+export type NativeToolCallContext = Pick<NativeToolInvocationContext, "cwd" | "sessionId" | "deadline">;
 
 export interface NativeToolHostRequest {
   type: "request";
@@ -39,7 +38,7 @@ export interface NativeToolHostLog {
 }
 
 export interface RegisterToolsPayload {
-  plugin: { id: string; name: string; version: string; root: string };
+  plugin: NativeToolPluginIdentity;
   entries: Array<{
     entryPath: string;
     permissions: OpenHarnessPluginPermissions;

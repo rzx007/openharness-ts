@@ -102,6 +102,41 @@ describe("resolveSessionCwd", () => {
 });
 
 describe("dispatchSessionCommand", () => {
+  it("shows reload validation failures and permission recovery steps without claiming activation", async () => {
+    const { host: h, emitted } = host({ client: fakeClient({
+      async reloadPlugins() {
+        return {
+          message: "Plugins rediscovered; session runtimes will reload on next use.",
+          warnings: [],
+          plugins: [{
+            identity: { id: "example.text-inspector", name: "text-inspector", version: "1.0.0" },
+            origin: "native", scope: "user", enabled: true,
+            installation: "invalid", activation: "reload-required", inventory: {},
+            permissions: { requested: [], approved: [], missing: [] },
+            diagnostics: [{ severity: "error", phase: "activate", code: "plugin_installation_permissions_mismatch", message: "Actual permissions differ from the installed permission request" }],
+          }],
+        };
+      },
+    }) });
+    await dispatchSessionCommand({ name: "/reload-plugins", args: "" }, h);
+    const text = emitted.join("\n");
+    expect(text).toContain("invalid");
+    expect(text).toContain("plugin_installation_permissions_mismatch");
+    expect(text).toContain("Actual permissions differ");
+    expect(text).toContain("ohs plugin link");
+    expect(text).toContain("--approve");
+    expect(text).toContain("next use");
+    expect(text).not.toContain("Reloaded plugins:");
+  });
+
+  it("keeps reload warnings even when no plugins are discovered", async () => {
+    const { host: h, emitted } = host({ client: fakeClient({
+      async reloadPlugins() { return { plugins: [], warnings: ["Legacy plugin requires reinstall"], message: "Runtimes will reload on next use." }; },
+    }) });
+    await dispatchSessionCommand({ name: "/reload-plugins", args: "" }, h);
+    expect(emitted.join("\n")).toContain("Legacy plugin requires reinstall");
+  });
+
   it("emits Available commands for /help", async () => {
     const { host: h, emitted } = host({
       commandCatalog: [

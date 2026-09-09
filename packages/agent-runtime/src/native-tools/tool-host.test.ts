@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IToolRegistry, ToolDefinition } from "@openharness/core";
 import { loadNativePlugin, validateNativePlugin } from "@openharness/plugins";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateNativePluginTools } from "./activate.js";
 
 const roots: string[] = [];
@@ -44,6 +44,109 @@ async function loadPlugin(root: string) {
 }
 
 describe("NativeToolHost", () => {
+  it("provides the documented registration and invocation contexts inside the child", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      export function registerTools(registration) {
+        registration.log("info", "sdk-context-ready");
+        return [{ name: "PluginSdkContext", description: "inspect the public context", inputSchema: {},
+          invoke(_input, context) {
+            return { content: [{ type: "text", text: JSON.stringify({
+              registrationPlugin: registration.plugin,
+              registrationPermissions: registration.permissions,
+              plugin: context.plugin, permissions: context.permissions,
+              cwd: context.cwd, sessionId: context.sessionId, deadline: context.deadline,
+              hasSignal: context.signal instanceof AbortSignal,
+              hasSettings: "settings" in context, hasTerminal: "terminal" in context,
+            }) }] };
+          }
+        }];
+      }
+    `, "dev.openharness.sdk-context"));
+    const registry = new TestRegistry();
+    const cleanups: Array<() => Promise<void> | void> = [];
+    const logs: string[] = [];
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: plugin.root, toolRegistry: registry, callTimeoutMs: 4000,
+      addCleanup: cleanup => cleanups.push(cleanup), onLog: message => logs.push(message),
+    });
+    try {
+      expect(activation.state).toBe("active");
+      const before = Date.now();
+      const result = await registry.get("PluginSdkContext")!.execute({}, { cwd: tmpdir(), sessionId: "sdk-session" });
+      const first = result.content[0];
+      expect(first?.type).toBe("text");
+      if (first?.type !== "text") throw new Error("Expected a text result");
+      const context = JSON.parse(first.text);
+      const identity = { id: "dev.openharness.sdk-context", name: "sdk-context", version: "1.0.0", root: plugin.root };
+      expect(context).toMatchObject({
+        registrationPlugin: identity, registrationPermissions: {}, plugin: identity, permissions: {},
+        cwd: tmpdir(), sessionId: "sdk-session", hasSignal: true, hasSettings: false, hasTerminal: false,
+      });
+      expect(context.deadline).toBeGreaterThanOrEqual(before + 4000);
+      expect(context.deadline).toBeLessThanOrEqual(Date.now() + 4000);
+      expect(logs.some(message => message.includes("sdk-context-ready"))).toBe(true);
+    } finally { for (const cleanup of cleanups) await cleanup(); }
+  });
+
+  it("forwards caller cancellation to the child and keeps the host usable afterwards", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      let cancelled = 0;
+      export function registerTools(ctx) {
+        return [{ name: "PluginCallerCancel", description: "wait for caller cancellation", inputSchema: {},
+          async invoke(input, context) {
+            if (!input.wait) return { content: [{ type: "text", text: String(cancelled) }] };
+            await new Promise(resolve => {
+              context.signal.addEventListener("abort", () => { cancelled++; resolve(); }, { once: true });
+              ctx.log("info", "caller-cancel-ready");
+            });
+            return { content: [] };
+          }
+        }];
+      }
+    `, "dev.openharness.caller-cancel"));
+    const registry = new TestRegistry();
+    const cleanups: Array<() => Promise<void> | void> = [];
+    let ready = false;
+    const activation = await activateNativePluginTools(plugin, {
+      cwd: plugin.root, toolRegistry: registry, callTimeoutMs: 4000, cancellationGraceMs: 1000,
+      addCleanup: cleanup => cleanups.push(cleanup),
+      onLog: message => { if (message.includes("caller-cancel-ready")) ready = true; },
+    });
+    try {
+      expect(activation.state).toBe("active");
+      const controller = new AbortController();
+      const call = registry.get("PluginCallerCancel")!.execute({ wait: true }, { cwd: plugin.root, abortSignal: controller.signal });
+      const cancelled = expect(call).rejects.toMatchObject({ code: "tool_call_cancelled" });
+      await vi.waitFor(() => expect(ready).toBe(true), { timeout: 2000 });
+      controller.abort();
+      await cancelled;
+      await expect(registry.get("PluginCallerCancel")!.execute({}, { cwd: plugin.root }))
+        .resolves.toEqual({ content: [{ type: "text", text: "1" }] });
+      expect(activation.host?.state).toBe("active");
+    } finally { for (const cleanup of cleanups) await cleanup(); }
+  });
+
+  it("does not invoke a tool when the caller signal is already aborted", async () => {
+    const plugin = await loadPlugin(writePlugin(`
+      let calls = 0;
+      export function registerTools() {
+        return [{ name: "PluginPreCancelled", description: "count invocations", inputSchema: {},
+          invoke() { calls++; return { content: [{ type: "text", text: String(calls) }] }; }
+        }];
+      }
+    `, "dev.openharness.pre-cancelled"));
+    const registry = new TestRegistry();
+    const cleanups: Array<() => Promise<void> | void> = [];
+    await activateNativePluginTools(plugin, { cwd: plugin.root, toolRegistry: registry, addCleanup: cleanup => cleanups.push(cleanup) });
+    try {
+      const controller = new AbortController(); controller.abort();
+      await expect(registry.get("PluginPreCancelled")!.execute({}, { cwd: plugin.root, abortSignal: controller.signal }))
+        .rejects.toMatchObject({ code: "tool_call_cancelled" });
+      await expect(registry.get("PluginPreCancelled")!.execute({}, { cwd: plugin.root }))
+        .resolves.toEqual({ content: [{ type: "text", text: "1" }] });
+    } finally { for (const cleanup of cleanups) await cleanup(); }
+  });
+
   it("registers and invokes multiple tools in a child process, then cleans them up", async () => {
     const plugin = await loadPlugin(writePlugin(`
       export async function registerTools(ctx) {

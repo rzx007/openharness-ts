@@ -2,6 +2,7 @@ import type { OpenHarnessClient } from "../transport/http-client.js";
 import type { CommandCatalogEntry, OpenHarnessClientState } from "../types/index.js";
 import type { JobReadResult, JobSnapshot } from "@openharness/protocol";
 import { patchSessionRuntimeMetadata } from "@openharness/protocol";
+import { formatPluginReload } from "./plugin-presentation.js";
 
 export type SlashLine = { name: string; args: string };
 
@@ -898,20 +899,7 @@ export async function dispatchSessionCommand(
 
   if (slash?.name === "/reload-plugins") {
     const result = await client.reloadPlugins({ cwd });
-    if (result.plugins.length === 0) {
-      emit(`${result.message}\nNo plugins discovered.`);
-      return "handled";
-    }
-    emit(
-      [
-        result.message,
-        "Reloaded plugins:",
-        ...result.plugins.map(
-          (plugin) => `- ${plugin.identity.id} [${plugin.enabled ? "enabled" : "disabled"}]`,
-        ),
-        ...result.warnings.map((warning) => `! ${warning}`),
-      ].join("\n"),
-    );
+    emit(formatPluginReload(result));
     return "handled";
   }
 

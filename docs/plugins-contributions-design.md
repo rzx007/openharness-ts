@@ -24,6 +24,8 @@ Runtime 唯一识别的 manifest 是：
 
 ## Manifest
 
+原生插件作者可从 [开发指南](./native-plugin-authoring.md)和[文本检查参考插件](../examples/plugins/text-inspector/README.md)开始。`@openharness/plugins/sdk` 提供开发期工具类型，真实 `.mjs` 参考代码也纳入 checkJs；该类型入口不需要运行期导入。
+
 Native v1 使用 `schemaVersion: 1`、稳定 dotted `id`、kebab-case `name` 和显式 `components`。每条组件路径必须以 `./` 开头。Validator 会同时检查规范化路径和符号链接后的真实路径，越界、缺失或重复来源都会产生结构化诊断。
 
 Skills、Agents、Hooks、MCP 和 Node Tool 已进入加载闭环。Tool 不会在 daemon 主进程动态 import；Runtime 会为每个插件版本启动独立 Tool Host 子进程。LSP、Workflow、Channel、Provider、UI 等已预留 schema，但会返回 unsupported 诊断。
@@ -98,3 +100,5 @@ Native Tool 调用路径有 runtime 级控制：
 - installed record 中缺少已批准权限时，Runtime 会跳过该插件并提示重新批准或重装。
 
 当前隔离边界仍是“进程与环境变量隔离”，不是操作系统级沙箱。第三方 Node Tool 仍可直接调用 Node 文件、网络和进程 API；manifest 权限目前用于 OpenHarness 宿主能力和运行时闸门，不能替代容器、受限系统用户或系统调用过滤。
+
+会话 `/reload-plugins` 关闭当前 cwd 的旧 Runtime，下一次使用时重新加载；输出显示安装校验状态、组件诊断和需要重新登记/批准的提示。HTTP 重载成功不等于插件已激活。没有发现插件时仍保留顶层 warnings，便于处理被忽略的旧安装记录。

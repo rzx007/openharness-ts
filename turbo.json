@@ -21,6 +21,23 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "@openharness/agent-runtime#test": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/examples/plugins/text-inspector/**"]
+    },
+    "@openharness/server#test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/examples/plugins/text-inspector/**",
+        "$TURBO_ROOT$/packages/client/src/**",
+        "$TURBO_ROOT$/packages/agent-runtime/test-helpers/**"
+      ]
+    },
+    "@openharness/plugins#check-types": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/examples/plugins/text-inspector/**"]
+    },
     "clean": {
       "cache": false
     }

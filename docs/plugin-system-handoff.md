@@ -195,7 +195,7 @@ my-plugin/
       {
         "entry": "./tools/index.mjs",
         "runtime": "node",
-        "permissions": ["workspace.read"]
+        "permissions": ["filesystem:workspace:read"]
       }
     ],
     "workflows": ["./workflows"],
@@ -617,6 +617,9 @@ Native Plugin → 在 daemon 主进程注册 Converter
 - Codex Converter 首版：legacy/portable 格式识别、Skills、保守 MCP 映射、有损批准和 CLI 导入；
 - 转换后的扁平 Native Plugin 目录；
 - CLI 的本地 Native 安装、link、转换、启停、详情和卸载；
+- 原生插件开发期 SDK 类型、五类组件开发指南和零运行依赖的文本检查参考插件；
+- 参考插件的实际 checkJs、独立进程调用、正式安装、link 重载、主动取消及跨 cwd 停用/卸载验收；
+- `/reload-plugins` 展示校验诊断和重新登记/批准提示，明确下次使用时才加载；
 - Desktop 扩展管理页面主体；
 - 真实 Claude Code 插件抽样回归。
 
@@ -644,6 +647,8 @@ Native Plugin → 在 daemon 主进程注册 Converter
 - Native LSP。等 OpenHarness 的 LSP 工具与 Runtime 契约稳定后再设计插件贡献，不提前写兼容层。
 
 ## 17. 建议实施顺序
+
+2026-09-09 调整：Converter 本轮开发到此结束。原生插件第一阶段已完成：公开开发类型、五类组件指南，以及无外部服务依赖的“文本检查助手”，覆盖安装、加载、调用、真实重载和清理。详见 [开发指南](./native-plugin-authoring.md)、[第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)和[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)。相关测试共 146 项通过，类型、缓存输入和文档检查通过，独立审查无代码阻断项。验收使用真实插件进程和管理路由，不包含完整 AgentPool、模型会话或桌面 UI。下一阶段为 Desktop 原生安装管理；以下长期顺序作为后续路线参考。
 
 后续不要一次实现所有 Component。建议顺序如下：
 

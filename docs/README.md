@@ -117,8 +117,10 @@
 - [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
 - [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换设计。
 - [OpenHarness 插件系统最终形态交接](./plugin-system-handoff.md)：面向后续开发者说明最终用户形态、Native Plugin 契约、转换与安装边界、当前完成度和建议实施顺序。
+- [原生插件开发第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)与[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)：公开开发类型、五类组件指南、文本检查参考插件及真实调用和生命周期验收。
 - [Native Plugin v1 与 Claude Code Converter 实施计划](./superpowers/plans/2026-08-25-native-plugin-and-claude-converter.md)：按 Native schema、安装激活、格式硬切、Converter core 和 Claude 转换闭环拆分的可执行任务。
 - [Native Plugin 当前实现](./plugins-contributions-design.md)：当前 Native Plugin 的 manifest、安装快照、外部转换、Runtime 激活和安全边界。
+- [原生插件开发指南](./native-plugin-authoring.md)：公开 Tool 类型、参考插件、五类组件写法、安装调试与当前能力边界。
 - [Claude Code 真实插件回归](./claude-real-plugin-regression.md)：用固定 commit 的真实 Claude Code 插件样本验证 detect、convert、install 和 Runtime discover 全链路。
 - [Slash Commands](./slash-commands.md) 与 [Slash Command Flow](./slash-commands-flow.md)：当前命令清单、三层分流和执行入口。
 

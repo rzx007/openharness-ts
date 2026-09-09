@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "paths": {
+      "@openharness/plugins/sdk": ["./src/sdk.ts"]
+    }
+  },
+  "include": ["../../examples/plugins/text-inspector/tools/**/*.mjs"]
+}
