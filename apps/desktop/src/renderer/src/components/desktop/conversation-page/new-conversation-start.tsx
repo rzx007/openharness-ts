@@ -49,7 +49,6 @@ export function NewConversationStart({
   onDraftChange,
   onSubmit,
   onPickFiles,
-  onPickImages,
   onDropFiles,
   onPasteFiles,
   onCancelAttachment,
@@ -88,7 +87,6 @@ export function NewConversationStart({
   onDraftChange: (value: string) => void
   onSubmit: () => void
   onPickFiles: () => void
-  onPickImages: () => void
   onDropFiles: (files: readonly File[]) => void
   onPasteFiles: (files: readonly File[]) => void
   onCancelAttachment: (draftId: string) => void
@@ -418,7 +416,6 @@ export function NewConversationStart({
             onDraftChange={onDraftChange}
             onSubmit={onSubmit}
             onPickFiles={onPickFiles}
-            onPickImages={onPickImages}
             onDropFiles={onDropFiles}
             onPasteFiles={onPasteFiles}
             onCancelAttachment={onCancelAttachment}

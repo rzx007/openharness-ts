@@ -117,7 +117,6 @@ function ConversationPane({
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
   const setComposerDraftText = useDesktopSessionStore((state) => state.setComposerDraftText)
   const pickAttachmentFiles = useDesktopSessionStore((state) => state.pickAttachmentFiles)
-  const pickAttachmentImages = useDesktopSessionStore((state) => state.pickAttachmentImages)
   const addDroppedAttachments = useDesktopSessionStore((state) => state.addDroppedAttachments)
   const addClipboardAttachment = useDesktopSessionStore((state) => state.addClipboardAttachment)
   const cancelAttachment = useDesktopSessionStore((state) => state.cancelAttachment)
@@ -377,7 +376,6 @@ function ConversationPane({
           onDraftChange={setDraft}
           onSubmit={() => void submitDraft()}
           onPickFiles={() => void pickAttachmentFiles(composerScope)}
-          onPickImages={() => void pickAttachmentImages(composerScope)}
           onDropFiles={(files) => void addDroppedAttachments(composerScope, files)}
           onPasteFiles={(files) => void pasteAttachments(files)}
           onCancelAttachment={(draftId) => void cancelAttachment(composerScope, draftId)}
@@ -503,7 +501,6 @@ function ConversationPane({
                 onDraftChange={setDraft}
                 onSubmit={() => void submitDraft()}
                 onPickFiles={() => void pickAttachmentFiles(composerScope)}
-                onPickImages={() => void pickAttachmentImages(composerScope)}
                 onDropFiles={(files) => void addDroppedAttachments(composerScope, files)}
                 onPasteFiles={(files) => void pasteAttachments(files)}
                 onCancelAttachment={(draftId) => void cancelAttachment(composerScope, draftId)}

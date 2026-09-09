@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
-import { createComposerAttachmentMenuItems } from "./composer-attachment-menu"
 import { ComposerAttachments } from "./composer-attachments"
 import { readComposerClipboard, readComposerDrop } from "./composer-file-input"
 
@@ -64,17 +63,6 @@ describe("ComposerAttachments", () => {
     expect(html).toContain('aria-label="重试上传 凡人修仙传.txt"')
     expect(html).toContain('aria-live="polite"')
     expect(html).toContain("上传中断，请重试")
-  })
-
-  it("keeps the folder entry visible but disabled with its future-version hint", () => {
-    const items = createComposerAttachmentMenuItems()
-    const folder = items.find((item) => item.id === "folder")
-
-    expect(folder).toMatchObject({
-      label: "添加文件夹",
-      description: "后续版本开放",
-      disabled: true,
-    })
   })
 
   it("keeps accompanying text when pasted files are present", () => {

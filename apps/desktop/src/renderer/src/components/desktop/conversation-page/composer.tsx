@@ -1,14 +1,13 @@
 import { ChevronDown, Mic, ShieldCheck } from "lucide-react"
+import { IconPlus } from "@tabler/icons-react"
 import { useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui/popover"
-import { PlusMenu } from "@renderer/components/ui/plus-menu"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
-import { createComposerAttachmentMenuItems } from "./composer-attachment-menu"
 import { ComposerAttachments } from "./composer-attachments"
 import { readComposerDrop } from "./composer-file-input"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
@@ -45,7 +44,6 @@ export function Composer({
   attachmentInteractionEnabled = false,
   attachmentReadOnly = false,
   onPickFiles,
-  onPickImages,
   onDropFiles,
   onPasteFiles,
   onCancelAttachment,
@@ -77,7 +75,6 @@ export function Composer({
   attachmentInteractionEnabled?: boolean
   attachmentReadOnly?: boolean
   onPickFiles?: () => void
-  onPickImages?: () => void
   onDropFiles?: (files: readonly File[]) => void
   onPasteFiles?: (files: readonly File[]) => void
   onCancelAttachment?: (draftId: string) => void
@@ -88,6 +85,7 @@ export function Composer({
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
   const closePicker = (): void => setActivePicker(null)
   const allowSubmit = canSubmit ?? Boolean(draft.trim())
+  const attachDisabled = !attachmentInteractionEnabled || attachmentReadOnly
 
   const submit = (): void => {
     if (sending || !allowSubmit) return
@@ -141,15 +139,18 @@ export function Composer({
       />
       <SkillCommandMenu draft={draft} commands={skillCommands} onSelect={onDraftChange} />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
-        <PlusMenu
-          items={createComposerAttachmentMenuItems()}
-          disabled={!attachmentInteractionEnabled || attachmentReadOnly}
-          triggerLabel={{ open: "关闭附件菜单", closed: "添加附件" }}
-          onSelect={({ item }) => {
-            if (item.id === "file") onPickFiles?.()
-            if (item.id === "image") onPickImages?.()
-          }}
-        />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="rounded-full"
+          aria-label="添加附件"
+          title="添加附件"
+          disabled={attachDisabled}
+          onClick={() => onPickFiles?.()}
+        >
+          <IconPlus className="size-5" />
+        </Button>
         <Popover
           open={activePicker === "permission"}
           onOpenChange={(open) => setActivePicker(open ? "permission" : null)}
