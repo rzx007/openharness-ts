@@ -81,6 +81,11 @@ import type {
 } from "./git-types"
 import type {
   DesktopPluginActionInput,
+  DesktopPluginArchiveCancelInput,
+  DesktopPluginArchiveConfirmResult,
+  DesktopPluginArchiveConfirmInput,
+  DesktopPluginArchiveImportInput,
+  DesktopPluginArchiveImportResult,
   DesktopPluginContextInput,
   DesktopPluginSnapshot,
 } from "./plugin-types"
@@ -239,6 +244,11 @@ export type DesktopAPI = {
     disable: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     uninstall: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     reload: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
+    importArchive: (input: DesktopPluginArchiveImportInput) => Promise<DesktopPluginArchiveImportResult>
+    confirmArchive: (
+      input: DesktopPluginArchiveConfirmInput
+    ) => Promise<DesktopPluginArchiveConfirmResult>
+    cancelArchive: (input: DesktopPluginArchiveCancelInput) => Promise<void>
   }
   skills: {
     snapshot: (input: DesktopSkillSnapshotInput) => Promise<DesktopSkillSnapshot>

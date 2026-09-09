@@ -34,6 +34,19 @@
         "$TURBO_ROOT$/packages/agent-runtime/test-helpers/**"
       ]
     },
+    "@openharness/desktop#test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/examples/plugins/text-inspector/**",
+        "$TURBO_ROOT$/packages/plugin-sources/src/**",
+        "$TURBO_ROOT$/packages/plugins/src/**",
+        "$TURBO_ROOT$/packages/server/src/application/default-services/plugin-service.ts",
+        "$TURBO_ROOT$/packages/server/src/http/routes/service.ts",
+        "$TURBO_ROOT$/packages/client/src/transport/http-client.ts",
+        "$TURBO_ROOT$/packages/client/src/types/index.ts"
+      ]
+    },
     "@openharness/plugins#check-types": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/examples/plugins/text-inspector/**"]

@@ -41,6 +41,7 @@ import type {
   OpenHarnessServerHealth,
   PermissionRequestRecord,
   PluginInfo,
+  PluginArchivePreview,
   SkillSnapshot,
   PromoteQueuedClientPromptInput,
   PromoteQueuedPromptResponse,
@@ -769,6 +770,26 @@ export class OpenHarnessClient {
       input.link ? "/plugins/link-local" : "/plugins/install-local",
       { method: "POST", body: input },
     );
+  }
+
+  /** `POST /plugins/archive/preview` */
+  async previewPluginArchive(
+    input: { cwd: string; archivePath: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<PluginArchivePreview> {
+    return await this.request<PluginArchivePreview>("/plugins/archive/preview", {
+      method: "POST", body: input, signal: options.signal,
+    });
+  }
+
+  /** `POST /plugins/archive/install` */
+  async installPluginArchive(
+    input: { cwd: string; archivePath: string; expectedArchiveDigest: string; approvedPermissions: string[] },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ message: string }> {
+    return await this.request<{ message: string }>("/plugins/archive/install", {
+      method: "POST", body: input, signal: options.signal,
+    });
   }
 
   async uninstallPlugin(

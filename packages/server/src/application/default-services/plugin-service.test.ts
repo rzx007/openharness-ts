@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getInstalledPluginStorePath } from "@openharness/core";
+import { getInstalledPluginStorePath, getPluginCacheDir } from "@openharness/core";
 import { readInstalledPluginStore, updateInstalledPluginStore } from "@openharness/plugins";
-import { createDefaultPluginService } from "./plugin-service.js";
+import { createDefaultPluginService, PluginArchiveFailure } from "./plugin-service.js";
 
 let root: string;
 let previousConfigDir: string | undefined;
@@ -46,6 +46,77 @@ function service() {
     maxTurns: 1,
     permission: { mode: "default" },
   } });
+}
+
+function crc32(bytes: Buffer): number {
+  let value = 0xffffffff;
+  for (const byte of bytes) {
+    value ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+async function writeArchive(name: string, files: Record<string, string>): Promise<string> {
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [path, source] of Object.entries(files)) {
+    const filename = Buffer.from(path);
+    const contents = Buffer.from(source);
+    const checksum = crc32(contents);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(checksum, 14);
+    local.writeUInt32LE(contents.length, 18);
+    local.writeUInt32LE(contents.length, 22);
+    local.writeUInt16LE(filename.length, 26);
+    locals.push(local, filename, contents);
+    const directory = Buffer.alloc(46);
+    directory.writeUInt32LE(0x02014b50, 0);
+    directory.writeUInt16LE(20, 4);
+    directory.writeUInt16LE(20, 6);
+    directory.writeUInt32LE(checksum, 16);
+    directory.writeUInt32LE(contents.length, 20);
+    directory.writeUInt32LE(contents.length, 24);
+    directory.writeUInt16LE(filename.length, 28);
+    directory.writeUInt32LE(offset, 42);
+    central.push(directory, filename);
+    offset += local.length + filename.length + contents.length;
+  }
+  const centralSize = central.reduce((size, item) => size + item.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(files).length, 8);
+  end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  const archive = join(root, name);
+  await writeFile(archive, Buffer.concat([...locals, ...central, end]));
+  return archive;
+}
+
+async function writeNativeArchive(name = "plugin.zip", overrides: Record<string, string> = {}): Promise<string> {
+  return await writeArchive(name, {
+    ".openharness-plugin/plugin.json": JSON.stringify({
+      schemaVersion: 1,
+      id: "dev.openharness.archive",
+      name: "archive",
+      version: "1.0.0",
+      components: { tools: ["./tools/not-executed.js"] },
+    }),
+    "tools/not-executed.js": "throw new Error('Tool code must not run during archive preview');",
+    ...overrides,
+  });
+}
+
+function archiveFailureCode(error: unknown): string | undefined {
+  return error instanceof PluginArchiveFailure ? error.body.code : undefined;
+}
+
+async function resolverRoots(): Promise<string[]> {
+  return (await readdir(tmpdir())).filter((name) => name.startsWith("oh-plugin-zip-"));
 }
 
 describe("default plugin service user scope", () => {
@@ -104,5 +175,136 @@ describe("default plugin service user scope", () => {
       inventory: {},
       diagnostics: [{ code: "plugin_content_digest_missing" }],
     });
+  });
+});
+
+describe("default plugin service archive imports", () => {
+  it("previews a real ZIP without executing Node Tool code", async () => {
+    const archive = await writeNativeArchive();
+
+    await expect((service() as any).previewArchive({ cwd: "C:/workspace", archivePath: archive })).resolves.toMatchObject({
+      identity: { id: "dev.openharness.archive", name: "archive", version: "1.0.0" },
+      requestedPermissions: [],
+      inventory: { tools: 1 },
+      diagnostics: [],
+    });
+  });
+
+  it("installs the immutable ZIP snapshot only when preview digest and approvals still match", async () => {
+    const archive = await writeNativeArchive();
+    const plugins = service() as any;
+    const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+
+    await expect(plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: preview.archiveDigest,
+      approvedPermissions: [],
+    })).resolves.toMatchObject({ message: "Installed plugin 'dev.openharness.archive'." });
+    const record = Object.values((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)[0];
+    expect(record).toMatchObject({ id: "dev.openharness.archive", scope: "user" });
+    expect(record).not.toHaveProperty("linkedSourcePath");
+    expect(record?.cachePath).toContain("dev.openharness.archive");
+    await writeNativeArchive("plugin.zip", { "tools/not-executed.js": "export default 'changed archive';" });
+    await expect(readFile(join(record!.cachePath, "tools", "not-executed.js"), "utf8")).resolves.toContain("must not run");
+  });
+
+  it("rejects missing and unknown permission approvals before store mutation", async () => {
+    const archive = await writeNativeArchive("permissions.zip", {
+      ".openharness-plugin/plugin.json": JSON.stringify({
+        schemaVersion: 1, id: "dev.openharness.archive", name: "archive", version: "1.0.0",
+        permissions: { process: ["spawn"] },
+        components: { tools: [{ entry: "./tools/not-executed.js", permissions: ["process.spawn"] }] },
+      }),
+    });
+    const plugins = service() as any;
+    const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    expect(preview.requestedPermissions).toEqual(["process:spawn", "tool:process.spawn"]);
+
+    for (const approvedPermissions of [[], ["process:spawn", "tool:process.spawn", "network:example"]]) {
+      await expect(plugins.installArchive({ cwd: "C:/workspace", archivePath: archive, expectedArchiveDigest: preview.archiveDigest, approvedPermissions }))
+        .rejects.toSatisfy((error: unknown) => archiveFailureCode(error) === "plugin_archive_permissions_not_approved");
+    }
+    expect(Object.keys((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)).toEqual([]);
+  });
+
+  it("rejects a digest drift before it mutates the store", async () => {
+    const archive = await writeNativeArchive("drift.zip");
+    const plugins = service() as any;
+    const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    await writeNativeArchive("drift.zip", { "tools/not-executed.js": "export default 'changed';" });
+
+    await expect(plugins.installArchive({ cwd: "C:/workspace", archivePath: archive, expectedArchiveDigest: preview.archiveDigest, approvedPermissions: [] }))
+      .rejects.toSatisfy((error: unknown) => archiveFailureCode(error) === "plugin_archive_changed");
+    expect(Object.keys((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)).toEqual([]);
+  });
+
+  it("refuses an archive that conflicts with a managed plugin ID", async () => {
+    const archive = await writeNativeArchive("managed.zip");
+    await updateInstalledPluginStore(getInstalledPluginStorePath(), (store) => {
+      store.plugins["managed::dev.openharness.archive"] = {
+        id: "dev.openharness.archive", scope: "managed", enabled: true, currentVersion: "1.0.0",
+        cachePath: join(root, "managed-cache"), origin: "native", requestedPermissions: [], approvedPermissions: [],
+        installedAt: "now", updatedAt: "now",
+      };
+    });
+    const plugins = service() as any;
+    const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+
+    await expect(plugins.installArchive({ cwd: "C:/workspace", archivePath: archive, expectedArchiveDigest: preview.archiveDigest, approvedPermissions: [] }))
+      .rejects.toSatisfy((error: unknown) => archiveFailureCode(error) === "plugin_archive_managed_conflict");
+  });
+
+  it("returns validation diagnostics and cleans extracted candidates after a failed preview", async () => {
+    const before = await resolverRoots();
+    const archive = await writeNativeArchive("invalid.zip", {
+      ".openharness-plugin/plugin.json": JSON.stringify({
+        schemaVersion: 1, id: "dev.openharness.archive", name: "archive", version: "1.0.0",
+        components: { skills: ["./missing"] },
+      }),
+    });
+
+    await expect((service() as any).previewArchive({ cwd: "C:/workspace", archivePath: archive }))
+      .rejects.toMatchObject({ body: { code: "plugin_archive_invalid", diagnostics: [expect.objectContaining({ code: "component_path_missing" })] } });
+    expect(await resolverRoots()).toEqual(before);
+  });
+
+  it("returns a structured resolver failure for a corrupt ZIP", async () => {
+    const archive = join(root, "corrupt.zip");
+    await writeFile(archive, "not a ZIP");
+
+    await expect((service() as any).previewArchive({ cwd: "C:/workspace", archivePath: archive }))
+      .rejects.toMatchObject({ body: { code: "plugin_archive_invalid", diagnostics: [expect.objectContaining({ code: "plugin_archive_resolution_failed" })] } });
+  });
+
+  it("keeps warning-level unsupported diagnostics visible while allowing installation", async () => {
+    const archive = await writeNativeArchive("warning.zip", {
+      ".openharness-plugin/plugin.json": JSON.stringify({
+        schemaVersion: 1, id: "dev.openharness.archive", name: "archive", version: "1.0.0",
+        components: { workflows: ["./workflows/workflow.yml"] },
+      }),
+      "workflows/workflow.yml": "name: unsupported-but-safe\n",
+    });
+    const plugins = service() as any;
+    const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    expect(preview.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "warning", code: "native_workflows_not_supported" }),
+    ]));
+
+    await expect(plugins.installArchive({ cwd: "C:/workspace", archivePath: archive, expectedArchiveDigest: preview.archiveDigest, approvedPermissions: [] }))
+      .resolves.toMatchObject({ message: "Installed plugin 'dev.openharness.archive'." });
+  });
+
+  it("returns an installer failure and cleans the extracted candidate", async () => {
+    const before = await resolverRoots();
+    const archive = await writeNativeArchive("installer-failure.zip");
+    const plugins = service() as any;
+    const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    await mkdir(getPluginCacheDir(), { recursive: true });
+    await writeFile(join(getPluginCacheDir(), "dev.openharness.archive"), "blocks cache directory creation");
+
+    await expect(plugins.installArchive({ cwd: "C:/workspace", archivePath: archive, expectedArchiveDigest: preview.archiveDigest, approvedPermissions: [] }))
+      .rejects.toMatchObject({ body: { code: "plugin_archive_install_failed" } });
+    expect(await resolverRoots()).toEqual(before);
   });
 });

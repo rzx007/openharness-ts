@@ -211,6 +211,52 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
       installLocalPlugin(context, c, false),
     )
     .post("/plugins/link-local", (c) => installLocalPlugin(context, c, true))
+    .post("/plugins/archive/preview", async (c) => {
+      if (!context.pluginService?.previewArchive) return pluginArchiveErrorResponse(501, "plugin_archive_not_configured", "Plugin archive preview is not configured");
+      let body: Record<string, unknown>;
+      try {
+        body = await readJson(c);
+      } catch (error) {
+        return pluginArchiveErrorResponse(400, "plugin_archive_invalid_request", error instanceof Error ? error.message : String(error));
+      }
+      const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
+      const archivePath = typeof body.archivePath === "string" ? body.archivePath : undefined;
+      if (!cwd || !archivePath) return pluginArchiveErrorResponse(400, "plugin_archive_invalid_request", "cwd and archivePath are required");
+      try {
+        return jsonResponse(await context.pluginService.previewArchive({ cwd, archivePath }));
+      } catch (error) {
+        return pluginArchiveFailureResponse(error);
+      }
+    })
+    .post("/plugins/archive/install", async (c) => {
+      if (!context.pluginService?.installArchive) return pluginArchiveErrorResponse(501, "plugin_archive_not_configured", "Plugin archive installation is not configured");
+      let body: Record<string, unknown>;
+      try {
+        body = await readJson(c);
+      } catch (error) {
+        return pluginArchiveErrorResponse(400, "plugin_archive_invalid_request", error instanceof Error ? error.message : String(error));
+      }
+      const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
+      const archivePath = typeof body.archivePath === "string" ? body.archivePath : undefined;
+      const expectedArchiveDigest = typeof body.expectedArchiveDigest === "string" ? body.expectedArchiveDigest : undefined;
+      const approvedPermissions = Array.isArray(body.approvedPermissions) && body.approvedPermissions.every((item) => typeof item === "string")
+        ? body.approvedPermissions as string[]
+        : undefined;
+      if (!cwd || !archivePath || !expectedArchiveDigest || !approvedPermissions) {
+        return pluginArchiveErrorResponse(400, "plugin_archive_invalid_request", "cwd, archivePath, expectedArchiveDigest and approvedPermissions are required");
+      }
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease) return pluginArchiveErrorResponse(409, "plugin_archive_mutation_blocked", "Cannot install plugins while session runs are active");
+      try {
+        const result = await context.pluginService.installArchive({ cwd, archivePath, expectedArchiveDigest, approvedPermissions });
+        await context.control.closeAllRuntimes();
+        return jsonResponse(result);
+      } catch (error) {
+        return pluginArchiveFailureResponse(error);
+      } finally {
+        lease.release();
+      }
+    })
     .post("/plugins/:id/enable", async (c) =>
       setPluginEnabled(context, c.req.param("id"), true, await readJson(c)),
     )
@@ -367,6 +413,27 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         );
       }
     });
+}
+
+function pluginArchiveErrorResponse(
+  status: number,
+  code: string,
+  message: string,
+  diagnostics?: unknown,
+): Response {
+  return jsonResponse({ code, message, ...(Array.isArray(diagnostics) ? { diagnostics } : {}) }, status);
+}
+
+function pluginArchiveFailureResponse(error: unknown): Response {
+  if (error && typeof error === "object" && "body" in error) {
+    const body = (error as { body?: unknown }).body;
+    if (body && typeof body === "object" && typeof (body as { code?: unknown }).code === "string" && typeof (body as { message?: unknown }).message === "string") {
+      const archive = body as { code: string; message: string; diagnostics?: unknown };
+      const status = archive.code === "plugin_archive_changed" || archive.code === "plugin_archive_managed_conflict" || archive.code === "plugin_archive_permissions_not_approved" ? 409 : 400;
+      return pluginArchiveErrorResponse(status, archive.code, archive.message, archive.diagnostics);
+    }
+  }
+  return pluginArchiveErrorResponse(400, "plugin_archive_failed", error instanceof Error ? error.message : String(error));
 }
 
 async function setPluginEnabled(

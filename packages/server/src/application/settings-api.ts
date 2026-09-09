@@ -239,6 +239,20 @@ export interface PluginInfo {
   }>;
 }
 
+export interface PluginArchivePreview {
+  archiveDigest: string;
+  identity: { id: string; name: string; version: string; displayName?: string };
+  requestedPermissions: string[];
+  inventory: Record<string, number>;
+  diagnostics: PluginInfo["diagnostics"];
+}
+
+export interface PluginArchiveError {
+  code: string;
+  message: string;
+  diagnostics?: PluginInfo["diagnostics"];
+}
+
 export interface PluginService {
   list(input: {
     cwd: string;
@@ -259,6 +273,16 @@ export interface PluginService {
     approvedPermissions: string[];
     link?: boolean;
   }): Promise<{ message: string; restartRuntimes?: boolean }>;
+  previewArchive?(input: {
+    cwd: string;
+    archivePath: string;
+  }): Promise<PluginArchivePreview>;
+  installArchive?(input: {
+    cwd: string;
+    archivePath: string;
+    expectedArchiveDigest: string;
+    approvedPermissions: string[];
+  }): Promise<{ message: string }>;
   uninstall?(input: {
     cwd: string;
     id: string;

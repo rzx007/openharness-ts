@@ -36,6 +36,12 @@ ohs plugin uninstall example.text-inspector
 
 同一个 ID 只有一条用户安装记录。`install-local` 会替代该 ID 之前的 link 记录；再次执行 `link` 则切回开发链接。安装、启停、卸载会使所有相关用户 Runtime 失效；有活动任务时管理操作可能返回冲突，需要等待任务结束。普通卸载移除安装记录、阻止后续加载，保留插件数据；旧快照不会立即全部删除。
 
+## Desktop 本地 ZIP 导入
+
+Desktop 插件页当前只支持选择 **一个本地 Native Plugin ZIP**。系统在后台复制、校验和解压 ZIP；不申请权限的插件会直接安装，申请权限的插件只会出现一次完整权限确认。页面只反馈成功、失败或无法确认的安装结果；成功后插件在下一次对话中生效。
+
+该入口不支持在 Agent 对话中安装，不转换 Claude Code 或 Codex 插件，也不支持 Git、npm、归档 URL、`.tar`/`.tar.gz` 等其他来源或格式。请使用 CLI 的目录开发/安装流程处理这些场景。旧插件页 localStorage 配置已从页面隐藏，但保留原数据，不迁移也不删除。
+
 ## 包结构与 manifest
 
 唯一原生入口是 `.openharness-plugin/plugin.json`：

@@ -223,6 +223,12 @@ export const desktopAPI = {
       invoke(IpcChannels.pluginUninstall, input),
     reload: (input: IpcInvokeMap[typeof IpcChannels.pluginReload]["args"][0]) =>
       invoke(IpcChannels.pluginReload, input),
+    importArchive: (input: IpcInvokeMap[typeof IpcChannels.pluginImportArchive]["args"][0]) =>
+      invoke(IpcChannels.pluginImportArchive, input),
+    confirmArchive: (input: IpcInvokeMap[typeof IpcChannels.pluginConfirmArchive]["args"][0]) =>
+      invoke(IpcChannels.pluginConfirmArchive, input),
+    cancelArchive: (input: IpcInvokeMap[typeof IpcChannels.pluginCancelArchive]["args"][0]) =>
+      invoke(IpcChannels.pluginCancelArchive, input),
   },
   skills: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.skillSnapshot]["args"][0]) =>
