@@ -29,10 +29,8 @@ export const desktopAPI = {
     download: () => invoke(IpcChannels.updateDownload),
     install: () => invoke(IpcChannels.updateInstall),
     onStateChanged: (listener: (state: DesktopUpdateState) => void): (() => void) => {
-      const wrapped = (
-        _event: Electron.IpcRendererEvent,
-        state: DesktopUpdateState
-      ): void => listener(state)
+      const wrapped = (_event: Electron.IpcRendererEvent, state: DesktopUpdateState): void =>
+        listener(state)
       ipcRenderer.on(IpcEvents.updateStateChanged, wrapped)
       return () => ipcRenderer.removeListener(IpcEvents.updateStateChanged, wrapped)
     },
@@ -203,16 +201,16 @@ export const desktopAPI = {
       invoke(IpcChannels.settingsUpdateWorkStyle, input),
     updateNotificationMode: (
       input: IpcInvokeMap[typeof IpcChannels.settingsUpdateNotificationMode]["args"][0]
-      ) => invoke(IpcChannels.settingsUpdateNotificationMode, input),
-      updateAgentEnvironment: (
-        input: IpcInvokeMap[typeof IpcChannels.settingsUpdateAgentEnvironment]["args"][0]
-      ) => invoke(IpcChannels.settingsUpdateAgentEnvironment, input),
-      updateDefaultOpener: (
+    ) => invoke(IpcChannels.settingsUpdateNotificationMode, input),
+    updateAgentEnvironment: (
+      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateAgentEnvironment]["args"][0]
+    ) => invoke(IpcChannels.settingsUpdateAgentEnvironment, input),
+    updateDefaultOpener: (
       input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultOpener]["args"][0]
     ) => invoke(IpcChannels.settingsUpdateDefaultOpener, input),
-      updateDefaultTerminalShell: (
-        input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultTerminalShell]["args"][0]
-      ) => invoke(IpcChannels.settingsUpdateDefaultTerminalShell, input),
+    updateDefaultTerminalShell: (
+      input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultTerminalShell]["args"][0]
+    ) => invoke(IpcChannels.settingsUpdateDefaultTerminalShell, input),
   },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>

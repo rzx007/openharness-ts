@@ -9,10 +9,99 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
     />
+    <style>
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      #startup-loading {
+        display: grid;
+        width: 100%;
+        height: 100%;
+        place-items: center;
+        color: #68747d;
+        font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+      }
+
+      .startup-loading-content {
+        display: grid;
+        justify-items: center;
+        gap: 0.75rem;
+      }
+
+      .startup-loading-wordmark {
+        font-size: 0.9375rem;
+        font-weight: 500;
+        letter-spacing: 0.03em;
+      }
+
+      .startup-loading-dots {
+        display: flex;
+        gap: 0.3125rem;
+      }
+
+      .startup-loading-dot {
+        width: 0.25rem;
+        height: 0.25rem;
+        border-radius: 999px;
+        background: currentColor;
+        animation: startup-dot 1.5s ease-in-out infinite;
+      }
+
+      .startup-loading-dot:nth-child(2) {
+        animation-delay: 160ms;
+      }
+
+      .startup-loading-dot:nth-child(3) {
+        animation-delay: 320ms;
+      }
+
+      @keyframes startup-dot {
+        0%,
+        100% {
+          opacity: 0.28;
+        }
+        50% {
+          opacity: 0.9;
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #20242a;
+        }
+
+        #startup-loading {
+          color: #8d969e;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .startup-loading-dot {
+          animation: none;
+          opacity: 0.55;
+        }
+      }
+    </style>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="startup-loading" role="status" aria-label="正在启动 OpenHarness">
+        <div class="startup-loading-content" aria-hidden="true">
+          <span class="startup-loading-wordmark">OpenHarness</span>
+          <span class="startup-loading-dots">
+            <span class="startup-loading-dot" data-startup-dot="true"></span>
+            <span class="startup-loading-dot" data-startup-dot="true"></span>
+            <span class="startup-loading-dot" data-startup-dot="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
