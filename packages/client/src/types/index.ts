@@ -483,6 +483,20 @@ export interface PluginInfo {
   }>;
 }
 
+export interface PluginArchivePreview {
+  archiveDigest: string;
+  identity: { id: string; name: string; version: string; displayName?: string };
+  requestedPermissions: string[];
+  inventory: Record<string, number>;
+  diagnostics: PluginInfo["diagnostics"];
+}
+
+export interface PluginArchiveError {
+  code: string;
+  message: string;
+  diagnostics?: PluginInfo["diagnostics"];
+}
+
 export type SkillSource = "bundled" | "agent" | "project" | "personal";
 
 export interface SkillInfo {

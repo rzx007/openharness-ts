@@ -120,6 +120,12 @@ Installed Plugin 是已经完成以下步骤的 Native Plugin：
 
 “转换成功”不等于“已经安装”，“安装成功”也不等于“当前 Runtime 已经热加载”。这 3 个状态需要分别返回和展示。
 
+### Desktop 当前入口
+
+Desktop 插件页目前只接收一个本地 Native Plugin ZIP。它在后台静态校验，未申请权限时直接安装，申请权限时只请求一次完整确认；结果返回成功、失败或待刷新确认，成功后的激活从下一次对话开始。绝对 ZIP 路径和摘要不返回 Renderer，安装器收到的仍是已经准备好的目录。
+
+这不改变最终多来源架构：Agent 对话安装、Claude Code/Codex 转换、Git、npm、归档 URL、tar 格式和 Marketplace 还没有进入 Desktop。旧插件页 localStorage 配置仅被隐藏，未迁移或删除。
+
 ## 4. Native Plugin 包结构
 
 推荐目录如下：
@@ -489,7 +495,7 @@ Native Tool 在 WSL、远程主机或其他执行环境中必须显式声明可�
 - Marketplace 浏览与安装；
 - managed plugin 的只读状态。
 
-当前 Desktop 已完成列表、搜索、详情、启停、卸载、刷新，以及 Skills/MCP 管理页面。页面中的“插件配置”和静态工具模板仍是本地配置层，不等于真实 Native Plugin 安装；后续应接入统一安装流程或明确改名，不能让用户误以为已经安装。
+当前 Desktop 已完成列表、搜索、详情、启停、卸载、刷新，以及 Skills/MCP 管理页面。插件页可导入一个本地 Native Plugin ZIP：无权限时直接安装，有权限时只显示一次确认。旧“插件配置”和静态模板已从实际页面隐藏，localStorage 原数据仍保留，未迁移或删除。
 
 ### CLI
 
@@ -621,11 +627,12 @@ Native Plugin → 在 daemon 主进程注册 Converter
 - 参考插件的实际 checkJs、独立进程调用、正式安装、link 重载、主动取消及跨 cwd 停用/卸载验收；
 - `/reload-plugins` 展示校验诊断和重新登记/批准提示，明确下次使用时才加载；
 - Desktop 扩展管理页面主体；
+- Desktop 插件页本地 Native ZIP 导入、后台安全校验、权限确认与结果反馈；
+- 本地 ZIP Archive Resolver：路径、类型、大小、数量、压缩比、CRC、摘要和临时目录清理；
 - 真实 Claude Code 插件抽样回归。
 
 ### 部分完成
 
-- Desktop 插件页：管理能力已接入，插件配置/模板尚未接入真实安装流程；
 - Converter Registry：内部注册接口已存在，但第三方 Converter 发现和隔离加载未实现；
 - Native Tool：Node 已实现，Wasm 和操作系统级沙箱未实现；
 - managed plugin：状态边界已存在，完整组织分发链路未实现。
@@ -635,7 +642,7 @@ Native Plugin → 在 daemon 主进程注册 Converter
 - Codex Apps、Hooks、技能专用策略和复杂 MCP 配置转换（首版明确报告 unsupported）；
 - Output Styles、Themes、Monitors 插件贡献；
 - Workflows、Channels、Providers、UI 插件贡献；
-- Git/npm/archive Source Resolver；
+- Git、npm、archive URL 和非 ZIP 格式 Source Resolver；
 - Marketplace；
 - 自动依赖安装；
 - 第三方 Converter 的签名、隔离和注册；
@@ -648,12 +655,14 @@ Native Plugin → 在 daemon 主进程注册 Converter
 
 ## 17. 建议实施顺序
 
-2026-09-09 调整：Converter 本轮开发到此结束。原生插件第一阶段已完成：公开开发类型、五类组件指南，以及无外部服务依赖的“文本检查助手”，覆盖安装、加载、调用、真实重载和清理。详见 [开发指南](./native-plugin-authoring.md)、[第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)和[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)。相关测试共 146 项通过，类型、缓存输入和文档检查通过，独立审查无代码阻断项。验收使用真实插件进程和管理路由，不包含完整 AgentPool、模型会话或桌面 UI。下一阶段为 Desktop 原生安装管理；以下长期顺序作为后续路线参考。
+2026-09-09 Desktop 本地 ZIP 阶段已完成：插件页可导入一个本地 Native `.zip`，交互只呈现成功、失败、结果待确认或一次权限确认；Archive Resolver、Native 校验、摘要复核和临时清理由后台完成。Agent 对话安装、转换插件和远程来源后续再规划。详见 [ZIP 导入设计](./superpowers/specs/2026-09-09-desktop-native-plugin-zip-import-design.md)和[实施计划](./superpowers/plans/2026-09-09-desktop-native-plugin-zip-import.md)。
+
+2026-09-09 调整：Converter 本轮开发到此结束。原生插件第一阶段已完成：公开开发类型、五类组件指南，以及无外部服务依赖的“文本检查助手”，覆盖安装、加载、调用、真实重载和清理。详见 [开发指南](./native-plugin-authoring.md)、[第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)和[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)。相关测试共 146 项通过，类型、缓存输入和文档检查通过，独立审查无代码阻断项。验收使用真实插件进程和管理路由，不包含完整 AgentPool、模型会话或桌面 UI。Desktop 本地 Native ZIP 导入也已在本阶段完成；以下长期顺序作为后续路线参考。
 
 后续不要一次实现所有 Component。建议顺序如下：
 
 1. **Codex Converter**：首版已接入 Converter → Native → Installer，并增加依据真实 manifest 结构独立编写的 fixture；范围和限制见 [Codex 转换器设计](./superpowers/specs/2026-09-09-codex-plugin-converter-design.md)。
-2. **Desktop 真实安装向导**：让本地 Native/Claude/Codex 导入、权限确认和失败诊断进入统一 Plugin Service。
+2. **Desktop 本地 Native ZIP 导入**：已完成最简导入、后台校验、权限确认和结构化失败反馈。Agent 对话、Claude/Codex 和远程来源仍延后。
 3. **声明式贡献**：优先实现 Output Styles、Themes，再处理 Monitors；它们比动态代码贡献更容易收紧边界。
 4. **Workflows**：先定义只包含声明数据的贡献格式，再接现有 Workflow Registry。
 5. **Source Resolver**：依次实现本地 archive、Git、npm；每一种都要做完整性和路径安全测试。

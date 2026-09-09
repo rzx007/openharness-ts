@@ -118,6 +118,7 @@
 - [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换设计。
 - [OpenHarness 插件系统最终形态交接](./plugin-system-handoff.md)：面向后续开发者说明最终用户形态、Native Plugin 契约、转换与安装边界、当前完成度和建议实施顺序。
 - [原生插件开发第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)与[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)：公开开发类型、五类组件指南、文本检查参考插件及真实调用和生命周期验收。
+- [Desktop 本地 Native Plugin ZIP 导入](./superpowers/specs/2026-09-09-desktop-native-plugin-zip-import-design.md)与[实施计划](./superpowers/plans/2026-09-09-desktop-native-plugin-zip-import.md)：插件页面当前可选择一个本地 Native ZIP，后台校验后直接安装或进行一次权限确认；其他来源仍未进入 Desktop。
 - [Native Plugin v1 与 Claude Code Converter 实施计划](./superpowers/plans/2026-08-25-native-plugin-and-claude-converter.md)：按 Native schema、安装激活、格式硬切、Converter core 和 Claude 转换闭环拆分的可执行任务。
 - [Native Plugin 当前实现](./plugins-contributions-design.md)：当前 Native Plugin 的 manifest、安装快照、外部转换、Runtime 激活和安全边界。
 - [原生插件开发指南](./native-plugin-authoring.md)：公开 Tool 类型、参考插件、五类组件写法、安装调试与当前能力边界。

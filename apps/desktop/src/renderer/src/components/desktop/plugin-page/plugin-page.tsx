@@ -103,7 +103,7 @@ function ExtensionManagement({ projectPath }: { projectPath: string }): React.JS
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => add("plugins")}>添加插件配置</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => add("plugins")}>导入插件</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => add("mcp")}>添加 MCP 服务器</DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>

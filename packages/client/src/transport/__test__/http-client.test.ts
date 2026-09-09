@@ -32,6 +32,33 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("uses typed plugin archive endpoints and preserves structured failures", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: (async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        if (String(url).endsWith("/preview")) return jsonResponse({
+          archiveDigest: "a".repeat(64), identity: { id: "dev.example.archive", name: "archive", version: "1" },
+          requestedPermissions: ["process:spawn"], inventory: { tools: 1 }, diagnostics: [],
+        });
+        return jsonResponse({ code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [{ code: "archive_changed" }] }, 409);
+      }) as typeof fetch,
+    });
+
+    await expect((client as any).previewPluginArchive({ cwd: "C:/workspace", archivePath: "C:/archive.zip" })).resolves.toMatchObject({
+      archiveDigest: "a".repeat(64), requestedPermissions: ["process:spawn"],
+    });
+    await expect((client as any).installPluginArchive({
+      cwd: "C:/workspace", archivePath: "C:/archive.zip", expectedArchiveDigest: "a".repeat(64), approvedPermissions: ["process:spawn"],
+    })).rejects.toMatchObject({ name: "OpenHarnessApiError", status: 409, body: {
+      code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [{ code: "archive_changed" }],
+    } });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://daemon.test/plugins/archive/preview",
+      "http://daemon.test/plugins/archive/install",
+    ]);
+  });
   it("lists and removes skills through daemon resource routes", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const snapshot = {

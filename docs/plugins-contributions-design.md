@@ -44,6 +44,12 @@ Skills、Agents、Hooks、MCP 和 Node Tool 已进入加载闭环。Tool 不会�
 
 Native Plugin 只支持用户级安装；当前 cwd 只作为插件运行时的工作目录，不形成独立安装或独立权限批准。旧的 project/local 记录会被忽略并提示重新以 user scope 安装，不能自动扩大成全局授权。Runtime 加载前先确认非 link 缓存根不是符号链接或目录联接，再重新核对实际 manifest 的 ID、版本和权限，并校验内容摘要；任一项与安装记录不一致都会拒绝激活。启停使用稳定插件 ID，不再修改 Settings。
 
+### Desktop 本地 ZIP 导入
+
+Desktop 插件页现可选择一个本地 Native Plugin ZIP。Source Resolver 只做安全复制、解压和静态校验；Server 再安装为不可变用户快照。无权限时直接安装，申请权限时 Renderer 只显示一次确认，且不会收到 ZIP 绝对路径或摘要。成功、失败和安装结果暂无法确认均为显式反馈，成功后的 Runtime 激活从下一次对话开始。
+
+Desktop 尚不支持 Agent 对话安装、Claude Code/Codex 转换、Git、npm、归档 URL、tar 格式或 Marketplace。被旧插件页面隐藏的 localStorage 配置仍原样保留，未执行迁移或删除。
+
 ## 外部转换
 
 `@openharness/plugin-converters` 拥有外部格式逻辑。Claude Code Converter 按以下流程工作：

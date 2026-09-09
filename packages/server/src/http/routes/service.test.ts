@@ -126,6 +126,84 @@ describe("user-scoped plugin mutation routes", () => {
   );
 });
 
+describe("plugin archive routes", () => {
+  it("previews without a mutation lease and installs under the global lease", async () => {
+    const release = vi.fn();
+    const acquireGlobalMutation = vi.fn(() => ({ release }));
+    const closeAllRuntimes = vi.fn(async () => {});
+    const previewArchive = vi.fn(async () => ({
+      archiveDigest: "a".repeat(64), identity: { id: "dev.example.archive", name: "archive", version: "1" },
+      requestedPermissions: [], inventory: { skills: 1 }, diagnostics: [],
+    }));
+    const installArchive = vi.fn(async () => ({ message: "Installed plugin 'dev.example.archive'." }));
+    const routes = createServiceRoutes({
+      pluginService: { list: async () => ({ plugins: [], warnings: [] }), setEnabled: async () => ({ message: "" }), previewArchive, installArchive } as any,
+      control: {
+        acquireGlobalMutation, acquireCwdMutation: vi.fn(() => undefined), closeAllRuntimes,
+        closeRuntimesForCwd: vi.fn(async () => {}), runtimeInspectionAvailable: false,
+        inspectRuntimeHooks: vi.fn(async () => []), sessionExists: vi.fn(() => false),
+      },
+    });
+
+    await expect((await routes.request("/plugins/archive/preview", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: "C:/workspace", archivePath: "C:/archive.zip" }),
+    })).json()).resolves.toMatchObject({ archiveDigest: "a".repeat(64) });
+    expect(acquireGlobalMutation).not.toHaveBeenCalled();
+
+    expect((await routes.request("/plugins/archive/install", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: "C:/workspace", archivePath: "C:/archive.zip", expectedArchiveDigest: "a".repeat(64), approvedPermissions: [] }),
+    })).status).toBe(200);
+    expect(acquireGlobalMutation).toHaveBeenCalledOnce();
+    expect(closeAllRuntimes).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("returns a structured archive error for malformed JSON", async () => {
+    const routes = createServiceRoutes({
+      pluginService: { list: async () => ({ plugins: [], warnings: [] }), setEnabled: async () => ({ message: "" }), previewArchive: vi.fn() } as any,
+      control: {
+        acquireGlobalMutation: vi.fn(() => ({ release: vi.fn() })), acquireCwdMutation: vi.fn(() => undefined),
+        closeAllRuntimes: vi.fn(async () => {}), closeRuntimesForCwd: vi.fn(async () => {}), runtimeInspectionAvailable: false,
+        inspectRuntimeHooks: vi.fn(async () => []), sessionExists: vi.fn(() => false),
+      },
+    });
+
+    const response = await routes.request("/plugins/archive/preview", { method: "POST", body: "{" });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      code: "plugin_archive_invalid_request",
+      message: "Request body must be valid JSON",
+    });
+  });
+
+  it("releases the install lease without closing runtimes when installation fails", async () => {
+    const release = vi.fn();
+    const closeAllRuntimes = vi.fn(async () => {});
+    const routes = createServiceRoutes({
+      pluginService: {
+        list: async () => ({ plugins: [], warnings: [] }), setEnabled: async () => ({ message: "" }),
+        installArchive: async () => { throw { body: { code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [] } }; },
+      } as any,
+      control: {
+        acquireGlobalMutation: vi.fn(() => ({ release })), acquireCwdMutation: vi.fn(() => undefined), closeAllRuntimes,
+        closeRuntimesForCwd: vi.fn(async () => {}), runtimeInspectionAvailable: false,
+        inspectRuntimeHooks: vi.fn(async () => []), sessionExists: vi.fn(() => false),
+      },
+    });
+
+    const response = await routes.request("/plugins/archive/install", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: "C:/workspace", archivePath: "C:/archive.zip", expectedArchiveDigest: "a".repeat(64), approvedPermissions: [] }),
+    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [] });
+    expect(closeAllRuntimes).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+});
+
 describe("skill management routes", () => {
   it("lists skills and deletes through a global runtime mutation", async () => {
     const snapshot = { skills: [], projects: [], warnings: [] };
