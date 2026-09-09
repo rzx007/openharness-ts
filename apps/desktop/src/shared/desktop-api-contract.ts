@@ -85,6 +85,11 @@ import type {
   DesktopPluginSnapshot,
 } from "./plugin-types"
 import type {
+  DesktopSkillRemoveInput,
+  DesktopSkillSnapshot,
+  DesktopSkillSnapshotInput,
+} from "./skill-types"
+import type {
   DesktopSettingsSnapshot,
   UpdateDesktopAgentEnvironmentInput,
   UpdateDesktopDefaultOpenerInput,
@@ -234,6 +239,10 @@ export type DesktopAPI = {
     disable: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     uninstall: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     reload: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
+  }
+  skills: {
+    snapshot: (input: DesktopSkillSnapshotInput) => Promise<DesktopSkillSnapshot>
+    remove: (input: DesktopSkillRemoveInput) => Promise<DesktopSkillSnapshot>
   }
   sessions: {
     bootstrap: () => Promise<DesktopBootstrapData>

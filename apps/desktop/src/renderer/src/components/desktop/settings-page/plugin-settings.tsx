@@ -474,24 +474,34 @@ function PluginRow({
   )
 }
 
-function PluginDetailsDialog({
+export function PluginDetailsDialog({
   plugin,
   onOpenChange,
+  actions,
+  error,
 }: {
   plugin: DesktopPluginInfo | null
   onOpenChange: (open: boolean) => void
+  actions?: React.ReactNode
+  error?: string
 }): React.JSX.Element {
   if (!plugin) return <></>
   const runtime = plugin.toolRuntime
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto p-6 sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{pluginDisplayName(plugin)}</DialogTitle>
           <DialogDescription>
             {plugin.identity.id}@{plugin.identity.version} · {scopeLabels[plugin.scope]}
           </DialogDescription>
         </DialogHeader>
+        {actions}
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
         <div className="flex flex-col gap-6 text-sm">
           <DetailSection title="安装状态">
             <DetailRow

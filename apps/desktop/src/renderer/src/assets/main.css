@@ -8,6 +8,27 @@
 @source "../../../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
+
+/* Sparse extension navigation and optional compact rows. */
+.extension-tabs [data-slot="tabs-trigger"] {
+  padding-inline: 0.75rem;
+}
+.extension-tabs [data-slot="tabs-trigger"][data-active] {
+  background: var(--muted);
+  box-shadow: none;
+}
+.extension-management[data-compact="true"] [data-extension-row] {
+  min-height: 3.5rem;
+  padding-block: 0.5rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .extension-management *,
+  [data-slot="dialog-content"],
+  [data-slot="dialog-overlay"] {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 /* "Microsoft YaHei UI", "Microsoft YaHei",  */
 @theme inline {
   --font-heading: var(--font-sans);

@@ -8,6 +8,7 @@ import { providerIpcContribution } from "./provider/ipc"
 import { sessionIpcContribution } from "./session/ipc"
 import { scheduleIpcContribution } from "./schedule/ipc"
 import { settingsIpcContribution } from "./settings/ipc"
+import { skillIpcContribution } from "./skill/ipc"
 import { terminalIpcContribution } from "./terminal/ipc"
 import { trayIpcContribution } from "./tray/ipc"
 import { windowControlsIpcContribution } from "./window-controls/ipc"
@@ -19,6 +20,7 @@ export const allIpcContributions: IpcContribution[] = [
   trayIpcContribution,
   petIpcContribution,
   pluginIpcContribution,
+  skillIpcContribution,
   providerIpcContribution,
   clipboardIpcContribution,
   gitIpcContribution,

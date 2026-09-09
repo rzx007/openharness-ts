@@ -224,6 +224,12 @@ export const desktopAPI = {
     reload: (input: IpcInvokeMap[typeof IpcChannels.pluginReload]["args"][0]) =>
       invoke(IpcChannels.pluginReload, input),
   },
+  skills: {
+    snapshot: (input: IpcInvokeMap[typeof IpcChannels.skillSnapshot]["args"][0]) =>
+      invoke(IpcChannels.skillSnapshot, input),
+    remove: (input: IpcInvokeMap[typeof IpcChannels.skillRemove]["args"][0]) =>
+      invoke(IpcChannels.skillRemove, input),
+  },
   sessions: {
     bootstrap: () => invoke(IpcChannels.sessionBootstrap),
     daemonStatus: () => invoke(IpcChannels.sessionDaemonStatus),

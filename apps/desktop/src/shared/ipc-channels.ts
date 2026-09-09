@@ -77,6 +77,11 @@ import type {
   DesktopPluginSnapshot,
 } from "./plugin-types"
 import type {
+  DesktopSkillRemoveInput,
+  DesktopSkillSnapshot,
+  DesktopSkillSnapshotInput,
+} from "./skill-types"
+import type {
   DesktopSettingsSnapshot,
   UpdateDesktopAgentEnvironmentInput,
   UpdateDesktopDefaultOpenerInput,
@@ -223,6 +228,9 @@ export const IpcChannels = {
   pluginDisable: "plugin:disable",
   pluginUninstall: "plugin:uninstall",
   pluginReload: "plugin:reload",
+
+  skillSnapshot: "skill:snapshot",
+  skillRemove: "skill:remove",
 
   settingsSnapshot: "settings:snapshot",
   settingsUpdateWorkStyle: "settings:update-work-style",
@@ -618,5 +626,13 @@ export interface IpcInvokeMap {
   [IpcChannels.pluginReload]: {
     args: [input: DesktopPluginContextInput]
     result: DesktopPluginSnapshot
+  }
+  [IpcChannels.skillSnapshot]: {
+    args: [input: DesktopSkillSnapshotInput]
+    result: DesktopSkillSnapshot
+  }
+  [IpcChannels.skillRemove]: {
+    args: [input: DesktopSkillRemoveInput]
+    result: DesktopSkillSnapshot
   }
 }
