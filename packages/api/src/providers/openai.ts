@@ -98,6 +98,10 @@ function emptyReasoningRequired(): boolean {
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
+function nonEmptyText(content: string): string {
+  return content.trim() ? content : " ";
+}
+
 /**
  * Convert user text/image content blocks into OpenAI chat content. Returns a
  * plain string when there are no images, otherwise the structured multimodal
@@ -350,16 +354,14 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
       switch (msg.type) {
         case "user": {
           if (typeof msg.content === "string") {
-            messages.push({ role: "user", content: msg.content });
+            messages.push({ role: "user", content: nonEmptyText(msg.content) });
           } else {
             const content = await convertUserContentToOpenAI(
               msg.content,
               params.abortSignal,
             );
             if (typeof content === "string") {
-              if (content.trim()) {
-                messages.push({ role: "user", content });
-              }
+              messages.push({ role: "user", content: nonEmptyText(content) });
             } else if (content.length) {
               messages.push({ role: "user", content });
             }
@@ -367,9 +369,10 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
           break;
         }
         case "assistant": {
+          const rawContent = typeof msg.content === "string" ? msg.content : "";
           const assistantMsg: ReasoningMessage = {
             role: "assistant",
-            content: typeof msg.content === "string" ? msg.content : null,
+            content: nonEmptyText(rawContent),
           };
           const reasoning = this.reasoningHistory.get(turnIdx);
           if (reasoning) {
@@ -413,7 +416,7 @@ export class OpenAICompatibleClient implements StreamingMessageClient {
           messages.push({
             role: "tool",
             tool_call_id: msg.toolUseId,
-            content: toolContent,
+            content: nonEmptyText(toolContent),
           });
           break;
         }

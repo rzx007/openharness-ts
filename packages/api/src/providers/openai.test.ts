@@ -202,6 +202,41 @@ describe("convertMessages reasoning_content gating", () => {
   });
 });
 
+describe("convertMessages empty content sanitization", () => {
+  it("does not emit empty string user content", async () => {
+    const client = new TestableClient({ apiKey: "test", baseURL: undefined } as any);
+    const out = await client.build([
+      { type: "user", content: "" },
+      { type: "assistant", content: "saw the screenshots" },
+      { type: "user", content: "继续" },
+    ]);
+    expect(out.every((message: { content?: unknown }) => message.content !== "")).toBe(true);
+    const users = out.filter((message: { role: string }) => message.role === "user");
+    expect(users).toHaveLength(2);
+    expect(users[0].content).toBe(" ");
+    expect(users[1].content).toBe("继续");
+  });
+
+  it("does not emit empty assistant content when tool calls are present", async () => {
+    const client = new TestableClient({ apiKey: "test", baseURL: undefined } as any);
+    const out = await client.build([
+      {
+        type: "assistant",
+        content: "",
+        toolUses: [{ type: "tool_use", id: "t1", name: "foo", input: {} }],
+      },
+      {
+        type: "tool_result",
+        toolUseId: "t1",
+        content: [{ type: "text", text: "ok" }],
+      },
+    ]);
+    const assistant = out.find((message: { role: string }) => message.role === "assistant");
+    expect(assistant.content).toBe(" ");
+    expect(assistant.tool_calls).toHaveLength(1);
+  });
+});
+
 describe("convertMessages image passing", () => {
   it("produces structured image_url content for image user messages", async () => {
     const client = new TestableClient({ apiKey: "test", baseURL: undefined } as any);
