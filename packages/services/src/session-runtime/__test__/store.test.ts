@@ -378,6 +378,73 @@ describe("SessionStore", () => {
     });
   });
 
+  it("copies model switch presentation messages only when they are inside the fork boundary", () => {
+    withStore((store) => {
+      const parent = store.createSession({
+        id: "model-switch-parent",
+        cwd: process.cwd(),
+        model: "model-b",
+      });
+      const presentation = store.createMessage({
+        id: "model-switch-message",
+        sessionId: parent.id,
+        role: "system",
+        metadata: {
+          presentation: {
+            kind: "model_switch",
+            fromModel: "model-a",
+            toModel: "model-b",
+          },
+        },
+      });
+      store.upsertMessagePart({
+        id: "model-switch-part",
+        sessionId: parent.id,
+        messageId: presentation.id,
+        type: "text",
+        status: "completed",
+        text: "模型已切换 model-a → model-b",
+      });
+      const following = store.createMessage({
+        id: "following-message",
+        sessionId: parent.id,
+        role: "assistant",
+      });
+
+      const after = store.forkSessionWithHistory({
+        sourceSessionId: parent.id,
+        afterMessageId: following.id,
+        session: {
+          id: "fork-after-switch",
+          cwd: parent.cwd,
+          model: parent.model,
+          metadata: {},
+        },
+      });
+      const before = store.forkSessionWithHistory({
+        sourceSessionId: parent.id,
+        beforeMessageId: presentation.id,
+        session: {
+          id: "fork-before-switch",
+          cwd: parent.cwd,
+          model: "model-a",
+          metadata: {},
+        },
+      });
+
+      expect(
+        store.listMessages(after.id).some((message) =>
+          (message.metadata.presentation as { kind?: string } | undefined)?.kind ===
+          "model_switch"
+        )
+      ).toBe(true);
+      expect(store.listMessageParts(after.id)).toEqual([
+        expect.objectContaining({ text: "模型已切换 model-a → model-b" }),
+      ]);
+      expect(store.listMessages(before.id)).toEqual([]);
+    });
+  });
+
   it("allows one input to own multiple runs", () => {
     withStore((store) => {
       store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
