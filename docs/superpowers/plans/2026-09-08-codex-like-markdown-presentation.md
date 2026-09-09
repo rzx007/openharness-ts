@@ -133,10 +133,10 @@ git commit -m "feat(prompts): guide compact markdown responses"
 
 - [ ] **步骤 1：扩展失败的样式回归测试**
 
-把测试文件读取的资源扩展到 `conversation-page.tsx`，断言消息滚动内容使用 `max-w-[960px]`；同时断言助手消息专用规则包含以下值：
+把测试文件读取的资源扩展到 `conversation-page.tsx`，断言消息滚动内容使用 `max-w-190`；同时断言助手消息专用规则包含以下值：
 
 ```ts
-expect(conversationPage).toContain("max-w-[960px]");
+expect(conversationPage).toContain("max-w-190");
 expect(stylesheet).toMatch(
   /\.assistant-markdown \[data-streamdown="list-item"\]\s*\{[^}]*padding-block:\s*0;/s,
 );
@@ -160,7 +160,7 @@ pnpm --filter @openharness/desktop exec vitest run src/renderer/src/markdown-tab
 
 - [ ] **步骤 3：拓宽消息正文**
 
-在 `conversation-page.tsx` 只把 `MessageScrollerContent` 的 `max-w-190` 改为 `max-w-[960px]`。不要修改 `NewConversationStart`、输入框、浮层或 Markdown 文件预览的宽度。
+在 `conversation-page.tsx` 只把 `MessageScrollerContent` 的 `max-w-190` 改为 `max-w-190`。不要修改 `NewConversationStart`、输入框、浮层或 Markdown 文件预览的宽度。
 
 - [ ] **步骤 4：增加助手消息专用样式**
 
