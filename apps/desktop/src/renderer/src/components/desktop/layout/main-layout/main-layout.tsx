@@ -31,7 +31,7 @@ import { UtilityPanel, useUtilityPanelController } from "./utility-panel"
 
 const resizeTargetMinimumSize = { fine: 12, coarse: 28 }
 const sidebarDefaultWidth = 288
-const sidebarMinimumWidth = 236
+const sidebarMinimumWidth = 266
 const conversationMinimumWidth = 350
 const utilityMinimumWidth = 320
 const workspaceMinimumWidth = conversationMinimumWidth + utilityMinimumWidth
