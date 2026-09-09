@@ -77,7 +77,12 @@ export interface DownloadAttachmentOptions {
 }
 
 export interface AttachmentStorageIssue {
-  code: "missing_blob" | "size_mismatch" | "orphan_blob" | "stale_lease" | "deleted_asset_retained";
+  code:
+    | "missing_blob"
+    | "size_mismatch"
+    | "orphan_blob"
+    | "stale_lease"
+    | "deleted_asset_retained";
   severity: "warning" | "error";
   assetId?: string;
   sha256?: string;
@@ -98,7 +103,12 @@ export interface AttachmentStorageReport {
     reclaimableBytes: number;
   };
   issues: AttachmentStorageIssue[];
-  latestGcAudit?: { id: string; policy: string; result: unknown; createdAt: number };
+  latestGcAudit?: {
+    id: string;
+    policy: string;
+    result: unknown;
+    createdAt: number;
+  };
 }
 
 export interface AttachmentStorageRepairResult {
@@ -114,7 +124,12 @@ export interface AttachmentStorageGcResult {
   deletedBlobs: number;
   releasedBytes: number;
   skipped: Record<
-    "notDeleted" | "gracePeriod" | "missingHash" | "referenced" | "activeLease" | "sharedBlob",
+    | "notDeleted"
+    | "gracePeriod"
+    | "missingHash"
+    | "referenced"
+    | "activeLease"
+    | "sharedBlob",
     number
   >;
   errors: Array<{ assetId: string; code: "blob_delete_failed" }>;
@@ -260,11 +275,7 @@ export interface ResumeInterruptedRunResponse extends PromptResponse {
 
 export type CommandKind = "session" | "template";
 export type CommandSource =
-  | "builtin"
-  | "bundled"
-  | "user"
-  | "plugin"
-  | "project";
+  "builtin" | "bundled" | "user" | "plugin" | "project";
 
 /** `GET /commands` 返回的命令元数据。 */
 export interface CommandCatalogEntry {
@@ -470,6 +481,31 @@ export interface PluginInfo {
     message: string;
     path?: string;
   }>;
+}
+
+export type SkillSource = "bundled" | "agent" | "project" | "personal";
+
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  path: string;
+  source: SkillSource;
+  readOnly: boolean;
+  projectPath?: string;
+  projectName?: string;
+}
+
+export interface SkillProject {
+  name: string;
+  path: string;
+}
+
+export interface SkillSnapshot {
+  skills: SkillInfo[];
+  projects: SkillProject[];
+  warnings: string[];
 }
 
 export interface AgentPersonaInfo {

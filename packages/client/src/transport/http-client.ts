@@ -41,6 +41,7 @@ import type {
   OpenHarnessServerHealth,
   PermissionRequestRecord,
   PluginInfo,
+  SkillSnapshot,
   PromoteQueuedClientPromptInput,
   PromoteQueuedPromptResponse,
   PromptResponse,
@@ -296,21 +297,27 @@ export class OpenHarnessClient {
   async repairAttachmentStorage(
     options: { signal?: AbortSignal } = {},
   ): Promise<AttachmentStorageRepairResult> {
-    return await this.request<AttachmentStorageRepairResult>("/attachments/storage/actions", {
-      method: "POST",
-      body: { action: "repair-safe" },
-      signal: options.signal,
-    });
+    return await this.request<AttachmentStorageRepairResult>(
+      "/attachments/storage/actions",
+      {
+        method: "POST",
+        body: { action: "repair-safe" },
+        signal: options.signal,
+      },
+    );
   }
 
   async gcAttachmentStorage(
     options: { signal?: AbortSignal } = {},
   ): Promise<AttachmentStorageGcResult> {
-    return await this.request<AttachmentStorageGcResult>("/attachments/storage/actions", {
-      method: "POST",
-      body: { action: "gc" },
-      signal: options.signal,
-    });
+    return await this.request<AttachmentStorageGcResult>(
+      "/attachments/storage/actions",
+      {
+        method: "POST",
+        body: { action: "gc" },
+        signal: options.signal,
+      },
+    );
   }
 
   async handleChannelMessage(
@@ -784,6 +791,31 @@ export class OpenHarnessClient {
       body: input,
       signal: options.signal,
     });
+  }
+
+  /** `GET /skills` */
+  async listSkills(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SkillSnapshot> {
+    return await this.request<SkillSnapshot>("/skills", {
+      signal: options.signal,
+    });
+  }
+
+  /** `DELETE /skills/:id` */
+  async removeSkill(
+    id: string,
+    input: { expectedContent: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SkillSnapshot> {
+    return await this.request<SkillSnapshot>(
+      `/skills/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+        body: input,
+        signal: options.signal,
+      },
+    );
   }
 
   /** `GET /agent-personas` */

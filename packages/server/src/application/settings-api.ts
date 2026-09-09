@@ -5,9 +5,7 @@
 
 export interface SettingsService {
   get(): Promise<Record<string, unknown>> | Record<string, unknown>;
-  patch(
-    patch: Record<string, unknown>,
-  ):
+  patch(patch: Record<string, unknown>):
     | Promise<{
         settings: Record<string, unknown>;
         restartRuntimes?: boolean;
@@ -216,7 +214,13 @@ export interface PluginInfo {
   installation: "installed" | "missing" | "invalid";
   activation: "inactive" | "active" | "partial" | "reload-required";
   toolRuntime?: {
-    state: "inactive" | "reload-required" | "starting" | "active" | "degraded" | "error";
+    state:
+      | "inactive"
+      | "reload-required"
+      | "starting"
+      | "active"
+      | "degraded"
+      | "error";
     declaredEntries: number;
     activatableEntries: number;
     hostCount: number;
@@ -226,7 +230,13 @@ export interface PluginInfo {
   };
   inventory: Record<string, number>;
   permissions: { requested: string[]; approved: string[]; missing: string[] };
-  diagnostics: Array<{ severity: "info" | "warning" | "error"; phase: string; code: string; message: string; path?: string }>;
+  diagnostics: Array<{
+    severity: "info" | "warning" | "error";
+    phase: string;
+    code: string;
+    message: string;
+    path?: string;
+  }>;
 }
 
 export interface PluginService {
@@ -242,8 +252,46 @@ export interface PluginService {
   }):
     | Promise<{ message: string; restartRuntimes?: boolean }>
     | { message: string; restartRuntimes?: boolean };
-  installLocal?(input: { cwd: string; sourcePath: string; scope: "user"; approvedPermissions: string[]; link?: boolean }): Promise<{ message: string; restartRuntimes?: boolean }>;
-  uninstall?(input: { cwd: string; id: string }): Promise<{ message: string; restartRuntimes?: boolean }>;
+  installLocal?(input: {
+    cwd: string;
+    sourcePath: string;
+    scope: "user";
+    approvedPermissions: string[];
+    link?: boolean;
+  }): Promise<{ message: string; restartRuntimes?: boolean }>;
+  uninstall?(input: {
+    cwd: string;
+    id: string;
+  }): Promise<{ message: string; restartRuntimes?: boolean }>;
+}
+
+export type SkillSource = "bundled" | "agent" | "project" | "personal";
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  path: string;
+  source: SkillSource;
+  readOnly: boolean;
+  projectPath?: string;
+  projectName?: string;
+}
+export interface SkillProject {
+  name: string;
+  path: string;
+}
+export interface SkillSnapshot {
+  skills: SkillInfo[];
+  projects: SkillProject[];
+  warnings: string[];
+}
+export interface SkillService {
+  list(): Promise<SkillSnapshot> | SkillSnapshot;
+  remove(input: {
+    id: string;
+    expectedContent: string;
+  }): Promise<SkillSnapshot> | SkillSnapshot;
 }
 
 export interface AgentPersonaInfo {

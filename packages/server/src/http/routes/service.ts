@@ -10,6 +10,7 @@ import type {
   PluginService,
   ProfileService,
   ProjectInitService,
+  SkillService,
 } from "../../application/index.js";
 import type { DaemonControlService } from "../../application/control/index.js";
 
@@ -20,6 +21,7 @@ export interface ServiceRoutesContext {
   outputStyleService?: OutputStyleService;
   projectInitService?: ProjectInitService;
   pluginService?: PluginService;
+  skillService?: SkillService;
   agentPersonaService?: AgentPersonaService;
   hooksService?: HooksService;
   control: Pick<
@@ -37,27 +39,36 @@ export interface ServiceRoutesContext {
 export function createServiceRoutes(context: ServiceRoutesContext): Hono {
   return new Hono()
     .get("/context", async (c) => {
-      if (!context.contextService) return errorResponse(501, "Context service is not configured");
+      if (!context.contextService)
+        return errorResponse(501, "Context service is not configured");
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");
       try {
         return jsonResponse(await context.contextService.preview({ cwd }));
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .get("/context/status", async (c) => {
-      if (!context.contextService) return errorResponse(501, "Context service is not configured");
+      if (!context.contextService)
+        return errorResponse(501, "Context service is not configured");
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");
       try {
         return jsonResponse(await context.contextService.status({ cwd }));
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .get("/context/usage", async (c) => {
-      if (!context.contextService) return errorResponse(501, "Context service is not configured");
+      if (!context.contextService)
+        return errorResponse(501, "Context service is not configured");
       const cwd = c.req.query("cwd");
       if (!cwd) return errorResponse(400, "cwd is required");
       const sessionId = c.req.query("sessionId") || undefined;
@@ -70,7 +81,9 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
             : undefined;
       const previousRaw = c.req.query("previousContextWindow");
       const previousContextWindow =
-        previousRaw != null && previousRaw !== "" && Number.isFinite(Number(previousRaw))
+        previousRaw != null &&
+        previousRaw !== "" &&
+        Number.isFinite(Number(previousRaw))
           ? Number(previousRaw)
           : undefined;
       try {
@@ -79,15 +92,21 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
             cwd,
             ...(sessionId ? { sessionId } : {}),
             ...(refresh !== undefined ? { refresh } : {}),
-            ...(previousContextWindow !== undefined ? { previousContextWindow } : {}),
+            ...(previousContextWindow !== undefined
+              ? { previousContextWindow }
+              : {}),
           }),
         );
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .post("/dream", async (c) => {
-      if (!context.dreamService) return errorResponse(501, "Dream service is not configured");
+      if (!context.dreamService)
+        return errorResponse(501, "Dream service is not configured");
       const body = await readJson(c);
       if (typeof body.cwd !== "string" || !body.cwd.trim()) {
         return errorResponse(400, "cwd is required");
@@ -95,7 +114,8 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
       try {
         const result = await context.dreamService.start({
           cwd: body.cwd,
-          sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+          sessionId:
+            typeof body.sessionId === "string" ? body.sessionId : undefined,
           preview: body.preview === true,
         });
         if (!result.started) {
@@ -103,131 +123,248 @@ export function createServiceRoutes(context: ServiceRoutesContext): Hono {
         }
         return jsonResponse({ taskId: result.taskId }, 201);
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .get("/profile", async () => {
-      if (!context.profileService) return errorResponse(501, "Profile service is not configured");
+      if (!context.profileService)
+        return errorResponse(501, "Profile service is not configured");
       try {
         return jsonResponse(await context.profileService.status());
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .post("/profile/init", async () => {
-      if (!context.profileService) return errorResponse(501, "Profile service is not configured");
+      if (!context.profileService)
+        return errorResponse(501, "Profile service is not configured");
       const lease = context.control.acquireGlobalMutation();
       if (!lease) {
-        return errorResponse(409, "Cannot initialize profile while session runs are active");
+        return errorResponse(
+          409,
+          "Cannot initialize profile while session runs are active",
+        );
       }
       try {
         const result = await context.profileService.init();
         await context.control.closeAllRuntimes();
         return jsonResponse(result);
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       } finally {
         lease.release();
       }
     })
     .get("/output-styles", async () => {
-      if (!context.outputStyleService) return errorResponse(501, "Output style service is not configured");
+      if (!context.outputStyleService)
+        return errorResponse(501, "Output style service is not configured");
       try {
-        return jsonResponse({ styles: await context.outputStyleService.list() });
+        return jsonResponse({
+          styles: await context.outputStyleService.list(),
+        });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .post("/project/init", async (c) => {
-      if (!context.projectInitService) return errorResponse(501, "Project init service is not configured");
+      if (!context.projectInitService)
+        return errorResponse(501, "Project init service is not configured");
       const body = await readJson(c);
       const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
       if (!cwd) return errorResponse(400, "cwd is required");
       try {
         return jsonResponse(await context.projectInitService.init({ cwd }));
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .get("/plugins", async (c) => {
-      if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
+      if (!context.pluginService)
+        return errorResponse(501, "Plugin service is not configured");
       const cwd = c.req.query("cwd") ?? undefined;
       if (!cwd) return errorResponse(400, "cwd is required");
       try {
         return jsonResponse(await context.pluginService.list({ cwd }));
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
-    .post("/plugins/install-local", (c) => installLocalPlugin(context, c, false))
+    .post("/plugins/install-local", (c) =>
+      installLocalPlugin(context, c, false),
+    )
     .post("/plugins/link-local", (c) => installLocalPlugin(context, c, true))
-    .post("/plugins/:id/enable", async (c) => setPluginEnabled(context, c.req.param("id"), true, await readJson(c)))
-    .post("/plugins/:id/disable", async (c) => setPluginEnabled(context, c.req.param("id"), false, await readJson(c)))
+    .post("/plugins/:id/enable", async (c) =>
+      setPluginEnabled(context, c.req.param("id"), true, await readJson(c)),
+    )
+    .post("/plugins/:id/disable", async (c) =>
+      setPluginEnabled(context, c.req.param("id"), false, await readJson(c)),
+    )
     .delete("/plugins/:id", async (c) => {
-      if (!context.pluginService?.uninstall) return errorResponse(501, "Plugin uninstall is not configured");
+      if (!context.pluginService?.uninstall)
+        return errorResponse(501, "Plugin uninstall is not configured");
       const body = await readJson(c);
       const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
       if (!cwd) return errorResponse(400, "cwd is required");
       const lease = context.control.acquireGlobalMutation();
-      if (!lease) return errorResponse(409, "Cannot uninstall plugins while session runs are active");
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot uninstall plugins while session runs are active",
+        );
       try {
-        const result = await context.pluginService.uninstall({ cwd, id: c.req.param("id") });
+        const result = await context.pluginService.uninstall({
+          cwd,
+          id: c.req.param("id"),
+        });
         if (result.restartRuntimes) await context.control.closeAllRuntimes();
         return jsonResponse({ message: result.message });
-      } catch (error) { return errorResponse(400, error instanceof Error ? error.message : String(error)); }
-      finally { lease.release(); }
+      } catch (error) {
+        return errorResponse(
+          400,
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        lease.release();
+      }
     })
     .post("/plugins/reload", async (c) => {
-      if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
+      if (!context.pluginService)
+        return errorResponse(501, "Plugin service is not configured");
       const body = await readJson(c);
-      const cwd = typeof body.cwd === "string" ? body.cwd : c.req.query("cwd") ?? undefined;
+      const cwd =
+        typeof body.cwd === "string"
+          ? body.cwd
+          : (c.req.query("cwd") ?? undefined);
       if (!cwd) return errorResponse(400, "cwd is required");
       const lease = context.control.acquireCwdMutation(cwd);
       if (!lease) {
-        return errorResponse(409, "Cannot reload plugins while session runs are active for this cwd");
+        return errorResponse(
+          409,
+          "Cannot reload plugins while session runs are active for this cwd",
+        );
       }
       try {
         await context.control.closeRuntimesForCwd(cwd);
         const listed = await context.pluginService.list({ cwd });
         return jsonResponse({
           ...listed,
-          message: "Plugins rediscovered; session runtimes will reload on next use.",
+          message:
+            "Plugins rediscovered; session runtimes will reload on next use.",
         });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        lease.release();
+      }
+    })
+    .get("/skills", async () => {
+      if (!context.skillService)
+        return errorResponse(501, "Skill service is not configured");
+      try {
+        return jsonResponse(await context.skillService.list());
+      } catch (error) {
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    })
+    .delete("/skills/:id", async (c) => {
+      if (!context.skillService)
+        return errorResponse(501, "Skill service is not configured");
+      const lease = context.control.acquireGlobalMutation();
+      if (!lease)
+        return errorResponse(
+          409,
+          "Cannot remove skills while session runs are active",
+        );
+      try {
+        const body = await readJson(c);
+        if (typeof body.expectedContent !== "string") {
+          return errorResponse(400, "expectedContent is required");
+        }
+        const result = await context.skillService.remove({
+          id: c.req.param("id"),
+          expectedContent: body.expectedContent,
+        });
+        await context.control.closeAllRuntimes();
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse(
+          400,
+          error instanceof Error ? error.message : String(error),
+        );
       } finally {
         lease.release();
       }
     })
     .get("/agent-personas", async () => {
-      if (!context.agentPersonaService) return errorResponse(501, "Agent persona service is not configured");
+      if (!context.agentPersonaService)
+        return errorResponse(501, "Agent persona service is not configured");
       try {
         return jsonResponse(await context.agentPersonaService.list());
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })
     .get("/hooks", async (c) => {
-      if (!context.hooksService) return errorResponse(501, "Hooks service is not configured");
+      if (!context.hooksService)
+        return errorResponse(501, "Hooks service is not configured");
       const cwd = c.req.query("cwd") ?? undefined;
       if (!cwd) return errorResponse(400, "cwd is required");
       const sessionId = c.req.query("sessionId") ?? undefined;
       try {
-        const listed = await context.hooksService.list({ cwd, ...(sessionId ? { sessionId } : {}) });
+        const listed = await context.hooksService.list({
+          cwd,
+          ...(sessionId ? { sessionId } : {}),
+        });
         const hooks = [...listed.hooks];
         if (sessionId && context.control.runtimeInspectionAvailable) {
           if (!context.control.sessionExists(sessionId)) {
             return errorResponse(404, "Session not found");
           }
-          for (const hook of await context.control.inspectRuntimeHooks(sessionId)) {
-            if (!hooks.some((row) => row.id === hook.id && row.origin === hook.origin)) {
+          for (const hook of await context.control.inspectRuntimeHooks(
+            sessionId,
+          )) {
+            if (
+              !hooks.some(
+                (row) => row.id === hook.id && row.origin === hook.origin,
+              )
+            ) {
               hooks.push(hook);
             }
           }
         }
         return jsonResponse({ hooks });
       } catch (error) {
-        return errorResponse(500, error instanceof Error ? error.message : String(error));
+        return errorResponse(
+          500,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     });
 }
@@ -238,42 +375,74 @@ async function setPluginEnabled(
   enabled: boolean,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  if (!context.pluginService) return errorResponse(501, "Plugin service is not configured");
+  if (!context.pluginService)
+    return errorResponse(501, "Plugin service is not configured");
   if (!id) return errorResponse(400, "plugin id is required");
   const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
   if (!cwd) return errorResponse(400, "cwd is required");
   const lease = context.control.acquireGlobalMutation();
   if (!lease) {
-    return errorResponse(409, "Cannot update plugins while session runs are active");
+    return errorResponse(
+      409,
+      "Cannot update plugins while session runs are active",
+    );
   }
   try {
     const result = await context.pluginService.setEnabled({ id, cwd, enabled });
     if (result.restartRuntimes) await context.control.closeAllRuntimes();
     return jsonResponse({ message: result.message });
   } catch (error) {
-    return errorResponse(400, error instanceof Error ? error.message : String(error));
+    return errorResponse(
+      400,
+      error instanceof Error ? error.message : String(error),
+    );
   } finally {
     lease.release();
   }
 }
 
-async function installLocalPlugin(context: ServiceRoutesContext, c: any, link: boolean): Promise<Response> {
-  if (!context.pluginService?.installLocal) return errorResponse(501, "Plugin installation is not configured");
+async function installLocalPlugin(
+  context: ServiceRoutesContext,
+  c: any,
+  link: boolean,
+): Promise<Response> {
+  if (!context.pluginService?.installLocal)
+    return errorResponse(501, "Plugin installation is not configured");
   const body = await readJson(c);
   const cwd = typeof body.cwd === "string" ? body.cwd : undefined;
-  const sourcePath = typeof body.sourcePath === "string" ? body.sourcePath : undefined;
+  const sourcePath =
+    typeof body.sourcePath === "string" ? body.sourcePath : undefined;
   const scope = body.scope;
   const approvedPermissions = Array.isArray(body.approvedPermissions)
-    ? body.approvedPermissions.filter((item): item is string => typeof item === "string") : [];
+    ? body.approvedPermissions.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
   if (!cwd || !sourcePath || scope !== "user") {
     return errorResponse(400, "cwd, sourcePath and user scope are required");
   }
   const lease = context.control.acquireGlobalMutation();
-  if (!lease) return errorResponse(409, "Cannot install plugins while session runs are active");
+  if (!lease)
+    return errorResponse(
+      409,
+      "Cannot install plugins while session runs are active",
+    );
   try {
-    const result = await context.pluginService.installLocal({ cwd, sourcePath, scope, approvedPermissions, link });
+    const result = await context.pluginService.installLocal({
+      cwd,
+      sourcePath,
+      scope,
+      approvedPermissions,
+      link,
+    });
     if (result.restartRuntimes) await context.control.closeAllRuntimes();
     return jsonResponse({ message: result.message });
-  } catch (error) { return errorResponse(400, error instanceof Error ? error.message : String(error)); }
-  finally { lease.release(); }
+  } catch (error) {
+    return errorResponse(
+      400,
+      error instanceof Error ? error.message : String(error),
+    );
+  } finally {
+    lease.release();
+  }
 }

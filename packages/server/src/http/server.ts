@@ -27,7 +27,9 @@ import type {
   ProjectInitService,
   ProviderService,
   SettingsService,
+  SkillService,
 } from "../application/settings-api.js";
+import { createSkillManagementService } from "../application/skill-management-service.js";
 import {
   TRACE_ID_HEADER,
   writeStructuredLog,
@@ -82,6 +84,7 @@ export interface OpenHarnessServerServices {
   agentPersona?: AgentPersonaService;
   hooks?: HooksService;
   git?: GitService;
+  skill?: SkillService;
 }
 
 export interface OpenHarnessServerOptions {
@@ -353,6 +356,9 @@ export class OpenHarnessHttpServer {
         outputStyleService: this.services.outputStyle,
         projectInitService: this.services.projectInit,
         pluginService: this.services.plugin,
+        skillService:
+          this.services.skill ??
+          createSkillManagementService({ projects: this.application.projects }),
         agentPersonaService: this.services.agentPersona,
         hooksService: this.services.hooks,
         control: this.application.control,

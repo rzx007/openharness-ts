@@ -32,18 +32,66 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
 }
 
 describe("OpenHarnessClient", () => {
+  it("lists and removes skills through daemon resource routes", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const snapshot = {
+      skills: [],
+      projects: [{ name: "App", path: "/repo" }],
+      warnings: [],
+    };
+    const client = new OpenHarnessClient({
+      baseUrl: "http://daemon.test",
+      fetch: (async (url, init = {}) => {
+        calls.push({ url: String(url), init });
+        return jsonResponse(snapshot);
+      }) as typeof fetch,
+    });
+
+    await expect(client.listSkills()).resolves.toEqual(snapshot);
+    await expect(
+      client.removeSkill("skill/a b", { expectedContent: "current" }),
+    ).resolves.toEqual(snapshot);
+
+    expect(
+      calls.map(({ url, init }) => `${init.method ?? "GET"} ${url}`),
+    ).toEqual([
+      "GET http://daemon.test/skills",
+      "DELETE http://daemon.test/skills/skill%2Fa%20b",
+    ]);
+    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({
+      expectedContent: "current",
+    });
+  });
+
   it("scans, repairs, and garbage-collects attachment storage", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = new OpenHarnessClient({
       baseUrl: "http://daemon.test",
       fetch: (async (url, init = {}) => {
         calls.push({ url: String(url), init });
-        const action = init.body ? JSON.parse(String(init.body)).action : undefined;
-        return jsonResponse(action === "gc"
-          ? { scannedAssets: 0, expiredLeases: 0, deletedAssets: 0, deletedBlobs: 0, releasedBytes: 0, skipped: {}, errors: [] }
-          : action === "repair-safe"
-            ? { expiredLeases: 0, deletedOrphanBlobs: 0, releasedBytes: 0 }
-            : { summary: { assets: { importing: 0, ready: 0, failed: 0, deleted: 0 } }, issues: [] });
+        const action = init.body
+          ? JSON.parse(String(init.body)).action
+          : undefined;
+        return jsonResponse(
+          action === "gc"
+            ? {
+                scannedAssets: 0,
+                expiredLeases: 0,
+                deletedAssets: 0,
+                deletedBlobs: 0,
+                releasedBytes: 0,
+                skipped: {},
+                errors: [],
+              }
+            : action === "repair-safe"
+              ? { expiredLeases: 0, deletedOrphanBlobs: 0, releasedBytes: 0 }
+              : {
+                  summary: {
+                    assets: { importing: 0, ready: 0, failed: 0, deleted: 0 },
+                  },
+                  issues: [],
+                },
+        );
       }) as typeof fetch,
     });
 
@@ -51,19 +99,23 @@ describe("OpenHarnessClient", () => {
     await client.repairAttachmentStorage();
     await client.gcAttachmentStorage();
 
-    expect(calls.map(({ url, init }) => `${init.method ?? "GET"} ${url}`)).toEqual([
+    expect(
+      calls.map(({ url, init }) => `${init.method ?? "GET"} ${url}`),
+    ).toEqual([
       "GET http://daemon.test/attachments/storage",
       "POST http://daemon.test/attachments/storage/actions",
       "POST http://daemon.test/attachments/storage/actions",
     ]);
-    expect(calls.slice(1).map(({ init }) => JSON.parse(String(init.body)))).toEqual([
-      { action: "repair-safe" },
-      { action: "gc" },
-    ]);
+    expect(
+      calls.slice(1).map(({ init }) => JSON.parse(String(init.body))),
+    ).toEqual([{ action: "repair-safe" }, { action: "gc" }]);
   });
 
   it("uploads, reads, downloads and deletes attachments with raw bodies", async () => {
-    const calls: Array<{ url: string; init: RequestInit & { duplex?: string } }> = [];
+    const calls: Array<{
+      url: string;
+      init: RequestInit & { duplex?: string };
+    }> = [];
     const ready = {
       id: "att_test",
       displayName: "截图.png",
@@ -114,7 +166,9 @@ describe("OpenHarnessClient", () => {
       status: "deleted",
     });
 
-    expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
+    expect(
+      calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`),
+    ).toEqual([
       "POST http://daemon.test/attachments",
       "GET http://daemon.test/attachments/att_test",
       "GET http://daemon.test/attachments/att_test/content",
@@ -210,7 +264,10 @@ describe("OpenHarnessClient", () => {
     const client = new OpenHarnessClient({
       baseUrl: "http://daemon.test",
       fetch: (async () =>
-        jsonResponse({ error: "attachment_too_large: limit exceeded" }, 413)) as typeof fetch,
+        jsonResponse(
+          { error: "attachment_too_large: limit exceeded" },
+          413,
+        )) as typeof fetch,
     });
 
     await expect(
