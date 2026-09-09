@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { fileURLToPath } from "node:url";
 import type { PluginInfo } from "@openharness/client";
 import { createPluginCommand, formatPluginList } from "./plugin";
 
@@ -86,6 +87,33 @@ describe("formatPluginList", () => {
 });
 
 describe("createPluginCommand", () => {
+  it("previews Codex conversion with permission and loss approvals in JSON", async () => {
+    const output: string[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation(value => { output.push(String(value)); });
+    try {
+      const source = fileURLToPath(new URL("../../../../packages/plugin-converters/fixtures/codex/mixed-plugin", import.meta.url));
+      await createPluginCommand().parseAsync(["convert", source, "--from", "codex", "--dry-run", "--json"], { from: "user" });
+      const result = JSON.parse(output.join("\n"));
+      expect(result.detection.converterId).toBe("codex");
+      expect(result.plan.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ sourceKind: "apps", fidelity: "unsupported", requiredApprovals: ["apps:.app.json"] }),
+        expect.objectContaining({ sourceKind: "mcpServers", requiredApprovals: ["mcpServers:.mcp.json#docs", "network:https://docs.example.invalid"] }),
+      ]));
+    } finally { log.mockRestore(); }
+  });
+
+  it("includes reasons and exact approval arguments in the text conversion preview", async () => {
+    const output: string[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation(value => { output.push(String(value)); });
+    try {
+      const source = fileURLToPath(new URL("../../../../packages/plugin-converters/fixtures/codex/mixed-plugin", import.meta.url));
+      await createPluginCommand().parseAsync(["convert", source, "--from", "codex", "--dry-run"], { from: "user" });
+      expect(output.join("\n")).toContain("no supported Native conversion");
+      expect(output.join("\n")).toContain('--approve "network:https://docs.example.invalid"');
+      expect(output.join("\n")).toContain('--approve "apps:.app.json"');
+    } finally { log.mockRestore(); }
+  });
+
   it("registers list output options", () => {
     const list = createPluginCommand().commands.find(
       (command) => command.name() === "list",

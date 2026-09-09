@@ -6,11 +6,11 @@
 
 ```text
 手写 Native Plugin
-或 Claude Code Source -> Converter -> Native Plugin
+或 Claude Code / Codex Source -> Converter -> Native Plugin
   -> validateNativePlugin
-  -> 当前 cache
+  -> 不可变 cache 快照
   -> installed.json
-  -> Runtime 按 cwd/scope 发现
+  -> Runtime 读取用户安装记录并重新校验快照
   -> 加载 Skills / Agents / Hooks / MCP / Node Tool
 ```
 
@@ -53,6 +53,34 @@ detect -> inspect -> plan -> approve -> convert -> Native validate
 转换产物保存 `provenance.json`、`plan.json` 和 `report.json`，并逐项标记 exact、adapted、unsupported 或 blocked。转换过程只读源文件，不 import JavaScript、不启动 Hook/MCP、不联网或安装依赖。
 
 转换完成后，目录本身就是普通 Native Plugin：组件直接位于 `skills/`、`agents/`、`hooks.json` 和 `mcp.json`，不会再套 `payload/` 或 `generated/`。`plugin.json.metadata` 只保留 converted/sourceFormat/Converter 信息；Installer、Runtime、UI 和 CLI 均按 Native Plugin 管理，`.openharness-conversion/` 仅供审计，删除它不影响安装和运行。
+
+### Codex 导入
+
+Codex 转换器识别 `.codex-plugin/plugin.json`，以及 schema 明确为 Agent Plugins 1.0.0 的根级 `plugin.json`。后者仍是外部输入，需要转换才能安装。portable 格式固定读取 `skills/` 和 `mcp.json`；内联 `extensions.com.openai` 整体替代旧 Codex manifest 的扩展设置。
+
+先查看转换预览：
+
+```sh
+ohs plugin convert ./my-codex-plugin --from codex --dry-run
+ohs plugin convert ./my-codex-plugin --from codex --dry-run --json
+```
+
+确认预览中的每项变化后，重复传入对应 `--approve <item>`，选择输出目录或直接安装：
+
+```sh
+ohs plugin convert ./my-codex-plugin --from codex --output ./native-plugin
+ohs plugin install ./my-codex-plugin --from codex
+```
+
+以上两条命令适用于不需要额外批准的纯 Skills 插件。有 MCP、有损项或 `agents/openai.yaml` 时，必须补上预览列出的批准参数。输出目录必须不存在，且不能位于源目录内。
+
+Skills 保留原来的包内位置及相对资源路径；Native manifest 逐个声明 `SKILL.md`，不会把说明文档误当作技能。MCP 输出到 `mcp/servers.json`，网络地址或进程请求写入 Native permissions，安装时再校验批准。
+
+首版可转换普通 HTTP/SSE MCP，以及通过 PATH 运行、参数不依赖本地脚本或安装命令的 stdio MCP。Apps、Hooks、`agents/openai.yaml` 中的调用策略/工具依赖、复杂认证、未知 MCP 字段、插件根变量和自动下载依赖等明确报告 `unsupported`；批准表示接受这些内容不进入 Native 运行配置。全部组件都不支持时，不生成可安装产物。
+
+具体边界见 [Codex 转换器设计](./superpowers/specs/2026-09-09-codex-plugin-converter-design.md)，验证步骤见 [实现计划](./superpowers/plans/2026-09-09-codex-plugin-converter.md)。
+
+本次还修正了共享来源摘要的二进制编码歧义。历史转换计划需要重新 `inspect/plan`；已经安装的 Native 快照与权限记录不需要迁移。
 
 ## 诊断与安全边界
 

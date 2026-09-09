@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 function stable(value: unknown): string {
@@ -18,7 +18,18 @@ async function files(root: string, dir = root): Promise<string[]> {
   return out;
 }
 export async function digestSource(root: string): Promise<string> {
+  if ((await lstat(root)).isSymbolicLink()) throw new Error("Source root link is not allowed");
   const hash = createHash("sha256");
-  for (const file of await files(root)) { hash.update(relative(root, file).replaceAll("\\", "/")); hash.update("\0"); hash.update(await readFile(file)); hash.update("\0"); }
+  hash.update("openharness-source-v2\n");
+  for (const file of await files(root)) {
+    const content = await readFile(file);
+    // Hash an unambiguous record: arbitrary binary bytes cannot impersonate file boundaries.
+    hash.update(JSON.stringify([
+      relative(root, file).replaceAll("\\", "/"),
+      content.length,
+      createHash("sha256").update(content).digest("hex"),
+    ]));
+    hash.update("\n");
+  }
   return hash.digest("hex");
 }

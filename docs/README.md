@@ -115,9 +115,10 @@
 - [Native / WSL 运行环境与 SRT](./sandbox-runtime-design.md)：运行位置与本机 SRT 权限边界。
 - [LSP Client 设计](./lsp-client-design.md)：把当前正则/ripgrep 近似实现替换成真实语言服务器连接，说明协议库选型、Runtime 生命周期、环境路径、权限和分阶段验收。
 - [MCP HTTP Transport](./mcp-http-transport-design.md)：MCP HTTP/SSE 与鉴权。
-- [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：下一版 Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换流程。
+- [OpenHarness 原生插件与外部转换器设计](./superpowers/specs/2026-08-25-native-plugin-and-converters-design.md)：Native Plugin 唯一运行时契约，以及 Claude Code、Codex 等外部格式的独立转换设计。
+- [OpenHarness 插件系统最终形态交接](./plugin-system-handoff.md)：面向后续开发者说明最终用户形态、Native Plugin 契约、转换与安装边界、当前完成度和建议实施顺序。
 - [Native Plugin v1 与 Claude Code Converter 实施计划](./superpowers/plans/2026-08-25-native-plugin-and-claude-converter.md)：按 Native schema、安装激活、格式硬切、Converter core 和 Claude 转换闭环拆分的可执行任务。
-- [Plugin Contributions（待替换的当前实现）](./plugins-contributions-design.md)：仓库当前代码怎样加载旧 OpenHarness 专用插件；不代表下一版格式。
+- [Native Plugin 当前实现](./plugins-contributions-design.md)：当前 Native Plugin 的 manifest、安装快照、外部转换、Runtime 激活和安全边界。
 - [Claude Code 真实插件回归](./claude-real-plugin-regression.md)：用固定 commit 的真实 Claude Code 插件样本验证 detect、convert、install 和 Runtime discover 全链路。
 - [Slash Commands](./slash-commands.md) 与 [Slash Command Flow](./slash-commands-flow.md)：当前命令清单、三层分流和执行入口。
 

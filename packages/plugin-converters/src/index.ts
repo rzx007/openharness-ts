@@ -9,7 +9,14 @@ export * from "./claude-code/parser.js";
 export * from "./claude-code/mappings.js";
 export * from "./claude-code/convert-agents.js";
 export * from "./claude-code/converter.js";
+export * from "./codex/converter.js";
 
 import { ConverterRegistry } from "./core/registry.js";
 import { ClaudeCodePluginConverter } from "./claude-code/converter.js";
-export function createBuiltinConverterRegistry(): ConverterRegistry { const registry = new ConverterRegistry(); registry.register(new ClaudeCodePluginConverter()); return registry; }
+import { CodexPluginConverter } from "./codex/converter.js";
+export function createBuiltinConverterRegistry(): ConverterRegistry {
+  const registry = new ConverterRegistry();
+  registry.register(new ClaudeCodePluginConverter());
+  registry.register(new CodexPluginConverter());
+  return registry;
+}

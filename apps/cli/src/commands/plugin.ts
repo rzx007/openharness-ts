@@ -6,7 +6,7 @@ import {
   requestedPluginPermissions,
   validateNativePlugin,
 } from "@openharness/plugins";
-import { createBuiltinConverterRegistry } from "@openharness/plugin-converters";
+import { createBuiltinConverterRegistry, type ConversionPlan } from "@openharness/plugin-converters";
 import { Command } from "commander";
 import { ensureLocalDaemon } from "../ensure-daemon.js";
 
@@ -15,6 +15,14 @@ async function client(): Promise<OpenHarnessClient> {
   return new OpenHarnessClient({ baseUrl: daemon.url, token: daemon.token });
 }
 const collect = (value: string, previous: string[]) => [...previous, value];
+
+function formatConversionPlan(plan: ConversionPlan): string {
+  return plan.items.map(item => [
+    `${item.fidelity.padEnd(11)} ${item.id}`,
+    ...(item.reason ? [`  ${item.reason}`] : []),
+    ...(item.requiredApprovals ?? []).map(approval => `  --approve ${JSON.stringify(approval)}`),
+  ].join("\n")).join("\n");
+}
 
 type PluginListResult = { plugins: PluginInfo[]; warnings: string[] };
 
@@ -173,7 +181,7 @@ export function createPluginCommand(): Command {
     if (!plugin) throw new Error(`Plugin not found: ${id}`);
     console.log(JSON.stringify(plugin, null, 2));
   });
-  cmd.command("install").argument("<source>").requiredOption("--from <converter>")
+  cmd.command("install").argument("<source>").requiredOption("--from <converter>", "source converter: claude-code or codex")
     .option("--cwd <path>").option("--approve <item>", "approve conversion item or permission", collect, [])
     .action(async (source, options) => {
       const temporaryRoot = await mkdtemp(join(tmpdir(), "ohs-plugin-import-"));
@@ -196,15 +204,15 @@ export function createPluginCommand(): Command {
       } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
     });
   cmd.command("convert").argument("<source>")
-    .option("--from <converter>").option("--output <path>").option("--dry-run").option("--json")
-    .option("--approve <item>", "approve a blocked conversion item", collect, [])
+    .option("--from <converter>", "source converter: claude-code or codex").option("--output <path>").option("--dry-run").option("--json")
+    .option("--approve <item>", "approve a conversion change, omitted component, or permission shown in the plan", collect, [])
     .action(async (source, options) => {
       const registry = createBuiltinConverterRegistry();
       const { converter, detection } = await registry.detect(resolve(source), options.from);
       const inspection = await converter.inspect(resolve(source));
       const plan = await converter.plan(inspection, {});
       if (options.dryRun) {
-        console.log(options.json ? JSON.stringify({ detection, inspection, plan }, null, 2) : plan.items.map((item) => `${item.fidelity.padEnd(11)} ${item.id}`).join("\n"));
+        console.log(options.json ? JSON.stringify({ detection, inspection, plan }, null, 2) : formatConversionPlan(plan));
         return;
       }
       if (!options.output) throw new Error("--output is required unless --dry-run is used");

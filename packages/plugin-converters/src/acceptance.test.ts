@@ -8,8 +8,10 @@ import {
   installLocalNativePlugin,
   loadNativePlugin,
   validateNativePlugin,
+  verifyInstalledNativePlugin,
 } from "@openharness/plugins";
 import { ClaudeCodePluginConverter } from "./claude-code/converter.js";
+import { CodexPluginConverter } from "./codex/converter.js";
 
 const source = fileURLToPath(new URL("../fixtures/claude-code/mixed-plugin", import.meta.url));
 const cleanup: string[] = [];
@@ -21,6 +23,34 @@ afterEach(async () => {
 });
 
 describe("Native Plugin acceptance", () => {
+  it("installs a converted Codex plugin only with approved permissions and loads it after the source is removed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohs-codex-acceptance-")); cleanup.push(root);
+    process.env.OPENHARNESS_CONFIG_DIR = join(root, "config");
+    const converter = new CodexPluginConverter();
+    const inspection = await converter.inspect(fileURLToPath(new URL("../fixtures/codex/mixed-plugin", import.meta.url)));
+    const plan = await converter.plan(inspection);
+    const output = join(root, "converted");
+    await converter.convert({ inspection, plan, output, approvals: plan.items.flatMap(item => item.requiredApprovals ?? []) });
+    const denied = await installLocalNativePlugin({ sourcePath: output, scope: "user", cwd: root, approvedPermissions: [] });
+    expect(denied.status).toBe("blocked");
+    expect(await discoverInstalledNativePlugins({ cwd: root })).toHaveLength(0);
+    const installed = await installLocalNativePlugin({ sourcePath: output, scope: "user", cwd: root, approvedPermissions: ["network:https://docs.example.invalid"] });
+    expect(installed.status).toBe("installed");
+    if (installed.status !== "installed") throw new Error("Expected installed Codex fixture");
+    expect(installed.record).toMatchObject({ origin: "converted", sourceFormat: "codex", requestedPermissions: ["network:https://docs.example.invalid"], enabled: true });
+    await rm(output, { recursive: true, force: true });
+    const records = await discoverInstalledNativePlugins({ cwd: root });
+    expect(records).toHaveLength(1);
+    const verified = await verifyInstalledNativePlugin(records[0]!);
+    expect(verified.status).toBe("valid");
+    if (verified.status !== "valid") throw new Error("Expected valid installed Codex snapshot");
+    const loaded = await loadNativePlugin(verified.plugin);
+    expect(loaded.status).toBe("loaded");
+    expect(loaded.components.skills?.value).toHaveLength(1);
+    expect(loaded.components.mcpServers?.value?.docs).toEqual({ type: "http", url: "https://docs.example.invalid/mcp" });
+    expect(loaded.components.tools).toBeUndefined();
+  });
+
   it("converts, validates, installs, discovers and loads a Claude source without executing it", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohs-plugin-acceptance-")); cleanup.push(root);
     process.env.OPENHARNESS_CONFIG_DIR = join(root, "config");

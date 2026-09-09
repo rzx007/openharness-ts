@@ -1,0 +1,9 @@
+{
+  "name": "review-helper",
+  "version": "1.2.3",
+  "description": "A minimal Codex conversion fixture",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
+  "interface": { "displayName": "Review Helper" }
+}
