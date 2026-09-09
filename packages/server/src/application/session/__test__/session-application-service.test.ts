@@ -23,7 +23,10 @@ function createService(options: {
   owningRun?: Record<string, any>;
 } = {}) {
   const store = {
+    transaction: vi.fn((work: () => unknown) => work()),
     createSession: vi.fn((input) => ({ ...session, ...input })),
+    createMessage: vi.fn((input) => ({ id: "model-switch-message", ...input })),
+    upsertMessagePart: vi.fn((input) => ({ id: "model-switch-part", ...input })),
     getSession: vi.fn(() => session),
     updateSession: vi.fn((_sessionId, input) => ({ ...session, ...input })),
     listChildSessions: vi.fn(() => []),
@@ -225,7 +228,35 @@ describe("SessionApplicationService", () => {
       model: "next-model",
       metadata: { runtime: { model: "next-model" } },
     }));
+    expect(store.transaction).toHaveBeenCalledOnce();
+    expect(store.createMessage).toHaveBeenCalledWith({
+      sessionId: "s1",
+      role: "system",
+      metadata: {
+        presentation: {
+          kind: "model_switch",
+          fromModel: "gpt-test",
+          toModel: "next-model",
+        },
+      },
+    });
+    expect(store.upsertMessagePart).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "s1",
+      messageId: "model-switch-message",
+      type: "text",
+      status: "completed",
+      text: "模型已切换 gpt-test → next-model",
+    }));
     expect(agentPool.close).toHaveBeenCalledWith("s1");
+  });
+
+  it("does not create a presentation message when the model is unchanged", async () => {
+    const { service, store } = createService();
+
+    await service.updateSession("s1", { metadata: { runtime: { model: "gpt-test" } } });
+
+    expect(store.createMessage).not.toHaveBeenCalled();
+    expect(store.upsertMessagePart).not.toHaveBeenCalled();
   });
 
   it("routes attachment prompts to the durable run engine instead of a live child", async () => {

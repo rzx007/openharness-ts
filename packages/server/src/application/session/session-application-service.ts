@@ -302,18 +302,38 @@ export class SessionApplicationService {
       const nextModel = metadata
         ? readSessionRuntimeConfig({ ...existing, metadata }).model
         : undefined;
-      const session = this.context.store.updateSession(sessionId, {
-        title: input.title,
-        model: nextModel,
-        agent: input.agent,
-        metadata,
+      const modelChanged = nextModel !== undefined && nextModel !== existing.model;
+      const session = this.context.store.transaction(() => {
+        const updated = this.context.store.updateSession(sessionId, {
+          title: input.title,
+          model: nextModel,
+          agent: input.agent,
+          metadata,
+        });
+        if (!modelChanged) return updated;
+        const message = this.context.store.createMessage({
+          sessionId,
+          role: "system",
+          metadata: {
+            presentation: {
+              kind: "model_switch",
+              fromModel: existing.model,
+              toModel: nextModel,
+            },
+          },
+        });
+        this.context.store.upsertMessagePart({
+          sessionId,
+          messageId: message.id,
+          type: "text",
+          status: "completed",
+          text: `模型已切换 ${existing.model} → ${nextModel}`,
+        });
+        return updated;
       });
       if (runtimeConfigurationChanged)
         await this.context.agentPool.close(sessionId);
-      if (
-        nextModel !== undefined &&
-        nextModel !== existing.model
-      ) {
+      if (modelChanged) {
         this.context.contextUsageCache?.invalidate(sessionId);
       }
       this.context.events.publishSince(before);

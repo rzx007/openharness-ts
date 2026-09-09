@@ -3,6 +3,97 @@ import { describe, expect, it } from "vitest";
 import { agentMessagesToTranscript, buildAgentTranscript } from "../agent-transcript.js";
 
 describe("agent transcript codec", () => {
+  it("filters valid presentation messages but preserves ordinary system messages", () => {
+    const transcript = buildAgentTranscript(
+      [
+        {
+          id: "presentation",
+          sessionId: "session-1",
+          seq: 1,
+          role: "system",
+          metadata: {
+            presentation: {
+              kind: "model_switch",
+              fromModel: "model-a",
+              toModel: "model-b",
+            },
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "ordinary-system",
+          sessionId: "session-1",
+          seq: 2,
+          role: "system",
+          metadata: {},
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+      [
+        {
+          id: "presentation-part",
+          sessionId: "session-1",
+          messageId: "presentation",
+          seq: 1,
+          type: "text",
+          status: "completed",
+          text: "模型已切换 model-a → model-b",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "ordinary-part",
+          sessionId: "session-1",
+          messageId: "ordinary-system",
+          seq: 1,
+          type: "text",
+          status: "completed",
+          text: "keep this instruction",
+          metadata: {},
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+    );
+
+    expect(transcript.messages).toEqual([
+      { type: "system", content: "keep this instruction" },
+    ]);
+  });
+
+  it("keeps malformed presentation metadata as a normal system message", () => {
+    const transcript = buildAgentTranscript(
+      [{
+        id: "malformed",
+        sessionId: "session-1",
+        seq: 1,
+        role: "system",
+        metadata: { presentation: { kind: "model_switch", toModel: "model-b" } },
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+      [{
+        id: "malformed-part",
+        sessionId: "session-1",
+        messageId: "malformed",
+        seq: 1,
+        type: "text",
+        status: "completed",
+        text: "do not hide me",
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    );
+
+    expect(transcript.messages).toEqual([
+      { type: "system", content: "do not hide me" },
+    ]);
+  });
+
   it("preserves assistant commentary and final-answer phases", () => {
     const transcript = buildAgentTranscript(
       [{

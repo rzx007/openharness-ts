@@ -36,6 +36,7 @@ export function buildAgentTranscript(
   const output: Message[] = [];
   const attachmentsByMessageId: Record<string, AgentTranscriptAttachment[]> = {};
   for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
+    if (isPresentationOnlyMessage(message)) continue;
     const messageParts = (byMessage.get(message.id) ?? []).sort((a, b) => a.seq - b.seq);
     const attachments = attachmentsFromParts(messageParts);
     if (attachments.length > 0) attachmentsByMessageId[message.id] = attachments;
@@ -78,6 +79,21 @@ export function buildAgentTranscript(
     }
   }
   return { messages: output, attachmentsByMessageId };
+}
+
+function isPresentationOnlyMessage(message: SessionMessageRecord): boolean {
+  const presentation = message.metadata.presentation;
+  if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) {
+    return false;
+  }
+  const value = presentation as Record<string, unknown>;
+  return (
+    value.kind === "model_switch" &&
+    typeof value.fromModel === "string" &&
+    Boolean(value.fromModel.trim()) &&
+    typeof value.toModel === "string" &&
+    Boolean(value.toModel.trim())
+  );
 }
 
 export function agentMessagesToTranscript(messages: Message[]): ReplaceTranscriptMessageInput[] {
