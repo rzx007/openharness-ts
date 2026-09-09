@@ -7,6 +7,76 @@ import { MessageBlock } from "./message-block"
 import { visibleTranscriptParts } from "./transcript-visibility"
 
 describe("visibleTranscriptParts", () => {
+  it("renders a model switch presentation message as an accessible divider", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBlock, {
+        message: {
+          id: "model-switch",
+          sessionId: "session-1",
+          seq: 1,
+          role: "system",
+          metadata: {
+            presentation: {
+              kind: "model_switch",
+              fromModel: "GLM-5.3",
+              toModel: "GLM-5.3-Flash",
+            },
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        parts: [],
+        streaming: false,
+        onOpenFile: () => undefined,
+        canOpenReview: false,
+        onOpenReview: () => undefined,
+        onOpenTerminal: () => undefined,
+      })
+    )
+
+    expect(html).toContain('role="separator"')
+    expect(html).toContain("模型已切换")
+    expect(html).toContain("GLM-5.3")
+    expect(html).toContain("GLM-5.3-Flash")
+    expect(html).toContain('aria-label="模型已切换 GLM-5.3 到 GLM-5.3-Flash"')
+  })
+
+  it("keeps ordinary system messages in their existing text presentation", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBlock, {
+        message: {
+          id: "ordinary-system",
+          sessionId: "session-1",
+          seq: 1,
+          role: "system",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        parts: [{
+          id: "ordinary-system-part",
+          sessionId: "session-1",
+          messageId: "ordinary-system",
+          seq: 1,
+          type: "text",
+          status: "completed",
+          text: "普通系统提示",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+        streaming: false,
+        onOpenFile: () => undefined,
+        canOpenReview: false,
+        onOpenReview: () => undefined,
+        onOpenTerminal: () => undefined,
+      })
+    )
+
+    expect(html).toContain("普通系统提示")
+    expect(html).not.toContain('role="separator"')
+  })
+
   it("renders selected skill metadata as a compact capsule above the user task", () => {
     const message: DesktopSessionMessage = {
       id: "message-skill",

@@ -24,6 +24,10 @@ import type {
   DesktopSessionPart,
 } from "@shared/session-types"
 import { MessageAttachment } from "./message-attachment"
+import {
+  ModelSwitchDivider,
+  readModelSwitchPresentation,
+} from "./message/model-switch-divider"
 
 const collapsibleUserMessageChars = 900
 const collapsibleUserMessageLines = 14
@@ -68,6 +72,8 @@ export function MessageBlock({
   }
 
   if (message.role === "system") {
+    const modelSwitch = readModelSwitchPresentation(message.metadata)
+    if (modelSwitch) return <ModelSwitchDivider presentation={modelSwitch} />
     const content = parts.map((part) => part.text ?? "").join("")
     return <p className="text-xs whitespace-pre-wrap text-ui-muted">{content}</p>
   }
