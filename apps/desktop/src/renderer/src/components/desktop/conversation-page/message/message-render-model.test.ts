@@ -230,6 +230,24 @@ describe("message render model", () => {
       status: "failed",
       isError: true,
     })).toEqual({ name: "本地 OCR 提取失败", detail: "可以重新发送消息重试" })
+    expect(summarizeToolCall({
+      ...toolPart("ImageToText", { image_path: "attachment://att-1" }),
+      status: "failed",
+      isError: true,
+      metadata: { failureKind: "command" },
+    })).toEqual({ name: "本地 OCR 未能启动", detail: "图片引用无效，请重新发送图片后重试" })
+    expect(summarizeToolCall({
+      ...toolPart("ImageToText", { attachment_id: "att-1" }),
+      status: "failed",
+      isError: true,
+      metadata: { failureKind: "command" },
+    })).toEqual({ name: "本地 OCR 未能启动", detail: "请重新发送消息后重试" })
+    expect(summarizeToolCall({
+      ...toolPart("ImageToText", { image_path: "receipt.png" }),
+      status: "failed",
+      isError: true,
+      metadata: { failureKind: "command" },
+    })).toEqual({ name: "本地 OCR 未能启动", detail: "请重新发送消息后重试" })
   })
 })
 

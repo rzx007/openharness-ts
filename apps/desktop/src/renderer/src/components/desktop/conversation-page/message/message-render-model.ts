@@ -234,6 +234,13 @@ export function toolDisplayName(call: DesktopSessionPart, result?: DesktopSessio
 function summarizeLocalOcr(part: DesktopSessionPart): { name: string; detail?: string } {
   const metadata = recordValue(part.metadata.attachmentOcr)
   if (part.status === "failed" || part.isError) {
+    if (part.metadata.failureKind === "command") {
+      const imagePath = typeof part.input?.image_path === "string" ? part.input.image_path : ""
+      if (imagePath.startsWith("attachment://")) {
+        return { name: "本地 OCR 未能启动", detail: "图片引用无效，请重新发送图片后重试" }
+      }
+      return { name: "本地 OCR 未能启动", detail: "请重新发送消息后重试" }
+    }
     return { name: "本地 OCR 提取失败", detail: "可以重新发送消息重试" }
   }
   if (metadata?.status === "no_text_detected") {

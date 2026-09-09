@@ -69,6 +69,28 @@ describe("AttachmentCapabilityRouter", () => {
     expect((result.content[1] as { text: string }).text).toContain("receipt");
   });
 
+  it("keeps an attachment OCR reference beside a natively delivered image", async () => {
+    const { router, resolveReadyContentPath } = harness();
+    const result = await router.route({
+      text: "OCR this image",
+      attachments: [attachment("receipt", 0)],
+      modelCapabilities: { image: "native" },
+      providerCapabilities: { image: "native", imageMediaTypes: ["image/png"] },
+      availableTools: ["ImageToText"],
+      attachmentOcrAvailable: true,
+    } as any);
+
+    expect(resolveReadyContentPath).toHaveBeenCalledWith("receipt");
+    expect(result.decisions).toEqual([
+      expect.objectContaining({ assetId: "receipt", route: "native_image" }),
+    ]);
+    expect(result.content).toEqual([
+      { type: "text", text: "OCR this image" },
+      expect.objectContaining({ type: "image" }),
+      { type: "text", text: expect.stringContaining('"attachment_id":"receipt"') },
+    ]);
+  });
+
   it("blocks OCR fallback before provider execution when ImageToText is filtered out", async () => {
     const { router } = harness();
     await expect(router.route({
