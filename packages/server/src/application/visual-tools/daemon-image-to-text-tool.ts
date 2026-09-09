@@ -98,8 +98,8 @@ async function recognizeAttachment(
     attachmentOcr: AttachmentOcrService;
   },
 ): Promise<ToolResult> {
-  if (Object.keys(input).some((key) => key !== "attachment_id")) {
-    return errorResult("attachment_id cannot be combined with image_path, image_url, or prompt", "command");
+  if (Object.keys(input).some((key) => key !== "attachment_id" && key !== "prompt")) {
+    return errorResult("attachment_id cannot be combined with another image source", "command");
   }
   const assetId = typeof input.attachment_id === "string" ? input.attachment_id.trim() : "";
   if (!assetId || !context.sessionId) return errorResult("attachment_resource_access_denied", "command");

@@ -107,7 +107,34 @@ describe("daemon ImageToText tool", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects mixed attachment input before OCR", async () => {
+  it("accepts an optional prompt with attachment OCR", async () => {
+    const recognize = vi.fn(async () => ({
+      status: "completed" as const,
+      text: "invoice 123",
+      representationId: "rep-1",
+      processor: "light-ocr" as const,
+      processorVersion: "1",
+      cached: false,
+      lineCount: 1,
+      durationMs: 2,
+    }));
+    const tool = createDaemonImageToTextTool({
+      authorizationSessions: { resolve: () => "root" },
+      attachmentOcr: { recognize },
+    });
+
+    const result = await tool.execute(
+      { attachment_id: "att-1", prompt: "Extract the visible text." },
+      { cwd: "C:/work", sessionId: "child" },
+    );
+    expect(result).toMatchObject({
+      metadata: { attachmentOcr: { assetId: "att-1" } },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(recognize).toHaveBeenCalledOnce();
+  });
+
+  it("rejects combining an attachment with another image source", async () => {
     const recognize = vi.fn();
     const tool = createDaemonImageToTextTool({
       authorizationSessions: { resolve: () => "root" },
@@ -115,7 +142,7 @@ describe("daemon ImageToText tool", () => {
     });
 
     await expect(tool.execute(
-      { attachment_id: "att-1", prompt: "describe" },
+      { attachment_id: "att-1", image_path: "invoice.png" },
       { cwd: "C:/work", sessionId: "child" },
     )).resolves.toMatchObject({ isError: true, failureKind: "command" });
     expect(recognize).not.toHaveBeenCalled();
