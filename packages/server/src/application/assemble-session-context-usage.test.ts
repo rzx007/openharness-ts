@@ -192,11 +192,17 @@ describe("assembleSessionContextUsage", () => {
       updatedAt: 1,
     };
     const store = {
+      transaction: vi.fn((work: () => unknown) => work()),
       getSession: vi.fn(() => session),
       updateSession: vi.fn((_id: string, input: Record<string, unknown>) => ({
         ...session,
         ...input,
       })),
+      createMessage: vi.fn((input: Record<string, unknown>) => ({
+        id: "model-switch-message",
+        ...input,
+      })),
+      upsertMessagePart: vi.fn(),
     };
     const agentPool = {
       configured: true,
