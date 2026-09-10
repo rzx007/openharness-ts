@@ -289,7 +289,7 @@ export interface PluginService {
   }): Promise<{ message: string; restartRuntimes?: boolean }>;
 }
 
-export type SkillSource = "bundled" | "agent" | "project" | "personal";
+export type SkillSource = "bundled" | "agent" | "standard" | "project" | "personal";
 export interface SkillInfo {
   id: string;
   name: string;

@@ -88,13 +88,14 @@ async function resolveSkillRegistry(
   const sharedRegistry = context.skillRegistry as SkillRegistryInstance | undefined;
   if (sharedRegistry && !options.refreshFilesystem) return sharedRegistry;
 
-  const { createSkillRegistrySnapshot, findProjectSkillDirs } = await import("@openharness/skills");
+  const { createSkillRegistrySnapshot, findProjectSkillDirs, standardUserSkillDirs } = await import("@openharness/skills");
   const { getSkillsDir } = await import("@openharness/core");
   const baseline = sharedRegistry?.getAll().filter((skill) =>
     skill.source === "plugin" || !skill.path
   ) ?? [];
   return createSkillRegistrySnapshot({
     baseline,
+    userDirs: standardUserSkillDirs(),
     userDir: getSkillsDir(),
     projectDirs: await findProjectSkillDirs(
       context.environment?.workspace?.hostRoot ?? context.cwd,

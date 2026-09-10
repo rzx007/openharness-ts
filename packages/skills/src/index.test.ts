@@ -5,6 +5,7 @@ import {
   parseSkillMarkdown,
   findProjectSkillDirs,
   createSkillRegistrySnapshot,
+  standardUserSkillDirs,
   BUNDLED_SKILLS,
   type SkillDefinition,
 } from "../src/index.js";
@@ -140,6 +141,42 @@ describe("createSkillRegistrySnapshot", () => {
 
     expect(registry.get("winner")?.description).toBe("project");
     expect(registry.get("winner")?.source).toBe("project");
+  });
+
+  it("loads standard user directories before the OHS user directory", async () => {
+    const standardA = path.resolve("/standard-a");
+    const standardB = path.resolve("/standard-b");
+    const personal = path.resolve("/personal");
+    mockedReaddir.mockImplementation(async (target) => {
+      const value = String(target);
+      if ([standardA, standardB, personal].includes(value)) {
+        return [{ name: "winner.md", isFile: () => true, isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    });
+    mockedReadFile.mockImplementation(async (target) => {
+      const value = String(target);
+      const directory = value.includes("personal") ? "personal" : "standard";
+      return `---\nname: winner\ndescription: ${directory}\n---\n${directory}`;
+    });
+
+    const registry = await createSkillRegistrySnapshot({
+      bundled: false,
+      userDirs: [standardA, standardA, standardB],
+      userDir: personal,
+    });
+
+    expect(registry.get("winner")?.description).toBe("personal");
+    expect(mockedReaddir.mock.calls.filter(([target]) => target === standardA)).toHaveLength(1);
+  });
+});
+
+describe("standardUserSkillDirs", () => {
+  it("returns both open Agent Skills global directories", () => {
+    expect(standardUserSkillDirs(path.resolve("/home/dev"))).toEqual([
+      path.join(path.resolve("/home/dev"), ".agents", "skills"),
+      path.join(path.resolve("/home/dev"), ".config", "agents", "skills"),
+    ]);
   });
 });
 
@@ -580,6 +617,7 @@ describe("findProjectSkillDirs", () => {
     expect(dirs).not.toContain(path.join(home, ".openharness-ts", "skills"));
     expect(dirs).not.toContain(path.join(home, ".claude", "skills"));
     expect(dirs).not.toContain(path.join(home, ".agents", "skills"));
+    expect(dirs).not.toContain(path.join(home, ".config", "agents", "skills"));
     expect(dirs).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@ import {
   BUNDLED_SKILLS,
   SkillLoader,
   SkillRegistry,
+  standardUserSkillDirs,
 } from "@openharness/skills";
 import type {
   SkillInfo,
@@ -35,6 +36,7 @@ interface SkillFixture {
 export interface SkillManagementServiceOptions {
   projects: ProjectCatalog;
   configDir?: string;
+  standardSkillsDirs?: readonly string[];
   bundledSkills?: readonly SkillFixture[];
 }
 interface ValidProject {
@@ -46,6 +48,7 @@ export class SkillManagementService implements SkillService {
   private readonly personalSkillsDir: string;
   private readonly configDir: string;
   private readonly bundledSkills: readonly SkillFixture[];
+  private readonly standardSkillsDirs: readonly string[];
 
   constructor(private readonly options: SkillManagementServiceOptions) {
     const defaultSkillsDir = getSkillsDir();
@@ -53,6 +56,7 @@ export class SkillManagementService implements SkillService {
     this.personalSkillsDir = options.configDir
       ? join(this.configDir, "skills")
       : resolve(defaultSkillsDir);
+    this.standardSkillsDirs = options.standardSkillsDirs ?? standardUserSkillDirs();
     this.bundledSkills = options.bundledSkills ?? BUNDLED_SKILLS;
   }
 
@@ -87,6 +91,9 @@ export class SkillManagementService implements SkillService {
       if (key(managed) !== key(this.personalSkillsDir)) {
         await this.load(managed, "project", skills, seen, warnings, project);
       }
+    }
+    for (const directory of uniqueDirectories(this.standardSkillsDirs, this.personalSkillsDir)) {
+      await this.load(directory, "standard", skills, seen, warnings);
     }
     await this.load(this.personalSkillsDir, "personal", skills, seen, warnings);
     return { skills, projects: projects.map(({ info }) => info), warnings };
@@ -195,7 +202,7 @@ function desktopSkill(
     content: skill.content,
     path: skill.path,
     source,
-    readOnly: source === "bundled" || source === "agent",
+    readOnly: source === "bundled" || source === "agent" || source === "standard",
     ...(project
       ? { projectPath: project.path, projectName: project.name }
       : {}),
@@ -225,4 +232,19 @@ function within(root: string, target: string): boolean {
 function key(path: string): string {
   const normalized = resolve(path);
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function uniqueDirectories(
+  directories: readonly string[],
+  personalSkillsDir: string,
+): string[] {
+  const personalKey = key(personalSkillsDir);
+  const seen = new Set<string>();
+  return directories.flatMap((directory) => {
+    const resolved = resolve(directory);
+    const directoryKey = key(resolved);
+    if (directoryKey === personalKey || seen.has(directoryKey)) return [];
+    seen.add(directoryKey);
+    return [resolved];
+  });
 }

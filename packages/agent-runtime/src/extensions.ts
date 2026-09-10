@@ -18,6 +18,7 @@ import {
   createSkillRegistrySnapshot,
   SkillRegistry,
   findProjectSkillDirs,
+  standardUserSkillDirs,
 } from "@openharness/skills";
 import { activateNativePluginTools, type NativeToolActivationResult } from "./native-tools/activate.js";
 
@@ -66,6 +67,7 @@ export async function discoverOpenHarnessExtensions(
   }
   const skillRegistry = await createSkillRegistrySnapshot({
     plugins: plugins.flatMap((plugin) => plugin.components.skills?.value ?? []),
+    userDirs: standardUserSkillDirs(),
     userDir: getSkillsDir(),
     projectDirs: await findProjectSkillDirs(cwd),
   });

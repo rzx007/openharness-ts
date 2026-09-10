@@ -78,6 +78,15 @@ const mixedSnapshot = {
       projectName: "Other",
     },
     {
+      id: "standard",
+      name: "standard",
+      description: "standard",
+      content: "standard",
+      path: "C:/Users/ruanz/.agents/skills/standard/SKILL.md",
+      source: "standard",
+      readOnly: true,
+    },
+    {
       id: "personal",
       name: "personal",
       description: "personal",
@@ -125,6 +134,7 @@ describe("DesktopSkillService", () => {
         mixedSnapshot.skills[2],
         mixedSnapshot.skills[3],
         mixedSnapshot.skills[4],
+        mixedSnapshot.skills[5],
       ],
     })
     expect(daemon.listSkills).toHaveBeenCalledOnce()

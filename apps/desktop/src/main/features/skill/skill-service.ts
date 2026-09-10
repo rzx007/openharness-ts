@@ -70,7 +70,12 @@ function filterOutsideProjectWorkspaces(
     warnings: snapshot.warnings,
     projects,
     skills: snapshot.skills.filter((skill) => {
-      if (skill.source === "bundled" || skill.source === "personal") return true
+      if (
+        skill.source === "bundled" ||
+        skill.source === "standard" ||
+        skill.source === "personal"
+      )
+        return true
       if (!skill.projectPath) return false
       return projectKeys.has(pathKey(skill.projectPath))
     }),

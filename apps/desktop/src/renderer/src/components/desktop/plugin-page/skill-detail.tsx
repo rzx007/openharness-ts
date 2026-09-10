@@ -24,6 +24,7 @@ import { exportSkillMarkdown } from "./skill-export"
 const sourceLabels: Record<DesktopSkillInfo["source"], string> = {
   bundled: "内置 · 只读",
   agent: "Agent 目录 · 只读",
+  standard: "通用 · 只读",
   project: "项目技能",
   personal: "个人 · OHS 全局技能",
 }

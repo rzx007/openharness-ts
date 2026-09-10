@@ -22,10 +22,12 @@ afterEach(async () => {
 });
 
 describe("SkillManagementService", () => {
-  it("discovers registered project, agent, personal, and bundled skills", async () => {
+  it("discovers registered project, agent, standard, personal, and bundled skills", async () => {
     const root = await temp();
     const project = join(root, "project");
     const config = join(root, "config");
+    const standardAgents = join(root, ".agents", "skills");
+    const standardConfig = join(root, ".config", "agents", "skills");
     await skill(join(project, ".agents", "skills", "agent.md"), "agent");
     await skill(
       join(project, ".claude", "skills", "claude", "SKILL.md"),
@@ -36,9 +38,12 @@ describe("SkillManagementService", () => {
       "project",
     );
     await skill(join(config, "skills", "personal.md"), "personal");
+    await skill(join(standardAgents, "standard-a.md"), "standard-a");
+    await skill(join(standardConfig, "standard-b.md"), "standard-b");
     const service = createSkillManagementService({
       projects: { list: () => [{ name: "Project", path: project }] },
       configDir: config,
+      standardSkillsDirs: [standardAgents, standardConfig],
       bundledSkills: [bundled("builtin")],
     });
 
@@ -51,8 +56,14 @@ describe("SkillManagementService", () => {
       ["agent", "agent", true],
       ["claude", "agent", true],
       ["project", "project", false],
+      ["standard-a", "standard", true],
+      ["standard-b", "standard", true],
       ["personal", "personal", false],
     ]);
+    const standard = required(snapshot.skills, "standard-a");
+    await expect(
+      service.remove({ id: standard.id, expectedContent: standard.content }),
+    ).rejects.toThrow(/只读/);
   });
 
   it("uses the authoritative project catalog and keeps OHS global skills personal", async () => {

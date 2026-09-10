@@ -51,6 +51,7 @@ export interface CreateSkillRegistrySnapshotOptions {
   bundled?: boolean | readonly SkillDefinition[];
   baseline?: readonly SkillDefinition[];
   plugins?: readonly SkillDefinition[];
+  userDirs?: readonly string[];
   userDir?: string;
   projectDirs?: readonly string[];
 }
@@ -477,8 +478,11 @@ export async function createSkillRegistrySnapshot(
   for (const skill of options.plugins ?? []) registry.register(skill);
 
   const loader = new SkillLoader(registry);
-  if (options.userDir) {
-    await loader.loadFromDirectory(options.userDir, {
+  for (const directory of uniqueDirectories([
+    ...(options.userDirs ?? []),
+    ...(options.userDir ? [options.userDir] : []),
+  ])) {
+    await loader.loadFromDirectory(directory, {
       source: "user",
       recursive: true,
     });
@@ -490,6 +494,26 @@ export async function createSkillRegistrySnapshot(
     });
   }
   return registry;
+}
+
+export function standardUserSkillDirs(homeDir = homedir()): string[] {
+  return [
+    join(homeDir, ".agents", "skills"),
+    join(homeDir, ".config", "agents", "skills"),
+  ];
+}
+
+function uniqueDirectories(directories: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (let index = directories.length - 1; index >= 0; index -= 1) {
+    const directory = resolve(directories[index]!);
+    const key = process.platform === "win32" ? directory.toLowerCase() : directory;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.unshift(directory);
+  }
+  return output;
 }
 
 /**
@@ -549,6 +573,7 @@ function personalSkillDirectories(): Set<string> {
       join(configDir, "skills"),
       join(home, ".claude", "skills"),
       join(home, ".agents", "skills"),
+      join(home, ".config", "agents", "skills"),
     ].map(normalizePathKey),
   );
 }

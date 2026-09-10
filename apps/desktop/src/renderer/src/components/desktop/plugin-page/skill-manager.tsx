@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import type {
   DesktopSkillInfo,
-  DesktopSkillProject,
   DesktopSkillSnapshot,
 } from "@shared/skill-types"
 import { Alert, AlertDescription } from "@renderer/components/ui/alert"
@@ -18,6 +17,11 @@ export interface SkillManagerProps {
   projectPath: string
   notify: (message: string) => void
 }
+
+type SkillCategory =
+  | { kind: "standard"; name: "通用" }
+  | { kind: "personal"; name: "个人" }
+  | { kind: "project"; name: string; path: string }
 
 export function SkillManager({
   query,
@@ -69,14 +73,17 @@ export function SkillManager({
     const ordered = snapshot?.projects ?? []
     const current = ordered.find((item) => pathKey(item.path) === pathKey(projectPath))
     return [
-      ...(current ? [current] : []),
-      { name: "个人", path: "" },
-      ...ordered.filter((item) => item !== current),
+      ...(current ? [{ kind: "project" as const, ...current }] : []),
+      { kind: "standard" as const, name: "通用" as const },
+      { kind: "personal" as const, name: "个人" as const },
+      ...ordered
+        .filter((item) => item !== current)
+        .map((item) => ({ kind: "project" as const, ...item })),
     ]
   }, [projectPath, snapshot?.projects])
   const activeCategory = categories.some((item) => categoryId(item) === category)
     ? category
-    : categoryId(categories[0] ?? { name: "个人", path: "" })
+    : categoryId(categories[0] ?? { kind: "personal", name: "个人" })
   const needle = query.trim().toLocaleLowerCase()
   const matches = (skill: DesktopSkillInfo): boolean =>
     !needle ||
@@ -86,13 +93,13 @@ export function SkillManager({
   const installed = skills.filter(matches)
   const selected = skills.find((skill) => skill.id === selectedId)
 
-  function skillsFor(item: DesktopSkillProject): DesktopSkillInfo[] {
+  function skillsFor(item: SkillCategory): DesktopSkillInfo[] {
     return skills.filter(
       (skill) =>
         matches(skill) &&
-        (item.path
+        (item.kind === "project"
           ? skill.source === "project" && pathKey(skill.projectPath ?? "") === pathKey(item.path)
-          : skill.source === "personal")
+          : skill.source === item.kind)
     )
   }
   async function remove(skill: DesktopSkillInfo): Promise<string | null> {
@@ -226,7 +233,7 @@ function SkillRows({
           data-extension-row
           className="group flex min-h-16 min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
           onClick={() => onOpen(skill.id)}
-          aria-label={`查看 ${skill.name}，${skill.readOnly ? "只读" : skill.source === "personal" ? "个人" : (skill.projectName ?? "项目")}`}
+          aria-label={`查看 ${skill.name}，${skill.source === "standard" ? "通用" : skill.readOnly ? "只读" : skill.source === "personal" ? "个人" : (skill.projectName ?? "项目")}`}
         >
           <SkillIcon name={skill.name} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -248,8 +255,8 @@ function SkillRows({
 function pathKey(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase()
 }
-function categoryId(project: DesktopSkillProject): string {
-  return project.path ? `project:${pathKey(project.path)}` : "personal"
+function categoryId(category: SkillCategory): string {
+  return category.kind === "project" ? `project:${pathKey(category.path)}` : category.kind
 }
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : "技能操作失败，请重试。"

@@ -48,6 +48,15 @@ const snapshot = {
       projectName: "Client",
     },
     {
+      id: "standard",
+      name: "archify",
+      description: "Standard global skill",
+      content: "# Archify",
+      path: "C:/Users/dev/.agents/skills/archify/SKILL.md",
+      source: "standard",
+      readOnly: true,
+    },
+    {
       id: "personal",
       name: "docs",
       description: "Global docs",
@@ -118,13 +127,15 @@ afterEach(() => {
 })
 
 describe("SkillManager filesystem management", () => {
-  it("loads all real sources but only offers project and personal categories", async () => {
+  it("loads all real sources and offers standard separately from personal", async () => {
     await render()
     expect(api.snapshot).toHaveBeenCalledWith({ projectPath: "D:/OpenHarness" })
     expect(host.querySelector('[aria-label="已安装技能"]')?.textContent).toContain("agent-browser")
     expect(host.querySelector('[aria-label="已安装技能"]')?.textContent).toContain("docs")
+    expect(host.querySelector('[aria-label="已安装技能"]')?.textContent).toContain("archify")
     expect([...host.querySelectorAll('[role="tab"]')].map((node) => node.textContent)).toEqual([
       "OpenHarness",
+      "通用",
       "个人",
       "Client",
     ])
@@ -146,6 +157,19 @@ describe("SkillManager filesystem management", () => {
       [...host.querySelectorAll('[role="tab"]')].find((node) => node.textContent === "个人")
     )
     expect(host.querySelector('[role="tabpanel"]')?.textContent).toContain("docs")
+    expect(host.querySelector('[role="tabpanel"]')?.textContent).not.toContain("archify")
+    await click(
+      [...host.querySelectorAll('[role="tab"]')].find((node) => node.textContent === "通用")
+    )
+    expect(host.querySelector('[role="tabpanel"]')?.textContent).toContain("archify")
+    expect(host.querySelector('[role="tabpanel"]')?.textContent).not.toContain("docs")
+  })
+
+  it("shows standard skills as read-only in details", async () => {
+    await render()
+    await click(host.querySelector('[aria-label*="archify"]'))
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("通用 · 只读")
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain("删除")
   })
 
   it("keeps bundled and agent-folder skills read-only in details", async () => {
