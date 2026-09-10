@@ -107,7 +107,7 @@ export class DesktopPluginService {
     }
 
     const pluginName = preview.identity.displayName ?? preview.identity.name
-    if (preview.requestedPermissions.length === 0) {
+    if (!preview.approvalRequired) {
       try {
         await this.installArchive(cwd, archivePath, preview.archiveDigest, [])
       } catch (error) {

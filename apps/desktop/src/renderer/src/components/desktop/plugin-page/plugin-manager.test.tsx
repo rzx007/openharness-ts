@@ -247,7 +247,7 @@ describe("PluginManager archive import", () => {
 
     await click("导入插件")
     expect(api().importArchive).toHaveBeenCalledTimes(2)
-    expect(props.notify).toHaveBeenCalledWith("Retry Plugin 已安装，将在下次对话中生效。")
+    expect(props.notify).toHaveBeenCalledWith("Retry Plugin 已安装或更新，将在下次对话中生效。")
   })
 
   it("treats an unknown result as a refreshable warning rather than installation", async () => {

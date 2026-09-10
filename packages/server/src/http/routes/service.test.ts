@@ -133,7 +133,7 @@ describe("plugin archive routes", () => {
     const closeAllRuntimes = vi.fn(async () => {});
     const previewArchive = vi.fn(async () => ({
       archiveDigest: "a".repeat(64), identity: { id: "dev.example.archive", name: "archive", version: "1" },
-      requestedPermissions: [], inventory: { skills: 1 }, diagnostics: [],
+      requestedPermissions: [], approvalRequired: false, inventory: { skills: 1 }, diagnostics: [],
     }));
     const installArchive = vi.fn(async () => ({ message: "Installed plugin 'dev.example.archive'." }));
     const routes = createServiceRoutes({

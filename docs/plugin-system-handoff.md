@@ -122,7 +122,7 @@ Installed Plugin 是已经完成以下步骤的 Native Plugin：
 
 ### Desktop 当前入口
 
-Desktop 插件页目前只接收一个本地 Native Plugin ZIP。它在后台静态校验，未申请权限时直接安装，申请权限时只请求一次完整确认；结果返回成功、失败或待刷新确认，成功后的激活从下一次对话开始。绝对 ZIP 路径和摘要不返回 Renderer，安装器收到的仍是已经准备好的目录。
+Desktop 插件页目前只接收一个本地 Native Plugin ZIP。它在后台静态校验，未申请权限时直接安装，申请权限时只请求一次完整确认；重新导入同一插件 ID 时，既有批准覆盖本次权限便直接安装，只有新增权限才重新确认。重新安装沿用同一条安装链路，成功切换前保留旧记录，并保留插件原来的启停状态。结果返回成功、失败或待刷新确认，成功后的激活从下一次对话开始。绝对 ZIP 路径和摘要不返回 Renderer，安装器收到的仍是已经准备好的目录。
 
 这不改变最终多来源架构：Agent 对话安装、Claude Code/Codex 转换、Git、npm、归档 URL、tar 格式和 Marketplace 还没有进入 Desktop。旧插件页 localStorage 配置仅被隐藏，未迁移或删除。
 
@@ -627,7 +627,7 @@ Native Plugin → 在 daemon 主进程注册 Converter
 - 参考插件的实际 checkJs、独立进程调用、正式安装、link 重载、主动取消及跨 cwd 停用/卸载验收；
 - `/reload-plugins` 展示校验诊断和重新登记/批准提示，明确下次使用时才加载；
 - Desktop 扩展管理页面主体；
-- Desktop 插件页本地 Native ZIP 导入、后台安全校验、权限确认与结果反馈；
+- Desktop 插件页本地 Native ZIP 导入、后台安全校验、权限确认与结果反馈；重新导入同一 ID 可完成手动更新或修复，且只在新增权限时重新确认；
 - 本地 ZIP Archive Resolver：路径、类型、大小、数量、压缩比、CRC、摘要和临时目录清理；
 - 真实 Claude Code 插件抽样回归。
 
@@ -646,7 +646,7 @@ Native Plugin → 在 daemon 主进程注册 Converter
 - Marketplace；
 - 自动依赖安装；
 - 第三方 Converter 的签名、隔离和注册；
-- 插件更新、修复和安全垃圾回收完整流程；
+- 插件自动更新、来源刷新、独立修复命令、版本回滚和安全垃圾回收完整流程；
 - Wasm Tool Runtime。
 
 ### 暂缓
@@ -656,6 +656,8 @@ Native Plugin → 在 daemon 主进程注册 Converter
 ## 17. 建议实施顺序
 
 2026-09-09 Desktop 本地 ZIP 阶段已完成：插件页可导入一个本地 Native `.zip`，交互只呈现成功、失败、结果待确认或一次权限确认；Archive Resolver、Native 校验、摘要复核和临时清理由后台完成。Agent 对话安装、转换插件和远程来源后续再规划。详见 [ZIP 导入设计](./superpowers/specs/2026-09-09-desktop-native-plugin-zip-import-design.md)和[实施计划](./superpowers/plans/2026-09-09-desktop-native-plugin-zip-import.md)。
+
+2026-09-10 补充最小重新安装语义：用户重新导入同一插件 ID 的可信 ZIP，即可手动更新或修复。Server 复用能够覆盖本次请求的既有权限批准，新增权限仍请求一次完整确认；Installer 只在新快照成功后切换记录，并保留原启停状态。自动更新、Repair 命令、版本回滚和垃圾回收仍不在近期范围。详见[核心设计](./superpowers/specs/2026-09-10-native-plugin-reinstall-core-design.md)和[实施计划](./superpowers/plans/2026-09-10-native-plugin-reinstall-core.md)。
 
 2026-09-09 调整：Converter 本轮开发到此结束。原生插件第一阶段已完成：公开开发类型、五类组件指南，以及无外部服务依赖的“文本检查助手”，覆盖安装、加载、调用、真实重载和清理。详见 [开发指南](./native-plugin-authoring.md)、[第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)和[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)。相关测试共 146 项通过，类型、缓存输入和文档检查通过，独立审查无代码阻断项。验收使用真实插件进程和管理路由，不包含完整 AgentPool、模型会话或桌面 UI。Desktop 本地 Native ZIP 导入也已在本阶段完成；以下长期顺序作为后续路线参考。
 

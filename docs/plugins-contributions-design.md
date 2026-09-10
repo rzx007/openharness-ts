@@ -46,9 +46,9 @@ Native Plugin 只支持用户级安装；当前 cwd 只作为插件运行时的�
 
 ### Desktop 本地 ZIP 导入
 
-Desktop 插件页现可选择一个本地 Native Plugin ZIP。Source Resolver 只做安全复制、解压和静态校验；Server 再安装为不可变用户快照。无权限时直接安装，申请权限时 Renderer 只显示一次确认，且不会收到 ZIP 绝对路径或摘要。成功、失败和安装结果暂无法确认均为显式反馈，成功后的 Runtime 激活从下一次对话开始。
+Desktop 插件页现可选择一个本地 Native Plugin ZIP。Source Resolver 只做安全复制、解压和静态校验；Server 再安装为不可变用户快照。无权限时直接安装，申请权限时 Renderer 只显示一次确认，且不会收到 ZIP 绝对路径或摘要。重新导入同一插件 ID 即执行手动更新或修复：既有批准覆盖本次权限时直接安装，新增权限时才重新确认；新快照成功前不切换旧记录，重新安装保留原启停状态。成功、失败和安装结果暂无法确认均为显式反馈，成功后的 Runtime 激活从下一次对话开始。
 
-Desktop 尚不支持 Agent 对话安装、Claude Code/Codex 转换、Git、npm、归档 URL、tar 格式或 Marketplace。被旧插件页面隐藏的 localStorage 配置仍原样保留，未执行迁移或删除。
+Desktop 尚不支持自动更新、独立 Repair 命令、版本回滚、旧快照垃圾回收界面、Agent 对话安装、Claude Code/Codex 转换、Git、npm、归档 URL、tar 格式或 Marketplace。被旧插件页面隐藏的 localStorage 配置仍原样保留，未执行迁移或删除。
 
 ## 外部转换
 

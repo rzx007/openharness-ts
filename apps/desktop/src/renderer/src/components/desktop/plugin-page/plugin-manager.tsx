@@ -153,8 +153,8 @@ export function PluginManager({
       if (result.snapshot) setSnapshot(result.snapshot)
       notify(
         result.snapshot
-          ? `${result.pluginName} 已安装，将在下次对话中生效。`
-          : `${result.pluginName} 已安装，将在下次对话中生效。插件列表可刷新。`
+          ? `${result.pluginName} 已安装或更新，将在下次对话中生效。`
+          : `${result.pluginName} 已安装或更新，将在下次对话中生效。插件列表可刷新。`
       )
       return
     }

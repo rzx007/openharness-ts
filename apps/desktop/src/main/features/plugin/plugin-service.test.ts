@@ -58,6 +58,7 @@ describe("DesktopPluginService", () => {
       archiveDigest: "a".repeat(64),
       identity: { id: "archive-plugin", name: "archive-plugin", version: "1.0.0" },
       requestedPermissions: [],
+      approvalRequired: false,
       inventory: {},
       diagnostics: [],
     })
@@ -130,11 +131,36 @@ describe("DesktopPluginService", () => {
     expect(JSON.stringify(result)).not.toContain("a".repeat(64))
   })
 
+  it("reinstalls immediately when existing approval covers requested permissions", async () => {
+    daemon.previewPluginArchive.mockResolvedValue({
+      archiveDigest: "d".repeat(64),
+      identity: { id: "archive-plugin", name: "Archive Plugin", version: "1.1.0" },
+      requestedPermissions: ["process:spawn"],
+      approvalRequired: false,
+      inventory: {},
+      diagnostics: [],
+    })
+    const service = new DesktopPluginService({
+      chooseArchive: async () => "C:/private/plugin.zip",
+    })
+
+    await expect(
+      (service as any).importArchive({} as never, { cwd: "C:/workspace" })
+    ).resolves.toMatchObject({ status: "installed", pluginName: "Archive Plugin" })
+    expect(daemon.installPluginArchive).toHaveBeenCalledWith({
+      cwd: resolve("C:/workspace"),
+      archivePath: "C:/private/plugin.zip",
+      expectedArchiveDigest: "d".repeat(64),
+      approvedPermissions: [],
+    })
+  })
+
   it("stores an approval once, confirms using stored archive details, and consumes the selection", async () => {
     daemon.previewPluginArchive.mockResolvedValue({
       archiveDigest: "b".repeat(64),
       identity: { id: "archive-plugin", name: "Archive Plugin", version: "1.0.0" },
       requestedPermissions: ["network", "process:spawn"],
+      approvalRequired: true,
       inventory: {},
       diagnostics: [],
     })
@@ -182,6 +208,7 @@ describe("DesktopPluginService", () => {
       archiveDigest: "c".repeat(64),
       identity: { id: "archive-plugin", name: "Archive Plugin", version: "1.0.0" },
       requestedPermissions: ["network"],
+      approvalRequired: true,
       inventory: {},
       diagnostics: [],
     })
@@ -308,6 +335,7 @@ describe("DesktopPluginService", () => {
       archiveDigest: "e".repeat(64),
       identity: { id: "archive-plugin", name: "Archive Plugin", version: "1.0.0" },
       requestedPermissions: ["network"],
+      approvalRequired: true,
       inventory: {},
       diagnostics: [],
     })
@@ -366,6 +394,7 @@ describe("DesktopPluginService", () => {
       archiveDigest: "d".repeat(64),
       identity: { id: "archive-plugin", name: "Archive Plugin", version: "1.0.0" },
       requestedPermissions: ["network"],
+      approvalRequired: true,
       inventory: {},
       diagnostics: [],
     })

@@ -40,14 +40,14 @@ describe("OpenHarnessClient", () => {
         calls.push({ url: String(url), init: init ?? {} });
         if (String(url).endsWith("/preview")) return jsonResponse({
           archiveDigest: "a".repeat(64), identity: { id: "dev.example.archive", name: "archive", version: "1" },
-          requestedPermissions: ["process:spawn"], inventory: { tools: 1 }, diagnostics: [],
+          requestedPermissions: ["process:spawn"], approvalRequired: true, inventory: { tools: 1 }, diagnostics: [],
         });
         return jsonResponse({ code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [{ code: "archive_changed" }] }, 409);
       }) as typeof fetch,
     });
 
     await expect((client as any).previewPluginArchive({ cwd: "C:/workspace", archivePath: "C:/archive.zip" })).resolves.toMatchObject({
-      archiveDigest: "a".repeat(64), requestedPermissions: ["process:spawn"],
+      archiveDigest: "a".repeat(64), requestedPermissions: ["process:spawn"], approvalRequired: true,
     });
     await expect((client as any).installPluginArchive({
       cwd: "C:/workspace", archivePath: "C:/archive.zip", expectedArchiveDigest: "a".repeat(64), approvedPermissions: ["process:spawn"],
