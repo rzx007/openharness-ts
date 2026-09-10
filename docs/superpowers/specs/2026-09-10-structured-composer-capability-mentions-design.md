@@ -83,8 +83,8 @@ type ComposerInputItem =
   | { type: "text"; text: string }
   | {
       type: "skill"
-      skillRef: string
       name: string
+      path: string
       displayName: string
       source?: "bundled" | "user" | "project" | "plugin"
     }
@@ -99,7 +99,7 @@ type ComposerInputItem =
 约束：
 
 - 相邻 `text` item 在序列化时合并；空文本不保存。
-- `skill.skillRef` 是服务端生成的不透明身份，`name` 和 `displayName` 用于提交文本与展示。客户端不接收或提交本机绝对路径。
+- `skill.path` 是当前 Skill catalog 返回的绝对 `SKILL.md` 路径，`name` 和 `displayName` 用于提交文本与展示。路径会进入本地 Desktop 与 daemon 之间的协议，这与 Codex 的 `{ type: "skill", name, path }` 输入保持一致。
 - `mention.path` 使用可扩展 URI，例如未来的 `app://...`、`plugin://...` 或文件资源 URI。
 - 文档顺序就是用户表达顺序，所有层都不得按类型重新排序。
 - 附件继续使用现有独立草稿列表、上传、租约和关系表，不进入本次 composer items。将来只有在产品真的支持“光标位置插入附件”时才单独设计行内附件协议。
@@ -111,7 +111,7 @@ type ComposerInputItem =
 ```ts
 type SessionUserInputItem =
   | { type: "text"; text: string }
-  | { type: "skill"; skillRef: string; name: string; displayName?: string; source?: SkillSource }
+  | { type: "skill"; name: string; path: string; displayName?: string; source?: SkillSource }
   | { type: "mention"; name: string; path: string; displayName?: string }
 ```
 
@@ -128,20 +128,19 @@ type SessionUserInputItem =
 服务端在一次 run 被接纳后，将结构化输入解析成 agent/provider 可消费的内容：
 
 1. 校验所有 item 的类型、长度和字段格式。
-2. 用 `skillRef` 在服务端当前 catalog 中解析精确 Skill。catalog 同时保留全部显式候选和按名称计算出的隐式调用赢家。
-3. admission 时记录 Skill 的规范路径和内容摘要；run 执行前重新读取并校验摘要。内容已变化时拒绝本次 run 并保留可重试输入，避免静默执行另一份内容。
-4. 按首次出现顺序收集 Skill；执行加载时按 `skillRef` 去重。
-5. 保留用户正文中的 `$skill-name` 可读标记。
-6. 将 Skill 引用作为明确的结构化选择交给运行时；不再为每个 Skill 嵌套生成“请先使用 Skill 工具”的提示词。
-7. 当前 agent adapter 如果暂时只接受文本，则由单一兼容适配器生成一次集中指令；兼容逻辑不能散落在 Desktop、Session service 和各 provider 中。
-8. 附件沿用现有流程展开成 `ContentBlock`，不与 composer items 混合排序。
+2. 规范化 `path`，并确认它与当前 cwd 的 Skill catalog 中某一项完全一致；renderer 不能提交 catalog 之外的任意路径。
+3. 按首次出现顺序收集 Skill；执行加载时按规范化 path 去重。Skill 文件在运行时按当前内容读取，不固定选择时的历史快照。
+4. 保留用户正文中的 `$skill-name` 可读标记。
+5. `Skill` 工具增加可选 `path`：显式选择使用 `{ name, path }` 精确加载；隐式调用继续只传 `name`，由现有 registry 优先级选择赢家。
+6. 当前 agent adapter 如果暂时只接受文本，则由单一兼容适配器生成一次集中加载指令；兼容逻辑不能散落在 Desktop、Session service 和各 provider 中。
+7. 附件沿用现有流程展开成 `ContentBlock`，不与 composer items 混合排序。
 
 兼容适配器的临时文本形态为：
 
 ```text
 用户显式选择了以下技能，请按出现顺序加载并遵循：
-1. using-superpowers
-2. writing-plans
+1. using-superpowers (path: <SKILL.md path>)
+2. writing-plans (path: <SKILL.md path>)
 
 用户输入：
 使用 $using-superpowers 写个计划 $writing-plans
@@ -152,7 +151,7 @@ type SessionUserInputItem =
 ### 节点
 
 - 将现有 `SkillCommandPillNode` 更名为表达用途的 `SkillMentionNode`。
-- 节点保存 `skillRef`、`name`、`displayName`、`source`，导出 JSON 时包含稳定版本号。
+- 节点保存 `name`、`path`、`displayName`、`source`，导出 JSON 时包含稳定版本号。
 - `getTextContent()` 返回 `$name`，保证复制到纯文本、搜索和降级展示仍有意义。
 - 节点是行内原子元素：不能把光标放入名称内部，Backspace/Delete 一次删除整个节点，左右方向键可以越过节点。
 - 后续新增 `ResourceMentionNode` 时复用相同的序列化接口和视觉组件。
@@ -162,8 +161,8 @@ type SessionUserInputItem =
 - Lexical editor state 是编辑期事实来源；每次更新通过纯函数导出 `ComposerDocument` 给 Zustand 草稿 store。
 - 外部恢复草稿时，从 `ComposerDocument` 重建 Lexical 节点，不再通过解析一个字符串猜测 Skill。
 - 输入框初始化、切换 Session、提交成功清空、提交失败保留、历史恢复和编辑最新消息都使用同一套 document codec。
-- 纯文本粘贴不会凭 `$name` 自动创建 Skill；只有从菜单明确选中的条目才带服务端签发的 `skillRef` 并成为结构化节点。
-- 从应用内部复制再粘贴时，自定义 MIME 只作为候选数据；仍用服务端 catalog 重新验证 `skillRef`。验证失败就降级为 `$name` 纯文本。外部应用只能得到 `$name` 纯文本。
+- 纯文本粘贴不会凭 `$name` 自动创建 Skill；只有从菜单明确选中的条目才带 catalog 返回的 path 并成为结构化节点。
+- 从应用内部复制再粘贴时，自定义 MIME 只作为候选数据；仍用服务端 catalog 重新验证 path。验证失败就降级为 `$name` 纯文本。外部应用只能得到 `$name` 纯文本。
 
 ### token 识别
 
@@ -193,8 +192,8 @@ interface ComposerTrigger {
 - 将 `SkillCommandMenu` 拆为通用 `ComposerPicker` 和数据源适配器。
 - 菜单锚定当前 token，而不是固定覆盖整个 composer；空间不足时允许退化为输入框宽度。
 - `/` 首字符菜单按命令、Skill 分组；inline `/` 菜单只显示 Skill；`$` 菜单按 Skill、未来的 App/资源分组。
-- 搜索字段包括 name、displayName、description 和来源，但插入身份始终使用精确 `skillRef`。
-- 同名不同来源的 Skill 都可展示，显示来源辅助信息；项目版本排在用户、插件和内置版本之前。每一项使用独立 `skillRef`，不会因名称相同而合并身份。
+- 搜索字段包括 name、displayName、description 和来源，但插入身份始终使用 catalog 返回的精确 path。
+- 同名 Skill 沿用现有 registry 的覆盖优先级，只展示当前赢家，不在本次改造中支持同名多版本并列选择。
 - 没有结果时显示安静的空状态；不会阻止用户继续把 `/...` 或 `$...` 当普通文字发送。
 
 ## 数据流
@@ -228,7 +227,7 @@ interface ComposerTrigger {
 ## 错误处理与安全
 
 - 提交前发现 Skill 已删除或路径不可读时，保留草稿并把对应引用标为失效，提示用户移除或重新选择。
-- server 只接受自己签发且属于当前 cwd catalog 的 `skillRef`，不接受 renderer 传入绝对路径。
+- server 接受 renderer 传入的绝对 path，但必须规范化并验证它属于当前 cwd 的 Skill catalog；不能直接读取任意路径。
 - 名称和显示名称限制长度并过滤控制字符；路径不进入 HTML title 的未转义内容。
 - 未识别的 `/` 或 `$` token 始终作为普通文本，不阻塞正常发送。
 - 排队、steer 和 edit 使用同一套校验，避免直接发送与排队发送行为不一致。
@@ -243,7 +242,7 @@ interface ComposerTrigger {
 - 选中项只替换当前 token，正文前后保持不变。
 - 多个 text/skill/mention item 往返序列化后顺序和字段不丢失。
 - 兼容文本按原顺序生成 `$skill-name`，相邻 text 正确合并。
-- 同名不同 `skillRef` 不混淆；服务端只按 `skillRef` 去重完全相同的 Skill。
+- 服务端按规范化 path 去重完全相同的 Skill；同名冲突继续服从现有 registry 优先级。
 - 256/257 items、32/33 Skill、文本上限前后一个字节都有边界测试。
 
 ### 组件
@@ -265,7 +264,7 @@ interface ComposerTrigger {
 
 ## 实施切片
 
-1. 定义 `ComposerDocument`、`SessionUserInputItem`、`skillRef` catalog 和 codec，先完成纯函数测试。
+1. 定义 `ComposerDocument`、`SessionUserInputItem`，给 command catalog 补充 Skill path，并先完成 codec 纯函数测试。
 2. 将草稿 store 和 Session API 迁移到结构化 items，打通持久化、排队、重试和编辑。
 3. 重构 Lexical 节点与光标 token 解析，实现 `$` 能力菜单和多个 Skill。
 4. 将 `/` 菜单改成动态数据源：首字符显示完整菜单，inline 只显示 Skill，并按条目类型分流。
@@ -284,7 +283,7 @@ interface ComposerTrigger {
 
 - 用户可在正文任意合法 token 边界通过 `/` 或 `$` 添加多个 Skill。
 - `/` 为首字符时显示完整动作菜单；位于正文中间时隐藏 Review、Compact 等应用动作，只显示可行内插入的 Skill。
-- 两种入口生成同一种结构化 Skill item，并保留精确 `skillRef` 与出现顺序。
+- 两种入口生成同一种结构化 Skill item，并保留精确 path 与出现顺序。
 - `/` 中的应用命令仍作为动作处理，不混入模型输入。
 - 输入框和 transcript 的 Skill 均为蓝色图标加名称，无胶囊视觉。
 - 发送、排队、重试、编辑和历史恢复不丢失引用。
