@@ -46,10 +46,10 @@ export function McpEditor({
   onClose: () => void
 }): React.JSX.Element {
   const id = useId()
-  const [mode, setMode] = useState("json")
+  const [mode, setMode] = useState("form")
   const [json, setJson] = useState(() => serializeMcpDocument(initial))
   const [document, setDocument] = useState(initial)
-  const [forms, setForms] = useState<McpForm[]>([])
+  const [forms, setForms] = useState<McpForm[]>(() => initial.servers.map(toMcpForm))
   const [activeIndex, setActiveIndex] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [discard, setDiscard] = useState(false)
@@ -207,7 +207,9 @@ export function McpEditor({
               <Button variant="ghost" onClick={close}>
                 取消
               </Button>
-              <Button onClick={save}>{editing ? "保存更改" : "保存配置"}</Button>
+              <Button variant="secondary" size="sm" className="rounded-full px-3" onClick={save}>
+                保存
+              </Button>
             </div>
           </DialogFooter>
         </div>

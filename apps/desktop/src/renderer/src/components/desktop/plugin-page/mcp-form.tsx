@@ -1,40 +1,74 @@
 import { useId } from "react"
-import { Plus, X } from "lucide-react"
+import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@renderer/components/ui/button"
 import { Input } from "@renderer/components/ui/input"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@renderer/components/ui/field"
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@renderer/components/ui/field"
 import { ToggleGroup, ToggleGroupItem } from "@renderer/components/ui/toggle-group"
 import type { McpForm, McpPairs } from "./mcp-config"
 
+function AddRowButton({
+  children,
+  onClick,
+}: {
+  children: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="h-8 w-full rounded-lg bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
+      onClick={onClick}
+    >
+      <Plus data-icon="inline-start" />
+      {children}
+    </Button>
+  )
+}
+
+function RemoveRowButton({
+  label,
+  onClick,
+}: {
+  label: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className="shrink-0 text-muted-foreground"
+      aria-label={label}
+      onClick={onClick}
+    >
+      <Trash2 />
+    </Button>
+  )
+}
+
 function StringRows({
   label,
+  addLabel,
   values,
   onChange,
-  description,
   errorId,
   invalid,
 }: {
   label: string
+  addLabel: string
   values: string[]
   onChange: (values: string[]) => void
-  description?: string
   errorId?: string
   invalid?: boolean
 }): React.JSX.Element {
   const id = useId()
+  const rows = values.length ? values : [""]
   return (
-    <FieldSet>
+    <FieldSet className="gap-2">
       <FieldLegend variant="label">{label}</FieldLegend>
-      {description && <FieldDescription>{description}</FieldDescription>}
       <FieldGroup className="gap-2">
-        {values.map((value, index) => (
+        {rows.map((value, index) => (
           <Field key={index} orientation="horizontal" data-invalid={invalid}>
             <FieldLabel className="sr-only" htmlFor={`${id}-${index}`}>
               {label} {index + 1}
@@ -44,122 +78,99 @@ function StringRows({
               value={value}
               aria-invalid={invalid}
               aria-describedby={invalid ? errorId : undefined}
-              onChange={(e) => onChange(values.map((v, i) => (i === index ? e.target.value : v)))}
+              onChange={(event) => {
+                const next = values.length ? [...values] : [""]
+                next[index] = event.target.value
+                onChange(next)
+              }}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`移除${label} ${index + 1}`}
-              onClick={() => onChange(values.filter((_, i) => i !== index))}
-            >
-              <X />
-            </Button>
+            <RemoveRowButton
+              label={`移除${label} ${index + 1}`}
+              onClick={() => onChange(values.filter((_, item) => item !== index))}
+            />
           </Field>
         ))}
       </FieldGroup>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="self-start"
-        onClick={() => onChange([...values, ""])}
-      >
-        <Plus data-icon="inline-start" />
-        添加{label}
-      </Button>
+      <AddRowButton onClick={() => onChange(values.length ? [...values, ""] : ["", ""])}>
+        {addLabel}
+      </AddRowButton>
     </FieldSet>
   )
 }
 
 function PairRows({
   label,
+  addLabel,
   values,
   onChange,
-  description,
-  valueLabel,
   errorId,
   invalid,
 }: {
   label: string
+  addLabel: string
   values: McpPairs
   onChange: (values: McpPairs) => void
-  description?: string
-  valueLabel?: string
   errorId?: string
   invalid?: boolean
 }): React.JSX.Element {
   const id = useId()
+  const rows = values.length ? values : [["", ""]]
   function update(index: number, column: 0 | 1, value: string): void {
-    onChange(
-      values.map((pair, i) =>
-        i === index ? (column === 0 ? [value, pair[1]] : [pair[0], value]) : pair
-      )
-    )
+    const next = values.length ? values.map((pair) => [...pair] as [string, string]) : [["", ""]]
+    next[index] = column === 0 ? [value, next[index][1]] : [next[index][0], value]
+    onChange(next)
   }
   return (
-    <FieldSet>
+    <FieldSet className="gap-2">
       <FieldLegend variant="label">{label}</FieldLegend>
-      {description && <FieldDescription>{description}</FieldDescription>}
       <FieldGroup className="gap-2">
-        {values.map(([key, value], index) => (
-          <FieldGroup
-            key={index}
-            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2"
-          >
-            <Field data-invalid={invalid}>
-              <FieldLabel htmlFor={`${id}-${index}-key`} className={index ? "sr-only" : undefined}>
-                键{index ? ` ${index + 1}` : ""}
-              </FieldLabel>
-              <Input
-                id={`${id}-${index}-key`}
-                aria-label={`${label} ${index + 1} 键`}
-                value={key}
-                aria-invalid={invalid}
-                aria-describedby={invalid ? errorId : undefined}
-                onChange={(e) => update(index, 0, e.target.value)}
-              />
-            </Field>
-            <Field data-invalid={invalid}>
-              <FieldLabel
-                htmlFor={`${id}-${index}-value`}
-                className={index ? "sr-only" : undefined}
-              >
-                {valueLabel ?? "值"}
-                {index ? ` ${index + 1}` : ""}
-              </FieldLabel>
-              <Input
-                id={`${id}-${index}-value`}
-                aria-label={`${label} ${index + 1} ${valueLabel ?? "值"}`}
-                value={value}
-                aria-invalid={invalid}
-                aria-describedby={invalid ? errorId : undefined}
-                onChange={(e) => update(index, 1, e.target.value)}
-              />
-            </Field>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="mb-0.5"
-              aria-label={`移除${label} ${index + 1}`}
-              onClick={() => onChange(values.filter((_, i) => i !== index))}
-            >
-              <X />
-            </Button>
-          </FieldGroup>
+        {rows.map(([key, value], index) => (
+          <Field key={index} orientation="horizontal" data-invalid={invalid}>
+            <FieldLabel className="sr-only" htmlFor={`${id}-${index}-key`}>
+              {label} {index + 1} 键
+            </FieldLabel>
+            <Input
+              id={`${id}-${index}-key`}
+              aria-label={`${label} ${index + 1} 键`}
+              placeholder="键"
+              value={key}
+              aria-invalid={invalid}
+              aria-describedby={invalid ? errorId : undefined}
+              onChange={(event) => update(index, 0, event.target.value)}
+            />
+            <FieldLabel className="sr-only" htmlFor={`${id}-${index}-value`}>
+              {label} {index + 1} 值
+            </FieldLabel>
+            <Input
+              id={`${id}-${index}-value`}
+              aria-label={`${label} ${index + 1} 值`}
+              placeholder="值"
+              value={value}
+              aria-invalid={invalid}
+              aria-describedby={invalid ? errorId : undefined}
+              onChange={(event) => update(index, 1, event.target.value)}
+            />
+            <RemoveRowButton
+              label={`移除${label} ${index + 1}`}
+              onClick={() => onChange(values.filter((_, item) => item !== index))}
+            />
+          </Field>
         ))}
       </FieldGroup>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="self-start"
-        onClick={() => onChange([...values, ["", ""]])}
+      <AddRowButton
+        onClick={() =>
+          onChange(
+            values.length
+              ? [...values, ["", ""]]
+              : [
+                  ["", ""],
+                  ["", ""],
+                ]
+          )
+        }
       >
-        <Plus data-icon="inline-start" />
-        添加{label}
-      </Button>
+        {addLabel}
+      </AddRowButton>
     </FieldSet>
   )
 }
@@ -183,8 +194,7 @@ export function McpFormFields({
   function text(
     key: "name" | "command" | "cwd" | "url" | "bearer_token_env_var",
     label: string,
-    placeholder: string,
-    description?: string
+    placeholder: string
   ): React.JSX.Element {
     const bad = invalid(key === "name" ? "名称" : key)
     return (
@@ -195,102 +205,99 @@ export function McpFormFields({
           value={value[key]}
           placeholder={placeholder}
           aria-invalid={bad}
-          aria-describedby={bad ? errorId : description ? `${id}-${key}-hint` : undefined}
-          onChange={(e) => update(key, e.target.value)}
+          aria-describedby={bad ? errorId : undefined}
+          onChange={(event) => update(key, event.target.value)}
           autoComplete="off"
           spellCheck={false}
         />
-        {description && <FieldDescription id={`${id}-${key}-hint`}>{description}</FieldDescription>}
       </Field>
     )
   }
   return (
-    <FieldGroup>
-      <FieldGroup className="grid gap-4 sm:grid-cols-2">
-        {text("name", "名称（必填）", "例如：my-server")}
-        <Field>
-          <FieldLabel id={`${id}-type`}>连接类型</FieldLabel>
+    <FieldGroup className="gap-3">
+      <section
+        data-mcp-form-card
+        className="flex flex-col gap-4 rounded-2xl border border-border/80 p-4"
+      >
+        {text("name", "名称", "MCP server name")}
+        <div className="flex items-center justify-between gap-3">
+          <FieldLabel id={`${id}-type`} className="mb-0">
+            类型
+          </FieldLabel>
           <ToggleGroup
             aria-labelledby={`${id}-type`}
             value={[value.type]}
-            onValueChange={(v) => {
-              if (v[0]) update("type", v[0] as McpForm["type"])
+            onValueChange={(next) => {
+              if (next[0]) update("type", next[0] as McpForm["type"])
             }}
-            variant="outline"
+            spacing={0}
             size="sm"
           >
-            <ToggleGroupItem value="stdio">STDIO</ToggleGroupItem>
-            <ToggleGroupItem value="http">HTTP</ToggleGroupItem>
+            <ToggleGroupItem value="stdio" className="rounded-md px-3">
+              STDIO
+            </ToggleGroupItem>
+            <ToggleGroupItem value="http" className="rounded-md px-3">
+              流式 HTTP
+            </ToggleGroupItem>
           </ToggleGroup>
-        </Field>
-      </FieldGroup>
-      {value.type === "stdio" ? (
-        <>
-          {text(
-            "command",
-            "启动命令（必填）",
-            "例如：npx 或可执行文件路径",
-            "只填写可执行程序；每个命令行参数单独添加在下方。"
-          )}
-          <StringRows
-            label="参数"
-            values={value.args}
-            onChange={(v) => update("args", v)}
-            invalid={invalid("args")}
-            errorId={errorId}
-          />
-          <PairRows
-            label="环境变量"
-            values={value.env}
-            onChange={(v) => update("env", v)}
-            invalid={invalid("env")}
-            errorId={errorId}
-          />
-          <StringRows
-            label="透传环境变量"
-            values={value.env_vars}
-            onChange={(v) => update("env_vars", v)}
-            description="填写变量名，例如 PATH。接入后端后，将从运行环境读取对应的值。"
-            invalid={invalid("env_vars")}
-            errorId={errorId}
-          />
-          {text(
-            "cwd",
-            "工作目录",
-            "例如：D:/projects/my-server",
-            "可选。启动服务器进程时使用的目录。"
-          )}
-        </>
-      ) : (
-        <>
-          {text("url", "服务器 URL（必填）", "https://example.com/mcp")}
-          {text(
-            "bearer_token_env_var",
-            "Bearer Token 环境变量",
-            "例如：MCP_API_TOKEN",
-            "可选。填写存放令牌的环境变量名。"
-          )}
-          <PairRows
-            label="HTTP 请求头"
-            values={value.http_headers}
-            onChange={(v) => update("http_headers", v)}
-            invalid={invalid("http_headers")}
-            errorId={errorId}
-          />
-          <PairRows
-            label="请求头环境变量"
-            values={value.env_http_headers}
-            valueLabel="环境变量名"
-            description="键填写请求头名称，值填写对应的环境变量名。"
-            onChange={(v) => update("env_http_headers", v)}
-            invalid={invalid("env_http_headers")}
-            errorId={errorId}
-          />
-        </>
-      )}
-      <FieldDescription>
-        其他 JSON 字段会保留。切换连接类型也会保留原类型的字段，可在 JSON 中查看或移除。
-      </FieldDescription>
+        </div>
+      </section>
+      <section
+        data-mcp-form-card
+        className="flex flex-col gap-4 rounded-2xl border border-border/80 p-4"
+      >
+        {value.type === "stdio" ? (
+          <>
+            {text("command", "启动命令", "openai-dev-mcp serve-sqlite")}
+            <StringRows
+              label="参数"
+              addLabel="添加参数"
+              values={value.args}
+              onChange={(next) => update("args", next)}
+              invalid={invalid("args")}
+              errorId={errorId}
+            />
+            <PairRows
+              label="环境变量"
+              addLabel="添加环境变量"
+              values={value.env}
+              onChange={(next) => update("env", next)}
+              invalid={invalid("env")}
+              errorId={errorId}
+            />
+            <StringRows
+              label="环境变量传递"
+              addLabel="添加变量"
+              values={value.env_vars}
+              onChange={(next) => update("env_vars", next)}
+              invalid={invalid("env_vars")}
+              errorId={errorId}
+            />
+            {text("cwd", "工作目录", "~/code")}
+          </>
+        ) : (
+          <>
+            {text("url", "URL", "https://mcp.example.com/mcp")}
+            {text("bearer_token_env_var", "Bearer 令牌环境变量", "MCP_BEARER_TOKEN")}
+            <PairRows
+              label="标头"
+              addLabel="添加标头"
+              values={value.http_headers}
+              onChange={(next) => update("http_headers", next)}
+              invalid={invalid("http_headers")}
+              errorId={errorId}
+            />
+            <PairRows
+              label="来自环境变量的标头"
+              addLabel="添加变量"
+              values={value.env_http_headers}
+              onChange={(next) => update("env_http_headers", next)}
+              invalid={invalid("env_http_headers")}
+              errorId={errorId}
+            />
+          </>
+        )}
+      </section>
     </FieldGroup>
   )
 }

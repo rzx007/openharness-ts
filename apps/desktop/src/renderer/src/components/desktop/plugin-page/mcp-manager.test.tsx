@@ -53,24 +53,17 @@ describe("MCP manager local workflow", () => {
     })
   }
 
-  it("opens an HTTP starter as unsaved JSON without adding a configured server", async () => {
+  it("saves an HTTP server from the form without writing it before confirm", async () => {
     await render()
     await render({ addRequest: 1 })
-    await input("textarea", '{"name":"","type":"http","url":""}')
-    expect(JSON.parse(document.querySelector("textarea")!.value)).toEqual({
-      name: "",
-      type: "http",
-      url: "",
-    })
     expect(loadMcpStorage(localStorage, props.projectPath).document.servers).toHaveLength(0)
-    await click("表单")
+    await click("流式 HTTP")
     await input('input[id$="-name"]', "remote")
     await input('input[id$="-url"]', "https://example.com/mcp")
-    await click("添加HTTP 请求头")
-    await input('input[aria-label="HTTP 请求头 1 键"]', "Accept")
-    await input('input[aria-label="HTTP 请求头 1 值"]', "application/json")
-    await click("保存配置")
-    expect(loadMcpStorage(localStorage, props.projectPath).document.servers[0]).toEqual({
+    await input('input[aria-label="标头 1 键"]', "Accept")
+    await input('input[aria-label="标头 1 值"]', "application/json")
+    await click("保存")
+    expect(loadMcpStorage(localStorage, props.projectPath).document.servers[0]).toMatchObject({
       name: "remote",
       config: {
         type: "http",
@@ -84,12 +77,12 @@ describe("MCP manager local workflow", () => {
     await render()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     await render({ addRequest: 1 })
-    expect(document.querySelector("textarea")).toBeTruthy()
-    await input("textarea", '{"name":"draft","command":"node"}')
+    expect(document.querySelector('input[id$="-name"]')).toBeTruthy()
+    await input('input[id$="-name"]', "draft")
     await click("取消")
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("放弃未保存")
     await click("继续编辑")
-    expect(document.querySelector("textarea")?.value).toContain('"draft"')
+    expect(document.querySelector<HTMLInputElement>('input[id$="-name"]')?.value).toBe("draft")
     await click("取消")
     await click("放弃更改")
     await render({ query: "anything" })
@@ -102,6 +95,7 @@ describe("MCP manager local workflow", () => {
   it("preserves extras through JSON → form → JSON and persists an edited command", async () => {
     await render()
     await render({ addRequest: 1 })
+    await click("JSON")
     await input(
       "textarea",
       '{"name":"local","command":"node","custom":{"retry":3},"env":{"EMPTY":""}}'
@@ -114,7 +108,7 @@ describe("MCP manager local workflow", () => {
       custom: { retry: 3 },
       env: { EMPTY: "" },
     })
-    await click("保存配置")
+    await click("保存")
     expect(loadMcpStorage(localStorage, props.projectPath).document.servers).toEqual([
       { name: "local", config: { command: "bun", custom: { retry: 3 }, env: { EMPTY: "" } } },
     ])
@@ -141,7 +135,7 @@ describe("MCP manager local workflow", () => {
     expect(JSON.parse(document.querySelector("textarea")!.value)).toEqual({
       mcpServers: { a: { command: "bun", ...extensions } },
     })
-    await click("保存更改")
+    await click("保存")
     expect(loadMcpStorage(localStorage, props.projectPath).document.servers).toEqual([
       { name: "a", config: { command: "bun", ...extensions } },
     ])
@@ -150,11 +144,12 @@ describe("MCP manager local workflow", () => {
   it("rejects a partially invalid batch without saving any server", async () => {
     await render()
     await render({ addRequest: 1 })
+    await click("JSON")
     await input(
       "textarea",
       '{"mcpServers":{"good":{"command":"node"},"bad":{"url":"ftp://example.com"}}}'
     )
-    await click("保存配置")
+    await click("保存")
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("http")
     expect(loadMcpStorage(localStorage, props.projectPath).document.servers).toHaveLength(0)
   })
