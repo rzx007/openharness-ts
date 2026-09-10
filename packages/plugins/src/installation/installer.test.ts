@@ -56,11 +56,13 @@ describe("installLocalNativePlugin", () => {
       storePath,
     });
     expect(second.status).toBe("installed");
+    if (second.status !== "installed") throw new Error("expected reinstall");
 
     const record = (await readInstalledPluginStore(storePath)).plugins[`user::${first.record.id}`]!;
     expect(record.enabled).toBe(false);
     expect(record.installedAt).toBe("2026-01-01T00:00:00.000Z");
     expect(record.updatedAt).not.toBe("2026-01-01T00:00:00.000Z");
+    expect(second.record).toEqual(record);
   });
 
   it.each(["project", "local"] as const)("rejects the legacy %s installation scope", async (scope) => {

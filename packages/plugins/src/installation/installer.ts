@@ -91,12 +91,12 @@ export async function installLocalNativePlugin(input: InstallLocalNativePluginIn
     ...((input.sourceFormat ?? manifestSourceFormat) ? { sourceFormat: input.sourceFormat ?? manifestSourceFormat } : {}),
     requestedPermissions: requested, approvedPermissions: approved, installedAt: now, updatedAt: now,
   };
-  await updateInstalledPluginStore(input.storePath ?? getInstalledPluginStorePath(), (store) => {
-    const key = installedPluginKey(record);
+  const key = installedPluginKey(record);
+  const updatedStore = await updateInstalledPluginStore(input.storePath ?? getInstalledPluginStorePath(), (store) => {
     const previous = store.plugins[key];
     store.plugins[key] = previous
       ? { ...record, enabled: previous.enabled, installedAt: previous.installedAt }
       : record;
   });
-  return { status: "installed", record, diagnostics: [] };
+  return { status: "installed", record: updatedStore.plugins[key]!, diagnostics: [] };
 }
