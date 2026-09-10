@@ -659,6 +659,8 @@ Native Plugin → 在 daemon 主进程注册 Converter
 
 2026-09-10 补充最小重新安装语义：用户重新导入同一插件 ID 的可信 ZIP，即可手动更新或修复。Server 复用能够覆盖本次请求的既有权限批准，新增权限仍请求一次完整确认；Installer 只在新快照成功后切换记录，并保留原启停状态。自动更新、Repair 命令、版本回滚和垃圾回收仍不在近期范围。详见[核心设计](./superpowers/specs/2026-09-10-native-plugin-reinstall-core-design.md)和[实施计划](./superpowers/plans/2026-09-10-native-plugin-reinstall-core.md)。
 
+2026-09-10 下一阶段交接已单独整理为 [Native Plugin 后续工作交接](./native-plugin-next-stage-handoff.md)。推荐下一阶段做 Native Plugin 运行诊断 v1：把 Runtime 加载结果、失败原因和用户可执行建议返回到 Plugin Service 与 Desktop 插件页。Agent 对话内安装、`output_styles`、自动更新、Marketplace 和远程来源继续暂缓。
+
 2026-09-09 调整：Converter 本轮开发到此结束。原生插件第一阶段已完成：公开开发类型、五类组件指南，以及无外部服务依赖的“文本检查助手”，覆盖安装、加载、调用、真实重载和清理。详见 [开发指南](./native-plugin-authoring.md)、[第一阶段设计](./superpowers/specs/2026-09-09-native-plugin-authoring-v1-design.md)和[实施计划](./superpowers/plans/2026-09-09-native-plugin-authoring-v1.md)。相关测试共 146 项通过，类型、缓存输入和文档检查通过，独立审查无代码阻断项。验收使用真实插件进程和管理路由，不包含完整 AgentPool、模型会话或桌面 UI。Desktop 本地 Native ZIP 导入也已在本阶段完成；以下长期顺序作为后续路线参考。
 
 后续不要一次实现所有 Component。建议顺序如下：
