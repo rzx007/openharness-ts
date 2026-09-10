@@ -26,8 +26,20 @@ export type SessionMessagePartStatus =
 export type ProjectionSettlementAction = "retry-terminal-projection" | "compensate-child";
 export type ProjectionSettlementStatus = "pending" | "retrying" | "resolved" | "abandoned";
 
-/** Current durable session-event envelope version. Payload versions are added by the event registry. */
+/** Default durable session-event schema version for types without an override. */
 export const SESSION_EVENT_SCHEMA_VERSION = 1;
+
+/**
+ * Per-event payload schema versions written by the durable event registry.
+ * Unlisted types use {@link SESSION_EVENT_SCHEMA_VERSION}.
+ */
+export const SESSION_EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
+  "session.input.admitted": 2,
+};
+
+export function sessionEventSchemaVersion(type: string): number {
+  return SESSION_EVENT_SCHEMA_VERSIONS[type] ?? SESSION_EVENT_SCHEMA_VERSION;
+}
 
 export interface SessionRecord {
   id: string;

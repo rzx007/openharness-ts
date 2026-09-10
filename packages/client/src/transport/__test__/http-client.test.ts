@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { sessionEventSchemaVersion } from "@openharness/protocol";
 import {
   normalizeDaemonBaseUrl,
   IncompatibleProtocolError,
@@ -25,7 +26,7 @@ function event(seq: number, type = "daemon.test"): SessionEventRecord {
     id: `e${seq}`,
     seq,
     type,
-    schemaVersion: 1,
+    schemaVersion: sessionEventSchemaVersion(type),
     payload: {},
     createdAt: seq,
   };

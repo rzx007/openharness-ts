@@ -59,8 +59,10 @@ describe("session event reducer", () => {
     const snapshot = {
       cursor: 2, session: session("s1", 2), inputs: [newer], messages: [], parts: [], runs: [], permissions: [],
     };
-    const admitted = event(1, "session.input.admitted", { input: older });
-
+    const admitted = {
+      ...event(1, "session.input.admitted", { input: older }),
+      schemaVersion: 2,
+    };
     const eventThenSnapshot = applySessionSnapshot(applyEvent(createInitialClientState(), admitted), snapshot);
     const snapshotThenEvent = applyEvent(applySessionSnapshot(createInitialClientState(), snapshot), admitted);
 
@@ -80,6 +82,50 @@ describe("session event reducer", () => {
     );
     expect(state.lastSeq).toBe(0);
     expect(state.eventsBySeq).toEqual({});
+  });
+
+  it("accepts session.input.admitted at schema version 2", () => {
+    const input: SessionInputRecord = {
+      id: "input-1",
+      sessionId: "s1",
+      seq: 1,
+      delivery: "queue",
+      items: [{ type: "text", text: "hello" }],
+      content: "hello",
+      attachments: [],
+      metadata: {},
+      createdAt: 1,
+    };
+    const admitted = {
+      ...event(1, "session.input.admitted", { input }),
+      schemaVersion: 2,
+    };
+
+    const next = applyEvent(createInitialClientState(), admitted);
+
+    expect(next.lastSeq).toBe(1);
+    expect(next.buckets.s1?.inputs).toEqual([input]);
+  });
+
+  it("rejects session.input.admitted at the retired schema version 1", () => {
+    const input: SessionInputRecord = {
+      id: "input-1",
+      sessionId: "s1",
+      seq: 1,
+      delivery: "queue",
+      items: [{ type: "text", text: "hello" }],
+      content: "hello",
+      attachments: [],
+      metadata: {},
+      createdAt: 1,
+    };
+
+    expect(() =>
+      applyEvent(
+        createInitialClientState(),
+        event(1, "session.input.admitted", { input }),
+      ),
+    ).toThrow(UnsupportedSessionEventSchemaVersionError);
   });
 
   it("hydrates canonical messages, parts, runs, and permissions from an attach snapshot", () => {
