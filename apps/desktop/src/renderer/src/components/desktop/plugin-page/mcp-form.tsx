@@ -116,8 +116,10 @@ function PairRows({
   const id = useId()
   const rows = values.length ? values : [["", ""]]
   function update(index: number, column: 0 | 1, value: string): void {
-    const next = values.length ? values.map((pair) => [...pair] as [string, string]) : [["", ""]]
-    next[index] = column === 0 ? [value, next[index][1]] : [next[index][0], value]
+    const next: McpPairs = values.length
+      ? values.map((pair): [string, string] => [pair[0], pair[1]])
+      : [["", ""]]
+    next[index][column] = value
     onChange(next)
   }
   return (
