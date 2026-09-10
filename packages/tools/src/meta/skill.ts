@@ -19,16 +19,24 @@ export const skillTool: ToolDefinition = {
     type: "object",
     properties: {
       name: { type: "string", description: "Skill name" },
+      path: {
+        type: "string",
+        description: "Optional catalog path. When supplied, it must identify the current skill winner.",
+      },
     },
     required: ["name"],
   },
   async execute(input, context) {
     const name = input.name as string;
+    const requestedPath = input.path;
 
     const registry = await resolveSkillRegistry(context, { refreshFilesystem: true });
 
-    const skill = registry.resolve(name);
-    if (!skill) {
+    const resolvedByName = registry.resolve(name);
+    const skill = typeof requestedPath === "string"
+      ? registry.resolvePath(requestedPath)
+      : resolvedByName;
+    if (!skill || (typeof requestedPath === "string" && skill !== resolvedByName)) {
       return {
         content: [{ type: "text", text: `Skill not found: ${name}` }],
         isError: true,

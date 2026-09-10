@@ -1,4 +1,6 @@
 import { Fragment, useMemo } from "react"
+import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
+import type { DesktopSessionInput } from "@shared/session-types"
 
 import { messageTextContent } from "./message-content"
 import { AssistantMessage } from "./message/assistant-message"
@@ -17,6 +19,7 @@ import { RunErrorNotice } from "./message/run-error-notice"
 
 export function ConversationTranscript({
   messages,
+  inputs = [],
   parts,
   runs,
   running,
@@ -31,11 +34,12 @@ export function ConversationTranscript({
   showReasoning = true,
 }: {
   messages: DesktopSessionMessage[]
+  inputs?: DesktopSessionInput[]
   parts: DesktopSessionPart[]
   runs: DesktopSessionRun[]
   running: boolean
   canEditLastUserMessage: boolean
-  onEditLastUserMessage: (sourceMessageId: string, content: string) => void
+  onEditLastUserMessage: (sourceMessageId: string, document: ComposerDocument) => void
   onCopyAssistantMessage: (content: string) => void
   onForkAssistantMessage?: (messageId: string) => void
   onOpenFile: (path: string, line?: number) => void
@@ -100,6 +104,7 @@ export function ConversationTranscript({
               <MessageScrollerItem messageId={userMessage.id} scrollAnchor className="pt-2">
                 <MessageBlock
                   message={userMessage}
+                  inputItems={inputs.find((input) => input.id === userMessage.inputId)?.items}
                   parts={entry.turn.userParts}
                   streaming={false}
                   userActions={{

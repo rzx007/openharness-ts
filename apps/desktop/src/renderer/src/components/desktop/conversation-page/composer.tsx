@@ -8,14 +8,15 @@ import { cn } from "@renderer/lib/utils"
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
+import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 import { ComposerAttachments } from "./composer-attachments"
 import { readComposerDrop } from "./composer-file-input"
 import { ComposerIconButton, ComposerSendButton, PermissionModeMenu } from "./controls"
-import type { ComposerSkillCommand } from "./composer-skill-commands"
 import { ContextUsageControl } from "./context-usage-control"
 import { ModelPicker } from "./model-picker"
 import { RichPromptInput } from "./rich-prompt-input"
-import { SkillCommandMenu } from "./skill-command-menu"
+import type { ComposerSkill } from "./rich-prompt-input"
+import type { ComposerPickerCommand, ComposerPickerItem } from "./composer-picker"
 import { resolvePermissionModeLabel } from "./utils"
 
 export function Composer({
@@ -28,7 +29,8 @@ export function Composer({
   selectedProvider,
   modelLabel,
   permissionMode,
-  skillCommands = [],
+  skills = [],
+  commands = [],
   className,
   textareaClassName,
   rows = 2,
@@ -37,6 +39,7 @@ export function Composer({
   onOpenContextUsage,
   onDraftChange,
   onSubmit,
+  onCommand,
   onInterrupt,
   onSelectModel,
   onSelectPermissionMode,
@@ -51,7 +54,7 @@ export function Composer({
   onRemoveAttachment,
 }: {
   id: string
-  draft: string
+  draft: ComposerDocument
   sending: boolean
   running?: boolean
   models: DesktopModel[]
@@ -59,15 +62,17 @@ export function Composer({
   selectedProvider: string | null
   modelLabel: string
   permissionMode: DesktopPermissionMode
-  skillCommands?: ComposerSkillCommand[]
+  skills?: readonly ComposerSkill[]
+  commands?: readonly ComposerPickerItem[]
   className?: string
   textareaClassName?: string
   rows?: number
   canSubmit?: boolean
   contextUsage?: DesktopContextUsageSnapshot | null
   onOpenContextUsage?: () => void
-  onDraftChange: (value: string) => void
+  onDraftChange: (value: ComposerDocument) => void
   onSubmit: () => void
+  onCommand?: (command: ComposerPickerCommand) => Promise<void>
   onInterrupt?: () => void
   onSelectModel: (model: DesktopModel) => void
   onSelectPermissionMode: (mode: DesktopPermissionMode) => void
@@ -84,7 +89,7 @@ export function Composer({
   const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
   const closePicker = (): void => setActivePicker(null)
-  const allowSubmit = canSubmit ?? Boolean(draft.trim())
+  const allowSubmit = canSubmit ?? draft.items.length > 0
   const attachDisabled = !attachmentInteractionEnabled || attachmentReadOnly
 
   const submit = (): void => {
@@ -131,13 +136,14 @@ export function Composer({
         placeholder="随心输入"
         rows={rows}
         disabled={sending}
-        skillCommands={skillCommands}
+        skills={skills}
+        commands={commands}
         className={textareaClassName}
         onChange={onDraftChange}
         onSubmit={submit}
+        onCommand={onCommand}
         onPasteFiles={attachmentInteractionEnabled ? onPasteFiles : undefined}
       />
-      <SkillCommandMenu draft={draft} commands={skillCommands} onSelect={onDraftChange} />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
         <Button
           type="button"

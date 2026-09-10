@@ -16,6 +16,7 @@ import {
 } from "./store-test-fixtures"
 import { useDesktopSessionStore } from "./store"
 import type { DesktopSessionRuntime } from "./types"
+import { composerDocument, emptyComposerDocument } from "./composer-document"
 
 function emptySessionView(sessionId: string, cursor = 0): DesktopSessionView {
   return {
@@ -104,7 +105,7 @@ describe("desktop session actions", () => {
     const attachment = readyAttachment("draft-first", "asset-first")
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
-        "new-conversation": { text: "", attachments: [attachment] },
+        "new-conversation": { document: emptyComposerDocument, attachments: [attachment] },
       },
     })
 
@@ -113,18 +114,18 @@ describe("desktop session actions", () => {
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
       sessionId: session.id,
-      content: "",
+      items: [],
       attachments: [{ assetId: "asset-first", intent: "auto", displayName: "asset-first.png" }],
     })
     expect(useDesktopSessionStore.getState().composerDraftsByScope).toEqual({
-      [`session:${session.id}`]: { text: "", attachments: [] },
+      [`session:${session.id}`]: { document: emptyComposerDocument, attachments: [] },
     })
     expect(useDesktopSessionStore.getState().sessions).toContainEqual(
       expect.objectContaining({ id: session.id, title: "asset-first.png" })
     )
   })
 
-  it("starts a session with a selected skill through the normal prompt API", async () => {
+  it("starts a session with ordered structured items through the normal prompt API", async () => {
     const session = emptySessionView("session-skill").session
     const sendPrompt = vi.fn(async () => undefined)
     vi.stubGlobal("window", {
@@ -137,25 +138,23 @@ describe("desktop session actions", () => {
       },
     })
     resetNewConversationState()
-    const skillInvocation = {
-      name: "archify",
-      commandName: "archify",
-      source: "project" as const,
-      invocationSource: "slash" as const,
-    }
+    const document = composerDocument([
+      { type: "text", text: "画" },
+      { type: "skill", name: "archify", path: "D:/skills/archify/SKILL.md", displayName: "Archify" },
+      { type: "text", text: "架构图" },
+    ])
 
-    await useDesktopSessionStore.getState().startSession("画架构图", { skillInvocation })
+    await useDesktopSessionStore.getState().startSession("", { document })
 
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
       sessionId: session.id,
-      content: "画架构图",
+      items: document.items,
       attachments: [],
-      skillInvocation,
     })
   })
 
-  it("clears the migrated slash-command draft using its original text", async () => {
+  it("clears the migrated structured draft after it is submitted", async () => {
     const session = emptySessionView("session-slash").session
     vi.stubGlobal("window", {
       desktop: {
@@ -167,25 +166,24 @@ describe("desktop session actions", () => {
       },
     })
     resetNewConversationState()
+    const document = composerDocument([
+      { type: "skill", name: "archify", path: "D:/skills/archify/SKILL.md", displayName: "Archify" },
+      { type: "text", text: " AI新闻" },
+    ])
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
-        "new-conversation": { text: "/archify AI新闻", attachments: [] },
+        "new-conversation": {
+          document,
+          attachments: [],
+        },
       },
     })
 
-    await useDesktopSessionStore.getState().startSession("AI新闻", {
-      sourceDraftText: "/archify AI新闻",
-      skillInvocation: {
-        name: "archify",
-        commandName: "archify",
-        source: "project",
-        invocationSource: "slash",
-      },
-    })
+    await useDesktopSessionStore.getState().startSession("", { document })
 
-    expect(
-      useDesktopSessionStore.getState().composerDraftsByScope[`session:${session.id}`]?.text
-    ).toBe("")
+    expect(useDesktopSessionStore.getState().composerDraftsByScope[`session:${session.id}`]?.document).toEqual(
+      emptyComposerDocument
+    )
   })
 
   it("clears the migrated first-prompt draft while sending is still pending", async () => {
@@ -207,7 +205,10 @@ describe("desktop session actions", () => {
     const attachment = readyAttachment("draft-first", "asset-first")
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
-        "new-conversation": { text: "说明", attachments: [attachment] },
+        "new-conversation": {
+          document: composerDocument([{ type: "text", text: "说明" }]),
+          attachments: [attachment],
+        },
       },
     })
 
@@ -220,7 +221,7 @@ describe("desktop session actions", () => {
     resolveSend()
     await starting
 
-    expect(draftWhileSending).toEqual({ text: "", attachments: [] })
+    expect(draftWhileSending).toEqual({ document: emptyComposerDocument, attachments: [] })
   })
 
   it("keeps the new-conversation attachment draft when create fails", async () => {
@@ -235,7 +236,10 @@ describe("desktop session actions", () => {
     })
     resetNewConversationState()
     const attachment = readyAttachment("draft-first", "asset-first")
-    const draft = { text: "说明", attachments: [attachment] }
+    const draft = {
+      document: composerDocument([{ type: "text", text: "说明" }]),
+      attachments: [attachment],
+    }
     useDesktopSessionStore.setState({
       composerDraftsByScope: { "new-conversation": draft },
     })
@@ -267,7 +271,10 @@ describe("desktop session actions", () => {
     const attachment = readyAttachment("draft-first", "asset-first")
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
-        "new-conversation": { text: "说明", attachments: [attachment] },
+        "new-conversation": {
+          document: composerDocument([{ type: "text", text: "说明" }]),
+          attachments: [attachment],
+        },
       },
     })
 
@@ -277,7 +284,10 @@ describe("desktop session actions", () => {
 
     expect(sendPrompt).not.toHaveBeenCalled()
     expect(useDesktopSessionStore.getState().composerDraftsByScope).toEqual({
-      [`session:${session.id}`]: { text: "说明", attachments: [attachment] },
+      [`session:${session.id}`]: {
+        document: composerDocument([{ type: "text", text: "说明" }]),
+        attachments: [attachment],
+      },
     })
   })
 
@@ -298,7 +308,10 @@ describe("desktop session actions", () => {
     const attachment = readyAttachment("draft-first", "asset-first")
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
-        "new-conversation": { text: "说明", attachments: [attachment] },
+        "new-conversation": {
+          document: composerDocument([{ type: "text", text: "说明" }]),
+          attachments: [attachment],
+        },
       },
     })
 
@@ -307,7 +320,10 @@ describe("desktop session actions", () => {
     ).rejects.toThrow("send failed")
 
     expect(useDesktopSessionStore.getState().composerDraftsByScope).toEqual({
-      [`session:${session.id}`]: { text: "说明", attachments: [attachment] },
+      [`session:${session.id}`]: {
+        document: composerDocument([{ type: "text", text: "说明" }]),
+        attachments: [attachment],
+      },
     })
   })
 
@@ -454,7 +470,7 @@ describe("desktop session actions", () => {
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
       sessionId: oldSession.id,
-      content: "old prompt",
+      items: [{ type: "text", text: "old prompt" }],
       attachments: [],
     })
 
@@ -572,6 +588,7 @@ describe("desktop session actions", () => {
         "input-old": {
           id: "input-old",
           sessionId: "session-old",
+          items: [{ type: "text" as const, text: "old prompt" }],
           content: "old prompt",
           attachments: [],
           createdAt: 1,
@@ -588,6 +605,7 @@ describe("desktop session actions", () => {
           "input-new": {
             id: "input-new",
             sessionId: "session-new",
+            items: [{ type: "text" as const, text: "new prompt" }],
             content: "new prompt",
             attachments: [],
             createdAt: 2,
@@ -599,6 +617,7 @@ describe("desktop session actions", () => {
           id: "edit-new",
           sessionId: "session-new",
           sourceMessageId: "message-new",
+          items: [{ type: "text" as const, text: "edited prompt" }],
           content: "edited prompt",
           attachments: [],
         },
@@ -1295,7 +1314,8 @@ describe("desktop session actions", () => {
 
     const runtime = useDesktopSessionStore.getState().sessionRuntimes[session.id]
     expect(Object.values(runtime?.pendingPromptSubmissions ?? {})).toContainEqual(
-      expect.objectContaining({ content: "first prompt", sessionId: session.id })
+      expect.objectContaining({ items: [{ type: "text" as const, text: "first prompt" }],
+      content: "first prompt", sessionId: session.id })
     )
     expect(Object.values(operationsWhenOpening)).toContainEqual(
       expect.objectContaining({ kind: "create-session", sessionId: session.id })
@@ -1381,7 +1401,7 @@ describe("desktop session store outside-project mode", () => {
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
       sessionId: "session-outside-project",
-      content: "总结今天的安排",
+      items: [{ type: "text", text: "总结今天的安排" }],
       attachments: [],
     })
     expect(useDesktopSessionStore.getState()).toMatchObject({
@@ -1453,6 +1473,7 @@ describe("desktop session store outside-project mode", () => {
 
     expect(onlyPendingPromptSubmission()).toMatchObject({
       sessionId: session.id,
+      items: [{ type: "text" as const, text: "第一条消息" }],
       content: "第一条消息",
       phase: "failed",
       error: "发送失败",
@@ -1467,6 +1488,7 @@ describe("desktop session store outside-project mode", () => {
         sessionId: "session-reopen",
         seq: 1,
         delivery: "queue",
+        items: [{ type: "text" as const, text: "confirmed" }],
         content: "confirmed",
         attachments: [],
         metadata: {},
@@ -1511,6 +1533,7 @@ describe("desktop session store outside-project mode", () => {
             "input-confirmed": {
               id: "input-confirmed",
               sessionId: "session-reopen",
+              items: [{ type: "text" as const, text: "confirmed" }],
               content: "confirmed",
               attachments: [],
               createdAt: 1,

@@ -12,6 +12,7 @@ const submission: PendingPromptSubmission = {
   id: "input-local",
   sessionId: "session-1",
   content: "new request",
+  items: [{ type: "text", text: "new request" }],
   attachments: [],
   createdAt: 10,
   phase: "accepted",
@@ -43,7 +44,7 @@ describe("mergeOptimisticTranscript", () => {
         type: "text",
         status: "completed",
         text: "new request",
-        metadata: { optimistic: true },
+        metadata: { optimistic: true, items: [{ type: "text", text: "new request" }] },
         createdAt: 10,
         updatedAt: 10,
       },
@@ -68,24 +69,25 @@ describe("mergeOptimisticTranscript", () => {
     expect(result.parts).toEqual([])
   })
 
-  it("shows a selected skill capsule immediately, including for an empty task", () => {
-    const skillInvocation = {
+  it("keeps ordered items for optimistic skills, including an empty text task", () => {
+    const items = [{
+      type: "skill" as const,
       name: "archify",
       displayName: "Archify",
       source: "project" as const,
-      invocationSource: "slash" as const,
-    }
+      path: "D:/skills/archify/SKILL.md",
+    }]
     const result = mergeOptimisticTranscript([], [], [{
       ...submission,
       content: "",
-      skillInvocation,
+      items,
     }])
 
     expect(result.parts).toEqual([
       expect.objectContaining({
         type: "text",
         text: "",
-        metadata: { optimistic: true, skillInvocation },
+        metadata: { optimistic: true, items },
       }),
     ])
   })
@@ -98,6 +100,7 @@ describe("mergeOptimisticTranscript", () => {
         {
           ...submission,
           content: "",
+          items: [],
           attachments: [
             {
               assetId: "asset-b",
@@ -144,6 +147,7 @@ describe("derivePendingHandoffSubmission", () => {
     sessionId: "session-1",
     seq: 2,
     delivery: "queue",
+    items: [{ type: "text" as const, text: "follow-up request" }],
     content: "follow-up request",
     attachments: [],
     metadata: {},
@@ -180,6 +184,7 @@ describe("derivePendingHandoffSubmission", () => {
     expect(result).toEqual({
       id: "input-queued",
       sessionId: "session-1",
+      items: [{ type: "text" as const, text: "follow-up request" }],
       content: "follow-up request",
       attachments: [],
       createdAt: 20,

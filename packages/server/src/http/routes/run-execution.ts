@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   parseAdmitPromptRequest,
   parsePromptAttachments,
+  parseSessionInputItems,
 } from "@openharness/protocol";
 
 import {
@@ -61,16 +62,16 @@ export function createRunExecutionRoutes(
       if (!sessionId) return errorResponse(400, "sessionId is required");
       let body;
       let attachments;
+      let items;
       try {
         body = await readJson(c);
         attachments = parsePromptAttachments(body.attachments);
+        items = parseSessionInputItems(body.items);
       } catch (error) {
         return protocolValidationErrorResponse(error);
       }
       if (typeof body.id !== "string" || !body.id.trim())
         return errorResponse(400, "id is required");
-      if (typeof body.content !== "string")
-        return errorResponse(400, "content is required");
       if (
         typeof body.sourceMessageId !== "string" ||
         !body.sourceMessageId.trim()
@@ -82,7 +83,7 @@ export function createRunExecutionRoutes(
       try {
         const admitted = await context.application.editLatestPrompt(sessionId, {
           id: body.id,
-          content: body.content,
+          items,
           sourceMessageId: body.sourceMessageId,
           attachments,
           ...(isRecord(body.metadata) ? { metadata: body.metadata } : {}),

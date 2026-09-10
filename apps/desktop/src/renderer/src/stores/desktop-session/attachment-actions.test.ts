@@ -68,7 +68,7 @@ describe("desktop attachment actions", () => {
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
         "session:a": {
-          text: "",
+          document: { version: 1, items: [] },
           attachments: [
             {
               draftId: candidate.draftId,
@@ -201,7 +201,7 @@ describe("desktop attachment actions", () => {
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
         "session:a": {
-          text: "",
+          document: { version: 1, items: [] },
           attachments: [
             {
               draftId: "draft-uploading",
@@ -250,7 +250,7 @@ describe("desktop attachment actions", () => {
     useDesktopSessionStore.setState({
       composerDraftsByScope: {
         "session:a": {
-          text: "keep text",
+          document: { version: 1, items: [{ type: "text", text: "keep text" }] },
           attachments: [
             {
               draftId: candidate.draftId,

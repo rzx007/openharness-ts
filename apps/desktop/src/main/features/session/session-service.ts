@@ -35,9 +35,11 @@ import { IpcEvents } from "../../../shared/ipc-channels"
 import type {
   CheckoutDesktopProjectBranchInput,
   CloseDesktopAuxSessionInput,
+  CompactDesktopSessionInput,
   CreateDesktopProjectBranchInput,
   CreateDesktopSessionInput,
   DesktopCommandCatalogEntry,
+  DesktopCompactSessionResult,
   DesktopBootstrapData,
   DesktopAuxSessionUpdate,
   DesktopDaemonStatus,
@@ -63,6 +65,7 @@ import type {
   ReplyDesktopPermissionInput,
   SetDefaultDesktopProjectShellInput,
   SendDesktopPromptInput,
+  SessionUserInputItem,
   SetDefaultDesktopModelInput,
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
@@ -85,6 +88,7 @@ import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./sess
 const execFileAsync = promisify(execFile)
 
 const primarySubscriptionSlot = "primary"
+const DESKTOP_SESSION_COMMAND_NAMES = new Set(["/compact", "/status", "/skills"])
 
 export class DesktopSessionService {
   private clientPromise: Promise<OpenHarnessClient> | null = null
@@ -212,7 +216,22 @@ export class DesktopSessionService {
 
   async listCommands(cwdInput: string): Promise<DesktopCommandCatalogEntry[]> {
     const cwd = resolveRequiredPath(cwdInput)
-    return await (await this.getClient()).listCommands({ cwd })
+    const commands = await (await this.getClient()).listCommands({ cwd })
+    return commands.flatMap((command): DesktopCommandCatalogEntry[] => {
+      if (command.kind === "template") {
+        if (!command.path) return []
+        return [{ ...command, kind: "template", path: command.path }]
+      }
+      return DESKTOP_SESSION_COMMAND_NAMES.has(command.name)
+        ? [{ ...command, kind: "session" }]
+        : []
+    })
+  }
+
+  async compactSession(input: CompactDesktopSessionInput): Promise<DesktopCompactSessionResult> {
+    const sessionId = requireString(input.sessionId, "会话 ID")
+    const result = await (await this.getClient()).compactSession(sessionId)
+    return { messageCount: result.messageCount }
   }
 
   async checkoutProjectBranch(
@@ -396,15 +415,15 @@ export class DesktopSessionService {
   async sendPrompt(input: SendDesktopPromptInput): Promise<void> {
     const id = requireString(input.id, "输入 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
-    const content = typeof input.content === "string" ? input.content.trim() : ""
+    const items = requirePromptItems(input.items)
     const attachments = normalizePromptAttachments(input.attachments, true)
-    if (!content && attachments.length === 0 && !input.skillInvocation) {
+    if (!hasPromptItems(items) && attachments.length === 0) {
       throw new Error("消息内容和附件不能同时为空。")
     }
     const client = await this.getClient()
     await client.admitPrompt(sessionId, {
       id,
-      content,
+      items,
       attachments,
       delivery: "queue",
       metadata: {
@@ -413,7 +432,6 @@ export class DesktopSessionService {
           component: "composer",
           action: "append_prompt",
         },
-        ...(input.skillInvocation ? { skillInvocation: input.skillInvocation } : {}),
       },
     })
   }
@@ -421,16 +439,16 @@ export class DesktopSessionService {
   async editLatestPrompt(input: EditLatestDesktopPromptInput): Promise<void> {
     const id = requireString(input.id, "编辑请求 ID")
     const sessionId = requireString(input.sessionId, "会话 ID")
-    const content = typeof input.content === "string" ? input.content.trim() : ""
+    const items = requirePromptItems(input.items)
     const sourceMessageId = requireString(input.sourceMessageId, "原消息 ID")
     const attachments = normalizePromptAttachments(input.attachments, false)
-    if (!content && attachments.length === 0 && !input.skillInvocation) {
+    if (!hasPromptItems(items) && attachments.length === 0) {
       throw new Error("消息内容、附件和技能不能同时为空。")
     }
     const client = await this.getClient()
     await client.editLatestPrompt(sessionId, {
       id,
-      content,
+      items,
       sourceMessageId,
       attachments,
       metadata: {
@@ -439,7 +457,6 @@ export class DesktopSessionService {
           component: "latest-message-editor",
           action: "edit_latest_prompt",
         },
-        ...(input.skillInvocation ? { skillInvocation: input.skillInvocation } : {}),
       },
     })
   }
@@ -975,6 +992,51 @@ function normalizePromptAttachments(
       displayName: requireString(record.displayName, `第 ${index + 1} 个附件名称`),
     }
   })
+}
+
+function requirePromptItems(value: unknown): SessionUserInputItem[] {
+  if (!Array.isArray(value)) throw new Error("消息 items 必须是数组。")
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`第 ${index + 1} 个消息 item 无效。`)
+    }
+    const record = item as Record<string, unknown>
+    if (record.type === "text" && typeof record.text === "string") {
+      return { type: "text", text: record.text }
+    }
+    if (record.type === "mention" && typeof record.name === "string" && typeof record.path === "string") {
+      return {
+        type: "mention",
+        name: record.name,
+        path: record.path,
+        ...(typeof record.displayName === "string" ? { displayName: record.displayName } : {}),
+      }
+    }
+    if (record.type === "skill" && typeof record.name === "string" && typeof record.path === "string") {
+      const source = record.source
+      if (
+        source !== undefined &&
+        source !== "bundled" &&
+        source !== "user" &&
+        source !== "project" &&
+        source !== "plugin"
+      ) {
+        throw new Error(`第 ${index + 1} 个消息 item 的 source 无效。`)
+      }
+      return {
+        type: "skill",
+        name: record.name,
+        path: record.path,
+        ...(typeof record.displayName === "string" ? { displayName: record.displayName } : {}),
+        ...(source ? { source } : {}),
+      }
+    }
+    throw new Error(`第 ${index + 1} 个消息 item 无效。`)
+  })
+}
+
+function hasPromptItems(items: readonly SessionUserInputItem[]): boolean {
+  return items.some((item) => item.type !== "text" || item.text.trim().length > 0)
 }
 
 function requireAttachmentIntent(

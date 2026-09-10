@@ -202,6 +202,7 @@ describe("desktop session selectors", () => {
             "send-a": {
               id: "send-a",
               sessionId: "session-a",
+              items: [{ type: "text" as const, text: "message" }],
               content: "message",
               attachments: [],
               createdAt: 1,
@@ -315,6 +316,7 @@ describe("desktop session selectors", () => {
             "prompt-a": {
               id: "prompt-a",
               sessionId: "session-a",
+              items: [{ type: "text" as const, text: "still local" }],
               content: "still local",
               attachments: [],
               createdAt: 1,

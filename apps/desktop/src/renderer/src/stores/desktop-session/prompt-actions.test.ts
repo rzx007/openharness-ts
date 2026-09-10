@@ -8,6 +8,7 @@ import { emptySessionView, resetDesktopSessionStore, sessionRuntime } from "./st
 import { useDesktopSessionStore } from "./store"
 import { selectActiveSessionQueuedPromptActions, selectSessionSending } from "./selectors"
 import type { DesktopSessionRuntime } from "./types"
+import { composerDocument, emptyComposerDocument } from "./composer-document"
 
 function viewContainingInput(
   sessionId: string,
@@ -34,6 +35,7 @@ function viewContainingInput(
         seq: 1,
         delivery: "queue",
         content: "confirmed",
+        items: [{ type: "text", text: "confirmed" }],
         attachments: [],
         metadata: {},
         createdAt: 1,
@@ -107,14 +109,14 @@ describe("prompt actions session runtime", () => {
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
       sessionId: "session-1",
-      content: "",
+      items: [],
       attachments: [
         { assetId: "asset-b", intent: "auto", displayName: "asset-b.png" },
         { assetId: "asset-a", intent: "auto", displayName: "asset-a.png" },
       ],
     })
     expect(onlyPendingPromptSubmission()).toMatchObject({
-      content: "",
+      items: [],
       attachments: [
         { assetId: "asset-b", mediaType: "image/png", sizeBytes: 100 },
         { assetId: "asset-a", mediaType: "image/png", sizeBytes: 100 },
@@ -148,7 +150,7 @@ describe("prompt actions session runtime", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       composerDraftsByScope: {
-        "session:session-1": { text: "", attachments: [submitted] },
+        "session:session-1": { document: emptyComposerDocument, attachments: [submitted] },
       },
     })
 
@@ -159,7 +161,10 @@ describe("prompt actions session runtime", () => {
     useDesktopSessionStore.setState((state) => ({
       composerDraftsByScope: {
         ...state.composerDraftsByScope,
-        "session:session-1": { text: "", attachments: [submitted, addedLater] },
+        "session:session-1": {
+          document: emptyComposerDocument,
+          attachments: [submitted, addedLater],
+        },
       },
     }))
     resolveSend()
@@ -179,7 +184,7 @@ describe("prompt actions session runtime", () => {
     useDesktopSessionStore.setState({
       activeSessionId: "session-1",
       composerDraftsByScope: {
-        "session:session-1": { text: "", attachments: [attachment] },
+        "session:session-1": { document: emptyComposerDocument, attachments: [attachment] },
       },
     })
 
@@ -211,27 +216,24 @@ describe("prompt actions session runtime", () => {
     expect(sendPrompt.mock.calls[0]?.[0].id).not.toBe(sendPrompt.mock.calls[1]?.[0].id)
   })
 
-  it("submits a selected skill as normal prompt metadata and keeps attachments", async () => {
+  it("submits a selected skill as an ordered item and keeps attachments", async () => {
     const sendPrompt = vi.fn(async () => undefined)
     vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
     useDesktopSessionStore.setState({ activeSessionId: "session-1" })
-    const skillInvocation = {
-      name: "review",
-      commandName: "review",
-      displayName: "review",
-      source: "project" as const,
-      invocationSource: "slash" as const,
-    }
+    const document = composerDocument([
+      { type: "text", text: "review " },
+      { type: "skill", name: "review", path: "D:/skills/review/SKILL.md", displayName: "Review" },
+      { type: "text", text: "this" },
+    ])
 
-    await useDesktopSessionStore.getState().sendMessage("review this", {
-      skillInvocation,
+    await useDesktopSessionStore.getState().sendMessage("", {
+      document,
       attachments: [readyAttachment("draft-a", "asset-a")],
     })
 
     expect(sendPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: "review this",
-        skillInvocation,
+        items: document.items,
         attachments: [{ assetId: "asset-a", intent: "auto", displayName: "asset-a.png" }],
       })
     )
@@ -241,15 +243,14 @@ describe("prompt actions session runtime", () => {
     const sendPrompt = vi.fn(async () => undefined)
     vi.stubGlobal("window", { desktop: { sessions: { sendPrompt } } })
     useDesktopSessionStore.setState({ activeSessionId: "session-1" })
-    const skillInvocation = {
-      name: "archify",
-      invocationSource: "slash" as const,
-    }
+    const document = composerDocument([
+      { type: "skill", name: "archify", path: "D:/skills/archify/SKILL.md", displayName: "Archify" },
+    ])
 
-    await useDesktopSessionStore.getState().sendMessage("", { skillInvocation })
+    await useDesktopSessionStore.getState().sendMessage("", { document })
 
     expect(sendPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ content: "", skillInvocation })
+      expect.objectContaining({ items: document.items })
     )
   })
 
@@ -257,9 +258,9 @@ describe("prompt actions session runtime", () => {
     let resolveOld!: () => void
     let resolveNew!: () => void
     const sendPrompt = vi.fn(
-      ({ content }: { content: string }) =>
+      ({ items }: { items: Array<{ type: string; text?: string }> }) =>
         new Promise<void>((resolve) => {
-          if (content === "old") resolveOld = resolve
+          if (items[0]?.text === "old") resolveOld = resolve
           else resolveNew = resolve
         })
     )
@@ -550,7 +551,7 @@ describe("desktop session store prompt intent boundaries", () => {
     expect(sendPrompt).toHaveBeenCalledWith({
       id: expect.any(String),
       sessionId: "session-1",
-      content: "new request",
+      items: [{ type: "text", text: "new request" }],
       attachments: [],
     })
     expect(editLatestPrompt).not.toHaveBeenCalled()
@@ -559,9 +560,9 @@ describe("desktop session store prompt intent boundaries", () => {
   it("does not let an old session request clear a newer session sending state", async () => {
     let resolveOld!: () => void
     let resolveNew!: () => void
-    const sendPrompt = vi.fn(({ content }: { content: string }) => {
+    const sendPrompt = vi.fn(({ items }: { items: Array<{ type: string; text?: string }> }) => {
       return new Promise<void>((resolve) => {
-        if (content === "old request") resolveOld = resolve
+        if (items[0]?.text === "old request") resolveOld = resolve
         else resolveNew = resolve
       })
     })
@@ -601,6 +602,7 @@ describe("desktop session store prompt intent boundaries", () => {
 
     expect(onlyPendingPromptSubmission()).toMatchObject({
       sessionId: "session-1",
+      items: [{ type: "text" as const, text: "new request" }],
       content: "new request",
       phase: "submitting",
       placement: "transcript",
@@ -611,6 +613,7 @@ describe("desktop session store prompt intent boundaries", () => {
 
     expect(onlyPendingPromptSubmission()).toMatchObject({
       sessionId: "session-1",
+      items: [{ type: "text" as const, text: "new request" }],
       content: "new request",
       phase: "accepted",
       placement: "transcript",
@@ -687,6 +690,7 @@ describe("desktop session store prompt intent boundaries", () => {
           sessionId: "session-1",
           seq: 1,
           delivery: "queue",
+          items: [{ type: "text" as const, text: "first request" }],
           content: "first request",
           attachments: [],
           metadata: {},
@@ -743,6 +747,7 @@ describe("desktop session store prompt intent boundaries", () => {
           sessionId: "session-1",
           seq: 1,
           delivery: "queue",
+          items: [{ type: "text" as const, text: "confirmed request" }],
           content: "confirmed request",
           attachments: [],
           metadata: {},
@@ -796,21 +801,23 @@ describe("desktop session store prompt intent boundaries", () => {
       id: expect.any(String),
       sessionId: "session-1",
       sourceMessageId: "message-1",
-      content: "replacement",
+      items: [{ type: "text", text: "replacement" }],
       attachments: [],
     })
   })
 
-  it("preserves the selected skill when editing its task", async () => {
+  it("preserves structured items when editing a task with a selected skill", async () => {
     const editLatestPrompt = vi.fn(async () => undefined)
     vi.stubGlobal("window", { desktop: { sessions: { editLatestPrompt } } })
     const view = emptySessionView("session-1", 1)
-    const skillInvocation = {
-      name: "archify",
-      commandName: "archify",
-      source: "project",
-      invocationSource: "slash" as const,
-    }
+    const originalItems = [
+      { type: "skill" as const, name: "archify", path: "D:/skills/archify/SKILL.md" },
+      { type: "text" as const, text: "旧任务" },
+    ]
+    const editedDocument = composerDocument([
+      { type: "skill", name: "archify", path: "D:/skills/archify/SKILL.md" },
+      { type: "text", text: "新任务" },
+    ])
     view.messages = [
       {
         id: "message-skill",
@@ -829,21 +836,21 @@ describe("desktop session store prompt intent boundaries", () => {
         sessionId: "session-1",
         seq: 1,
         delivery: "queue",
+        items: originalItems,
         content: "旧任务",
         attachments: [],
-        metadata: { skillInvocation },
+        metadata: {},
         createdAt: 1,
       },
     ]
     useDesktopSessionStore.setState({ activeSessionId: "session-1", sessionView: view })
 
-    await useDesktopSessionStore.getState().editLatestMessage("message-skill", "新任务")
+    await useDesktopSessionStore.getState().editLatestMessage("message-skill", "", editedDocument)
 
     expect(editLatestPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceMessageId: "message-skill",
-        content: "新任务",
-        skillInvocation,
+        items: editedDocument.items,
       })
     )
   })
@@ -870,6 +877,7 @@ describe("desktop session store prompt intent boundaries", () => {
         sessionId: "session-1",
         seq: 1,
         delivery: "queue",
+        items: [{ type: "text" as const, text: "" }],
         content: "",
         attachments: [
           inputAttachment("attachment-b", "asset-b", 0, "b.png"),
@@ -887,7 +895,7 @@ describe("desktop session store prompt intent boundaries", () => {
       id: expect.any(String),
       sessionId: "session-1",
       sourceMessageId: "message-1",
-      content: "",
+      items: [],
       attachments: [
         { assetId: "asset-b", intent: "auto", displayName: "b.png" },
         { assetId: "asset-a", intent: "auto", displayName: "a.pdf" },

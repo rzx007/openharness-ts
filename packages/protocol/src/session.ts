@@ -398,7 +398,7 @@ export interface AdmitPromptInput {
   id?: string;
   sessionId: string;
   delivery?: InputDelivery;
-  content: string;
+  items: SessionUserInputItem[];
   attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
 }

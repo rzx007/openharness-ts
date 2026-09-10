@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { sessionUserInputText } from "@openharness/protocol";
 
 import type {
   AdmitPromptAttachmentInput,
   AttachmentLimits,
   ReplaceTranscriptMessageInput,
   SessionRunRecord,
+  SessionUserInputItem,
 } from "@openharness/protocol";
 import {
   AttachmentError,
@@ -22,10 +24,14 @@ import type { SessionRunExecutor } from "./session-run-executor.js";
 import type { SessionEventPublisher } from "./session-event-publisher.js";
 import type { AgentPool } from "../agent/agent-pool.js";
 
+function inputItems(input: { items?: readonly SessionUserInputItem[]; content?: string }): SessionUserInputItem[] {
+  return input.items ? [...input.items] : [{ type: "text", text: input.content ?? "" }];
+}
+
 export type AdmitPromptInput = {
   id?: string;
   delivery?: "queue" | "steer";
-  content: string;
+  items: SessionUserInputItem[];
   metadata?: Record<string, unknown>;
   runMetadata?: Record<string, unknown>;
   traceId?: string;
@@ -59,6 +65,10 @@ export interface SessionRunEngineContext {
   runExecutor: Pick<SessionRunExecutor, "execute">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   attachmentLimits?: AttachmentLimits;
+  materializeSteerInput?(
+    sessionId: string,
+    items: readonly SessionUserInputItem[],
+  ): Promise<string>;
 }
 
 /**
@@ -76,7 +86,7 @@ export class SessionRunEngine {
     {
       sessionId: string;
       delivery: "queue" | "steer";
-      content: string;
+      items: SessionUserInputItem[];
       attachmentFingerprint: string;
       metadata: Record<string, unknown>;
       promise: Promise<AdmitPromptResult>;
@@ -107,13 +117,14 @@ export class SessionRunEngine {
     const input = this.context.store.getInput(inputId);
     const queuedRun = this.context.store.getRun(queuedRunId);
     if (!input || !queuedRun) return undefined;
+    const content = await this.materializeSteerInput(sessionId, input.items);
     const promoted = this.runCoordinator.promoteQueuedRun(
       sessionId,
       queuedRunId,
       expectedActiveRunId,
       {
         id: input.id,
-        content: input.content,
+        content,
         delivery: "steer",
         traceId: normalizeTraceId(input.metadata.traceId),
         metadata: {
@@ -180,7 +191,7 @@ export class SessionRunEngine {
           id: input.id,
           sessionId,
           delivery: "queue",
-          content: input.content,
+          items: inputItems(input),
           attachments: input.attachments,
           metadata,
         },
@@ -217,7 +228,7 @@ export class SessionRunEngine {
           id: input.id,
           sessionId,
           delivery: "queue",
-          content: input.content,
+          items: inputItems(input),
           attachments: input.attachments,
           metadata,
         },
@@ -358,7 +369,7 @@ export class SessionRunEngine {
       if (
         pending.sessionId !== sessionId ||
         pending.delivery !== delivery ||
-        pending.content !== input.content ||
+        !jsonEqual(pending.items, inputItems(input)) ||
         pending.attachmentFingerprint !== attachmentFingerprint ||
         !jsonEqual(pending.metadata, metadata)
       ) {
@@ -377,7 +388,7 @@ export class SessionRunEngine {
     this.pendingAdmissions.set(input.id, {
       sessionId,
       delivery,
-      content: input.content,
+      items: inputItems(input),
       attachmentFingerprint,
       metadata,
       promise,
@@ -406,7 +417,7 @@ export class SessionRunEngine {
     if (existingInput) {
       if (
         existingInput.sessionId !== sessionId ||
-        existingInput.content !== input.content ||
+        !jsonEqual(existingInput.items, inputItems(input)) ||
         existingInput.delivery !== delivery ||
         promptAttachmentFingerprint(
           existingInput.attachments.map((reference) => ({
@@ -461,7 +472,8 @@ export class SessionRunEngine {
           id: input.id,
           sessionId,
           delivery,
-          content: input.content,
+          items: inputItems(input),
+          content: (input as { content?: string }).content,
           attachments,
           metadata,
         },
@@ -484,7 +496,8 @@ export class SessionRunEngine {
       id: input.id,
       sessionId,
       delivery,
-      content: input.content,
+      items: inputItems(input),
+      content: (input as { content?: string }).content,
       attachments,
       metadata,
     };
@@ -495,9 +508,13 @@ export class SessionRunEngine {
       : this.context.store.admitPrompt(admission);
 
     if (delivery === "steer" && this.context.agentPool.configured) {
+      const items = inputItems(input);
+      const steerContent = items.some((item) => item.type === "skill")
+        ? await this.materializeSteerInput(sessionId, items)
+        : admitted.content;
       const steered = this.runCoordinator.steer(sessionId, {
         id: admitted.id,
-        content: admitted.content,
+        content: steerContent,
         delivery: "steer",
         traceId,
         metadata: admitted.metadata,
@@ -551,6 +568,17 @@ export class SessionRunEngine {
       input: admitted,
       ...(run ? { run, queue_state: queueState } : {}),
     };
+  }
+
+  private async materializeSteerInput(
+    sessionId: string,
+    items: readonly SessionUserInputItem[],
+  ): Promise<string> {
+    if (!this.context.materializeSteerInput) {
+      if (!items.some((item) => item.type === "skill")) return sessionUserInputText(items);
+      throw new Error("session_input_skill_catalog_unavailable");
+    }
+    return await this.context.materializeSteerInput(sessionId, items);
   }
 
   interruptSession(

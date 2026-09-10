@@ -16,7 +16,11 @@ import type {
   RouteAttachmentBatchInput,
 } from "../attachment-routing/attachment-routing-types.js";
 import type { SessionAttachmentResources } from "../attachment-resource/session-attachment-resources.js";
-import { applySkillInvocationToContent } from "./skill-invocation.js";
+import {
+  applyMaterializedSessionInput,
+  materializeSessionInput,
+  type SessionInputSkillCatalog,
+} from "./session-input-materializer.js";
 import type { ContextUsageCache } from "../context-usage-cache.js";
 import type { SessionContextUsageAgent } from "../assemble-session-context-usage.js";
 
@@ -52,6 +56,8 @@ export interface SessionRunExecutorContext {
     sessionId: string,
     agent: SessionContextUsageAgent,
   ) => Promise<void>;
+  /** Re-read the cwd catalog before executing renderer-supplied Skill paths. */
+  resolveSkillCatalog?(session: SessionRecord): Promise<SessionInputSkillCatalog>;
 }
 
 export interface ExecuteSessionRunInput {
@@ -85,6 +91,13 @@ export class SessionRunExecutor {
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+      const hasExplicitSkills = admitted.items.some((item) => item.type === "skill");
+      const materialized = hasExplicitSkills
+        ? materializeSessionInput(
+            admitted.items,
+            await resolveSkillCatalog(session, this.context.resolveSkillCatalog),
+          )
+        : undefined;
 
       if (admitted.attachments.length > 0) {
         const acquiredAt = Date.now();
@@ -127,7 +140,7 @@ export class SessionRunExecutor {
       const agent = await this.context.agentPool.acquireSession(sessionId);
       agent.setModel(readSessionRuntimeConfig(session).model);
 
-      let submittedContent: string | ContentBlock[] = admitted.content;
+      let submittedContent: string | ContentBlock[] = materialized?.text ?? admitted.content;
       if (admitted.attachments.length > 0) {
         if (!this.context.resolveCapabilities || !this.context.routeAttachments) {
           throw new Error("attachment routing is not configured");
@@ -135,7 +148,7 @@ export class SessionRunExecutor {
         const capabilities = await this.context.resolveCapabilities(session);
         const inspection = agent.inspect();
         const routed = await this.context.routeAttachments({
-          text: admitted.content,
+          text: materialized?.text ?? admitted.content,
           attachments: admitted.attachments,
           ...capabilities,
           availableTools: inspection.tools.map((tool) => tool.name),
@@ -170,7 +183,12 @@ export class SessionRunExecutor {
         this.context.events.publishSince(beforeAttachmentProjection);
       }
 
-      submittedContent = applySkillInvocationToContent(submittedContent, admitted.metadata);
+      if (materialized) {
+        submittedContent = applyMaterializedSessionInput(
+          submittedContent,
+          materialized,
+        );
+      }
 
       // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。
       // 不要让 agent 自己再生成一套 id，否则 SSE 里的 run 和 HTTP 回的 run 会对不上。
@@ -343,6 +361,18 @@ export class SessionRunExecutor {
       }
     }
   }
+}
+
+async function resolveSkillCatalog(
+  session: SessionRecord,
+  resolver: SessionRunExecutorContext["resolveSkillCatalog"],
+): Promise<SessionInputSkillCatalog> {
+  if (!resolver) {
+    throw new Error(
+      `session_input_skill_catalog_unavailable: cannot validate skills for ${session.cwd}`,
+    );
+  }
+  return await resolver(session);
 }
 
 function attachmentRoutingError(error: unknown): Pick<

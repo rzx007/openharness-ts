@@ -15,10 +15,13 @@ import {
   removeDraftAttachment,
   resetComposerScope,
   selectDraftAttachments,
+  selectDraftDocument,
   selectDraftText,
   sessionComposerScope,
+  setDraftDocument,
   setDraftText,
 } from "./composer-draft-state"
+import { composerDocument } from "./composer-document"
 
 const candidateA: DesktopAttachmentCandidate = {
   draftId: "draft-a",
@@ -37,6 +40,21 @@ const candidateB: DesktopAttachmentCandidate = {
 }
 
 describe("composer draft state", () => {
+  it("stores the structured document and derives its text without flattening it", () => {
+    const document = composerDocument([
+      { type: "text", text: "使用 " },
+      {
+        type: "skill",
+        name: "writing-plans",
+        path: "D:/skills/plan/SKILL.md",
+        displayName: "Writing Plans",
+      },
+    ])
+    const state = setDraftDocument(emptyComposerDraftState(), "session:a", document)
+
+    expect(selectDraftDocument(state, "session:a")).toEqual(document)
+    expect(selectDraftText(state, "session:a")).toBe("使用 $writing-plans")
+  })
   it("isolates text and ordered attachments by composer scope", () => {
     const state = setDraftText(
       addCandidates(emptyComposerDraftState(), "session:a", [candidateA, candidateB]),

@@ -104,6 +104,18 @@ export class SkillRegistry {
   }
 
   /**
+   * 根据已注册技能当前赢家的文件路径解析技能。
+   * 同名技能被覆盖后，旧路径不会保留为可解析目标。
+   */
+  resolvePath(pathValue: string): SkillDefinition | undefined {
+    if (!pathValue.trim()) return undefined;
+    const pathKey = normalizePathKey(pathValue);
+    return this.getAll().find(
+      (skill) => Boolean(skill.path) && normalizePathKey(skill.path) === pathKey,
+    );
+  }
+
+  /**
    * 获取所有已注册的技能定义列表，并按名称字母顺序排序。
    * @returns 只读的技能定义数组。
    */

@@ -169,6 +169,7 @@ describe("scoped operation errors", () => {
             "prompt-a": {
               id: "prompt-a",
               sessionId: "session-a",
+              items: [{ type: "text" as const, text: "需要重试的消息" }],
               content: "需要重试的消息",
               attachments: [],
               createdAt: 1,

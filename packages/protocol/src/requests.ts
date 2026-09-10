@@ -14,6 +14,11 @@ import type {
   UpdateSessionInput,
 } from "./session.js";
 import type { AttachmentIntent } from "./attachment.js";
+import {
+  normalizeSessionUserInputItems,
+  type SessionUserInputItem,
+  type SkillSource,
+} from "./session-input-items.js";
 
 export interface ProtocolError {
   code: string;
@@ -204,12 +209,69 @@ export function parseAdmitPromptRequest(value: unknown): AdmitPromptRequest {
   const metadata = optionalRecord(body, "metadata");
   const attachments = parsePromptAttachments(body.attachments);
   return {
-    content: requiredString(body, "content"),
+    items: parseSessionInputItems(body.items),
     attachments,
     ...(id !== undefined ? { id } : {}),
     ...(delivery !== undefined ? { delivery } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
   };
+}
+
+export function parseSessionInputItems(value: unknown): SessionUserInputItem[] {
+  if (!Array.isArray(value)) {
+    throw new ProtocolValidationError("items must be an array", "items");
+  }
+  const items = value.map((entry, index): SessionUserInputItem => {
+    const field = `items[${index}]`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new ProtocolValidationError(`${field} must be an object`, field);
+    }
+    const item = entry as JsonRecord;
+    if (item.type === "text") {
+      if (typeof item.text !== "string") {
+        throw new ProtocolValidationError(`${field}.text must be a string`, `${field}.text`);
+      }
+      return { type: "text", text: item.text };
+    }
+    if (item.type !== "skill" && item.type !== "mention") {
+      throw new ProtocolValidationError(`${field}.type is invalid`, `${field}.type`);
+    }
+    if (typeof item.name !== "string" || typeof item.path !== "string") {
+      throw new ProtocolValidationError(`${field} requires name and path`, field);
+    }
+    if (item.displayName !== undefined && typeof item.displayName !== "string") {
+      throw new ProtocolValidationError(`${field}.displayName must be a string`, `${field}.displayName`);
+    }
+    if (item.type === "mention") {
+      return {
+        type: "mention",
+        name: item.name,
+        path: item.path,
+        ...(typeof item.displayName === "string" ? { displayName: item.displayName } : {}),
+      };
+    }
+    if (
+      item.source !== undefined &&
+      item.source !== "bundled" && item.source !== "user" && item.source !== "project" && item.source !== "plugin"
+    ) {
+      throw new ProtocolValidationError(`${field}.source is invalid`, `${field}.source`);
+    }
+    return {
+      type: "skill",
+      name: item.name,
+      path: item.path,
+      ...(typeof item.displayName === "string" ? { displayName: item.displayName } : {}),
+      ...(item.source !== undefined ? { source: item.source as SkillSource } : {}),
+    };
+  });
+  try {
+    return normalizeSessionUserInputItems(items);
+  } catch (error) {
+    throw new ProtocolValidationError(
+      error instanceof Error ? error.message : "items are invalid",
+      "items",
+    );
+  }
 }
 
 export function parsePromptAttachments(

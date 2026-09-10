@@ -1,6 +1,6 @@
-import type { SessionInputAttachmentRecord, SkillInvocationMetadata } from "@openharness/client"
+import type { SessionInputAttachmentRecord, SessionUserInputItem } from "@openharness/client"
 
-export type { SkillInvocationMetadata } from "@openharness/client"
+export type { SessionUserInputItem } from "@openharness/client"
 
 import type { DesktopAttachmentSupport, DesktopPromptAttachmentInput } from "./attachment-types"
 
@@ -52,6 +52,7 @@ export interface DesktopSessionInput {
   sessionId: string
   seq: number
   delivery: "queue" | "steer"
+  items: SessionUserInputItem[]
   content: string
   attachments: SessionInputAttachmentRecord[]
   promotedMessageId?: string
@@ -194,6 +195,7 @@ export interface DesktopProjectDetails {
 }
 
 export type DesktopCommandKind = "session" | "template"
+export type DesktopCommandSelection = "execute" | "submenu" | "insert"
 export type DesktopCommandSource =
   | "builtin"
   | "bundled"
@@ -201,17 +203,42 @@ export type DesktopCommandSource =
   | "plugin"
   | "project"
 
-export interface DesktopCommandCatalogEntry {
+interface DesktopCommandCatalogEntryBase {
   name: string
   displayName?: string
   description?: string
-  kind: DesktopCommandKind
   source?: DesktopCommandSource
   argumentHint?: string
+  selection?: DesktopCommandSelection
+  requiresEmptyComposer?: boolean
 }
+
+export interface DesktopSessionCommandCatalogEntry extends DesktopCommandCatalogEntryBase {
+  kind: "session"
+  path?: never
+}
+
+export interface DesktopTemplateCommandCatalogEntry extends DesktopCommandCatalogEntryBase {
+  kind: "template"
+  skillName: string
+  /** 当前 Skill 定义的绝对路径；内嵌 bundled Skill 为 ""。 */
+  path: string
+}
+
+export type DesktopCommandCatalogEntry =
+  | DesktopSessionCommandCatalogEntry
+  | DesktopTemplateCommandCatalogEntry
 
 export interface ListDesktopCommandsInput {
   cwd: string
+}
+
+export interface CompactDesktopSessionInput {
+  sessionId: string
+}
+
+export interface DesktopCompactSessionResult {
+  messageCount: number
 }
 
 export type DesktopSessionSyncStatus = "connected" | "reconnecting"
@@ -254,18 +281,16 @@ export type CreateDesktopSessionInput = CreateDesktopSessionBaseInput &
 export interface SendDesktopPromptInput {
   id: string
   sessionId: string
-  content: string
+  items: SessionUserInputItem[]
   attachments: DesktopPromptAttachmentInput[]
-  skillInvocation?: SkillInvocationMetadata
 }
 
 export interface EditLatestDesktopPromptInput {
   id: string
   sessionId: string
-  content: string
+  items: SessionUserInputItem[]
   sourceMessageId: string
   attachments: DesktopPromptAttachmentInput[]
-  skillInvocation?: SkillInvocationMetadata
 }
 
 export interface InterruptDesktopSessionInput {

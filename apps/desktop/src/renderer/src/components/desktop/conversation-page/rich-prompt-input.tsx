@@ -10,94 +10,157 @@ import {
   $createTextNode,
   $getRoot,
   $getSelection,
+  $isElementNode,
   $isRangeSelection,
+  $isTextNode,
   COMMAND_PRIORITY_HIGH,
   COMMAND_PRIORITY_LOW,
   KEY_ENTER_COMMAND,
   PASTE_COMMAND,
+  type LexicalEditor,
+  type LexicalNode,
+  type TextNode,
 } from "lexical"
 
 import { cn } from "@renderer/lib/utils"
-import type { ComposerSkillCommand } from "./composer-skill-commands"
-import { parseSelectedSkillCommandDraft } from "./composer-skill-commands"
-import { $createSkillCommandPillNode, SkillCommandPillNode } from "./skill-command-pill-node"
+import {
+  composerDocument,
+  sameComposerDocument,
+  type ComposerDocument,
+} from "@renderer/stores/desktop-session/composer-document"
+import {
+  ComposerPicker,
+  type ComposerPickerItem,
+  type ComposerPickerCommand,
+  type ComposerPickerSkill,
+  pickerItems,
+} from "./composer-picker"
+import { findComposerTrigger, type ComposerTrigger } from "./composer-trigger"
 import { readComposerClipboard } from "./composer-file-input"
+import { ResourceMentionNode } from "./resource-mention-node"
+import {
+  $createSkillMentionNode,
+  $isSkillMentionNode,
+  SkillMentionNode,
+} from "./skill-mention-node"
+
+export interface ComposerSkill {
+  name: string
+  commandName?: string
+  path: string
+  displayName: string
+  description: string
+  source?: "bundled" | "user" | "project" | "plugin"
+  sourceLabel: string
+}
+
+interface TextLeaf {
+  node: LexicalNode
+  from: number
+  to: number
+}
+
+export function composerDocumentFromLexical(): ComposerDocument {
+  const items: ComposerDocument["items"] = []
+  const paragraphs = $getRoot().getChildren()
+  paragraphs.forEach((paragraph, index) => {
+    for (const node of descendantLeaves(paragraph)) {
+      if ($isSkillMentionNode(node)) {
+        items.push({
+          type: "skill",
+          name: node.__name,
+          path: node.__path,
+          displayName: node.__displayName,
+          ...(isSkillSource(node.__source) ? { source: node.__source } : {}),
+        })
+      } else if (node instanceof ResourceMentionNode) {
+        items.push({ ...node.__item })
+      } else {
+        const text = node.getTextContent()
+        if (text) items.push({ type: "text", text })
+      }
+    }
+    if (index < paragraphs.length - 1) items.push({ type: "text", text: "\n" })
+  })
+  return composerDocument(items)
+}
+
+export function restoreComposerDocument(value: ComposerDocument): void {
+  const root = $getRoot()
+  root.clear()
+  let paragraph = $createParagraphNode()
+  root.append(paragraph)
+  for (const item of value.items) {
+    if (item.type === "text") {
+      item.text.split("\n").forEach((text, index) => {
+        if (index > 0) {
+          paragraph = $createParagraphNode()
+          root.append(paragraph)
+        }
+        if (text) paragraph.append($createTextNode(text))
+      })
+    } else if (item.type === "skill") {
+      paragraph.append(
+        $createSkillMentionNode(
+          item.name,
+          item.path,
+          item.displayName ?? item.name,
+          item.source ?? ""
+        )
+      )
+    } else paragraph.append(new ResourceMentionNode(item))
+  }
+  paragraph.selectEnd()
+}
 
 function SyncDraftPlugin({
   value,
-  skillCommands,
   onChange,
 }: {
-  value: string
-  skillCommands: ComposerSkillCommand[]
-  onChange: (value: string) => void
+  value: ComposerDocument
+  onChange: (value: ComposerDocument) => void
 }): null {
   const [editor] = useLexicalComposerContext()
   const syncingRef = useRef(false)
-
+  useEffect(
+    () =>
+      editor.registerUpdateListener(() => {
+        if (syncingRef.current) return
+        const next = editor.getEditorState().read(composerDocumentFromLexical)
+        if (!sameComposerDocument(next, value)) onChange(next)
+      }),
+    [editor, onChange, value]
+  )
   useEffect(() => {
-    return editor.registerUpdateListener(({ editorState }) => {
-      if (syncingRef.current) return
-
-      editorState.read(() => {
-        const nextValue = $getRoot().getTextContent()
-        if (nextValue !== value) onChange(nextValue)
-      })
+    if (sameComposerDocument(editor.getEditorState().read(composerDocumentFromLexical), value))
+      return
+    syncingRef.current = true
+    editor.update(() => {
+      restoreComposerDocument(value)
     })
-  }, [editor, onChange, value])
-
-  useEffect(() => {
-    editor.getEditorState().read(() => {
-      const currentText = $getRoot().getTextContent()
-      if (currentText === value) return
-
-      syncingRef.current = true
-      editor.update(() => {
-        const root = $getRoot()
-        root.clear()
-
-        if (value) {
-          const paragraph = $createParagraphNode()
-          const selectedSkill = parseSelectedSkillCommandDraft(value, skillCommands)
-          if (selectedSkill) {
-            paragraph.append(
-              $createSkillCommandPillNode(selectedSkill.command.name, selectedSkill.command.label)
-            )
-            if (selectedSkill.body) paragraph.append($createTextNode(selectedSkill.body))
-          } else {
-            paragraph.append($createTextNode(value))
-          }
-          root.append(paragraph)
-          paragraph.selectEnd()
-        }
-      })
-
-      queueMicrotask(() => {
-        syncingRef.current = false
-      })
+    queueMicrotask(() => {
+      syncingRef.current = false
     })
-  }, [editor, skillCommands, value])
-
+  }, [editor, value])
   return null
 }
 
 function SubmitKeyPlugin({ onSubmit }: { onSubmit: () => void }): null {
   const [editor] = useLexicalComposerContext()
-
-  useEffect(() => {
-    return editor.registerCommand(
-      KEY_ENTER_COMMAND,
-      (event: KeyboardEvent | null) => {
-        if (!event || event.shiftKey || event.defaultPrevented) return false
-
-        event.preventDefault()
-        onSubmit()
-        return true
-      },
-      COMMAND_PRIORITY_LOW
-    )
-  }, [editor, onSubmit])
-
+  useEffect(
+    () =>
+      editor.registerCommand(
+        KEY_ENTER_COMMAND,
+        (event: KeyboardEvent | null) => {
+          if (!event || event.shiftKey || event.defaultPrevented) return false
+          event.preventDefault()
+          onSubmit()
+          return true
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+    [editor, onSubmit]
+  )
   return null
 }
 
@@ -107,31 +170,218 @@ function PlainTextPastePlugin({
   onPasteFiles?: (files: readonly File[]) => void
 }): null {
   const [editor] = useLexicalComposerContext()
-
-  useEffect(() => {
-    return editor.registerCommand(
-      PASTE_COMMAND,
-      (event) => {
-        if (!("clipboardData" in event)) return false
-
-        const clipboard = event.clipboardData
-        if (!clipboard) return false
-        const { files, text } = readComposerClipboard(clipboard)
-        if (files.length === 0 && !text) return false
-
-        event.preventDefault()
-        if (files.length > 0) onPasteFiles?.(files)
-        editor.update(() => {
-          const selection = $getSelection()
-          if (text && $isRangeSelection(selection)) selection.insertRawText(text)
-        })
-        return true
-      },
-      COMMAND_PRIORITY_HIGH
-    )
-  }, [editor, onPasteFiles])
-
+  useEffect(
+    () =>
+      editor.registerCommand(
+        PASTE_COMMAND,
+        (event) => {
+          if (!("clipboardData" in event) || !event.clipboardData) return false
+          const { files, text } = readComposerClipboard(event.clipboardData)
+          if (files.length === 0 && !text) return false
+          event.preventDefault()
+          if (files.length > 0) onPasteFiles?.(files)
+          editor.update(() => {
+            const selection = $getSelection()
+            if (text && $isRangeSelection(selection)) selection.insertRawText(text)
+          })
+          return true
+        },
+        COMMAND_PRIORITY_HIGH
+      ),
+    [editor, onPasteFiles]
+  )
   return null
+}
+
+function ComposerPickerPlugin({
+  skills,
+  commands,
+  onCommand,
+  onCommandError,
+}: {
+  skills: readonly ComposerSkill[]
+  commands: readonly ComposerPickerItem[]
+  onCommand: (command: ComposerPickerCommand) => Promise<void>
+  onCommandError: (message: string | null) => void
+}): React.JSX.Element | null {
+  const [editor] = useLexicalComposerContext()
+  const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState }) => {
+        const next = editorState.read(triggerFromEditorState)
+        setTrigger(next)
+        if (next) setDismissed(null)
+      }),
+    [editor]
+  )
+  const visible =
+    trigger &&
+    dismissed !== `${trigger.from}:${trigger.to}:${trigger.query}` &&
+    (trigger.sigil === "$" || trigger.mode === "inline" || trigger.mode === "leading")
+  if (!visible) return null
+  const skillItems: ComposerPickerItem[] = skills.map((skill) => ({
+    id: `skill:${skill.path}`,
+    kind: "skill",
+    label: skill.displayName,
+    description: skill.description,
+    sourceLabel: skill.sourceLabel,
+    skill,
+  }))
+  return (
+    <ComposerPicker
+      items={pickerItems({
+        trigger,
+        commands: editor.getEditorState().read(() => canExecuteComposerCommand(trigger))
+          ? commands
+          : [],
+        skills: skillItems,
+      })}
+      query=""
+      onDismiss={() => setDismissed(`${trigger.from}:${trigger.to}:${trigger.query}`)}
+      onSelect={(item) => {
+        if (item.skill) {
+          insertSkillMention(editor, trigger, item.skill)
+          return
+        }
+        if (item.command) {
+          onCommandError(null)
+          void executeComposerCommand(editor, item.command, onCommand, onCommandError)
+        }
+      }}
+    />
+  )
+}
+
+export async function executeComposerCommand(
+  editor: LexicalEditor,
+  command: ComposerPickerCommand,
+  onCommand: (command: ComposerPickerCommand) => Promise<void>,
+  onError: (message: string) => void = () => {}
+): Promise<void> {
+  if (!editor.getEditorState().read(() => canExecuteComposerCommand())) return
+  const previous = editor.getEditorState().read(composerDocumentFromLexical)
+  editor.update(
+    () => {
+      const root = $getRoot()
+      root.clear()
+      const paragraph = $createParagraphNode()
+      root.append(paragraph)
+      paragraph.selectEnd()
+    },
+    { discrete: true }
+  )
+  try {
+    await onCommand(command)
+  } catch (error) {
+    editor.update(
+      () => {
+        restoreComposerDocument(previous)
+      },
+      { discrete: true }
+    )
+    onError(error instanceof Error ? error.message : String(error))
+  }
+}
+
+function canExecuteComposerCommand(trigger?: ComposerTrigger | null): boolean {
+  const document = composerDocumentFromLexical()
+  if (document.items.some((item) => item.type !== "text")) return false
+  const text = document.items.map((item) => (item.type === "text" ? item.text : "")).join("")
+  const current = trigger ?? findComposerTrigger(text, text.trimEnd().length)
+  return (
+    !!current &&
+    current.sigil === "/" &&
+    current.mode === "leading" &&
+    (text.slice(0, current.from) + text.slice(current.to)).trim() === ""
+  )
+}
+
+export function triggerFromEditorState(): ComposerTrigger | null {
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) return null
+  const anchor = selection.anchor.getNode()
+  if (!$isTextNode(anchor)) return null
+  const leaves = textLeaves()
+  const leaf = leaves.find((item) => item.node === anchor)
+  return leaf
+    ? findComposerTrigger(editorText(leaves), leaf.from + selection.anchor.offset, {
+        atomicBoundaries: leaves
+          .filter(
+            (item) => $isSkillMentionNode(item.node) || item.node instanceof ResourceMentionNode
+          )
+          .map((item) => item.to),
+      })
+    : null
+}
+
+export function insertSkillMention(
+  editor: LexicalEditor,
+  trigger: ComposerTrigger,
+  skill: ComposerPickerSkill
+): void {
+  editor.update(
+    () => {
+      const selection = $getSelection()
+      if (!$isRangeSelection(selection)) return
+      const leaf = textLeaves().find(
+        (item) => $isTextNode(item.node) && item.from <= trigger.from && item.to >= trigger.to
+      )
+      if (!leaf || !$isTextNode(leaf.node)) return
+      const textNode = leaf.node as TextNode
+      const start = trigger.from - leaf.from
+      const end = trigger.to - leaf.from
+      const fragments = textNode.splitText(start, end)
+      const selectedIndex = start === 0 ? 0 : 1
+      const selected = fragments[selectedIndex]
+      const after = fragments[selectedIndex + 1]
+      if (!selected) return
+      const mention = $createSkillMentionNode(
+        skill.name,
+        skill.path,
+        skill.displayName ?? skill.name,
+        skill.source ?? ""
+      )
+      selected.replace(mention)
+      const spacer = after?.getTextContent().startsWith(" ") ? null : $createTextNode(" ")
+      if (spacer) mention.insertAfter(spacer)
+      const caretNode = spacer ?? after
+      if (caretNode && $isTextNode(caretNode)) caretNode.select(1, 1)
+    },
+    { discrete: true }
+  )
+}
+
+function textLeaves(): TextLeaf[] {
+  const leaves: TextLeaf[] = []
+  let offset = 0
+  $getRoot()
+    .getChildren()
+    .forEach((paragraph, index) => {
+      if (index > 0) offset += 1
+      for (const node of descendantLeaves(paragraph)) {
+        const text = node.getTextContent()
+        leaves.push({ node, from: offset, to: offset + text.length })
+        offset += text.length
+      }
+    })
+  return leaves
+}
+
+function editorText(leaves: TextLeaf[]): string {
+  let text = ""
+  for (const leaf of leaves) {
+    text += "\n".repeat(Math.max(0, leaf.from - text.length)) + leaf.node.getTextContent()
+  }
+  return text
+}
+
+function descendantLeaves(node: LexicalNode): LexicalNode[] {
+  return $isElementNode(node) ? node.getChildren().flatMap(descendantLeaves) : [node]
+}
+function isSkillSource(value: string): value is NonNullable<ComposerPickerSkill["source"]> {
+  return value === "bundled" || value === "user" || value === "project" || value === "plugin"
 }
 
 function RichPromptPlaceholder({
@@ -159,24 +409,29 @@ export function RichPromptInput({
   rows,
   placeholder,
   disabled,
-  skillCommands = [],
+  skills = [],
+  commands = [],
   className,
   onChange,
   onSubmit,
+  onCommand = async () => undefined,
   onPasteFiles,
 }: {
   id: string
-  value: string
+  value: ComposerDocument
   rows: number
   placeholder: string
   disabled: boolean
-  skillCommands?: ComposerSkillCommand[]
+  skills?: readonly ComposerSkill[]
+  commands?: readonly ComposerPickerItem[]
   className?: string
-  onChange: (value: string) => void
+  onChange: (value: ComposerDocument) => void
   onSubmit: () => void
+  onCommand?: (command: ComposerPickerCommand) => Promise<void>
   onPasteFiles?: (files: readonly File[]) => void
 }): React.JSX.Element {
   const [isComposing, setIsComposing] = useState(false)
+  const [commandError, setCommandError] = useState<string | null>(null)
   const minHeight = `${Math.max(rows, 1) * 24 + 24}px`
   const initialConfig = useMemo(
     () => ({
@@ -193,11 +448,10 @@ export function RichPromptInput({
       onError(error: Error) {
         console.error(error)
       },
-      nodes: [SkillCommandPillNode],
+      nodes: [SkillMentionNode, ResourceMentionNode],
     }),
     [id]
   )
-
   return (
     <LexicalComposer initialConfig={initialConfig}>
       <div
@@ -229,8 +483,21 @@ export function RichPromptInput({
         />
         <HistoryPlugin />
         <PlainTextPastePlugin onPasteFiles={onPasteFiles} />
-        <SyncDraftPlugin value={value} skillCommands={skillCommands} onChange={onChange} />
+        <SyncDraftPlugin value={value} onChange={onChange} />
+        {!isComposing ? (
+          <ComposerPickerPlugin
+            skills={skills}
+            commands={commands}
+            onCommand={onCommand}
+            onCommandError={setCommandError}
+          />
+        ) : null}
         {!isComposing && !disabled ? <SubmitKeyPlugin onSubmit={onSubmit} /> : null}
+        {commandError ? (
+          <p role="alert" className="px-4 text-sm text-destructive">
+            {commandError}
+          </p>
+        ) : null}
       </div>
     </LexicalComposer>
   )

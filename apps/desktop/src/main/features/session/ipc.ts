@@ -51,6 +51,13 @@ export const sessionIpcContribution: IpcContribution = {
         handler: (_event, cwd) => desktopSessionService.listCommands(String(cwd ?? "")),
       },
       {
+        channel: IpcChannels.sessionCompact,
+        handler: (_event, input) =>
+          desktopSessionService.compactSession(
+            input as import("../../../shared/session-types").CompactDesktopSessionInput
+          ),
+      },
+      {
         channel: IpcChannels.projectRename,
         handler: (_event, input) =>
           desktopSessionService.renameProject(input as RenameDesktopProjectInput),

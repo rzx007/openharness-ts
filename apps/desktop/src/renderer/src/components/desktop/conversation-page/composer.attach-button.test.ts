@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { Composer } from "./composer"
+import { emptyComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 
 describe("Composer attach button", () => {
   let container: HTMLDivElement
@@ -30,7 +31,7 @@ describe("Composer attach button", () => {
       root.render(
         createElement(Composer, {
           id: "composer-attach-test",
-          draft: "",
+          draft: emptyComposerDocument,
           sending: false,
           models: [],
           selectedModel: null,
@@ -67,7 +68,7 @@ describe("Composer attach button", () => {
       root.render(
         createElement(Composer, {
           id: "composer-attach-disabled",
-          draft: "",
+          draft: emptyComposerDocument,
           sending: false,
           models: [],
           selectedModel: null,

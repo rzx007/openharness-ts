@@ -11,6 +11,8 @@ import type {
   DesktopBootstrapData,
   DesktopAuxSessionUpdate,
   DesktopCommandCatalogEntry,
+  CompactDesktopSessionInput,
+  DesktopCompactSessionResult,
   DesktopDaemonStatus,
   DesktopProjectDetails,
   DesktopSessionRecord,
@@ -260,6 +262,7 @@ export type DesktopAPI = {
     chooseProject: () => Promise<DesktopProjectDetails | null>
     inspectProject: (path: string) => Promise<DesktopProjectDetails>
     listCommands: (cwd: string) => Promise<DesktopCommandCatalogEntry[]>
+    compact: (input: CompactDesktopSessionInput) => Promise<DesktopCompactSessionResult>
     renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectPinned: (input: PinDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectDefaultShell: (

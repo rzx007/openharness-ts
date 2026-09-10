@@ -10,8 +10,10 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import {
   DEFAULT_ATTACHMENT_LIMITS,
+  normalizeSessionUserInputItems,
   parseAttachmentAssetRecord,
   parseAttachmentLimits,
+  sessionUserInputText,
 } from "@openharness/protocol";
 
 import type {
@@ -65,6 +67,7 @@ import type {
   AttachmentRepresentationKind,
   AttachmentLimits,
   SessionInputAttachmentRecord,
+  SessionUserInputItem,
 } from "@openharness/protocol";
 import { AttachmentError } from "../attachment/attachment-errors.js";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
@@ -83,6 +86,11 @@ export interface CreateAttachmentRepresentationInput {
   mediaType: string;
   createdAt?: number;
 }
+
+type StoreAdmitPromptInput = Omit<AdmitPromptInput, "content" | "items"> & {
+  content?: string;
+  items?: readonly SessionUserInputItem[];
+};
 
 export interface AttachmentLeaseRecord {
   id: string;
@@ -1353,7 +1361,7 @@ export class SessionStore {
   }
 
   admitPrompt(
-    input: AdmitPromptInput,
+    input: StoreAdmitPromptInput,
     options: { attachmentLimits?: Partial<AttachmentLimits> } = {},
   ): SessionInputRecord {
     return this.transaction(() => {
@@ -1365,11 +1373,13 @@ export class SessionStore {
         : this.attachmentLimits;
       const session = assertSession(this.state, input.sessionId);
       assertMutableSession(session);
+      const items = normalizeInputItems(input);
+      const content = sessionUserInputText(items);
       const normalized = normalizePromptAttachments(input.attachments);
       if (
-        input.content.trim().length === 0 &&
+        content.trim().length === 0 &&
         normalized.length === 0 &&
-        !hasSkillInvocation(input.metadata)
+        !items.some((item) => item.type !== "text")
       ) {
         throw new AttachmentError(
           "prompt_content_required",
@@ -1400,7 +1410,7 @@ export class SessionStore {
         }));
         const same =
           existing.sessionId === input.sessionId &&
-          existing.content === input.content &&
+          isDeepStrictEqual(existing.items, items) &&
           existing.delivery === delivery &&
           isDeepStrictEqual(
             metadataWithoutTrace(existing.metadata),
@@ -1496,7 +1506,8 @@ export class SessionStore {
         sessionId: input.sessionId,
         seq,
         delivery,
-        content: input.content,
+        items,
+        content,
         attachments,
         metadata,
         createdAt: timestamp,
@@ -1508,7 +1519,7 @@ export class SessionStore {
       }
       session.updatedAt = timestamp;
       if (seq === 1 && isPlaceholderSessionTitle(session.title)) {
-        const title = formatSessionTitle(input.content);
+        const title = formatSessionTitle(content);
         if (title) session.title = title;
       }
       this.mutations.inputs.add(id);
@@ -2416,7 +2427,7 @@ export class SessionStore {
         const copiedInput = this.admitPrompt({
           sessionId: fork.id,
           delivery: sourceInput.delivery,
-          content: sourceInput.content,
+          items: sourceInput.items,
           attachments: sourceInput.attachments.map((attachment) => ({
             assetId: attachment.assetId,
             intent: attachment.intent,
@@ -3969,7 +3980,7 @@ export class SessionStore {
         sessionId: row.session_id as string,
         seq: row.seq as number,
         delivery: row.delivery as SessionInputRecord["delivery"],
-        content: row.content as string,
+        ...hydrateInput(row),
         attachments: [],
         metadata: decode(row.metadata_json as string),
         createdAt: row.created_at as number,
@@ -4288,10 +4299,13 @@ export class SessionStore {
     }
 
     const upsertInput = this.database.prepare(`
-      INSERT INTO session_input VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO session_input (
+        id, session_id, seq, delivery, content, metadata_json, created_at,
+        items_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, seq=excluded.seq,
         delivery=excluded.delivery, content=excluded.content, metadata_json=excluded.metadata_json,
-        created_at=excluded.created_at
+        created_at=excluded.created_at, items_json=excluded.items_json
     `);
     for (const id of this.mutations.inputs) {
       const value = this.state.inputs[id];
@@ -4304,6 +4318,7 @@ export class SessionStore {
           value.content,
           encode(value.metadata),
           value.createdAt,
+          encode(value.items),
         );
     }
 
@@ -4575,13 +4590,34 @@ export class SessionStore {
   }
 }
 
-function hasSkillInvocation(metadata: Record<string, unknown> | undefined): boolean {
-  const value = metadata?.skillInvocation;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return record.invocationSource === "slash" &&
-    typeof record.name === "string" &&
-    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(record.name.trim());
+function normalizeInputItems(input: StoreAdmitPromptInput): SessionUserInputItem[] {
+  if (input.items !== undefined) return normalizeSessionUserInputItems(input.items);
+  return normalizeSessionUserInputItems(
+    input.content === undefined ? [] : [{ type: "text", text: input.content }],
+  );
+}
+
+function hydrateInput(row: Record<string, unknown>): Pick<SessionInputRecord, "items" | "content"> {
+  if (row.items_json === null || row.items_json === undefined) {
+    throw new LegacySessionInputError();
+  }
+  if (typeof row.items_json !== "string") {
+    throw new Error("invalid_session_input_items");
+  }
+  const items = normalizeSessionUserInputItems(
+    decode(row.items_json) as unknown as SessionUserInputItem[],
+  );
+  return { items, content: sessionUserInputText(items) };
+}
+
+class LegacySessionInputError extends Error {
+  readonly code = "legacy_session_input_unsupported";
+
+  constructor() {
+    super(
+      "legacy_session_input_unsupported: clear legacy Session data before reopening it",
+    );
+  }
 }
 
 function withoutUndefined<T extends object>(value: T): Partial<T> {

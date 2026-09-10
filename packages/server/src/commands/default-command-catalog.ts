@@ -15,6 +15,8 @@ function skillToCatalogEntry(skill: SkillDefinition): CommandCatalogEntry {
     ...(skill.displayName ? { displayName: skill.displayName } : {}),
     description: skill.description,
     kind: "template",
+    skillName: skill.name,
+    path: skill.path,
     source: skill.source ?? "user",
     ...(skill.argumentHint ? { argumentHint: skill.argumentHint } : {}),
   };

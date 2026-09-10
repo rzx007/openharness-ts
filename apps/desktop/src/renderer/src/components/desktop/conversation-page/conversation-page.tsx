@@ -1,5 +1,6 @@
 import { Bot, ListFilter, MoreHorizontal, PanelRight, ShieldAlert } from "lucide-react"
-import { useCallback, useEffect, useState, type SetStateAction } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 
 import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
 import {
@@ -18,9 +19,14 @@ import { useDesktopSessionStore } from "@renderer/stores/desktop-session-store"
 import {
   NEW_CONVERSATION_SCOPE,
   selectDraftAttachments,
-  selectDraftText,
+  selectDraftDocument,
   sessionComposerScope,
 } from "@renderer/stores/desktop-session/composer-draft-state"
+import {
+  composerDocument,
+  selectComposerDocumentText,
+  type ComposerDocument,
+} from "@renderer/stores/desktop-session/composer-document"
 import {
   selectActiveSessionOpening,
   selectActiveSessionComposerError,
@@ -35,11 +41,8 @@ import {
 import { Composer } from "./composer"
 import { PendingPromptQueue } from "./pending-prompt-queue"
 import { derivePendingHandoffSubmission, mergeOptimisticTranscript } from "./optimistic-transcript"
-import {
-  parseSkillCommandInvocation,
-  toComposerSkillCommands,
-  type ComposerSkillCommand,
-} from "./composer-skill-commands"
+import { toComposerCommands, toComposerSkills, type ComposerPickerCommand } from "./composer-picker"
+import type { ComposerSkill } from "./rich-prompt-input"
 import { HeaderIconButton } from "./controls"
 import { NewConversationStart } from "./new-conversation-start"
 import { PermissionCard } from "./message-block"
@@ -50,12 +53,8 @@ import { ScopedOperationError } from "./scoped-operation-errors"
 import { ConversationTranscriptSkeleton } from "./conversation-transcript-skeleton"
 import { ConversationTranscript } from "./transcript"
 import type { AddToComposerEventDetail, ConversationPaneProps } from "./types"
-import { resolveDraftAfterSubmission } from "./draft-submission"
-import {
-  resolveScrollerAgentStatus,
-  type ScrollerAgentStatusKind,
-} from "./scroller-agent-status"
-import { appendDraftText, resolveModelLabel } from "./utils"
+import { resolveScrollerAgentStatus, type ScrollerAgentStatusKind } from "./scroller-agent-status"
+import { resolveModelLabel } from "./utils"
 
 function ConversationPane({
   panelOpen,
@@ -69,8 +68,10 @@ function ConversationPane({
   const [composerValidationError, setComposerValidationError] = useState<string | null>(null)
   const [skillCommandSnapshot, setSkillCommandSnapshot] = useState<{
     cwd: string
-    commands: ComposerSkillCommand[]
+    commands: import("@shared/session-types").DesktopCommandCatalogEntry[]
   } | null>(null)
+  const [statusOpen, setStatusOpen] = useState(false)
+  const navigate = useNavigate()
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
   const openingSession = useDesktopSessionStore(selectActiveSessionOpening)
@@ -112,10 +113,13 @@ function ConversationPane({
     (state) => state.updateSessionPermissionMode
   )
   const refreshContextUsage = useDesktopSessionStore((state) => state.refreshContextUsage)
+  const resyncActiveSessionSnapshot = useDesktopSessionStore(
+    (state) => state.resyncActiveSessionSnapshot
+  )
   const contextUsageSnapshot = useDesktopSessionStore((state) => state.contextUsageSnapshot)
   const interrupt = useDesktopSessionStore((state) => state.interrupt)
   const replyPermission = useDesktopSessionStore((state) => state.replyPermission)
-  const setComposerDraftText = useDesktopSessionStore((state) => state.setComposerDraftText)
+  const setComposerDraftDocument = useDesktopSessionStore((state) => state.setComposerDraftDocument)
   const pickAttachmentFiles = useDesktopSessionStore((state) => state.pickAttachmentFiles)
   const addDroppedAttachments = useDesktopSessionStore((state) => state.addDroppedAttachments)
   const addClipboardAttachment = useDesktopSessionStore((state) => state.addClipboardAttachment)
@@ -129,48 +133,33 @@ function ConversationPane({
   const composerScope = activeSessionId
     ? sessionComposerScope(activeSessionId)
     : NEW_CONVERSATION_SCOPE
-  const draft = useDesktopSessionStore((state) => selectDraftText(state, composerScope))
+  const draft = useDesktopSessionStore((state) => selectDraftDocument(state, composerScope))
   const attachments = useDesktopSessionStore((state) =>
     selectDraftAttachments(state, composerScope)
   )
+  const draftText = selectComposerDocumentText(draft)
   const setDraft = useCallback(
-    (next: SetStateAction<string>): void => {
+    (next: ComposerDocument): void => {
       setComposerValidationError(null)
-      const current = selectDraftText(useDesktopSessionStore.getState(), composerScope)
-      setComposerDraftText(composerScope, typeof next === "function" ? next(current) : next)
+      setComposerDraftDocument(composerScope, next)
     },
-    [composerScope, setComposerDraftText]
+    [composerScope, setComposerDraftDocument]
   )
   const sending = hasSession ? activeSessionSending : newConversationSending
   const archived = sessionView?.session.status === "archived"
   const sessionActions = useSessionActionDialogs()
 
   const submitDraft = async (): Promise<void> => {
-    const content = draft.trim()
+    const content = selectComposerDocumentText(draft)
     const ready = areDesktopAttachmentsSendable(attachments)
-    const skill = parseSkillCommandInvocation(content, skillCommands)
-    if ((!content && attachments.length === 0 && !skill) || !ready || sending || archived) return
-    const submittedSessionId = activeSessionId
-    const submittedContent = skill?.content ?? content
+    if ((!content.trim() && attachments.length === 0) || !ready || sending || archived) return
     setComposerValidationError(null)
     try {
-      let completedSessionId = submittedSessionId
       if (hasSession) {
-        await sendMessage(submittedContent, {
-          skillInvocation: skill?.skillInvocation,
-          attachments,
-        })
+        await sendMessage(content, { document: draft, attachments })
       } else {
-        completedSessionId = await startSession(submittedContent, {
-          skillInvocation: skill?.skillInvocation,
-          attachments,
-          sourceDraftText: content,
-        })
+        await startSession(content, { document: draft, attachments })
       }
-      const currentSessionId = useDesktopSessionStore.getState().activeSessionId
-      setDraft((current) =>
-        resolveDraftAfterSubmission(current, content, completedSessionId, currentSessionId)
-      )
     } catch {
       // The store keeps the error and the draft stays available for retry.
     }
@@ -232,10 +221,13 @@ function ConversationPane({
     ),
   })
   const commandCwd = useDesktopSessionStore(selectCommandCatalogCwd)
-  const skillCommands =
+  const commandCatalog =
     commandCwd && skillCommandSnapshot?.cwd === commandCwd ? skillCommandSnapshot.commands : []
+  const skillCommands: ComposerSkill[] = toComposerSkills(commandCatalog)
+  const applicationCommands = toComposerCommands(commandCatalog)
   const canSubmit =
-    areDesktopAttachmentsSendable(attachments) && Boolean(draft.trim() || attachments.length > 0)
+    areDesktopAttachmentsSendable(attachments) &&
+    Boolean(draftText.trim() || attachments.length > 0)
 
   const pasteAttachments = async (files: readonly File[]): Promise<void> => {
     const payloads = await Promise.all(
@@ -257,16 +249,16 @@ function ConversationPane({
     await forkSession(activeSessionId, { afterMessageId: messageId })
   }
 
-  const editLatestUserMessage = async (sourceMessageId: string, content: string): Promise<void> => {
+  const editLatestUserMessage = async (sourceMessageId: string, document: ComposerDocument): Promise<void> => {
     if (archived || running) return
-    await editLatestMessage(sourceMessageId, content)
+    await editLatestMessage(sourceMessageId, selectComposerDocumentText(document), document)
   }
 
   useEffect(() => {
     const handleAddToComposer = (event: Event): void => {
       const detail = (event as CustomEvent<AddToComposerEventDetail>).detail
       if (!detail?.text) return
-      setDraft((current) => appendDraftText(current, detail.text))
+      setDraft(composerDocument([...draft.items, { type: "text", text: detail.text }]))
       window.requestAnimationFrame(() => {
         const composer = document.querySelector<HTMLTextAreaElement>(
           "#message-composer, #new-conversation-composer"
@@ -277,7 +269,7 @@ function ConversationPane({
 
     window.addEventListener("desktop:add-to-composer", handleAddToComposer)
     return () => window.removeEventListener("desktop:add-to-composer", handleAddToComposer)
-  }, [setDraft])
+  }, [draft.items, setDraft])
 
   useEffect(() => {
     if (!commandCwd || loadStatus !== "ready") {
@@ -289,7 +281,7 @@ function ConversationPane({
       .listCommands(commandCwd)
       .then((commands) => {
         if (!cancelled)
-          setSkillCommandSnapshot({ cwd: commandCwd, commands: toComposerSkillCommands(commands) })
+          setSkillCommandSnapshot({ cwd: commandCwd, commands })
       })
       .catch(() => {
         if (!cancelled) setSkillCommandSnapshot({ cwd: commandCwd, commands: [] })
@@ -299,6 +291,28 @@ function ConversationPane({
       cancelled = true
     }
   }, [commandCwd, loadStatus])
+
+  const executeComposerCommand = useCallback(
+    async (command: ComposerPickerCommand): Promise<void> => {
+      if (command.id === "compact") {
+        if (!activeSessionId || running) throw new Error("当前会话无法压缩。")
+        await window.desktop.sessions.compact({ sessionId: activeSessionId })
+        await resyncActiveSessionSnapshot()
+        void refreshContextUsage({ refresh: true })
+        return
+      }
+      if (command.id === "status") {
+        setStatusOpen(true)
+        return
+      }
+      if (command.id === "skills") {
+        await navigate({ to: "/plugins" })
+        return
+      }
+      throw new Error(`Desktop 尚未支持 /${command.id}。`)
+    },
+    [activeSessionId, navigate, refreshContextUsage, resyncActiveSessionSnapshot, running]
+  )
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col overflow-x-hidden bg-conversation">
@@ -369,7 +383,7 @@ function ConversationPane({
           selectedProvider={selectedProvider}
           selectedPermissionMode={selectedPermissionMode}
           operationError={composerValidationError ?? newConversationError}
-          skillCommands={skillCommands}
+          skills={skillCommands}
           attachments={attachments}
           attachmentInteractionEnabled={attachmentSupport.interactionEnabled}
           panelOpen={panelOpen}
@@ -410,6 +424,7 @@ function ConversationPane({
                     <ConversationTranscriptSkeleton />
                   ) : (
                     <ConversationTranscript
+                      inputs={sessionView?.inputs ?? []}
                       messages={transcript.messages}
                       parts={transcript.parts}
                       runs={sessionView?.runs ?? []}
@@ -430,10 +445,7 @@ function ConversationPane({
                   )}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
-              <MessageScrollerButton
-                className="bottom-5"
-                title={scrollerAgentStatus?.title}
-              >
+              <MessageScrollerButton className="bottom-5" title={scrollerAgentStatus?.title}>
                 {scrollerAgentStatus ? (
                   <>
                     <ScrollerAgentStatusIcon kind={scrollerAgentStatus.kind} />
@@ -493,13 +505,17 @@ function ConversationPane({
                 selectedProvider={selectedProvider}
                 modelLabel={modelLabel}
                 permissionMode={selectedPermissionMode}
-                skillCommands={skillCommands}
+                skills={skillCommands}
+                commands={applicationCommands.filter(
+                  (item) => item.command?.id !== "compact" || !running
+                )}
                 canSubmit={canSubmit}
                 contextUsage={contextUsageSnapshot}
                 attachments={attachments}
                 attachmentInteractionEnabled={attachmentSupport.interactionEnabled}
                 onDraftChange={setDraft}
                 onSubmit={() => void submitDraft()}
+                onCommand={executeComposerCommand}
                 onPickFiles={() => void pickAttachmentFiles(composerScope)}
                 onDropFiles={(files) => void addDroppedAttachments(composerScope, files)}
                 onPasteFiles={(files) => void pasteAttachments(files)}
@@ -523,6 +539,27 @@ function ConversationPane({
           )}
         </>
       )}
+      {statusOpen ? (
+        <div
+          role="dialog"
+          aria-label="会话状态"
+          className="absolute right-5 bottom-5 z-50 w-80 rounded-xl bg-background p-4 shadow-lg ring-1 ring-black/10 dark:ring-white/10"
+        >
+          <div className="text-sm font-semibold">会话状态</div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div>状态：{sessionView?.session.status ?? "未创建"}</div>
+            <div>模型：{currentModel ?? "未选择"}</div>
+            <div>运行：{running ? "进行中" : "空闲"}</div>
+          </div>
+          <button
+            type="button"
+            className="mt-3 text-xs font-medium text-primary"
+            onClick={() => setStatusOpen(false)}
+          >
+            关闭
+          </button>
+        </div>
+      ) : null}
       {sessionActions.dialogs}
     </section>
   )
