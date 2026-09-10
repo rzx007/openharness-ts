@@ -58,9 +58,34 @@ describe("session input items", () => {
       .toThrowError(/text_byte_limit_exceeded/)
   })
 
-  it("rejects control characters and oversized names", () => {
-    expect(() => validateSessionUserInputItems([{ type: "text", text: "line\nbreak" }]))
-      .toThrowError(/invalid_text/)
+  it("allows line breaks and tabs in text", () => {
+    const items = [
+      { type: "text" as const, text: "first\nsecond" },
+      { type: "text" as const, text: "third\r\nfourth" },
+      { type: "text" as const, text: "before\tafter" },
+    ]
+    expect(validateSessionUserInputItems(items)).toEqual(items)
+  })
+
+  it("rejects NUL and other C0/C1 control characters in text", () => {
+    for (const text of ["nul\u0000byte", "vertical\u000Btab", "c1\u0085control"]) {
+      expect(() => validateSessionUserInputItems([{ type: "text", text }]))
+        .toThrowError(/invalid_text/)
+    }
+  })
+
+  it("rejects control characters and oversized names in item identifiers", () => {
+    for (const field of ["name", "path", "displayName"] as const) {
+      for (const value of ["contains\ncontrol", "contains\u0000control", "contains\u0085control"]) {
+        expect(() => validateSessionUserInputItems([{
+          type: "skill",
+          name: "skill",
+          path: "D:/skills/skill.md",
+          displayName: "Skill",
+          [field]: value,
+        }])).toThrowError(new RegExp(`invalid_${field}`))
+      }
+    }
     expect(() => validateSessionUserInputItems([{
       type: "skill",
       name: "s".repeat(129),

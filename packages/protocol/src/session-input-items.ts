@@ -14,6 +14,7 @@ export type SessionUserInputItem =
   | { type: "mention"; name: string; path: string; displayName?: string }
 
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F-\u009F]/
+const TEXT_CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/
 
 export function validateSessionUserInputItems(
   items: readonly SessionUserInputItem[],
@@ -24,7 +25,7 @@ export function validateSessionUserInputItems(
   let textBytes = 0
   for (const item of items) {
     if (item.type === "text") {
-      assertValidString(item.text, "text")
+      assertValidText(item.text)
       textBytes += new TextEncoder().encode(item.text).byteLength
       continue
     }
@@ -71,6 +72,10 @@ export function sessionUserInputText(items: readonly SessionUserInputItem[]): st
 
 function assertValidString(value: string, field: string): void {
   if (typeof value !== "string" || CONTROL_CHARACTER_PATTERN.test(value)) throw new Error(`invalid_${field}`)
+}
+
+function assertValidText(value: string): void {
+  if (typeof value !== "string" || TEXT_CONTROL_CHARACTER_PATTERN.test(value)) throw new Error("invalid_text")
 }
 
 function assertMaximumLength(value: string, maximum: number, field: string): void {
