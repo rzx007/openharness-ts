@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { CircleAlert, Ellipsis, Trash2, Upload } from "lucide-react"
+import { CircleAlert, Ellipsis, Trash2 } from "lucide-react"
 import { Alert, AlertDescription } from "@renderer/components/ui/alert"
 import {
   AlertDialog,

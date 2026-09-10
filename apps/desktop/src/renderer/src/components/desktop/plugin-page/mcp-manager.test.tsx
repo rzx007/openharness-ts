@@ -55,7 +55,8 @@ describe("MCP manager local workflow", () => {
 
   it("opens an HTTP starter as unsaved JSON without adding a configured server", async () => {
     await render()
-    await click("使用 HTTP 起始模板")
+    await render({ addRequest: 1 })
+    await input("textarea", '{"name":"","type":"http","url":""}')
     expect(JSON.parse(document.querySelector("textarea")!.value)).toEqual({
       name: "",
       type: "http",
@@ -100,7 +101,7 @@ describe("MCP manager local workflow", () => {
 
   it("preserves extras through JSON → form → JSON and persists an edited command", async () => {
     await render()
-    await click("添加 MCP")
+    await render({ addRequest: 1 })
     await input(
       "textarea",
       '{"name":"local","command":"node","custom":{"retry":3},"env":{"EMPTY":""}}'
@@ -148,7 +149,7 @@ describe("MCP manager local workflow", () => {
 
   it("rejects a partially invalid batch without saving any server", async () => {
     await render()
-    await click("添加 MCP")
+    await render({ addRequest: 1 })
     await input(
       "textarea",
       '{"mcpServers":{"good":{"command":"node"},"bad":{"url":"ftp://example.com"}}}'
@@ -191,5 +192,19 @@ describe("MCP manager local workflow", () => {
     await render({ refreshRequest: 1, query: "" })
     expect(container.textContent).toContain("external")
     expect(container.querySelectorAll("[data-extension-row]")).toHaveLength(1)
+  })
+
+  it("keeps a title-only empty state without starter templates", async () => {
+    await render()
+
+    expect(container.textContent).toContain("还没有 MCP")
+    expect(container.textContent).not.toContain("尚未添加 MCP 服务器")
+    expect(container.textContent).not.toContain("添加本地命令")
+    expect(container.textContent).not.toContain("STDIO")
+    expect(
+      [...document.querySelectorAll("button")].filter(
+        (item) => item.textContent?.trim() === "添加 MCP"
+      )
+    ).toHaveLength(0)
   })
 })

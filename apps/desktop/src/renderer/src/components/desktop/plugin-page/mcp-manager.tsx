@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react"
-import { Download, Globe, Pencil, Plug, Plus, Terminal, Trash2 } from "lucide-react"
+import { Download, Globe, Pencil, Terminal, Trash2 } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@renderer/components/ui/alert"
 import {
   AlertDialog,
@@ -19,14 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog"
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@renderer/components/ui/empty"
+import { Empty, EmptyHeader, EmptyTitle } from "@renderer/components/ui/empty"
 import { FieldError, FieldLabel, Field } from "@renderer/components/ui/field"
 import { Separator } from "@renderer/components/ui/separator"
 import { Switch } from "@renderer/components/ui/switch"
@@ -127,14 +120,7 @@ function McpProjectManager({
   const [operationError, setOperationError] = useState("")
   const seenAdd = useRef(addRequest)
   const seenRefresh = useRef(refreshRequest)
-  const addButton = useRef<HTMLButtonElement>(null)
   const document = snapshot.document
-
-  function openAdd(type: "stdio" | "http" = "stdio"): void {
-    if (editor) return
-    setDetailName(null)
-    setEditor(newEditor(snapshot.raw, type))
-  }
 
   useEffect(() => {
     if (addRequest <= seenAdd.current) {
@@ -270,32 +256,34 @@ function McpProjectManager({
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {document.servers.length ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-        <ToggleGroup
-          aria-label="MCP 状态筛选"
-          value={[filter]}
-          onValueChange={(v) => {
-            if (v[0]) setFilter(v[0])
-          }}
-          size="sm"
-        >
-          <ToggleGroupItem value="all">全部</ToggleGroupItem>
-          <ToggleGroupItem value="enabled">已启用</ToggleGroupItem>
-          <ToggleGroupItem value="disabled">已停用</ToggleGroupItem>
-        </ToggleGroup>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={!document.servers.length || Boolean(snapshot.error)}
-          onClick={() => {
-            setExportError("")
-            setExportOpen(true)
-          }}
-        >
-          <Download data-icon="inline-start" />
-          导出 JSON
-        </Button>
-      </div>
+          <ToggleGroup
+            aria-label="MCP 状态筛选"
+            value={[filter]}
+            onValueChange={(v) => {
+              if (v[0]) setFilter(v[0])
+            }}
+            size="sm"
+          >
+            <ToggleGroupItem value="all">全部</ToggleGroupItem>
+            <ToggleGroupItem value="enabled">已启用</ToggleGroupItem>
+            <ToggleGroupItem value="disabled">已停用</ToggleGroupItem>
+          </ToggleGroup>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!document.servers.length || Boolean(snapshot.error)}
+            onClick={() => {
+              setExportError("")
+              setExportOpen(true)
+            }}
+          >
+            <Download data-icon="inline-start" />
+            导出 JSON
+          </Button>
+        </div>
+      ) : null}
       {(snapshot.error || operationError) && (
         <Alert variant="destructive">
           <AlertTitle>本机配置未更新</AlertTitle>
@@ -350,67 +338,16 @@ function McpProjectManager({
           })}
         </ul>
       ) : (
-        <Empty className="py-10">
+        <Empty className="py-8">
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Plug />
-            </EmptyMedia>
             <EmptyTitle>
               {document.servers.length
                 ? "没有符合条件的服务器"
                 : snapshot.error
                   ? "暂时无法显示 MCP 配置"
-                  : "尚未添加 MCP 服务器"}
+                  : "还没有 MCP"}
             </EmptyTitle>
-            <EmptyDescription>
-              {document.servers.length
-                ? "尝试调整搜索关键词或状态筛选。"
-                : snapshot.error
-                  ? "请处理上方的存储错误后刷新。"
-                  : "添加本地命令或 HTTP 服务配置。"}
-            </EmptyDescription>
           </EmptyHeader>
-          {!document.servers.length && !snapshot.error && (
-            <EmptyContent className="max-w-lg">
-              <Button ref={addButton} variant="outline" onClick={() => openAdd()}>
-                <Plus data-icon="inline-start" />
-                添加 MCP
-              </Button>
-              <div className="mt-4 w-full text-left">
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-3 py-3"
-                  aria-label="使用 STDIO 起始模板"
-                  onClick={() => openAdd("stdio")}
-                >
-                  <Terminal data-icon="inline-start" />
-                  <span className="min-w-0 flex-1 whitespace-normal">
-                    <span className="block">STDIO · 本地进程</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
-                      填写启动命令与参数
-                    </span>
-                  </span>
-                  <Plus data-icon="inline-end" />
-                </Button>
-                <Separator />
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-3 py-3"
-                  aria-label="使用 HTTP 起始模板"
-                  onClick={() => openAdd("http")}
-                >
-                  <Globe data-icon="inline-start" />
-                  <span className="min-w-0 flex-1 whitespace-normal">
-                    <span className="block">HTTP · 远程服务</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
-                      填写服务地址与可选的认证信息
-                    </span>
-                  </span>
-                  <Plus data-icon="inline-end" />
-                </Button>
-              </div>
-            </EmptyContent>
-          )}
         </Empty>
       )}
 
@@ -424,7 +361,6 @@ function McpProjectManager({
           onSave={saveEditor}
           onClose={() => {
             setEditor(null)
-            requestAnimationFrame(() => addButton.current?.focus())
           }}
         />
       )}

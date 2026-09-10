@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check } from "lucide-react"
-import type {
-  DesktopSkillInfo,
-  DesktopSkillSnapshot,
-} from "@shared/skill-types"
+import type { DesktopSkillInfo, DesktopSkillSnapshot } from "@shared/skill-types"
 import { Alert, AlertDescription } from "@renderer/components/ui/alert"
+import { Empty, EmptyHeader, EmptyTitle } from "@renderer/components/ui/empty"
 import { Separator } from "@renderer/components/ui/separator"
 import { Skeleton } from "@renderer/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@renderer/components/ui/tabs"
@@ -166,13 +164,15 @@ export function SkillManager({
             ) : null}
           </>
         ) : (
-          <p className="py-3 text-sm text-muted-foreground">
-            {needle ? "没有匹配的技能。" : "没有发现技能。"}
-          </p>
+          <Empty className="py-8">
+            <EmptyHeader>
+              <EmptyTitle>{needle ? "没有匹配的技能" : "还没有技能"}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         )}
       </section>
 
-      {!loading ? (
+      {!loading && skills.length ? (
         <Tabs
           value={activeCategory}
           onValueChange={(value) => setCategory(String(value))}

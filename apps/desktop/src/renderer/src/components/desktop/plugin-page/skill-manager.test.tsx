@@ -110,6 +110,8 @@ beforeEach(() => {
     value: { skills: api },
   })
   vi.clearAllMocks()
+  api.snapshot.mockImplementation(async () => filteredSnapshot())
+  api.remove.mockImplementation(async () => filteredSnapshot())
   host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
@@ -234,6 +236,26 @@ describe("SkillManager filesystem management", () => {
     )
     await act(async () => resolveRefresh(snapshot))
     expect(host.querySelector('[aria-label="已安装技能"]')?.textContent).not.toContain("release")
+  })
+
+  it("hides source tabs and keeps a short empty prompt when nothing is installed", async () => {
+    api.snapshot.mockResolvedValueOnce({ projects: [], warnings: [], skills: [] })
+    await render()
+
+    expect(host.textContent).toContain("已安装")
+    expect(host.textContent).toContain("还没有技能")
+    expect(host.textContent).not.toContain("没有发现技能")
+    expect(host.querySelector('[aria-label="技能来源"]')).toBeNull()
+  })
+
+  it("keeps source tabs when installed skills are filtered to an empty list", async () => {
+    await render()
+    props = { ...props, query: "does-not-exist" }
+    await render()
+
+    expect(host.querySelector('[aria-label="技能来源"]')).not.toBeNull()
+    expect(host.textContent).toContain("没有匹配的技能")
+    expect(host.textContent).not.toContain("还没有技能")
   })
 })
 
