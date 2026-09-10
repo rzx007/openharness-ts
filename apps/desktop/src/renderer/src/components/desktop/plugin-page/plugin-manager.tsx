@@ -307,10 +307,6 @@ export function PluginManager({
           <h2 id="plugin-installed-title" className="text-sm font-medium">
             已安装
           </h2>
-          {/* <Button onClick={() => void importArchive()} disabled={busy || !api}>
-            {busy ? <Spinner data-icon="inline-start" /> : <Upload data-icon="inline-start" />}
-            导入插件
-          </Button> */}
         </div>
         <Separator className="bg-border/50" />
         {loading ? (

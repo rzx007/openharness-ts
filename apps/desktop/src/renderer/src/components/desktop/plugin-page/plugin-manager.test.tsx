@@ -113,11 +113,18 @@ describe("PluginManager archive import", () => {
     })
   }
 
-  it("replaces the legacy add-configuration action with archive import", async () => {
+  async function requestImport(): Promise<void> {
+    await render({ addRequest: props.addRequest + 1 })
+  }
+
+  it("keeps archive import on the page add request instead of an in-page button", async () => {
     await render()
 
-    expect(host.textContent).toContain("导入插件")
+    expect(host.textContent).not.toContain("导入插件")
     expect(host.textContent).not.toContain("添加插件配置")
+    expect(
+      [...host.querySelectorAll("button")].filter((item) => item.textContent?.trim() === "导入插件")
+    ).toHaveLength(0)
   })
 
   it("runs a top-menu import request after the initial snapshot has finished", async () => {
@@ -151,9 +158,8 @@ describe("PluginManager archive import", () => {
         })
     )
     await render()
-
-    await click("导入插件")
-    await click("导入插件")
+    await requestImport()
+    await requestImport()
 
     expect(api().importArchive).toHaveBeenCalledTimes(1)
     expect(api().importArchive).toHaveBeenCalledWith({ cwd: "D:/project" })
@@ -163,8 +169,7 @@ describe("PluginManager archive import", () => {
   it("keeps cancellation silent", async () => {
     api().importArchive.mockResolvedValue({ status: "cancelled" })
     await render()
-
-    await click("导入插件")
+    await requestImport()
 
     expect(props.notify).not.toHaveBeenCalled()
     expect(document.querySelector('[role="alert"]')).toBeNull()
@@ -183,8 +188,7 @@ describe("PluginManager archive import", () => {
     })
     api().confirmArchive.mockResolvedValue({ status: "installed", pluginName: "Archive Plugin" })
     await render()
-
-    await click("导入插件")
+    await requestImport()
 
     const dialog = document.querySelector('[role="alertdialog"]')
     expect(dialog?.textContent).toContain("安装「Archive Plugin」？")
@@ -219,7 +223,7 @@ describe("PluginManager archive import", () => {
       requestedPermissions: ["process:node"],
     })
     await render()
-    await click("导入插件")
+    await requestImport()
 
     await click("取消")
 
@@ -236,8 +240,7 @@ describe("PluginManager archive import", () => {
       })
       .mockResolvedValueOnce({ status: "installed", pluginName: "Retry Plugin", snapshot })
     await render()
-
-    await click("导入插件")
+    await requestImport()
 
     const alert = document.querySelector('[role="alert"]')
     expect(alert?.textContent).toContain("压缩包无法安装")
@@ -245,7 +248,7 @@ describe("PluginManager archive import", () => {
     await click("查看详情")
     expect(alert?.textContent).toContain("plugin_archive_invalid")
 
-    await click("导入插件")
+    await requestImport()
     expect(api().importArchive).toHaveBeenCalledTimes(2)
     expect(props.notify).toHaveBeenCalledWith("Retry Plugin 已安装或更新，将在下次对话中生效。")
   })
@@ -258,8 +261,7 @@ describe("PluginManager archive import", () => {
       details: [{ code: "plugin_archive_install_unknown" }],
     })
     await render()
-
-    await click("导入插件")
+    await requestImport()
 
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
       "安装结果暂时无法确认，请刷新插件列表。"
@@ -273,7 +275,7 @@ describe("PluginManager archive import", () => {
     const removeItem = vi.spyOn(Storage.prototype, "removeItem")
     api().importArchive.mockResolvedValue({ status: "cancelled" })
     await render()
-    await click("导入插件")
+    await requestImport()
 
     expect(getItem).not.toHaveBeenCalled()
     expect(setItem).not.toHaveBeenCalled()
@@ -367,7 +369,7 @@ describe("PluginManager archive import", () => {
     expect(host.textContent).not.toContain("还没有安装插件")
     expect(
       [...host.querySelectorAll("button")].filter((item) => item.textContent?.trim() === "导入插件")
-    ).toHaveLength(1)
+    ).toHaveLength(0)
   })
 
   it("does not flash my-plugins while the snapshot is still loading", async () => {
