@@ -77,7 +77,8 @@ describe("runPrintSession", () => {
     Client.mockImplementation(() => ({
       createSession: vi.fn(async () => session),
       admitPrompt: vi.fn(async () => ({
-        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", items: [{ type: "text" as const, text: "hi" }],
+        content: "hi", metadata: {}, createdAt: 2 },
         run,
       })),
       getSessionState: vi.fn(async () => ({
@@ -143,6 +144,7 @@ describe("runPrintSession", () => {
       { model: "m", cwd: "/tmp", daemonUrl: "https://daemon.example/", daemonToken: "remote-token" },
     );
 
+    expect(Client.mock.results[0]!.value.admitPrompt).toHaveBeenCalledWith("s1", { id: expect.any(String), items: [{ type: "text", text: "hi" }] });
     expect(writes.join("")).toContain("hello from daemon");
     expect(exitSpy).not.toHaveBeenCalled();
     expect(ensureLocalDaemon).not.toHaveBeenCalled();
@@ -200,7 +202,8 @@ describe("runPrintSession", () => {
     const completedSnapshot = {
       cursor: 5,
       session,
-      inputs: [{ id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 }],
+      inputs: [{ id: "i1", sessionId: "s1", seq: 1, delivery: "queue", items: [{ type: "text" as const, text: "hi" }],
+      content: "hi", metadata: {}, createdAt: 2 }],
       messages: [userMessage, assistantMessage],
       parts: [
         {
@@ -236,7 +239,8 @@ describe("runPrintSession", () => {
     Client.mockImplementation(() => ({
       createSession: vi.fn(async () => session),
       admitPrompt: vi.fn(async () => ({
-        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", items: [{ type: "text" as const, text: "hi" }],
+        content: "hi", metadata: {}, createdAt: 2 },
         run: { ...run, status: "running", updatedAt: 2 },
       })),
       getSessionState: vi.fn()
@@ -296,7 +300,8 @@ describe("runPrintSession", () => {
     const completedSnapshot = {
       cursor: 5,
       session,
-      inputs: [{ id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 }],
+      inputs: [{ id: "i1", sessionId: "s1", seq: 1, delivery: "queue", items: [{ type: "text" as const, text: "hi" }],
+      content: "hi", metadata: {}, createdAt: 2 }],
       messages: [
         {
           id: "m-assistant",
@@ -331,7 +336,8 @@ describe("runPrintSession", () => {
     Client.mockImplementation(() => ({
       createSession: vi.fn(async () => session),
       admitPrompt: vi.fn(async () => ({
-        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", items: [{ type: "text" as const, text: "hi" }],
+        content: "hi", metadata: {}, createdAt: 2 },
         run: { ...run, status: "running", updatedAt: 2 },
       })),
       getSessionState: vi.fn()
@@ -376,7 +382,8 @@ describe("runPrintSession", () => {
     Client.mockImplementation(() => ({
       createSession,
       admitPrompt: vi.fn(async () => ({
-        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", content: "hi", metadata: {}, createdAt: 2 },
+        input: { id: "i1", sessionId: "s1", seq: 1, delivery: "queue", items: [{ type: "text" as const, text: "hi" }],
+        content: "hi", metadata: {}, createdAt: 2 },
         run: { id: "r1", sessionId: "s1", status: "completed", metadata: {}, createdAt: 2, updatedAt: 2 },
       })),
       getSessionState: vi.fn(async () => ({

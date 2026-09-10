@@ -268,7 +268,7 @@ export async function runPrintSession(
 
       if (update.source === "snapshot" && !admitted) {
         admitted = true;
-        const response = await client.admitPrompt(session.id, { id: createPromptRequestId(), content: prompt });
+        const response = await client.admitPrompt(session.id, { id: createPromptRequestId(), items: [{ type: "text", text: prompt }] });
         runId = response.run?.id;
         observedState = mergeSessionSnapshot(update.state, await client.getSessionState(session.id));
         renderSessionSnapshot(observedState, session.id, renderer, options.outputFormat, partTextSeen);

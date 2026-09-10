@@ -559,6 +559,8 @@ describe("OpenHarnessClient", () => {
             {
               name: "/commit",
               kind: "template",
+              skillName: "commit",
+              path: "/skills/commit/SKILL.md",
               source: "user",
               description: "Commit",
             },
@@ -592,6 +594,8 @@ describe("OpenHarnessClient", () => {
       {
         name: "/commit",
         kind: "template",
+        skillName: "commit",
+        path: "/skills/commit/SKILL.md",
         source: "user",
         description: "Commit",
       },

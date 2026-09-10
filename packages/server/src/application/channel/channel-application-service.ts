@@ -65,7 +65,7 @@ export class ChannelApplicationService {
         conversation.sessionId,
         {
           id: inputId,
-          content: input.content,
+          items: [{ type: "text", text: input.content }],
           delivery: "queue",
           metadata: {
             source: "channel",

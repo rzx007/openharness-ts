@@ -36,6 +36,7 @@ describe("desktop session runtime cleanup", () => {
       accepted: {
         id: "accepted",
         sessionId: "s1",
+        items: [{ type: "text" as const, text: "accepted" }],
         content: "accepted",
         attachments: [],
         createdAt: 1,
@@ -45,6 +46,7 @@ describe("desktop session runtime cleanup", () => {
       submitting: {
         id: "submitting",
         sessionId: "s1",
+        items: [{ type: "text" as const, text: "pending" }],
         content: "pending",
         attachments: [],
         createdAt: 2,
@@ -54,6 +56,7 @@ describe("desktop session runtime cleanup", () => {
       failed: {
         id: "failed",
         sessionId: "s1",
+        items: [{ type: "text" as const, text: "failed" }],
         content: "failed",
         attachments: [],
         createdAt: 3,

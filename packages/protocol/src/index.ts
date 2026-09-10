@@ -7,3 +7,4 @@ export * from "./serialization.js";
 export * from "./channel.js";
 export * from "./capabilities.js";
 export * from "./attachment.js";
+export * from "./session-input-items.js";

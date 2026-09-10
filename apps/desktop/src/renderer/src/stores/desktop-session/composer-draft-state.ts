@@ -3,11 +3,17 @@ import type {
   DesktopAttachmentDraft,
   DesktopAttachmentUploadEvent,
 } from "@shared/attachment-types"
+import {
+  composerDocument,
+  emptyComposerDocument,
+  selectComposerDocumentText,
+  type ComposerDocument,
+} from "./composer-document"
 
 export const NEW_CONVERSATION_SCOPE = "new-conversation"
 
 export interface DesktopComposerDraft {
-  text: string
+  document: ComposerDocument
   attachments: DesktopAttachmentDraft[]
 }
 
@@ -26,7 +32,11 @@ export function sessionComposerScope(sessionId: string): string {
 }
 
 export function selectDraftText(state: ComposerDraftState, scope: string): string {
-  return state.composerDraftsByScope[scope]?.text ?? ""
+  return selectComposerDocumentText(selectDraftDocument(state, scope))
+}
+
+export function selectDraftDocument(state: ComposerDraftState, scope: string): ComposerDocument {
+  return state.composerDraftsByScope[scope]?.document ?? emptyComposerDocument
 }
 
 export function selectDraftAttachments(
@@ -41,9 +51,17 @@ export function setDraftText(
   scope: string,
   text: string
 ): ComposerDraftState {
+  return setDraftDocument(state, scope, composerDocument([{ type: "text", text }]))
+}
+
+export function setDraftDocument(
+  state: ComposerDraftState,
+  scope: string,
+  document: ComposerDocument
+): ComposerDraftState {
   const current = draftForScope(state, scope)
-  if (current.text === text) return state
-  return replaceScope(state, scope, { ...current, text })
+  if (JSON.stringify(current.document) === JSON.stringify(document)) return state
+  return replaceScope(state, scope, { ...current, document })
 }
 
 export function addCandidates(
@@ -179,7 +197,7 @@ export function findUploadEventScope(
 }
 
 function draftForScope(state: ComposerDraftState, scope: string): DesktopComposerDraft {
-  return state.composerDraftsByScope[scope] ?? { text: "", attachments: [] }
+  return state.composerDraftsByScope[scope] ?? { document: emptyComposerDocument, attachments: [] }
 }
 
 function replaceScope(

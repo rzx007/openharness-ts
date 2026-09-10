@@ -31,6 +31,13 @@ import {
   sessionComposerScope,
 } from "./composer-draft-state"
 import {
+  composerDocument,
+  emptyComposerDocument,
+  sameComposerDocument,
+  selectComposerDocumentText,
+  type ComposerDocument,
+} from "./composer-document"
+import {
   acceptActiveSessionView,
   reconcileRuntimeWithView,
   releaseAcknowledgedRuntime,
@@ -514,8 +521,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
     },
 
     async startSession(content, options) {
-      const prompt = content.trim()
-      const sourceDraftText = options?.sourceDraftText?.trim() || prompt
+      const document = options?.document ?? composerDocument([{ type: "text", text: content }])
+      const items = document.items
+      const prompt = selectComposerDocumentText(document)
       const attachmentDrafts = [...(options?.attachments ?? [])]
       if (attachmentDrafts.some((attachment) => attachment.status !== "ready")) return null
       const attachments = attachmentDrafts.flatMap((attachment) =>
@@ -544,7 +552,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
       const model = selectedModel ?? defaultModel
       const provider = selectedProvider ?? defaultProvider
       if (
-        (!prompt && attachments.length === 0 && !options?.skillInvocation) ||
+        (!hasMeaningfulItems(items) && attachments.length === 0) ||
         Object.values(get().newConversationRuntime.operations).some(
           (operation) => operation.kind === "create-session" && operation.phase === "pending"
         )
@@ -594,7 +602,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           id: promptSubmissionId,
           sessionId: session.id,
           content: prompt,
-          ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
+          items,
           attachments,
           createdAt: Date.now(),
           phase: "submitting",
@@ -655,7 +663,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         })
         if (clearedFirstPromptDraft) {
-          clearFirstPromptDraft(session.id, sourceDraftText, attachmentDrafts)
+          clearFirstPromptDraft(session.id, document, attachmentDrafts)
         }
         const openResult = ownsCurrentPage ? await openPrimarySession(session.id) : "cancelled"
         if (openResult === "failed") {
@@ -667,15 +675,14 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         await window.desktop.sessions.sendPrompt({
           id: promptSubmissionId,
           sessionId: session.id,
-          content: prompt,
+          items,
           attachments: attachments.map(({ assetId, intent, displayName }) => ({
             assetId,
             intent,
             displayName,
           })),
-          ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
         })
-        clearFirstPromptDraft(session.id, sourceDraftText, attachmentDrafts)
+        clearFirstPromptDraft(session.id, document, attachmentDrafts)
         const keepLocalAcknowledgement = get().activeSessionId === session.id
         set((state) => {
           const sessionRuntimes = updateSessionRuntime(
@@ -767,9 +774,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
           }
         })
         if (confirmed && startedSessionId) {
-          clearFirstPromptDraft(startedSessionId, sourceDraftText, attachmentDrafts)
+          clearFirstPromptDraft(startedSessionId, document, attachmentDrafts)
         } else if (startedSessionId && clearedFirstPromptDraft) {
-          restoreFirstPromptDraft(startedSessionId, sourceDraftText, attachmentDrafts)
+          restoreFirstPromptDraft(startedSessionId, document, attachmentDrafts)
         }
         if (confirmed) return startedSessionId
         throw error
@@ -812,7 +819,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
   function clearFirstPromptDraft(
     sessionId: string,
-    submittedText: string,
+    submittedDocument: ComposerDocument,
     submittedAttachments: readonly DesktopAttachmentDraft[]
   ): void {
     const scope = sessionComposerScope(sessionId)
@@ -826,7 +833,9 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         composerDraftsByScope: {
           ...state.composerDraftsByScope,
           [scope]: {
-            text: current.text.trim() === submittedText ? "" : current.text,
+            document: sameComposerDocument(current.document, submittedDocument)
+              ? emptyComposerDocument
+              : current.document,
             attachments: current.attachments.filter(
               (attachment) =>
                 submittedByDraftId.get(attachment.draftId) !== attachment.assetId ||
@@ -840,18 +849,20 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
   function restoreFirstPromptDraft(
     sessionId: string,
-    submittedText: string,
+    submittedDocument: ComposerDocument,
     submittedAttachments: readonly DesktopAttachmentDraft[]
   ): void {
     const scope = sessionComposerScope(sessionId)
     set((state) => {
-      const current = state.composerDraftsByScope[scope] ?? { text: "", attachments: [] }
+      const current =
+        state.composerDraftsByScope[scope] ?? { document: emptyComposerDocument, attachments: [] }
       const currentDraftIds = new Set(current.attachments.map((attachment) => attachment.draftId))
       return {
         composerDraftsByScope: {
           ...state.composerDraftsByScope,
           [scope]: {
-            text: current.text.trim().length === 0 ? submittedText : current.text,
+            document:
+              current.document.items.length === 0 ? submittedDocument : current.document,
             attachments: [
               ...submittedAttachments.filter(
                 (attachment) => !currentDraftIds.has(attachment.draftId)
@@ -895,6 +906,10 @@ function abandonOpenSessionOperations(runtime: DesktopSessionRuntime): DesktopSe
 
 function sessionViewContainsInput(view: DesktopSessionView | null, inputId: string): boolean {
   return Boolean(view?.inputs.some((input) => input.id === inputId))
+}
+
+function hasMeaningfulItems(items: readonly import("@shared/session-types").SessionUserInputItem[]): boolean {
+  return items.some((item) => item.type !== "text" || item.text.trim().length > 0)
 }
 
 function releaseActiveSessionAcknowledgements(

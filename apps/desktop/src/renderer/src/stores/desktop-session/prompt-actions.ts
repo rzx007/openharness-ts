@@ -18,8 +18,18 @@ import type {
   PendingPromptSubmission,
   PromptActions,
 } from "./types"
-import { removeDraftAttachment, sessionComposerScope } from "./composer-draft-state"
-import type { SkillInvocationMetadata } from "@shared/session-types"
+import {
+  removeDraftAttachment,
+  selectDraftDocument,
+  sessionComposerScope,
+  setDraftDocument,
+} from "./composer-draft-state"
+import {
+  composerDocument,
+  emptyComposerDocument,
+  sameComposerDocument,
+  selectComposerDocumentText,
+} from "./composer-document"
 
 interface PromptActionsContext extends DesktopStoreContext {
   scheduleSelectedProjectGitRefresh: (force: boolean) => void
@@ -30,7 +40,9 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
 
   return {
     async sendMessage(content, options) {
-      const prompt = content.trim()
+      const document = options?.document ?? composerDocument([{ type: "text", text: content }])
+      const items = document.items
+      const prompt = selectComposerDocumentText(document)
       const sessionId = get().activeSessionId
       const attachmentDrafts = [...(options?.attachments ?? [])]
       if (!sessionId || attachmentDrafts.some((attachment) => attachment.status !== "ready")) return
@@ -49,7 +61,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       )
       if (
         attachments.length !== attachmentDrafts.length ||
-        (!prompt && attachments.length === 0 && !options?.skillInvocation)
+        (!hasMeaningfulItems(items) && attachments.length === 0)
       ) {
         return
       }
@@ -60,7 +72,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
         (submission) =>
           submission.content === prompt &&
           submission.phase === "failed" &&
-          sameSkillInvocation(submission.skillInvocation, options?.skillInvocation) &&
+          sameInputItems(submission.items, items) &&
           sameAttachmentSnapshot(submission.attachments, attachments)
       )
       const submission: PendingPromptSubmission = retry
@@ -69,7 +81,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
             id: globalThis.crypto.randomUUID(),
             sessionId,
             content: prompt,
-            ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
+            items,
             attachments,
             createdAt: Date.now(),
             phase: "submitting",
@@ -98,15 +110,14 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
         await window.desktop.sessions.sendPrompt({
           id: submission.id,
           sessionId,
-          content: prompt,
+          items,
           attachments: attachments.map(({ assetId, intent, displayName }) => ({
             assetId,
             intent,
             displayName,
           })),
-          ...(options?.skillInvocation ? { skillInvocation: options.skillInvocation } : {}),
         })
-        clearSubmittedAttachments(sessionId, attachmentDrafts)
+        clearSubmittedDraft(sessionId, document, attachmentDrafts)
         const keepLocalAcknowledgement = get().activeSessionId === sessionId
         replaceRuntime(sessionId, (currentRuntime) =>
           settleSubmittedPrompt(
@@ -130,7 +141,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
         const message = errorMessage(error)
         const confirmed = promptSubmissionConfirmed(get(), sessionId, submission.id)
         const keepLocalAcknowledgement = get().activeSessionId === sessionId
-        if (confirmed) clearSubmittedAttachments(sessionId, attachmentDrafts)
+        if (confirmed) clearSubmittedDraft(sessionId, document, attachmentDrafts)
         replaceRuntime(sessionId, (currentRuntime) => {
           if (confirmed) {
             const acceptedSubmissions = updatePendingPromptSubmission(
@@ -172,8 +183,9 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       }
     },
 
-    async editLatestMessage(sourceMessageId, content) {
-      const prompt = content.trim()
+    async editLatestMessage(sourceMessageId, content, document = composerDocument([{ type: "text", text: content }])) {
+      const prompt = selectComposerDocumentText(document)
+      const items = document.items
       const current = get()
       const sessionId = current.activeSessionId
       const sourceMessage = current.sessionView?.messages.find(
@@ -185,9 +197,8 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       const attachments = [...(sourceInput?.attachments ?? [])]
         .sort((left, right) => left.seq - right.seq)
         .map(({ assetId, intent, displayName }) => ({ assetId, intent, displayName }))
-      const skillInvocation = readSkillInvocationMetadata(sourceInput?.metadata.skillInvocation)
       if (
-        (!prompt && attachments.length === 0 && !skillInvocation) ||
+        (!hasMeaningfulItems(items) && attachments.length === 0) ||
         !sourceMessageId ||
         !sessionId
       ) return
@@ -195,7 +206,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
       const runtime = getSessionRuntime(current, sessionId)
       const edit: PendingPromptEdit =
         runtime.pendingPromptEdit?.sourceMessageId === sourceMessageId &&
-        runtime.pendingPromptEdit.content === prompt &&
+        sameInputItems(runtime.pendingPromptEdit.items, items) &&
         sameAttachmentSnapshot(runtime.pendingPromptEdit.attachments, attachments)
           ? runtime.pendingPromptEdit
           : {
@@ -203,6 +214,7 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
               sessionId,
               sourceMessageId,
               content: prompt,
+              items,
               attachments,
             }
 
@@ -222,10 +234,9 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
         await window.desktop.sessions.editLatestPrompt({
           id: edit.id,
           sessionId,
-          content: prompt,
+          items,
           sourceMessageId,
           attachments,
-          ...(skillInvocation ? { skillInvocation } : {}),
         })
         replaceRuntime(sessionId, (currentRuntime) =>
           removeOperation(
@@ -327,11 +338,11 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
     })
   }
 
-  function clearSubmittedAttachments(
+  function clearSubmittedDraft(
     sessionId: string,
+    submittedDocument: import("./composer-document").ComposerDocument,
     submitted: readonly { draftId: string; assetId?: string }[]
   ): void {
-    if (submitted.length === 0) return
     const scope = sessionComposerScope(sessionId)
     set((state) => {
       let composerState = { composerDraftsByScope: state.composerDraftsByScope }
@@ -343,31 +354,19 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
           composerState = removeDraftAttachment(composerState, scope, attachment.draftId)
         }
       }
-      return { ...state, ...composerState }
+      const currentDocument = selectDraftDocument(composerState, scope)
+      return {
+        ...state,
+        ...setDraftDocument(
+          composerState,
+          scope,
+          sameComposerDocument(currentDocument, submittedDocument)
+            ? emptyComposerDocument
+            : currentDocument
+        ),
+      }
     })
   }
-}
-
-function readSkillInvocationMetadata(value: unknown): SkillInvocationMetadata | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
-  const record = value as Record<string, unknown>
-  if (record.invocationSource !== "slash" || typeof record.name !== "string") return undefined
-  const name = record.name.trim()
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) return undefined
-  const source = readSkillSource(record.source)
-  return {
-    name,
-    invocationSource: "slash",
-    ...(typeof record.commandName === "string" ? { commandName: record.commandName } : {}),
-    ...(typeof record.displayName === "string" ? { displayName: record.displayName } : {}),
-    ...(source ? { source } : {}),
-  }
-}
-
-function readSkillSource(value: unknown): SkillInvocationMetadata["source"] | undefined {
-  return value === "bundled" || value === "user" || value === "project" || value === "plugin"
-    ? value
-    : undefined
 }
 
 function sameAttachmentSnapshot(
@@ -380,11 +379,15 @@ function sameAttachmentSnapshot(
   )
 }
 
-function sameSkillInvocation(
-  left: SkillInvocationMetadata | undefined,
-  right: SkillInvocationMetadata | undefined
+function sameInputItems(
+  left: readonly import("@shared/session-types").SessionUserInputItem[],
+  right: readonly import("@shared/session-types").SessionUserInputItem[]
 ): boolean {
-  return left?.name === right?.name && left?.invocationSource === right?.invocationSource
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function hasMeaningfulItems(items: readonly import("@shared/session-types").SessionUserInputItem[]): boolean {
+  return items.some((item) => item.type !== "text" || item.text.trim().length > 0)
 }
 
 function getSessionRuntime(

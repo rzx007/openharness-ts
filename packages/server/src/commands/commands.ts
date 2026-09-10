@@ -7,6 +7,7 @@
  */
 
 export type CommandKind = "session" | "template";
+export type CommandSelection = "execute" | "submenu" | "insert";
 
 export type CommandSource =
   | "builtin"
@@ -15,15 +16,32 @@ export type CommandSource =
   | "plugin"
   | "project";
 
-export interface CommandCatalogEntry {
+interface CommandCatalogEntryBase {
   /** Slash form, e.g. `/models` or `/commit`. */
   name: string;
   displayName?: string;
   description?: string;
-  kind: CommandKind;
   source?: CommandSource;
   argumentHint?: string;
+  /** Selection behavior for clients that provide a native command adapter. */
+  selection?: CommandSelection;
+  /** State-changing commands may only be selected from an otherwise empty composer. */
+  requiresEmptyComposer?: boolean;
 }
+
+export interface SessionCommandCatalogEntry extends CommandCatalogEntryBase {
+  kind: "session";
+  path?: never;
+}
+
+export interface TemplateCommandCatalogEntry extends CommandCatalogEntryBase {
+  kind: "template";
+  skillName: string;
+  /** Absolute path of the current skill definition; empty for embedded bundled skills. */
+  path: string;
+}
+
+export type CommandCatalogEntry = SessionCommandCatalogEntry | TemplateCommandCatalogEntry;
 
 export interface ListCommandsInput {
   cwd: string;
@@ -40,6 +58,8 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     description: "List user-invocable skills / template commands",
     kind: "session",
     source: "builtin",
+    selection: "execute",
+    requiresEmptyComposer: true,
   },
   {
     name: "/config",
@@ -80,6 +100,8 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     description: "Show current session status",
     kind: "session",
     source: "builtin",
+    selection: "execute",
+    requiresEmptyComposer: true,
   },
   {
     name: "/help",
@@ -131,6 +153,8 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     description: "Summarize conversation to reduce context size",
     kind: "session",
     source: "builtin",
+    selection: "execute",
+    requiresEmptyComposer: true,
   },
   {
     name: "/remember",

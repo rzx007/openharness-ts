@@ -56,13 +56,13 @@ describe("HTTP request parsers", () => {
   });
 
   it("accepts only the two supported prompt delivery modes", () => {
-    expect(parseAdmitPromptRequest({ content: "hello", delivery: "steer" })).toEqual({
-      content: "hello",
+    expect(parseAdmitPromptRequest({ items: [{ type: "text", text: "hello" }], delivery: "steer" })).toEqual({
+      items: [{ type: "text", text: "hello" }],
       delivery: "steer",
       attachments: [],
     });
     expectInvalid(
-      () => parseAdmitPromptRequest({ content: "hello", delivery: "now" }),
+      () => parseAdmitPromptRequest({ items: [{ type: "text", text: "hello" }], delivery: "now" }),
       "delivery",
     );
   });
@@ -70,14 +70,14 @@ describe("HTTP request parsers", () => {
   it("preserves ordered prompt attachment inputs", () => {
     expect(
       parseAdmitPromptRequest({
-        content: "",
+        items: [],
         attachments: [
           { assetId: "att_b" },
           { assetId: "att_a", intent: "ocr", displayName: "receipt.png" },
         ],
       }),
     ).toEqual({
-      content: "",
+      items: [],
       attachments: [
         { assetId: "att_b" },
         { assetId: "att_a", intent: "ocr", displayName: "receipt.png" },

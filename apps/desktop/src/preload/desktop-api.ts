@@ -242,6 +242,8 @@ export const desktopAPI = {
     chooseProject: () => invoke(IpcChannels.sessionChooseProject),
     inspectProject: (path: string) => invoke(IpcChannels.sessionInspectProject, path),
     listCommands: (cwd: string) => invoke(IpcChannels.sessionListCommands, cwd),
+    compact: (input: IpcInvokeMap[typeof IpcChannels.sessionCompact]["args"][0]) =>
+      invoke(IpcChannels.sessionCompact, input),
     renameProject: (input: IpcInvokeMap[typeof IpcChannels.projectRename]["args"][0]) =>
       invoke(IpcChannels.projectRename, input),
     setProjectPinned: (input: IpcInvokeMap[typeof IpcChannels.projectSetPinned]["args"][0]) =>

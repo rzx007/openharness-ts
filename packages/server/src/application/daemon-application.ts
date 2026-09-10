@@ -68,6 +68,7 @@ import { SessionMaintenanceService } from "./session/session-maintenance-service
 import { SessionQueryService } from "./session/session-query-service.js";
 import { SessionRunEngine } from "./session/session-run-engine.js";
 import { SessionRunExecutor } from "./session/session-run-executor.js";
+import { materializeSessionInput } from "./session/session-input-materializer.js";
 import { SessionPostRunMaintenance } from "./session/session-post-run-maintenance.js";
 import { SessionExecutionProjector } from "./session/session-execution-projector.js";
 import { BackgroundShellService } from "./session/background-shell-service.js";
@@ -575,6 +576,13 @@ export class DaemonApplication implements DurableAgentApplication {
         attachmentOcrAvailable: true,
         contextUsageCache,
         refreshContextUsage,
+        resolveSkillCatalog: async (session) => {
+          const settings = await resolveSessionSettings(session.cwd);
+          if (!settings) {
+            throw new Error("session_input_skill_catalog_unavailable");
+          }
+          return (await discoverOpenHarnessExtensions(session.cwd, settings)).skillRegistry;
+        },
         routeAttachments: (input) => attachmentRouter.route(input),
         resolveCapabilities: async (session) => {
           const settings = options.getSettingsForCwd
@@ -607,6 +615,14 @@ export class DaemonApplication implements DurableAgentApplication {
         agentPool: this.agentPool,
         runExecutor,
         events: this.eventPublisher,
+        materializeSteerInput: async (sessionId, items) => {
+          const session = store.getSession(sessionId);
+          if (!session) throw new Error(`Session not found: ${sessionId}`);
+          const settings = await resolveSessionSettings(session.cwd);
+          if (!settings) throw new Error("session_input_skill_catalog_unavailable");
+          const { skillRegistry } = await discoverOpenHarnessExtensions(session.cwd, settings);
+          return materializeSessionInput(items, skillRegistry).instruction;
+        },
       });
       /**
        * 控制服务：
@@ -800,7 +816,7 @@ export class DaemonApplication implements DurableAgentApplication {
             }
             const admission = await this.sessions.admitPrompt(session!.id, {
               id: `scheduled-input:${scheduledRun.id}`,
-              content: scheduledPrompt(task),
+              items: [{ type: "text", text: scheduledPrompt(task) }],
               delivery: "queue",
               metadata: {
                 source: "scheduled_task",

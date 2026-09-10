@@ -41,6 +41,7 @@ describe("desktop pending prompt state", () => {
     runtime.pendingPromptSubmissions["input-1"] = {
       id: "input-1",
       sessionId: "s1",
+      items: [{ type: "text" as const, text: "first" }],
       content: "first",
       attachments: [],
       createdAt: 1,
@@ -70,6 +71,7 @@ describe("desktop pending prompt state", () => {
     runtime.pendingPromptSubmissions["input-1"] = {
       id: "input-1",
       sessionId: "s1",
+      items: [{ type: "text" as const, text: "failed" }],
       content: "failed",
       attachments: [],
       createdAt: 1,
@@ -86,6 +88,7 @@ describe("desktop pending prompt state", () => {
       "input-1": {
         id: "input-1",
         sessionId: "s1",
+        items: [{ type: "text" as const, text: "first" }],
         content: "first",
         attachments: [],
         createdAt: 1,
@@ -95,6 +98,7 @@ describe("desktop pending prompt state", () => {
       "input-2": {
         id: "input-2",
         sessionId: "s2",
+        items: [{ type: "text" as const, text: "background" }],
         content: "background",
         attachments: [],
         createdAt: 2,
@@ -112,6 +116,7 @@ describe("desktop pending prompt state", () => {
       sessionId: "s1",
       seq: 1,
       delivery: "steer",
+      items: [{ type: "text" as const, text: "first" }],
       content: "first",
       attachments: [],
       metadata: {},

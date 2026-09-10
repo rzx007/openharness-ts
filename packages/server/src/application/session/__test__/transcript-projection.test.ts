@@ -51,6 +51,7 @@ function createInput(
     sessionId: "s1",
     seq: 1,
     delivery: "follow_up",
+    items: [{ type: "text", text: "hello" }],
     content: "hello",
     attachments: [],
     metadata: {},
@@ -60,20 +61,17 @@ function createInput(
 }
 
 describe("SessionTranscriptProjection", () => {
-  it("projects selected skill metadata onto the durable user text part", () => {
+  it("projects structured input items onto the durable user text part", () => {
     const store = createStore();
     const projection = new SessionTranscriptProjection(store as any);
-    const skillInvocation = {
-      name: "archify",
-      commandName: "archify",
-      displayName: "Archify",
-      source: "project",
-      invocationSource: "slash",
-    };
+    const items = [
+      { type: "text" as const, text: "画一下 " },
+      { type: "skill" as const, name: "archify", path: "/repo/archify/SKILL.md" },
+    ];
 
     projection.beginRun("s1", "i1", "r1", createInput({
-      content: "画一下系统架构",
-      metadata: { skillInvocation },
+      content: "画一下 $archify",
+      items,
     }));
 
     expect(store.upsertMessagePart).toHaveBeenCalledWith({
@@ -81,8 +79,8 @@ describe("SessionTranscriptProjection", () => {
       messageId: "m1",
       type: "text",
       status: "completed",
-      text: "画一下系统架构",
-      metadata: { skillInvocation },
+      text: "画一下 $archify",
+      metadata: { items },
     });
   });
 

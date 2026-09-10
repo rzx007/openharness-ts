@@ -44,17 +44,15 @@ describe("SessionRunExecutor", () => {
     expect(closeIfStale).toHaveBeenCalledWith("s1");
   });
 
-  it("submits an explicit Skill tool instruction for selected skill metadata", async () => {
+  it("submits one ordered Skill instruction for structured skill items", async () => {
     const submitMessage = vi.fn(() => completedHandle());
     const store = createStore({
-      metadata: {
-        skillInvocation: {
-          name: "archify",
-          commandName: "archify",
-          source: "project",
-          invocationSource: "slash",
-        },
-      },
+      items: [
+        { type: "text", text: "draw " },
+        { type: "skill", name: "archify", path: "/repo/.agents/skills/archify/SKILL.md" },
+        { type: "text", text: " now " },
+        { type: "skill", name: "review", path: "/repo/.agents/skills/review/SKILL.md" },
+      ],
     });
     const executor = new SessionRunExecutor({
       store: store as any,
@@ -65,6 +63,12 @@ describe("SessionRunExecutor", () => {
       } as any,
       events: { checkpoint: () => 1, publishSince: vi.fn() },
       transcriptProjection: { finalizeRunParts: vi.fn() },
+      resolveSkillCatalog: vi.fn(async () => ({
+        resolvePath: (path: string) => ({
+          "/repo/.agents/skills/archify/SKILL.md": { name: "archify", path },
+          "/repo/.agents/skills/review/SKILL.md": { name: "review", path },
+        }[path]),
+      })),
       traceIdForRun: () => "trace-1",
       log: vi.fn(),
     });
@@ -75,11 +79,12 @@ describe("SessionRunExecutor", () => {
     );
 
     expect(submitMessage).toHaveBeenCalledWith(
-      '请先使用 Skill 工具加载 "archify" 技能，然后按该技能要求完成下面的任务：\n\nhello',
+      "用户显式选择了以下技能，请按出现顺序使用 Skill 工具的 { name, path } 加载并遵循：\n" +
+        "1. archify (path: /repo/.agents/skills/archify/SKILL.md)\n" +
+        "2. review (path: /repo/.agents/skills/review/SKILL.md)\n\n" +
+        "用户输入：\ndraw $archify now $review",
       expect.objectContaining({
-        metadata: expect.objectContaining({
-          skillInvocation: expect.objectContaining({ name: "archify" }),
-        }),
+        metadata: { requestedBy: "test", traceId: "trace-1" },
       }),
     );
   });
@@ -309,6 +314,7 @@ function capabilitySnapshot(
 function createStore(options: {
   attachments?: ReturnType<typeof attachment>[];
   metadata?: Record<string, unknown>;
+  items?: Array<{ type: "text"; text: string } | { type: "skill"; name: string; path: string }>;
 } = {}) {
   const run = { id: "run-1", sessionId: "s1", inputId: "input-1", status: "pending" };
   return {
@@ -323,6 +329,7 @@ function createStore(options: {
       id: "input-1",
       sessionId: "s1",
       content: "hello",
+      items: options.items ?? [{ type: "text", text: "hello" }],
       attachments: options.attachments ?? [],
       delivery: "queue",
       metadata: options.metadata ?? { requestedBy: "test", traceId: "trace-1" },

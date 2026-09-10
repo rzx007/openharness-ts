@@ -14,9 +14,11 @@ import {
   removeDraftAttachment,
   resetComposerScope,
   selectDraftAttachments,
+  setDraftDocument,
   setDraftText,
 } from "./composer-draft-state"
 import type { AttachmentActions, DesktopStoreContext } from "./types"
+import type { ComposerDocument } from "./composer-document"
 
 export function createAttachmentActions(context: DesktopStoreContext): AttachmentActions {
   const { get, set } = context
@@ -53,6 +55,10 @@ export function createAttachmentActions(context: DesktopStoreContext): Attachmen
   return {
     setComposerDraftText(scope, text) {
       set((state) => setDraftText(state, scope, text))
+    },
+
+    setComposerDraftDocument(scope: string, document: ComposerDocument) {
+      set((state) => setDraftDocument(state, scope, document))
     },
 
     async pickAttachmentFiles(scope) {

@@ -19,8 +19,9 @@ import {
   type DesktopAttachmentDraft,
 } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
+import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 import { Composer } from "./composer"
-import type { ComposerSkillCommand } from "./composer-skill-commands"
+import type { ComposerSkill } from "./rich-prompt-input"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "./controls"
 import { ScopedOperationError } from "./scoped-operation-errors"
 import type { LoadStatus, StartPicker } from "./types"
@@ -42,7 +43,7 @@ export function NewConversationStart({
   selectedProvider,
   selectedPermissionMode,
   operationError,
-  skillCommands,
+  skills,
   attachments,
   attachmentInteractionEnabled,
   panelOpen,
@@ -65,7 +66,7 @@ export function NewConversationStart({
   contextUsage = null,
   onOpenContextUsage,
 }: {
-  draft: string
+  draft: ComposerDocument
   sending: boolean
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
@@ -80,11 +81,11 @@ export function NewConversationStart({
   selectedProvider: string | null
   selectedPermissionMode: DesktopPermissionMode
   operationError: string | null
-  skillCommands: ComposerSkillCommand[]
+  skills: readonly ComposerSkill[]
   attachments: readonly DesktopAttachmentDraft[]
   attachmentInteractionEnabled: boolean
   panelOpen: boolean
-  onDraftChange: (value: string) => void
+  onDraftChange: (value: ComposerDocument) => void
   onSubmit: () => void
   onPickFiles: () => void
   onDropFiles: (files: readonly File[]) => void
@@ -405,9 +406,9 @@ export function NewConversationStart({
             selectedProvider={selectedProvider}
             modelLabel={modelLabel}
             permissionMode={selectedPermissionMode}
-            skillCommands={skillCommands}
+            skills={skills}
             canSubmit={Boolean(
-              (draft.trim() || attachments.length > 0) &&
+              (draft.items.length > 0 || attachments.length > 0) &&
               areDesktopAttachmentsSendable(attachments) &&
               (selectedProject || workspaceMode === "outside_project")
             )}

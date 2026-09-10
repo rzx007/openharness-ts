@@ -171,6 +171,26 @@ describe("skillTool", () => {
     expect((result.content[0] as any).text).toContain("Run the thing.");
   });
 
+  it("loads a skill only when its requested path matches the current registry winner", async () => {
+    const registry = new SkillRegistry();
+    registry.register(makeSkill({
+      name: "review",
+      source: "plugin",
+      path: "/repo/.agents/skills/review/SKILL.md",
+      content: "# Project review",
+    }));
+
+    await expect(skillTool.execute!(
+      { name: "review", path: "/tmp/foreign/SKILL.md" },
+      { cwd: "/repo", skillRegistry: registry },
+    )).resolves.toMatchObject({ isError: true });
+
+    await expect(skillTool.execute!(
+      { name: "review", path: "/repo/.agents/skills/review/SKILL.md" },
+      { cwd: "/repo", skillRegistry: registry },
+    )).resolves.not.toMatchObject({ isError: true });
+  });
+
   it("presents Skill file and root through the execution environment", async () => {
     const registry = new SkillRegistry();
     registry.register(makeSkill({

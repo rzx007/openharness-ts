@@ -8,7 +8,9 @@ import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
   readRuntimeMetadata,
+  sessionUserInputText,
   type AdmitPromptAttachmentInput,
+  type SessionUserInputItem,
 } from "@openharness/protocol";
 
 import type {
@@ -62,11 +64,15 @@ export interface ForkSessionCommand {
 
 export interface EditLatestPromptCommand {
   id: string;
-  content: string;
+  items: SessionUserInputItem[];
   attachments?: AdmitPromptAttachmentInput[];
   sourceMessageId: string;
   metadata?: Record<string, unknown>;
   traceId: string;
+}
+
+function inputItems(input: { items?: readonly SessionUserInputItem[]; content?: string }): SessionUserInputItem[] {
+  return input.items ? [...input.items] : [{ type: "text", text: input.content ?? "" }];
 }
 
 export interface ResumeSessionRunCommand {
@@ -186,9 +192,10 @@ export class SessionApplicationService {
     const session = this.context.store.getSession(sessionId);
     if (!session)
       throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
-    const content = input.content.trim();
+    const items = inputItems(input);
+    const content = sessionUserInputText(items).trim();
     const attachments = normalizePromptAttachments(input.attachments);
-    if (!content && attachments.length === 0 && !hasSkillInvocation(input.metadata)) {
+    if (!content && attachments.length === 0) {
       throw new SessionApplicationError(
         400,
         "content or attachments are required",
@@ -203,7 +210,7 @@ export class SessionApplicationService {
           : undefined;
         if (
           existingInput.sessionId !== sessionId ||
-          existingInput.content !== content ||
+          !jsonEqual(inputItems(existingInput), items) ||
           promptAttachmentFingerprint(
             existingInput.attachments.map((reference) => ({
               assetId: reference.assetId,
@@ -256,7 +263,7 @@ export class SessionApplicationService {
         latestUserMessage.id,
         {
           id: input.id,
-          content,
+          items,
           attachments,
           traceId: input.traceId,
           metadata: {
@@ -374,7 +381,7 @@ export class SessionApplicationService {
       if (existing) {
         if (
           existing.sessionId !== sessionId ||
-          existing.content !== input.content ||
+          !jsonEqual(inputItems(existing), inputItems(input)) ||
           existing.delivery !== delivery ||
           !jsonEqual(
             withoutTraceId(existing.metadata),
@@ -393,7 +400,7 @@ export class SessionApplicationService {
       ? undefined
       : await this.context.liveChildren.send(sessionId, {
           id: input.id,
-          content: input.content,
+          content: sessionUserInputText(inputItems(input)),
           delivery,
           traceId: input.traceId,
           metadata: input.metadata,
@@ -406,7 +413,7 @@ export class SessionApplicationService {
         live.sessionId !== sessionId ||
         !admitted ||
         admitted.sessionId !== sessionId ||
-        admitted.content !== input.content ||
+        !jsonEqual(inputItems(admitted), inputItems(input)) ||
         admitted.delivery !== delivery ||
         (input.id !== undefined && admitted.id !== input.id) ||
         !jsonEqual(withoutTraceId(admitted.metadata), withoutTraceId(metadata))
@@ -929,14 +936,6 @@ export class SessionApplicationService {
     }
     return result;
   }
-}
-
-function hasSkillInvocation(metadata: Record<string, unknown> | undefined): boolean {
-  const value = metadata?.skillInvocation;
-  if (!isRecord(value) || value.invocationSource !== "slash" || typeof value.name !== "string") {
-    return false;
-  }
-  return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value.name.trim());
 }
 
 function mergeSessionMetadata(

@@ -299,20 +299,14 @@ describe("DaemonAgentEventProjector", () => {
     expect(events.publishSince).toHaveBeenCalled();
   });
 
-  it("accepts model-facing content transformed from an admitted slash skill input", async () => {
+  it("accepts model-facing content transformed from an admitted structured skill input", async () => {
     const input = {
       id: "input-1",
       sessionId: "s1",
       content: "这是什么技能",
       delivery: "queue",
-      metadata: {
-        skillInvocation: {
-          name: "agent-reach",
-          commandName: "agent-reach",
-          source: "project",
-          invocationSource: "slash",
-        },
-      },
+      metadata: {},
+      items: [{ type: "skill", name: "agent-reach", path: "/repo/agent-reach/SKILL.md" }],
       attachments: [],
     };
     const store = {
@@ -331,7 +325,7 @@ describe("DaemonAgentEventProjector", () => {
     });
 
     await expect(projector.apply(event("input.accepted", {
-      content: '请先使用 Skill 工具加载 "agent-reach" 技能，然后按该技能要求完成下面的任务：\n\n这是什么技能',
+      content: "用户显式选择了以下技能，请按出现顺序使用 Skill 工具的 { name, path } 加载并遵循：\n1. agent-reach (path: /repo/agent-reach/SKILL.md)\n\n用户输入：\n$agent-reach",
       delivery: "queue",
       metadata: input.metadata,
     }, { sessionId: "s1", inputId: input.id, runId: "run-1" }))).resolves.toBeUndefined();

@@ -55,6 +55,8 @@ describe("createDefaultCommandCatalog", () => {
         kind: "template",
         source: "project",
         description: "Ship it",
+        path: join(skillDir, "ship.md"),
+        skillName: "ship",
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

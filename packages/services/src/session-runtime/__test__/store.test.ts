@@ -76,6 +76,48 @@ function createReadyAttachment(
 }
 
 describe("SessionStore", () => {
+  it("persists structured input items and rejects legacy input rows", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ohs-structured-input-"));
+    const path = join(directory, "store.db");
+    try {
+      const store = new SessionStore({ path });
+      store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
+      const admitted = store.admitPrompt({
+        id: "i1",
+        sessionId: "s1",
+        delivery: "queue",
+        content: "caller content must not win",
+        items: [
+          { type: "text", text: "use " },
+          { type: "skill", name: "review", path: "/repo/review/SKILL.md" },
+        ],
+      });
+
+      expect(admitted.items).toEqual([
+        { type: "text", text: "use " },
+        { type: "skill", name: "review", path: "/repo/review/SKILL.md" },
+      ]);
+      expect(admitted.content).toBe("use $review");
+      store.close();
+
+      const reloaded = new SessionStore({ path });
+      expect(reloaded.getInput("i1")).toMatchObject({
+        items: admitted.items,
+        content: "use $review",
+      });
+      reloaded.close();
+
+      const database = new Database(path);
+      database.prepare("UPDATE session_input SET items_json = NULL WHERE id = ?").run("i1");
+      database.close();
+      expect(() => new SessionStore({ path })).toThrowError(
+        /legacy_session_input_unsupported/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a format 1 database before running new migrations", () => {
     const root = mkdtempSync(join(tmpdir(), "ohs-format-1-"));
     const path = join(root, "store.db");
@@ -537,22 +579,16 @@ describe("SessionStore", () => {
           store.admitPrompt({
             id: "skill-only",
             sessionId: "s1",
-            content: "",
-            metadata: {
-              skillInvocation: { name: "archify", invocationSource: "slash" },
-            },
+            items: [{ type: "skill", name: "archify", path: "/repo/archify/SKILL.md" }],
           }),
-        ).toMatchObject({ id: "skill-only", content: "" });
+        ).toMatchObject({ id: "skill-only", content: "$archify" });
         expect(() =>
           store.admitPrompt({
             id: "invalid-skill-only",
             sessionId: "s1",
-            content: "",
-            metadata: {
-              skillInvocation: { name: "bad\nname", invocationSource: "slash" },
-            },
+            items: [{ type: "skill", name: "bad\nname", path: "/repo/bad/SKILL.md" }],
           }),
-        ).toThrow(/prompt_content_required/);
+        ).toThrow(/invalid_name/);
         expect(() =>
           store.admitPrompt({
             id: "unknown",
@@ -1553,14 +1589,17 @@ describe("SessionStore", () => {
         store.createSession({ id: "s1", cwd: process.cwd(), model: "m" });
         const cursor = store.listEvents().at(-1)!.seq;
         store.createSession({ id: "s2", cwd: process.cwd(), model: "m" });
-        store.admitPrompt({ sessionId: "s1", content: "wake" });
+        store.admitPrompt({
+          sessionId: "s1",
+          items: [{ type: "text", text: "wake" }],
+        });
         store.appendEvent({ type: "daemon.heartbeat", payload: { ok: true } });
 
         expect(store.listEvents().map((event) => event.seq)).toEqual([
           1, 2, 3, 4,
         ]);
         expect(store.listEvents().map((event) => event.schemaVersion)).toEqual([
-          1, 1, 1, 1,
+          1, 1, 2, 1,
         ]);
         expect(
           store.listEvents({ afterSeq: cursor }).map((event) => event.type),

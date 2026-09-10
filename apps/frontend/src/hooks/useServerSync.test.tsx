@@ -647,6 +647,8 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
           {
             name: "/pr",
             kind: "template",
+            skillName: "pull-request",
+            path: "/skills/pull-request/SKILL.md",
             source: "user",
             description: "Write a PR",
           },
@@ -1326,15 +1328,10 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
       String(call.init.body ?? "").includes("fix auth"),
   );
   expect(JSON.parse(String(skillPrompt?.init.body ?? "{}"))).toMatchObject({
-    content: "fix auth",
-    metadata: {
-      skillInvocation: {
-        name: "pr",
-        commandName: "pr",
-        source: "user",
-        invocationSource: "slash",
-      },
-    },
+    items: [
+      { type: "skill", name: "pull-request", path: "/skills/pull-request/SKILL.md", source: "user" },
+      { type: "text", text: " fix auth" },
+    ],
   });
 
   const promptCallsBeforeUnknown = calls.filter((call) => call.url.includes("/prompts")).length;
@@ -1410,7 +1407,7 @@ test("useServerSync hydrates daemon state and sends prompt/permission replies", 
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("a.txt | 1 +"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Current branch: main"))).toBe(false);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Rewound 1 turn(s)"))).toBe(true);
-  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Reloaded plugins:"))).toBe(true);
+  expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("Plugins rediscovered; session runtimes will reload on next use."))).toBe(true);
   expect(captured?.transcript.some((item) => item.role === "system" && item.text.includes("M README.md"))).toBe(false);
 
   await act(async () => {

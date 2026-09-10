@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
 import type { DesktopSessionMessage, DesktopSessionPart } from "@shared/session-types"
-import { MessageBlock } from "./message-block"
+import { MessageBlock, renderUserItems } from "./message-block"
 import { visibleTranscriptParts } from "./transcript-visibility"
 
 describe("visibleTranscriptParts", () => {
@@ -77,7 +77,7 @@ describe("visibleTranscriptParts", () => {
     expect(html).not.toContain('role="separator"')
   })
 
-  it("renders selected skill metadata as a compact capsule above the user task", () => {
+  it("renders structured user items inline in their original order without exposing paths", () => {
     const message: DesktopSessionMessage = {
       id: "message-skill",
       sessionId: "session-1",
@@ -99,14 +99,26 @@ describe("visibleTranscriptParts", () => {
             seq: 0,
             type: "text",
             status: "completed",
-            text: "画一下系统架构",
+            text: "使用 $archify 画一下系统架构",
             metadata: {
-              skillInvocation: {
-                name: "archify",
-                displayName: "Archify",
-                source: "project",
-                invocationSource: "slash",
-              },
+              items: [
+                { type: "text", text: "使用 " },
+                {
+                  type: "skill",
+                  name: "archify",
+                  displayName: "Archify",
+                  path: "D:/skills/archify/SKILL.md",
+                  source: "project",
+                },
+                { type: "text", text: " 画一下系统架构" },
+                {
+                  type: "skill",
+                  name: "writing-plans",
+                  displayName: "Writing Plans",
+                  path: "D:/skills/writing-plans/SKILL.md",
+                  source: "user",
+                },
+              ],
             },
             createdAt: 1,
             updatedAt: 1,
@@ -120,10 +132,71 @@ describe("visibleTranscriptParts", () => {
       })
     )
 
-    expect(html).toContain('aria-label="使用的技能"')
+    expect(html).not.toContain('aria-label="使用的技能"')
     expect(html).toContain("Archify")
-    expect(html).toContain("项目")
+    expect(html).toContain("Writing Plans")
     expect(html).toContain("画一下系统架构")
+    expect(html).not.toContain("SKILL.md")
+    expect(html.indexOf("使用 ")).toBeLessThan(html.indexOf("Archify"))
+    expect(html.indexOf("Archify")).toBeLessThan(html.indexOf("画一下系统架构"))
+    expect(html.indexOf("画一下系统架构")).toBeLessThan(html.indexOf("Writing Plans"))
+  })
+
+  it("keeps ordered text and skill display items for transcript rendering", () => {
+    expect(renderUserItems([
+      { type: "text", text: "使用 " },
+      { type: "skill", name: "a", path: "/a/SKILL.md", displayName: "Skill A" },
+      { type: "text", text: " 然后 " },
+      { type: "skill", name: "b", path: "/b/SKILL.md", displayName: "Skill B" },
+    ])).toEqual([
+      { kind: "text", text: "使用 " },
+      { kind: "skill", name: "a", displayName: "Skill A" },
+      { kind: "text", text: " 然后 " },
+      { kind: "skill", name: "b", displayName: "Skill B" },
+    ])
+  })
+
+  it("renders a skill-only structured message without a capsule", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBlock, {
+        message: {
+          id: "skill-only",
+          sessionId: "session-1",
+          seq: 1,
+          role: "user",
+          metadata: {},
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        parts: [{
+          id: "skill-only-text",
+          sessionId: "session-1",
+          messageId: "skill-only",
+          seq: 0,
+          type: "text",
+          status: "completed",
+          text: "",
+          metadata: {
+            items: [{
+              type: "skill",
+              name: "archify",
+              displayName: "Archify",
+              path: "D:/skills/archify/SKILL.md",
+            }],
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+        streaming: false,
+        onOpenFile: () => undefined,
+        canOpenReview: false,
+        onOpenReview: () => undefined,
+        onOpenTerminal: () => undefined,
+      })
+    )
+
+    expect(html).toContain("Archify")
+    expect(html).not.toContain('aria-label="使用的技能"')
     expect(html).not.toContain("SKILL.md")
   })
 

@@ -146,8 +146,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function sessionDefinition(type: string, validate: DurableEventDefinition["validate"]): DurableEventDefinition {
-  return { type, currentVersion: 1, scope: "session", validate };
+function sessionDefinition(
+  type: string,
+  validate: DurableEventDefinition["validate"],
+  currentVersion = 1,
+): DurableEventDefinition {
+  return { type, currentVersion, scope: "session", validate };
 }
 
 const workflowEventTypes = [
@@ -167,7 +171,7 @@ export const DEFAULT_DURABLE_EVENT_DEFINITIONS: readonly DurableEventDefinition[
   sessionDefinition("session.updated", objectPayload("session")),
   sessionDefinition("session.archived", stringsPayload("sessionId")),
   sessionDefinition("session.closing", stringsPayload("sessionId")),
-  sessionDefinition("session.input.admitted", objectPayload("input")),
+  sessionDefinition("session.input.admitted", objectPayload("input"), 2),
   sessionDefinition("session.message.created", objectPayload("message")),
   sessionDefinition("session.transcript.replaced", arraysPayload("messages", "parts")),
   sessionDefinition("session.message.part.updated", objectPayload("part")),

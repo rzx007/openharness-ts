@@ -91,28 +91,31 @@ describe("resolveDesktopRuntimeSnapshot", () => {
 })
 
 describe("DesktopSessionService.sendPrompt attachments", () => {
-  it("forwards a selected skill as prompt metadata", async () => {
+  it("forwards ordered structured items without re-parsing a selected skill", async () => {
     const admitPrompt = vi.fn(async () => undefined)
     const service = serviceWithClient({ admitPrompt })
-    const skillInvocation = {
-      name: "archify",
-      commandName: "archify",
-      displayName: "archify",
-      source: "user" as const,
-      invocationSource: "slash" as const,
-    }
+    const items = [
+      { type: "text" as const, text: "画一下" },
+      {
+        type: "skill" as const,
+        name: "archify",
+        path: "D:/skills/archify/SKILL.md",
+        displayName: "Archify",
+        source: "user" as const,
+      },
+      { type: "text" as const, text: "系统架构" },
+    ]
 
     await service.sendPrompt({
       id: "input-skill",
       sessionId: "session-1",
-      content: "画一下系统架构",
+      items,
       attachments: [],
-      skillInvocation,
     })
 
     expect(admitPrompt).toHaveBeenCalledWith("session-1", {
       id: "input-skill",
-      content: "画一下系统架构",
+      items,
       delivery: "queue",
       attachments: [],
       metadata: {
@@ -121,7 +124,6 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
           component: "composer",
           action: "append_prompt",
         },
-        skillInvocation,
       },
     })
   })
@@ -133,18 +135,23 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
     await service.sendPrompt({
       id: "input-skill-only",
       sessionId: "session-1",
-      content: "",
+      items: [
+        {
+          type: "skill",
+          name: "archify",
+          path: "D:/skills/archify/SKILL.md",
+          displayName: "Archify",
+        },
+      ],
       attachments: [],
-      skillInvocation: { name: "archify", invocationSource: "slash" },
     })
 
     expect(admitPrompt).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({
-        content: "",
-        metadata: expect.objectContaining({
-          skillInvocation: { name: "archify", invocationSource: "slash" },
-        }),
+        items: [
+          expect.objectContaining({ name: "archify", path: "D:/skills/archify/SKILL.md" }),
+        ],
       })
     )
   })
@@ -156,7 +163,7 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
     await service.sendPrompt({
       id: "input-1",
       sessionId: "session-1",
-      content: "",
+      items: [],
       attachments: [
         { assetId: "att-b", intent: "auto", displayName: "b.png" },
         { assetId: "att-a", intent: "auto", displayName: "a.pdf" },
@@ -165,7 +172,7 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
 
     expect(admitPrompt).toHaveBeenCalledWith("session-1", {
       id: "input-1",
-      content: "",
+      items: [],
       delivery: "queue",
       attachments: [
         { assetId: "att-b", intent: "auto", displayName: "b.png" },
@@ -189,7 +196,7 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
       service.sendPrompt({
         id: "input-empty",
         sessionId: "session-1",
-        content: "   ",
+        items: [{ type: "text", text: "   " }],
         attachments: [],
       })
     ).rejects.toThrow("消息内容和附件不能同时为空")
@@ -204,7 +211,7 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
       id: "edit-1",
       sessionId: "session-1",
       sourceMessageId: "message-1",
-      content: "",
+      items: [],
       attachments: [
         { assetId: "asset-b", intent: "auto", displayName: "b.png" },
         { assetId: "asset-a", intent: "auto", displayName: "a.pdf" },
@@ -214,7 +221,7 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
     expect(editLatestPrompt).toHaveBeenCalledWith("session-1", {
       id: "edit-1",
       sourceMessageId: "message-1",
-      content: "",
+      items: [],
       attachments: [
         { assetId: "asset-b", intent: "auto", displayName: "b.png" },
         { assetId: "asset-a", intent: "auto", displayName: "a.pdf" },
@@ -230,10 +237,36 @@ describe("DesktopSessionService.sendPrompt attachments", () => {
   })
 })
 
-function serviceWithClient(client: {
-  admitPrompt: ReturnType<typeof vi.fn>
-  editLatestPrompt?: ReturnType<typeof vi.fn>
-}): DesktopSessionService {
+describe("DesktopSessionService.listCommands", () => {
+  it("keeps Skills plus only commands with a Desktop execution adapter", async () => {
+    const listCommands = vi.fn(async () => [
+      { name: "/compact", kind: "session" as const, selection: "execute" as const, requiresEmptyComposer: true },
+      { name: "/review", kind: "session" as const, selection: "submenu" as const, requiresEmptyComposer: true },
+      { name: "/skills", kind: "session" as const, selection: "execute" as const, requiresEmptyComposer: true },
+      { name: "/writing-plans", skillName: "writing-plans", kind: "template" as const, path: "D:/skills/writing-plans/SKILL.md" },
+    ])
+    const service = serviceWithClient({ listCommands })
+
+    await expect(service.listCommands(process.cwd())).resolves.toEqual([
+      expect.objectContaining({ name: "/compact", kind: "session" }),
+      expect.objectContaining({ name: "/skills", kind: "session" }),
+      expect.objectContaining({ name: "/writing-plans", kind: "template" }),
+    ])
+    expect(listCommands).toHaveBeenCalledWith({ cwd: process.cwd() })
+  })
+
+  it("runs compact through the native session API", async () => {
+    const compactSession = vi.fn(async () => ({ messageCount: 3, compacted: true }))
+    const service = serviceWithClient({ compactSession })
+
+    await expect(service.compactSession({ sessionId: "session-1" })).resolves.toEqual({
+      messageCount: 3,
+    })
+    expect(compactSession).toHaveBeenCalledWith("session-1")
+  })
+})
+
+function serviceWithClient(client: Record<string, unknown>): DesktopSessionService {
   const service = new DesktopSessionService()
   ;(
     service as unknown as {

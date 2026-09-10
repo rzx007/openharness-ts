@@ -60,7 +60,7 @@
 1. **入口 → 创建。** `session-actions.ts` 先在 `newConversationRuntime.operations` 写入 `create-session`，随后调用 `sessions.create`。
 2. **调用返回 → 绑定状态。** main process 返回真实 `sessionId` 后，创建 operation 从 `newConversationRuntime` 原子移动到 `sessionRuntimes[sessionId]`；首条普通消息同时写为 `placement: transcript` 的本地 submission。
 3. **是否接管页面 → 打开 primary。** 只有这次创建仍拥有当前导航代次时，才调用 `sessions.open(sessionId)`，并把返回 snapshot 写到 `activeSessionId/sessionView`；用户期间改去别的会话时，首条消息仍会发送，但不会抢回 primary。
-4. **发送 → 等待 SSE。** 首条消息统一调用 `sendPrompt` 后标成 `accepted`；Slash Skill 也走普通 prompt，只额外携带 `metadata.skillInvocation`，由运行时要求 Agent 使用原生 Skill 工具加载。打开失败会把错误留在新 session 的 `open-session` owner、向 composer 返回失败并保留草稿。IPC 只表示请求已接收，不能伪造 cursor 或 transcript。
+4. **发送 → 等待 SSE。** 首条消息统一调用 `sendPrompt` 后标成 `accepted`；Skill 引用与正文按顺序放在 `items` 中，由运行时按引用的真实名称和路径加载。打开失败会把错误留在新 session 的 `open-session` owner、向 composer 返回失败并保留草稿。IPC 只表示请求已接收，不能伪造 cursor 或 transcript。
 5. **SSE 返回 → 清理。** `applySessionUpdate` 接受同会话、cursor 不倒退的快照；`reconcileRuntimeWithView` 按 input/run ID 清掉已经确认的 submission 与 operation。
 6. **失败 → 留给所属页面。** 创建尚未返回 session 时，失败写回 `newConversationRuntime`；已拿到 session 后，失败写到对应 `sessionRuntimes[sessionId]`。SSE 已确认首条消息时，迟到的 IPC 失败不改写为失败。
 

@@ -29,7 +29,7 @@ import type {
   SessionExecutionRecord,
   SessionStateSnapshot,
   SessionTransformationMessagePartRecord,
-  SkillInvocationMetadata,
+  SessionUserInputItem,
   ListMessagePartsOptions,
   JobSnapshot,
 } from "@openharness/protocol";
@@ -56,7 +56,7 @@ export type {
   SessionExecutionRecord,
   SessionStateSnapshot,
   SessionTransformationMessagePartRecord,
-  SkillInvocationMetadata,
+  SessionUserInputItem,
   ListMessagePartsOptions,
 };
 
@@ -182,7 +182,7 @@ export interface ForkClientSessionInput {
 
 export interface EditLatestClientPromptInput {
   id: string;
-  content: string;
+  items: SessionUserInputItem[];
   sourceMessageId: string;
   attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
@@ -211,7 +211,7 @@ export interface CancelQueuedPromptResponse {
 /** `POST /sessions/:id/prompts` 请求体。 */
 export interface AdmitClientPromptInput {
   id?: string;
-  content: string;
+  items: SessionUserInputItem[];
   delivery?: InputDelivery;
   attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
@@ -274,18 +274,25 @@ export interface ResumeInterruptedRunResponse extends PromptResponse {
 }
 
 export type CommandKind = "session" | "template";
+export type CommandSelection = "execute" | "submenu" | "insert";
 export type CommandSource =
   "builtin" | "bundled" | "user" | "plugin" | "project";
 
 /** `GET /commands` 返回的命令元数据。 */
-export interface CommandCatalogEntry {
+interface CommandCatalogEntryBase {
   name: string;
   displayName?: string;
   description?: string;
-  kind: CommandKind;
   source?: CommandSource;
   argumentHint?: string;
+  selection?: CommandSelection;
+  requiresEmptyComposer?: boolean;
 }
+
+export type CommandCatalogEntry = CommandCatalogEntryBase & (
+  | { kind: "session"; path?: never; skillName?: never }
+  | { kind: "template"; path: string; skillName: string }
+);
 
 /** `GET /commands` 查询参数。 */
 export interface ListCommandsOptions {
@@ -497,7 +504,7 @@ export interface PluginArchiveError {
   diagnostics?: PluginInfo["diagnostics"];
 }
 
-export type SkillSource = "bundled" | "agent" | "project" | "personal";
+export type SkillSource = "bundled" | "agent" | "project" | "personal" | "standard";
 
 export interface SkillInfo {
   id: string;

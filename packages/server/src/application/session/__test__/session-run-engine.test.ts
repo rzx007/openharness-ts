@@ -320,7 +320,7 @@ describe("SessionRunEngine", () => {
           id: "edited-input",
           sessionId: "s1",
           delivery: "queue",
-          content: "replacement",
+          items: [{ type: "text", text: "replacement" }],
         }),
         run: { metadata: { traceId: "trace-edit" } },
       },
@@ -477,13 +477,17 @@ describe("SessionRunEngine", () => {
       agentPool: { configured: true } as any,
       runExecutor: runExecutor as any,
       events,
+      materializeSteerInput: async (_sessionId, items) => {
+        expect(items).toEqual([{ type: "skill", name: "review", path: "/review/SKILL.md" }, { type: "text", text: " adjust direction" }]);
+        return "load selected skill then adjust direction";
+      },
     });
     const active = await engine.admitPromptAndMaybeRun("s1", {
       content: "active",
     });
     const queued = await engine.admitPromptAndMaybeRun("s1", {
       id: "queued-input",
-      content: "adjust direction",
+      items: [{ type: "skill", name: "review", path: "/review/SKILL.md" }, { type: "text", text: " adjust direction" }],
     });
     await vi.waitFor(() => expect(runExecutor.execute).toHaveBeenCalledOnce());
 
@@ -511,7 +515,7 @@ describe("SessionRunEngine", () => {
     expect(steer).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "queued-input",
-        content: "adjust direction",
+        content: "load selected skill then adjust direction",
         delivery: "steer",
       }),
     );

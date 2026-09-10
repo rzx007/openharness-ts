@@ -26,15 +26,6 @@ export type SessionMessagePartStatus =
 export type ProjectionSettlementAction = "retry-terminal-projection" | "compensate-child";
 export type ProjectionSettlementStatus = "pending" | "retrying" | "resolved" | "abandoned";
 
-/** A user explicitly selected a skill before submitting a normal prompt. */
-export interface SkillInvocationMetadata {
-  name: string;
-  commandName?: string;
-  displayName?: string;
-  source?: "bundled" | "user" | "project" | "plugin";
-  invocationSource: "slash";
-}
-
 /** Current durable session-event envelope version. Payload versions are added by the event registry. */
 export const SESSION_EVENT_SCHEMA_VERSION = 1;
 
@@ -81,6 +72,7 @@ export interface SessionInputRecord {
   sessionId: string;
   seq: number;
   delivery: InputDelivery;
+  items: SessionUserInputItem[];
   content: string;
   attachments: SessionInputAttachmentRecord[];
   promotedMessageId?: string;
@@ -406,7 +398,7 @@ export interface AdmitPromptInput {
   id?: string;
   sessionId: string;
   delivery?: InputDelivery;
-  content: string;
+  items: SessionUserInputItem[];
   attachments?: AdmitPromptAttachmentInput[];
   metadata?: Record<string, unknown>;
 }
@@ -621,3 +613,4 @@ import type {
   AttachmentIntent,
   SessionInputAttachmentRecord,
 } from "./attachment.js";
+import type { SessionUserInputItem } from "./session-input-items.js";

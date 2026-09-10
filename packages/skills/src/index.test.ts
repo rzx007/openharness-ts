@@ -97,6 +97,26 @@ describe("SkillRegistry", () => {
     expect(reg.resolve("dt")).toBe(skill);
     expect(reg.resolve("missing")).toBeUndefined();
   });
+
+  it("resolves only the current winner by its normalized path", () => {
+    const reg = new SkillRegistry();
+    reg.register(makeSkill({
+      name: "review",
+      source: "user",
+      path: "/user/review/SKILL.md",
+      content: "user review",
+    }));
+    const projectReview = makeSkill({
+      name: "review",
+      source: "project",
+      path: "/repo/.agents/skills/review/SKILL.md",
+      content: "project review",
+    });
+    reg.register(projectReview);
+
+    expect(reg.resolvePath("/user/review/SKILL.md")).toBeUndefined();
+    expect(reg.resolvePath("/repo/.agents/skills/review/SKILL.md")).toBe(projectReview);
+  });
 });
 
 describe("createSkillRegistrySnapshot", () => {

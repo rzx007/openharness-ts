@@ -82,6 +82,24 @@ describe("DurableEventRegistry", () => {
     }));
   });
 
+  it("writes structured input admissions as v2 and rejects v1 replays", () => {
+    const payload = { input: {} };
+    expect(defaultDurableEventRegistry.prepareWrite(
+      "session.input.admitted",
+      payload,
+      "s1",
+    )).toMatchObject({ schemaVersion: 2, payload });
+    expect(() => defaultDurableEventRegistry.prepareRead(
+      "session.input.admitted",
+      1,
+      payload,
+      "s1",
+    )).toThrowError(expect.objectContaining<Partial<DurableEventRegistryError>>({
+      code: "unsupported_version",
+      schemaVersion: 1,
+    }));
+  });
+
   it("rejects unregistered event names at both read and write boundaries", () => {
     expect(() => defaultDurableEventRegistry.prepareRead(
       "provider.rate_limited",

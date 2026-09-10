@@ -833,7 +833,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
       }
       const response = await client.admitPrompt(session.id, {
         id: createPromptRequestId(),
-        content: config.initial_prompt!,
+        items: [{ type: "text", text: config.initial_prompt! }],
       });
       setLocalBusy(false);
       setSubmittedRun(response.run ? { sessionId: session.id, runId: response.run.id } : null);
@@ -983,19 +983,18 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
           if (catalogEntry?.kind === "template") {
             if (!sessionId) return;
             setLocalBusy(true);
-            const commandName = slash.name.replace(/^\//, "");
             const response = await client.admitPrompt(sessionId, {
               id: createPromptRequestId(),
-              content: slash.args,
-              metadata: {
-                skillInvocation: {
-                  name: commandName,
-                  commandName,
+              items: [
+                {
+                  type: "skill",
+                  name: catalogEntry.skillName,
+                  path: catalogEntry.path,
                   ...(catalogEntry.displayName ? { displayName: catalogEntry.displayName } : {}),
-                  source: catalogEntry.source,
-                  invocationSource: "slash",
+                  ...(catalogEntry.source && catalogEntry.source !== "builtin" ? { source: catalogEntry.source } : {}),
                 },
-              },
+                ...(slash.args ? [{ type: "text" as const, text: ` ${slash.args}` }] : []),
+              ],
             });
             setLocalBusy(false);
             setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);
@@ -1013,7 +1012,7 @@ export function useServerSync(config: FrontendConfig, onError?: (message: string
         setLocalBusy(true);
             const response = await client.admitPrompt(sessionId, {
               id: createPromptRequestId(),
-              content: line,
+              items: [{ type: "text", text: line }],
             });
         setLocalBusy(false);
         setSubmittedRun(response.run ? { sessionId, runId: response.run.id } : null);

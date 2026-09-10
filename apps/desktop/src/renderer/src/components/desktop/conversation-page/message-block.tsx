@@ -1,5 +1,6 @@
 import {
   Check,
+  Box,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -22,12 +23,16 @@ import type {
   DesktopAttachmentSessionPart,
   DesktopSessionMessage,
   DesktopSessionPart,
+  SessionUserInputItem,
 } from "@shared/session-types"
 import { MessageAttachment } from "./message-attachment"
+import { RichPromptInput } from "./rich-prompt-input"
 import {
-  ModelSwitchDivider,
-  readModelSwitchPresentation,
-} from "./message/model-switch-divider"
+  composerDocument,
+  selectComposerDocumentText,
+  type ComposerDocument,
+} from "@renderer/stores/desktop-session/composer-document"
+import { ModelSwitchDivider, readModelSwitchPresentation } from "./message/model-switch-divider"
 
 const collapsibleUserMessageChars = 900
 const collapsibleUserMessageLines = 14
@@ -35,6 +40,7 @@ const collapsibleUserMessageLines = 14
 export function MessageBlock({
   message,
   parts,
+  inputItems,
   streaming,
   userActions,
   onOpenFile,
@@ -44,10 +50,11 @@ export function MessageBlock({
 }: {
   message: DesktopSessionMessage
   parts: DesktopSessionPart[]
+  inputItems?: SessionUserInputItem[]
   streaming: boolean
   userActions?: {
     canEdit: boolean
-    onEdit: (content: string) => void
+    onEdit: (document: ComposerDocument) => void
   }
   onOpenFile: (path: string, line?: number) => void
   canOpenReview: boolean
@@ -56,14 +63,22 @@ export function MessageBlock({
 }): React.JSX.Element {
   if (message.role === "user") {
     const content = messageTextContent(parts)
-    const skillInvocation = readSkillInvocation(parts)
+    const items = readUserItems(parts)
     const attachmentParts = parts
       .filter((part): part is DesktopAttachmentSessionPart => part.type === "attachment")
       .sort((left, right) => left.seq - right.seq)
     return (
       <UserMessageBlock
         content={content}
-        skillInvocation={skillInvocation}
+        items={items}
+        document={composerDocument(
+          inputItems ??
+            parts.flatMap((part) =>
+              part.type === "text" && Array.isArray(part.metadata.items)
+                ? (part.metadata.items as SessionUserInputItem[])
+                : []
+            )
+        )}
         attachmentParts={attachmentParts}
         timestamp={message.updatedAt}
         userActions={userActions}
@@ -92,19 +107,21 @@ export function MessageBlock({
 
 function UserMessageBlock({
   content,
-  skillInvocation,
+  items,
+  document,
   attachmentParts,
   timestamp,
   userActions,
 }: {
   content: string
-  skillInvocation: DisplaySkillInvocation | null
+  items: UserDisplayItem[]
+  document: ComposerDocument
   attachmentParts: DesktopAttachmentSessionPart[]
   timestamp: number
-  userActions?: { canEdit: boolean; onEdit: (content: string) => void }
+  userActions?: { canEdit: boolean; onEdit: (document: ComposerDocument) => void }
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(content)
+  const [draft, setDraft] = useState(document)
   const canEdit = Boolean(userActions?.canEdit && (content.trim() || attachmentParts.length > 0))
   const containsImage = attachmentParts.some((part) => part.mediaType.startsWith("image/"))
   const containsFile = attachmentParts.some((part) => !part.mediaType.startsWith("image/"))
@@ -112,13 +129,14 @@ function UserMessageBlock({
 
   useEffect(() => {
     if (editing) return
-    const timer = window.setTimeout(() => setDraft(content), 0)
+    const timer = window.setTimeout(() => setDraft(document), 0)
     return () => window.clearTimeout(timer)
-  }, [content, editing])
+  }, [document, editing])
 
   if (editing && userActions) {
-    const normalized = draft.trim()
-    const canSubmitEdit = Boolean(normalized || attachmentParts.length > 0)
+    const canSubmitEdit = Boolean(
+      selectComposerDocumentText(draft).trim() || attachmentParts.length > 0
+    )
     return (
       <Message align="end" className="group/msg">
         <MessageContent className="items-end">
@@ -128,7 +146,7 @@ function UserMessageBlock({
               event.preventDefault()
               if (!canSubmitEdit) return
               setEditing(false)
-              userActions.onEdit(normalized)
+              userActions.onEdit(draft)
             }}
           >
             <label className="sr-only" htmlFor="latest-message-editor">
@@ -146,20 +164,17 @@ function UserMessageBlock({
                 ))}
               </AttachmentGroup>
             ) : null}
-            <textarea
+            <RichPromptInput
               id="latest-message-editor"
-              autoFocus
               value={draft}
-              rows={Math.max(2, Math.min(8, draft.split("\n").length))}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  if (!canSubmitEdit) return
-                  setEditing(false)
-                  userActions.onEdit(normalized)
-                }
-                if (event.key === "Escape") setEditing(false)
+              rows={Math.max(2, Math.min(8, selectComposerDocumentText(draft).split("\n").length))}
+              placeholder="编辑最新消息"
+              disabled={false}
+              onChange={setDraft}
+              onSubmit={() => {
+                if (!canSubmitEdit) return
+                setEditing(false)
+                userActions.onEdit(draft)
               }}
               className="text-ui-small min-h-20 w-full resize-y rounded-xl bg-user-message/70 px-4 py-3 leading-6 whitespace-pre-wrap text-foreground outline-none"
             />
@@ -197,8 +212,9 @@ function UserMessageBlock({
             ))}
           </AttachmentGroup>
         ) : null}
-        {skillInvocation ? <SkillInvocationCapsule invocation={skillInvocation} /> : null}
-        {content.trim() ? <UserMessageBubble content={content} /> : null}
+        {content.trim() || items.length > 0 ? (
+          <UserMessageBubble content={content} items={items} />
+        ) : null}
         <MessageToolbar align="end" timestamp={timestamp}>
           {content.trim() ? (
             <MessageActionButton
@@ -209,7 +225,13 @@ function UserMessageBlock({
             </MessageActionButton>
           ) : null}
           {canEdit ? (
-            <MessageActionButton label="重新编辑" onClick={() => setEditing(true)}>
+            <MessageActionButton
+              label="重新编辑"
+              onClick={() => {
+                setDraft(document)
+                setEditing(true)
+              }}
+            >
               <PencilLine />
             </MessageActionButton>
           ) : null}
@@ -219,63 +241,35 @@ function UserMessageBlock({
   )
 }
 
-interface DisplaySkillInvocation {
-  name: string
-  displayName?: string
-  source?: string
+export type UserDisplayItem =
+  { kind: "text"; text: string } | { kind: "skill"; name: string; displayName: string }
+
+export function renderUserItems(items: readonly SessionUserInputItem[]): UserDisplayItem[] {
+  return items.flatMap((item): UserDisplayItem[] => {
+    if (item.type === "text") return item.text ? [{ kind: "text", text: item.text }] : []
+    const name = item.name.trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) return []
+    return [{ kind: "skill", name, displayName: item.displayName?.trim() || name }]
+  })
 }
 
-function SkillInvocationCapsule({
-  invocation,
-}: {
-  invocation: DisplaySkillInvocation
-}): React.JSX.Element {
-  return (
-    <div
-      aria-label="使用的技能"
-      className="text-ui-caption inline-flex max-w-[78%] items-center gap-1.5 rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 leading-none text-ui-muted"
-    >
-      <span>Skill</span>
-      <span className="font-medium text-foreground">
-        {invocation.displayName ?? invocation.name}
-      </span>
-      {invocation.source ? <span>· {skillSourceLabel(invocation.source)}</span> : null}
-    </div>
-  )
-}
-
-function readSkillInvocation(parts: DesktopSessionPart[]): DisplaySkillInvocation | null {
+function readUserItems(parts: DesktopSessionPart[]): UserDisplayItem[] {
   for (const part of parts) {
     if (part.type !== "text") continue
-    const value = part.metadata.skillInvocation
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue
-    const record = value as Record<string, unknown>
-    if (record.invocationSource !== "slash" || typeof record.name !== "string") continue
-    const name = record.name.trim()
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name)) continue
-    const source = record.source
-    return {
-      name,
-      ...(typeof record.displayName === "string" && record.displayName.trim()
-        ? { displayName: record.displayName.trim() }
-        : {}),
-      ...(source === "bundled" || source === "user" || source === "project" || source === "plugin"
-        ? { source }
-        : {}),
-    }
+    const items = part.metadata.items
+    if (!Array.isArray(items)) continue
+    return renderUserItems(items as SessionUserInputItem[])
   }
-  return null
+  return []
 }
 
-function skillSourceLabel(source: string): string {
-  if (source === "project") return "项目"
-  if (source === "plugin") return "插件"
-  if (source === "bundled" || source === "builtin") return "内置"
-  if (source === "user") return "个人"
-  return source
-}
-
-function UserMessageBubble({ content }: { content: string }): React.JSX.Element {
+function UserMessageBubble({
+  content,
+  items,
+}: {
+  content: string
+  items: UserDisplayItem[]
+}): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const longEnough =
     content.length > collapsibleUserMessageChars ||
@@ -288,7 +282,21 @@ function UserMessageBubble({ content }: { content: string }): React.JSX.Element 
         <div
           className={cn("px-4 py-3 whitespace-pre-wrap", collapsed && "max-h-72 overflow-hidden")}
         >
-          {content}
+          {items.length > 0
+            ? items.map((item, index) =>
+                item.kind === "text" ? (
+                  <span key={index}>{item.text}</span>
+                ) : (
+                  <span
+                    key={index}
+                    className="inline-flex items-baseline gap-1 align-baseline font-medium text-primary select-none"
+                  >
+                    <Box className="size-3.5 shrink-0" />
+                    <span>{item.displayName}</span>
+                  </span>
+                )
+              )
+            : content}
         </div>
         {collapsed ? (
           <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-16 bg-linear-to-b from-input/0 to-input/95" />

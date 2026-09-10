@@ -6,6 +6,8 @@ import type {
   DesktopDaemonStatus,
   DesktopProjectDetails,
   DesktopCommandCatalogEntry,
+  CompactDesktopSessionInput,
+  DesktopCompactSessionResult,
   DesktopSessionRecord,
   DesktopSessionView,
   CloseDesktopAuxSessionInput,
@@ -145,6 +147,7 @@ export const IpcChannels = {
   sessionChooseProject: "session:choose-project",
   sessionInspectProject: "session:inspect-project",
   sessionListCommands: "session:list-commands",
+  sessionCompact: "session:compact",
   projectRename: "project:rename",
   projectSetPinned: "project:set-pinned",
   projectSetDefaultShell: "project:set-default-shell",
@@ -357,6 +360,10 @@ export interface IpcInvokeMap {
   [IpcChannels.sessionListCommands]: {
     args: [cwd: string]
     result: DesktopCommandCatalogEntry[]
+  }
+  [IpcChannels.sessionCompact]: {
+    args: [input: CompactDesktopSessionInput]
+    result: DesktopCompactSessionResult
   }
   [IpcChannels.projectRename]: {
     args: [input: RenameDesktopProjectInput]

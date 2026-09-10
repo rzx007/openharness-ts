@@ -6,7 +6,7 @@ import type {
   DesktopSessionRecord,
   DesktopSessionView,
   DesktopWorkspaceMode,
-  SkillInvocationMetadata,
+  SessionUserInputItem,
 } from "@shared/session-types"
 import type { DesktopAttachmentSupport } from "@shared/attachment-types"
 import type {
@@ -18,15 +18,14 @@ import type {
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import type { StoreApi } from "zustand"
 import type { ComposerDraftState } from "./composer-draft-state"
+import type { ComposerDocument } from "./composer-document"
 import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error"
 
 export interface SubmitPromptOptions {
-  skillInvocation?: SkillInvocationMetadata
+  document?: ComposerDocument
   attachments?: readonly DesktopAttachmentDraft[]
-  /** Exact composer text before slash-command parsing; used only to clear a migrated first draft. */
-  sourceDraftText?: string
 }
 
 export interface PendingPromptAttachmentSnapshot extends DesktopPromptAttachmentInput {
@@ -38,7 +37,7 @@ export interface PendingPromptSubmission {
   id: string
   sessionId: string
   content: string
-  skillInvocation?: SkillInvocationMetadata
+  items: SessionUserInputItem[]
   attachments: PendingPromptAttachmentSnapshot[]
   createdAt: number
   phase: "submitting" | "accepted" | "failed"
@@ -51,6 +50,7 @@ export interface PendingPromptEdit {
   sessionId: string
   sourceMessageId: string
   content: string
+  items: SessionUserInputItem[]
   attachments: DesktopPromptAttachmentInput[]
 }
 
@@ -150,7 +150,11 @@ export interface SessionActions {
 
 export interface PromptActions {
   sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
-  editLatestMessage: (sourceMessageId: string, content: string) => Promise<void>
+  editLatestMessage: (
+    sourceMessageId: string,
+    content: string,
+    document?: ComposerDocument
+  ) => Promise<void>
   interrupt: () => Promise<void>
   replyPermission: (
     permissionId: string,
@@ -170,6 +174,7 @@ export interface QueuedPromptActions {
 
 export interface AttachmentActions {
   setComposerDraftText: (scope: string, text: string) => void
+  setComposerDraftDocument: (scope: string, document: ComposerDocument) => void
   pickAttachmentFiles: (scope: string) => Promise<void>
   pickAttachmentImages: (scope: string) => Promise<void>
   addDroppedAttachments: (scope: string, files: readonly File[]) => Promise<void>
