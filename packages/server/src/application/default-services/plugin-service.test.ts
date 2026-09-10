@@ -111,6 +111,22 @@ async function writeNativeArchive(name = "plugin.zip", overrides: Record<string,
   });
 }
 
+function permissionManifest(version: string, includeNetwork = false): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    id: "dev.openharness.archive",
+    name: "archive",
+    version,
+    permissions: {
+      process: ["spawn"],
+      ...(includeNetwork ? { network: ["api.example.com"] } : {}),
+    },
+    components: {
+      tools: [{ entry: "./tools/not-executed.js", permissions: ["process.spawn"] }],
+    },
+  });
+}
+
 function archiveFailureCode(error: unknown): string | undefined {
   return error instanceof PluginArchiveFailure ? error.body.code : undefined;
 }
@@ -185,6 +201,7 @@ describe("default plugin service archive imports", () => {
     await expect((service() as any).previewArchive({ cwd: "C:/workspace", archivePath: archive })).resolves.toMatchObject({
       identity: { id: "dev.openharness.archive", name: "archive", version: "1.0.0" },
       requestedPermissions: [],
+      approvalRequired: false,
       inventory: { tools: 1 },
       diagnostics: [],
     });
@@ -220,12 +237,124 @@ describe("default plugin service archive imports", () => {
     const plugins = service() as any;
     const preview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
     expect(preview.requestedPermissions).toEqual(["process:spawn", "tool:process.spawn"]);
+    expect(preview.approvalRequired).toBe(true);
 
     for (const approvedPermissions of [[], ["process:spawn", "tool:process.spawn", "network:example"]]) {
       await expect(plugins.installArchive({ cwd: "C:/workspace", archivePath: archive, expectedArchiveDigest: preview.archiveDigest, approvedPermissions }))
         .rejects.toSatisfy((error: unknown) => archiveFailureCode(error) === "plugin_archive_permissions_not_approved");
     }
     expect(Object.keys((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)).toEqual([]);
+  });
+
+  it("reuses previous approval when reinstalling with the same permissions", async () => {
+    const archive = await writeNativeArchive("same-permissions.zip", {
+      ".openharness-plugin/plugin.json": permissionManifest("1.0.0"),
+    });
+    const plugins = service() as any;
+    const firstPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    expect(firstPreview.approvalRequired).toBe(true);
+    await plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: firstPreview.archiveDigest,
+      approvedPermissions: firstPreview.requestedPermissions,
+    });
+
+    const secondPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    expect(secondPreview.approvalRequired).toBe(false);
+    await expect(plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: secondPreview.archiveDigest,
+      approvedPermissions: [],
+    })).resolves.toMatchObject({ message: "Installed plugin 'dev.openharness.archive'." });
+  });
+
+  it("reuses previous approval when reinstalling with fewer permissions", async () => {
+    const archive = await writeNativeArchive("fewer-permissions.zip", {
+      ".openharness-plugin/plugin.json": permissionManifest("1.0.0", true),
+    });
+    const plugins = service() as any;
+    const firstPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    await plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: firstPreview.archiveDigest,
+      approvedPermissions: firstPreview.requestedPermissions,
+    });
+
+    await writeNativeArchive("fewer-permissions.zip", {
+      ".openharness-plugin/plugin.json": permissionManifest("1.1.0"),
+    });
+    const secondPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    expect(secondPreview.approvalRequired).toBe(false);
+    await plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: secondPreview.archiveDigest,
+      approvedPermissions: [],
+    });
+
+    const record = Object.values((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)[0]!;
+    expect(record.currentVersion).toBe("1.1.0");
+    expect(record.approvedPermissions).toEqual(["process:spawn", "tool:process.spawn"]);
+  });
+
+  it("requires approval when a reinstall adds a permission", async () => {
+    const archive = await writeNativeArchive("added-permission.zip", {
+      ".openharness-plugin/plugin.json": permissionManifest("1.0.0"),
+    });
+    const plugins = service() as any;
+    const firstPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    await plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: firstPreview.archiveDigest,
+      approvedPermissions: firstPreview.requestedPermissions,
+    });
+
+    await writeNativeArchive("added-permission.zip", {
+      ".openharness-plugin/plugin.json": permissionManifest("1.1.0", true),
+    });
+    const secondPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    expect(secondPreview.approvalRequired).toBe(true);
+    await expect(plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: secondPreview.archiveDigest,
+      approvedPermissions: [],
+    })).rejects.toSatisfy(
+      (error: unknown) => archiveFailureCode(error) === "plugin_archive_permissions_not_approved",
+    );
+    expect(Object.values((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)[0]?.currentVersion).toBe("1.0.0");
+  });
+
+  it("keeps the previous record when archive contents drift before reinstall", async () => {
+    const archive = await writeNativeArchive("failed-reinstall.zip");
+    const plugins = service() as any;
+    const firstPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    await plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: firstPreview.archiveDigest,
+      approvedPermissions: [],
+    });
+    const previous = Object.values((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)[0]!;
+
+    const nextPreview = await plugins.previewArchive({ cwd: "C:/workspace", archivePath: archive });
+    await writeNativeArchive("failed-reinstall.zip", {
+      "tools/not-executed.js": "export default 'digest drift';",
+    });
+    await expect(plugins.installArchive({
+      cwd: "C:/workspace",
+      archivePath: archive,
+      expectedArchiveDigest: nextPreview.archiveDigest,
+      approvedPermissions: [],
+    })).rejects.toSatisfy(
+      (error: unknown) => archiveFailureCode(error) === "plugin_archive_changed",
+    );
+    const current = Object.values((await readInstalledPluginStore(getInstalledPluginStorePath())).plugins)[0]!;
+    expect(current).toEqual(previous);
   });
 
   it("rejects a digest drift before it mutates the store", async () => {

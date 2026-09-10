@@ -243,6 +243,7 @@ export interface PluginArchivePreview {
   archiveDigest: string;
   identity: { id: string; name: string; version: string; displayName?: string };
   requestedPermissions: string[];
+  approvalRequired: boolean;
   inventory: Record<string, number>;
   diagnostics: PluginInfo["diagnostics"];
 }

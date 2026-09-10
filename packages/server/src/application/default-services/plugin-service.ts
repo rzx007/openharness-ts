@@ -8,6 +8,8 @@ import {
   updateInstalledPluginStore,
   validateNativePlugin,
   verifyInstalledNativePlugin,
+  type InstalledPluginRecord,
+  type InstalledPluginStoreV1,
 } from "@openharness/plugins";
 import { resolveLocalPluginZip, type ResolvedLocalPluginZip } from "@openharness/plugin-sources";
 import type { PluginArchiveError, PluginArchivePreview, PluginInfo, PluginService } from "../settings-api.js";
@@ -36,6 +38,27 @@ function archiveDiagnostic(code: string, message: string): NonNullable<PluginArc
   return { severity: "error", phase: "install", code, message };
 }
 
+function findUserPluginRecord(
+  store: InstalledPluginStoreV1,
+  pluginId: string,
+): InstalledPluginRecord | undefined {
+  return Object.values(store.plugins).find(
+    (record) => record.scope === "user" && record.id === pluginId,
+  );
+}
+
+function permissionsCovered(requested: string[], approved: string[]): boolean {
+  const approvedSet = new Set(approved);
+  return requested.every((permission) => approvedSet.has(permission));
+}
+
+function permissionSetsEqual(left: string[], right: string[]): boolean {
+  const normalizedLeft = [...new Set(left)].sort();
+  const normalizedRight = [...new Set(right)].sort();
+  return normalizedLeft.length === normalizedRight.length
+    && normalizedLeft.every((permission, index) => permission === normalizedRight[index]);
+}
+
 async function inspectArchive(resolved: ResolvedLocalPluginZip): Promise<PluginArchivePreview> {
   const validation = await validateNativePlugin(resolved.candidateRoot);
   if (validation.status !== "valid" || !validation.plugin) {
@@ -50,6 +73,9 @@ async function inspectArchive(resolved: ResolvedLocalPluginZip): Promise<PluginA
   for (const [kind, values] of Object.entries(validation.plugin.manifest.components)) {
     inventory[kind] = values.length;
   }
+  const requestedPermissions = requestedPluginPermissions(validation.plugin.manifest);
+  const store = await readInstalledPluginStore(getInstalledPluginStorePath());
+  const previous = findUserPluginRecord(store, validation.plugin.manifest.id);
   return {
     archiveDigest: resolved.archiveDigest,
     identity: {
@@ -58,7 +84,9 @@ async function inspectArchive(resolved: ResolvedLocalPluginZip): Promise<PluginA
       version: validation.plugin.manifest.version,
       ...(validation.plugin.manifest.displayName ? { displayName: validation.plugin.manifest.displayName } : {}),
     },
-    requestedPermissions: requestedPluginPermissions(validation.plugin.manifest),
+    requestedPermissions,
+    approvalRequired: requestedPermissions.length > 0
+      && !permissionsCovered(requestedPermissions, previous?.approvedPermissions ?? []),
     inventory,
     diagnostics,
   };
@@ -180,18 +208,26 @@ export function createDefaultPluginService(_ref: DaemonSettingsRef): PluginServi
         if (preview.archiveDigest !== expectedArchiveDigest) {
           throw archiveFailure("plugin_archive_changed", "The plugin archive changed after preview. Select it again.");
         }
-        assertExactPermissionSet(preview.requestedPermissions, approvedPermissions);
         const store = await readInstalledPluginStore(getInstalledPluginStorePath());
         if (Object.values(store.plugins).some((record) => record.scope === "managed" && record.id === preview.identity.id)) {
           throw archiveFailure("plugin_archive_managed_conflict", `Managed plugin cannot be replaced: ${preview.identity.id}`);
         }
+        const previous = findUserPluginRecord(store, preview.identity.id);
+        const submittedPermissions = [...new Set(approvedPermissions)].sort();
+        const explicitlyApproved = permissionSetsEqual(submittedPermissions, preview.requestedPermissions);
+        const reusedApproval = submittedPermissions.length === 0
+          && permissionsCovered(preview.requestedPermissions, previous?.approvedPermissions ?? []);
+        if (!explicitlyApproved && !reusedApproval) {
+          assertExactPermissionSet(preview.requestedPermissions, submittedPermissions);
+        }
+        const effectiveApprovals = [...preview.requestedPermissions];
         let result;
         try {
           result = await installLocalNativePlugin({
             cwd,
             sourcePath: resolved.candidateRoot,
             scope: "user",
-            approvedPermissions,
+            approvedPermissions: effectiveApprovals,
           });
         } catch (error) {
           throw archiveFailure("plugin_archive_install_failed", "The plugin archive could not be installed.", [
