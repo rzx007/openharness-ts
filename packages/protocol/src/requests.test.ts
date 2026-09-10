@@ -55,6 +55,18 @@ describe("HTTP request parsers", () => {
     );
   });
 
+  it("accepts plain content as a text item", () => {
+    expect(parseAdmitPromptRequest({ content: "hello", delivery: "queue" })).toEqual({
+      items: [{ type: "text", text: "hello" }],
+      delivery: "queue",
+      attachments: [],
+    });
+    expect(parseAdmitPromptRequest({ content: "", attachments: [{ assetId: "att_1" }] })).toEqual({
+      items: [],
+      attachments: [{ assetId: "att_1" }],
+    });
+  });
+
   it("accepts only the two supported prompt delivery modes", () => {
     expect(parseAdmitPromptRequest({ items: [{ type: "text", text: "hello" }], delivery: "steer" })).toEqual({
       items: [{ type: "text", text: "hello" }],

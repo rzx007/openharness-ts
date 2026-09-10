@@ -576,8 +576,8 @@ export class SessionRunEngine {
     sessionId: string,
     items: readonly SessionUserInputItem[],
   ): Promise<string> {
+    if (!items.some((item) => item.type === "skill")) return sessionUserInputText(items);
     if (!this.context.materializeSteerInput) {
-      if (!items.some((item) => item.type === "skill")) return sessionUserInputText(items);
       throw new Error("session_input_skill_catalog_unavailable");
     }
     return await this.context.materializeSteerInput(sessionId, items);

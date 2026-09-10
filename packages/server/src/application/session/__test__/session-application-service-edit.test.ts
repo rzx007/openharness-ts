@@ -72,7 +72,7 @@ describe("SessionApplicationService editLatestPrompt", () => {
       context.runEngine.replaceLatestPrompt,
     ).toHaveBeenCalledWith("session-1", "message-1", {
       id: "edit-1",
-      content: "replacement",
+      items: [{ type: "text", text: "replacement" }],
       attachments: [{ assetId: "asset-new", intent: "ocr" }],
       traceId: "trace-edit",
       metadata: {

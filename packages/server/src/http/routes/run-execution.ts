@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import {
   parseAdmitPromptRequest,
   parsePromptAttachments,
-  parseSessionInputItems,
+  parsePromptItems,
 } from "@openharness/protocol";
 
 import {
@@ -66,7 +66,7 @@ export function createRunExecutionRoutes(
       try {
         body = await readJson(c);
         attachments = parsePromptAttachments(body.attachments);
-        items = parseSessionInputItems(body.items);
+        items = parsePromptItems(body);
       } catch (error) {
         return protocolValidationErrorResponse(error);
       }

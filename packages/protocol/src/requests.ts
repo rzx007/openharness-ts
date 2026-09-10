@@ -209,12 +209,22 @@ export function parseAdmitPromptRequest(value: unknown): AdmitPromptRequest {
   const metadata = optionalRecord(body, "metadata");
   const attachments = parsePromptAttachments(body.attachments);
   return {
-    items: parseSessionInputItems(body.items),
+    items: parsePromptItems(body),
     attachments,
     ...(id !== undefined ? { id } : {}),
     ...(delivery !== undefined ? { delivery } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
   };
+}
+
+export function parsePromptItems(value: unknown): SessionUserInputItem[] {
+  const body = record(value);
+  if (body.items !== undefined) return parseSessionInputItems(body.items);
+  const content = optionalString(body, "content");
+  if (content === undefined) {
+    throw new ProtocolValidationError("items must be an array", "items");
+  }
+  return parseSessionInputItems([{ type: "text", text: content }]);
 }
 
 export function parseSessionInputItems(value: unknown): SessionUserInputItem[] {

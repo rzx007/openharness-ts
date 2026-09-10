@@ -643,7 +643,7 @@ describe("run execution routes", () => {
     expect(response.status).toBe(202);
     expect(editLatestPrompt).toHaveBeenCalledWith("s1", {
       id: "edit-1",
-      content: "replacement",
+      items: [{ type: "text", text: "replacement" }],
       sourceMessageId: "message-1",
       attachments: [
         { assetId: "att-b", intent: "auto" },
@@ -744,7 +744,7 @@ describe("run execution routes", () => {
     expect(admitPromptAndMaybeRun).toHaveBeenCalledWith("s1", {
       id: "i1",
       delivery: "steer",
-      content: "hello",
+      items: [{ type: "text", text: "hello" }],
       attachments: [
         { assetId: "att-b", intent: "auto" },
         { assetId: "att-a", intent: "ocr", displayName: "receipt.png" },

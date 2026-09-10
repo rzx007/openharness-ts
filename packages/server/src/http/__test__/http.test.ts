@@ -3688,7 +3688,7 @@ describe("OpenHarnessHttpServer", () => {
         "session.input.admitted",
       ]);
       expect(nextEvents.events.map((event) => event.schemaVersion)).toEqual([
-        1,
+        2,
       ]);
 
       const snapshot = (await (
