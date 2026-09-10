@@ -4,7 +4,7 @@
  * 幂等：同一 `seq` 只应用一次。多端用同一套事件流应收敛到相同状态。
  */
 
-import { SESSION_EVENT_SCHEMA_VERSION } from "@openharness/protocol";
+import { sessionEventSchemaVersion } from "@openharness/protocol";
 
 import type {
   OpenHarnessClientState,
@@ -25,8 +25,9 @@ export class UnsupportedSessionEventSchemaVersionError extends Error {
   readonly event: Pick<SessionEventRecord, "seq" | "type" | "schemaVersion">;
 
   constructor(event: SessionEventRecord) {
+    const expected = sessionEventSchemaVersion(event.type);
     super(
-      `Unsupported session event schema version ${event.schemaVersion} for ${event.type} at sequence ${event.seq}; expected ${SESSION_EVENT_SCHEMA_VERSION}`,
+      `Unsupported session event schema version ${event.schemaVersion} for ${event.type} at sequence ${event.seq}; expected ${expected}`,
     );
     this.name = "UnsupportedSessionEventSchemaVersionError";
     this.event = {
@@ -110,7 +111,7 @@ export function applyEvent(
   state: OpenHarnessClientState,
   event: SessionEventRecord,
 ): OpenHarnessClientState {
-  if (event.schemaVersion !== SESSION_EVENT_SCHEMA_VERSION) {
+  if (event.schemaVersion !== sessionEventSchemaVersion(event.type)) {
     throw new UnsupportedSessionEventSchemaVersionError(event);
   }
   const transient = event.type === "session.message.part.delta";
