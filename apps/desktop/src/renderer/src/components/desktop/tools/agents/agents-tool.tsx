@@ -1,7 +1,7 @@
 import { AlertCircle, ArrowLeft, Bot, CircleCheck } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
-import { ConversationTranscript } from "@renderer/components/desktop/conversation-page/transcript"
+import { ConversationTranscript } from "@renderer/components/desktop/conversation-page/transcript/transcript"
 import { Alert, AlertDescription, AlertTitle } from "@renderer/components/ui/alert"
 import { Badge } from "@renderer/components/ui/badge"
 import { Button } from "@renderer/components/ui/button"

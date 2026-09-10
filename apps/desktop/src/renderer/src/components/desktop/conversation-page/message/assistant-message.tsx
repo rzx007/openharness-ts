@@ -28,7 +28,7 @@ import {
 } from "./message-render-model"
 import { createStreamdownComponents } from "./streamdown-components"
 import { streamdownPlugins } from "./streamdown-plugins"
-import { MessageAttachment } from "../message-attachment"
+import { MessageAttachment } from "./message-attachment"
 import { GeneratedImageGallery, ImageGenerationMessage } from "./image-generation-message"
 
 type ChangedFileStats = {

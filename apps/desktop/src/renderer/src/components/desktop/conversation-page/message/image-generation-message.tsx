@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { cn } from "@renderer/lib/utils"
 import type { DesktopAttachmentSessionPart, DesktopSessionPart } from "@shared/session-types"
 
-import { MessageAttachment } from "../message-attachment"
+import { MessageAttachment } from "./message-attachment"
 
 import {
   formatValue,

@@ -59,8 +59,8 @@ import {
   selectSessions,
 } from "@renderer/stores/desktop-session/selectors"
 import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types"
-import { useSessionActionDialogs } from "../../conversation-page/session-action-dialogs"
-import { SessionMoreMenu } from "../../conversation-page/session-more-menu"
+import { useSessionActionDialogs } from "../../conversation-page/session/session-action-dialogs"
+import { SessionMoreMenu } from "../../conversation-page/session/session-more-menu"
 import { projectMenuItems } from "./project-menu-items"
 
 type SidebarProps = {

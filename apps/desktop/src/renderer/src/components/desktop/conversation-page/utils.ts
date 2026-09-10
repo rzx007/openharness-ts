@@ -1,5 +1,5 @@
 import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
-import { permissionModeOptions } from "./controls"
+import { permissionModeOptions } from "./composer/controls"
 
 export function resolveModelLabel(
   models: DesktopModel[],

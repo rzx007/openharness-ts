@@ -10,7 +10,7 @@ import {
 } from "react-resizable-panels"
 
 import { ConversationPane } from "@renderer/components/desktop/conversation-page"
-import { ScopedOperationError } from "@renderer/components/desktop/conversation-page/scoped-operation-errors"
+import { ScopedOperationError } from "@renderer/components/desktop/conversation-page/session/scoped-operation-errors"
 import { defaultSettingsSection } from "@renderer/components/desktop/settings-page/settings-navigation"
 import { useDesktopShortcuts } from "@renderer/components/desktop/use-desktop-shortcuts"
 import { PanelResizeHandle } from "@renderer/components/ui/panel-resize-handle"
