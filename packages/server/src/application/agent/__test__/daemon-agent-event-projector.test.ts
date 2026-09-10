@@ -4,6 +4,46 @@ import { describe, expect, it, vi } from "vitest";
 import { DaemonAgentEventProjector } from "../daemon-agent-event-projector.js";
 
 describe("DaemonAgentEventProjector", () => {
+  it("accepts promoted structured input by its original items, and rejects changed identity", async () => {
+    const items = [{ type: "skill", name: "review", path: "/review/SKILL.md" }];
+    const input = { id: "input-1", sessionId: "s1", items, content: "$review", delivery: "queue", metadata: {}, attachments: [] };
+    const projector = new DaemonAgentEventProjector({
+      store: {
+        transaction: (work: () => unknown) => work(),
+        getInput: () => input,
+        getRun: () => ({ id: "queued", sessionId: "s1", inputId: "input-1", status: "pending" }),
+      } as any,
+      events: { checkpoint: () => 0, publishSince: () => {}, publish: () => {} },
+      rootAgent: {} as any, transcriptProjection: {} as any, executionProjector: {} as any,
+      liveChildren: {} as any, log: () => {},
+    });
+    const accepted = event("input.accepted", {
+      content: "Load review then handle the task", inputItems: items, delivery: "steer",
+      metadata: { promotion: { kind: "queued_prompt", queuedRunId: "queued", expectedActiveRunId: "active" } },
+    } as any, { sessionId: "s1", inputId: "input-1", runId: "active" });
+    await expect(projector.apply(accepted)).resolves.toBeUndefined();
+    await expect(projector.apply({ ...accepted, sequence: accepted.sequence + 1, data: {
+      ...accepted.data, inputItems: [{ type: "skill", name: "review", path: "/other/SKILL.md" }],
+    } } as any)).rejects.toThrow("identity conflict");
+  });
+
+  it("persists original items from a live child instead of its model instruction", async () => {
+    const items = [{ type: "skill", name: "review", path: "/review/SKILL.md" }];
+    let persisted: unknown;
+    const projector = new DaemonAgentEventProjector({
+      store: {
+        transaction: (work: () => unknown) => work(), getInput: () => undefined,
+        admitPrompt: (input: unknown) => { persisted = input; return input; },
+      } as any,
+      events: { checkpoint: () => 0, publishSince: () => {}, publish: () => {} },
+      rootAgent: {} as any, transcriptProjection: {} as any, executionProjector: {} as any,
+      liveChildren: {} as any, log: () => {},
+    });
+    await projector.apply(event("input.accepted", {
+      content: "Load review then handle the task", inputItems: items, delivery: "queue",
+    } as any, { sessionId: "s1", inputId: "input-child" }));
+    expect(persisted).toMatchObject({ items });
+  });
   it("projects child and run facts without returning execution handles", async () => {
     const sessions = new Map<string, any>([[
       "parent",
@@ -326,6 +366,7 @@ describe("DaemonAgentEventProjector", () => {
 
     await expect(projector.apply(event("input.accepted", {
       content: "用户显式选择了以下技能，请按出现顺序使用 Skill 工具的 { name, path } 加载并遵循：\n1. agent-reach (path: /repo/agent-reach/SKILL.md)\n\n用户输入：\n$agent-reach",
+      inputItems: input.items,
       delivery: "queue",
       metadata: input.metadata,
     }, { sessionId: "s1", inputId: input.id, runId: "run-1" }))).resolves.toBeUndefined();

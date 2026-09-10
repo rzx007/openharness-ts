@@ -73,6 +73,7 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
 
 export interface OpenHarnessAgentSubmitOptions {
   signal?: AbortSignal;
+  inputItems?: readonly unknown[];
   delivery?: "queue" | "steer";
   metadata?: Record<string, unknown>;
   ids?: {
@@ -209,6 +210,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       children: this.childManager,
       identity: this.identity,
       content,
+      inputItems: options.inputItems,
       ids,
       externalSignal: options.signal,
       delivery: options.delivery ?? "queue",

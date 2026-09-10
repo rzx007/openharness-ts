@@ -454,6 +454,7 @@ export class AgentChildManager implements AgentChildDirectory {
     };
     const run = agent.submitMessage(input.content, {
       ids,
+      inputItems: input.inputItems,
       signal: controller.signal,
       delivery: input.delivery ?? "queue",
       metadata: input.metadata,

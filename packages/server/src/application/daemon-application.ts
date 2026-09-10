@@ -671,6 +671,11 @@ export class DaemonApplication implements DurableAgentApplication {
         events: this.eventPublisher,
         assertReady: () => this.assertReady(),
         contextUsageCache,
+        resolveSkillCatalog: async (session) => {
+          const settings = await resolveSessionSettings(session.cwd);
+          if (!settings) throw new Error("session_input_skill_catalog_unavailable");
+          return (await discoverOpenHarnessExtensions(session.cwd, settings)).skillRegistry;
+        },
       });
       /**
        * 通道服务：

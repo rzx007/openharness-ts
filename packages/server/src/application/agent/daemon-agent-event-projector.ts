@@ -6,6 +6,7 @@ import {
 import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
+  parseSessionInputItems,
   type SessionInputRecord,
 } from "@openharness/protocol";
 
@@ -231,6 +232,8 @@ export class DaemonAgentEventProjector {
     const sessionId = event.context.sessionId;
     const inputId = required(event.context.inputId, "inputId", event.type);
     const content = contentToText(event.data.content);
+    const originalItems = event.data.inputItems === undefined
+      ? undefined : parseSessionInputItems(event.data.inputItems);
     const metadata: Record<string, unknown> = {
       ...event.data.metadata,
       ...(event.context.traceId ? { traceId: event.context.traceId } : {}),
@@ -247,10 +250,13 @@ export class DaemonAgentEventProjector {
             id: inputId,
             sessionId,
             delivery: event.data.delivery,
-            items: [{ type: "text", text: content }],
+            items: originalItems ?? [{ type: "text", text: content }],
             metadata,
           });
         } else {
+          const sameInput = originalItems
+            ? jsonEqual(input.items, originalItems)
+            : input.content === content;
           const promotion = isRecord(metadata.promotion) ? metadata.promotion : undefined;
           const queuedRun = typeof promotion?.queuedRunId === "string"
             ? this.context.store.getRun(promotion.queuedRunId)
@@ -270,14 +276,12 @@ export class DaemonAgentEventProjector {
           // instruction immediately before submit.  The durable input retains
           // its readable $name markers, so the projector must not mistake that
           // intentional adapter text for an input-id collision.
-          const structuredSkillExecution =
-            (input.items ?? []).some((item) => item.type === "skill") &&
-            input.content !== content;
+          const structuredSkillExecution = originalItems !== undefined && sameInput;
           const baseMetadata = { ...metadata };
           delete baseMetadata.promotion;
           const queuedPromptPromotion =
             input.sessionId === sessionId &&
-            input.content === content &&
+            sameInput &&
             input.delivery === "queue" &&
             event.data.delivery === "steer" &&
             promotion?.kind === "queued_prompt" &&
@@ -290,6 +294,7 @@ export class DaemonAgentEventProjector {
             !queuedPromptPromotion &&
             (
               input.sessionId !== sessionId ||
+              (originalItems !== undefined && !sameInput) ||
               (!routedAttachmentExecution && !structuredSkillExecution && input.content !== content) ||
               input.delivery !== event.data.delivery ||
               !jsonEqual(withoutTraceId(input.metadata), withoutTraceId(metadata))

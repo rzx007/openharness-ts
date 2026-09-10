@@ -21,6 +21,7 @@ function createService(options: {
   inputs?: Array<Record<string, any>>;
   live?: boolean;
   owningRun?: Record<string, any>;
+  resolveSkillCatalog?: () => Promise<{ resolvePath(path: string): { name: string; path: string } | undefined }>;
 } = {}) {
   const store = {
     transaction: vi.fn((work: () => unknown) => work()),
@@ -88,11 +89,30 @@ function createService(options: {
     liveChildren,
     operationGate,
     events: { checkpoint: () => 7, publishSince: broadcastSince },
+    resolveSkillCatalog: options.resolveSkillCatalog,
   });
   return { service, store, runEngine, agentPool, liveChildren, operationGate, broadcastSince };
 }
 
 describe("SessionApplicationService", () => {
+  it("delivers validated Skill instructions to a live child while preserving original input items", async () => {
+    const items = [{ type: "skill" as const, name: "review", path: "/review/SKILL.md" }];
+    const run = { id: "live-run", sessionId: "s1", inputId: "live-input", status: "running" };
+    const { service, liveChildren, store } = createService({
+      live: true, run, owningRun: run,
+      resolveSkillCatalog: async () => ({ resolvePath: (path) => path === "/review/SKILL.md" ? { name: "review", path } : undefined }),
+    });
+    let deliveredContent = "";
+    liveChildren.send.mockImplementation(async (_sessionId, sent) => {
+      deliveredContent = sent.content;
+      store.getInput.mockReturnValue({ id: "live-input", sessionId: "s1", delivery: "queue", items: sent.inputItems ?? [{ type: "text", text: sent.content }], metadata: {} });
+      return { sessionId: "s1", inputId: "live-input", runId: "live-run" } as any;
+    });
+    const result = await service.admitPrompt("s1", { id: "live-input", items });
+    expect(result.input.items).toEqual(items);
+    expect(deliveredContent).toContain("Skill 工具");
+    expect(deliveredContent).toContain("/review/SKILL.md");
+  });
   it("routes live child prompts back to framework controls without warming a second agent", async () => {
     const input = {
       id: "live-input",

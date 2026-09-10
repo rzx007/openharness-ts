@@ -132,6 +132,8 @@ export interface AgentChildSpawnInput {
 
 export interface AgentChildInput {
   content: string;
+  /** Original host input, carried unchanged for durable projection, never parsed by the runtime. */
+  inputItems?: readonly unknown[];
   id?: string;
   delivery?: "queue" | "steer";
   traceId?: string;
@@ -237,6 +239,7 @@ export type AgentEventInput =
       type: "input.accepted";
       data: {
         content: string | ContentBlock[];
+        inputItems?: readonly unknown[];
         delivery: "queue" | "steer";
         metadata?: Record<string, unknown>;
       };

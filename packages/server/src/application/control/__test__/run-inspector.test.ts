@@ -18,6 +18,20 @@ function createStore() {
 }
 
 describe("inspectDurableRun", () => {
+  it("redacts structured input text, names and paths unless content is requested", () => {
+    const store = createStore();
+    const items = [
+      { type: "text", text: "private task text" },
+      { type: "skill", name: "private-skill", path: "/private/skill/SKILL.md" },
+      { type: "mention", name: "private-resource", path: "app://private-resource" },
+    ];
+    const input = { ...store.getInput(), items };
+    store.getInput.mockReturnValue(input);
+    const hidden = inspectDurableRun(store as any, "r1")!;
+    for (const value of ["private task text", "private-skill", "/private/skill/SKILL.md", "private-resource", "app://private-resource"])
+      expect(JSON.stringify(hidden)).not.toContain(value);
+    expect(inspectDurableRun(store as any, "r1", true)!.input?.items).toEqual(items);
+  });
   it("redacts content by default and reports relationships that need operator attention", () => {
     const result = inspectDurableRun(createStore() as any, "r1")!;
     expect(result.input?.content).toBe("[redacted]");
