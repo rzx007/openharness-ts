@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, type WebPreferences } from "electron"
+import { BrowserWindow, nativeTheme, shell, type WebPreferences } from "electron"
 
 import { IpcEvents } from "../../../shared/ipc-channels"
 import type { AppContext } from "../../core/app-context"
@@ -6,6 +6,7 @@ import { isForceQuit } from "../../core/services/lifecycle"
 import { showPetWindow, syncPetWithMainWindow } from "../pet/window"
 import { clearAttention } from "../tray/attention-badge"
 import { isAllowedWebviewUrl } from "./webview-policy"
+import { mainWindowBackgroundColor } from "./window-background"
 import { mainWindowChromeOptions } from "./window-chrome"
 
 export function createMainWindow(ctx: AppContext): BrowserWindow {
@@ -27,7 +28,7 @@ export function createMainWindow(ctx: AppContext): BrowserWindow {
       title: "OpenHarness",
       autoHideMenuBar: true,
       ...mainWindowChromeOptions(process.platform),
-      backgroundColor: "#f4f7f9",
+      backgroundColor: mainWindowBackgroundColor(nativeTheme.shouldUseDarkColors),
       webPreferences: {
         webviewTag: true,
       },

@@ -5,6 +5,7 @@ import type {
 } from "@shared/session-types"
 import { normalizeDesktopAttachmentSupport } from "@shared/attachment-types"
 
+import { dismissStartupLoading } from "@renderer/dismiss-startup-loading"
 import {
   beginScopedOperation,
   errorMessage,
@@ -20,7 +21,11 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
 
   return {
     async initialize() {
-      if (get().loadStatus === "loading" || get().loadStatus === "ready") return
+      if (get().loadStatus === "loading") return
+      if (get().loadStatus === "ready") {
+        dismissStartupLoading()
+        return
+      }
       const operationId = globalThis.crypto.randomUUID()
       set((state) => ({
         loadStatus: "loading",
@@ -73,6 +78,7 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
           selectedProjectGitCheckedAt: null,
           branches: [],
         })
+        dismissStartupLoading()
         if (selectedProject)
           await get()
             .selectProject(selectedProject)
@@ -95,6 +101,7 @@ export function createBootstrapActions(context: DesktopStoreContext): BootstrapA
           daemonStatus,
           appOperations: failScopedOperation(state.appOperations, operationId, message, Date.now()),
         }))
+        dismissStartupLoading()
       }
     },
 

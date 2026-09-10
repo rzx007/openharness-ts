@@ -18,10 +18,16 @@
         margin: 0;
       }
 
+      body,
       #startup-loading {
+        background: #f4f7f9;
+      }
+
+      #startup-loading {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
         display: grid;
-        width: 100%;
-        height: 100%;
         place-items: center;
         color: #68747d;
         font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
@@ -71,13 +77,32 @@
       }
 
       @media (prefers-color-scheme: dark) {
-        body {
+        body,
+        #startup-loading {
           background: #20242a;
         }
 
         #startup-loading {
           color: #8d969e;
         }
+      }
+
+      html.light body,
+      html.light #startup-loading {
+        background: #f4f7f9;
+      }
+
+      html.light #startup-loading {
+        color: #68747d;
+      }
+
+      html.dark body,
+      html.dark #startup-loading {
+        background: #20242a;
+      }
+
+      html.dark #startup-loading {
+        color: #8d969e;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -87,19 +112,19 @@
         }
       }
     </style>
+    <script type="module" src="./src/startup-theme.ts"></script>
   </head>
 
   <body>
-    <div id="root">
-      <div id="startup-loading" role="status" aria-label="正在启动 OpenHarness">
-        <div class="startup-loading-content" aria-hidden="true">
-          <span class="startup-loading-wordmark">OpenHarness-ts</span>
-          <span class="startup-loading-dots">
-            <span class="startup-loading-dot" data-startup-dot="true"></span>
-            <span class="startup-loading-dot" data-startup-dot="true"></span>
-            <span class="startup-loading-dot" data-startup-dot="true"></span>
-          </span>
-        </div>
+    <div id="root"></div>
+    <div id="startup-loading" role="status" aria-label="正在启动 OpenHarness">
+      <div class="startup-loading-content" aria-hidden="true">
+        <span class="startup-loading-wordmark">OpenHarness-ts</span>
+        <span class="startup-loading-dots">
+          <span class="startup-loading-dot" data-startup-dot="true"></span>
+          <span class="startup-loading-dot" data-startup-dot="true"></span>
+          <span class="startup-loading-dot" data-startup-dot="true"></span>
+        </span>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
