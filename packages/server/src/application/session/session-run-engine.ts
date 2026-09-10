@@ -125,6 +125,7 @@ export class SessionRunEngine {
       {
         id: input.id,
         content,
+        inputItems: input.items,
         delivery: "steer",
         traceId: normalizeTraceId(input.metadata.traceId),
         metadata: {
@@ -515,6 +516,7 @@ export class SessionRunEngine {
       const steered = this.runCoordinator.steer(sessionId, {
         id: admitted.id,
         content: steerContent,
+        inputItems: admitted.items,
         delivery: "steer",
         traceId,
         metadata: admitted.metadata,

@@ -34,6 +34,7 @@ describe("SessionRunExecutor", () => {
     );
 
     expect(submitMessage).toHaveBeenCalledWith("hello", {
+      inputItems: [{ type: "text", text: "hello" }],
       signal: expect.any(AbortSignal),
       delivery: "queue",
       metadata: { requestedBy: "test", traceId: "trace-1" },

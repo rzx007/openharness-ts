@@ -36,6 +36,7 @@ interface FrameworkAgentRunOptions {
     parentRunId?: string;
   };
   content: string | ContentBlock[];
+  inputItems?: readonly unknown[];
   ids: { inputId: string; runId: string; traceId: string };
   externalSignal?: AbortSignal;
   delivery: "queue" | "steer";
@@ -169,6 +170,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
         type: "input.accepted",
         data: {
           content: this.options.content,
+          ...(this.options.inputItems ? { inputItems: this.options.inputItems } : {}),
           delivery: this.options.delivery,
           ...(this.options.metadata ? { metadata: this.options.metadata } : {}),
         },
@@ -235,6 +237,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
             type: "input.accepted",
             data: {
               content: input.content,
+              ...(input.inputItems ? { inputItems: input.inputItems } : {}),
               delivery: "steer",
               ...(input.metadata ? { metadata: input.metadata } : {}),
             },

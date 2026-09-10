@@ -35,6 +35,8 @@ import {
 } from "../support.js";
 import { SessionApplicationError } from "./session-application-error.js";
 import type { ContextUsageCache } from "../context-usage-cache.js";
+import { materializeSessionInput } from "./session-input-materializer.js";
+import type { SessionRunExecutorContext } from "./session-run-executor.js";
 
 export { SessionApplicationError } from "./session-application-error.js";
 
@@ -49,6 +51,7 @@ export interface SessionApplicationServiceContext {
   assertReady?(): void;
   /** Optional: invalidate session context-usage cache on model/runtime changes. */
   contextUsageCache?: Pick<ContextUsageCache, "invalidate">;
+  resolveSkillCatalog?: SessionRunExecutorContext["resolveSkillCatalog"];
 }
 
 export interface UpdateSessionCommand {
@@ -396,11 +399,19 @@ export class SessionApplicationService {
         return promptResult(this.context.store, existing);
       }
     }
+    const items = inputItems(input);
+    let liveContent = sessionUserInputText(items);
+    if (!hasAttachments && this.context.liveChildren.has(sessionId) && items.some((item) => item.type === "skill")) {
+      const session = this.context.store.getSession(sessionId);
+      if (!session || !this.context.resolveSkillCatalog) throw new Error("session_input_skill_catalog_unavailable");
+      liveContent = materializeSessionInput(items, await this.context.resolveSkillCatalog(session)).instruction;
+    }
     const live = hasAttachments
       ? undefined
       : await this.context.liveChildren.send(sessionId, {
           id: input.id,
-          content: sessionUserInputText(inputItems(input)),
+          content: liveContent,
+          inputItems: items,
           delivery,
           traceId: input.traceId,
           metadata: input.metadata,

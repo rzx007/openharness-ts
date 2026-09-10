@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, expect, it } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { RichPromptInput } from "./rich-prompt-input"
 import { MessageBlock } from "./message-block"
 import {
@@ -10,13 +10,18 @@ import {
   $isRangeSelection,
   $isTextNode,
   getNearestEditorFromDOMNode,
+  COPY_COMMAND,
+  PASTE_COMMAND,
 } from "lexical"
 import { composerDocumentFromLexical } from "./rich-prompt-input"
 import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 
 let container: HTMLDivElement
 let root: Root
+const rangeBounds = Range.prototype.getBoundingClientRect
 beforeEach(() => {
+  vi.stubGlobal("ClipboardEvent", Event)
+  if (!rangeBounds) Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => new DOMRect() })
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
   container = document.createElement("div")
   document.body.append(container)
@@ -26,6 +31,8 @@ afterEach(async () => {
   await act(async () => root.unmount())
   container.remove()
   Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT")
+  vi.unstubAllGlobals()
+  if (!rangeBounds) Reflect.deleteProperty(Range.prototype, "getBoundingClientRect")
 })
 const command = {
   id: "compact",
@@ -40,6 +47,65 @@ const command = {
     selection: "execute" as const,
   },
 }
+
+it("copies and pastes structured references through the real composer clipboard handlers", async () => {
+  const items: ComposerDocument["items"] = [
+    { type: "text", text: "Use " },
+    { type: "skill", name: "review", path: "D:/review/SKILL.md", displayName: "Review" },
+    { type: "text", text: "\nthen " },
+    { type: "mention", name: "resource", path: "app://resource", displayName: "Resource" },
+  ];
+  await act(async () => root.render(createElement(RichPromptInput, {
+    id: "clipboard", value: { version: 1, items }, rows: 2, placeholder: "", disabled: false,
+    skills: [{ name: "review", path: "D:/review/SKILL.md", displayName: "Review", description: "", sourceLabel: "个人" }],
+    onChange: () => {}, onSubmit: () => {},
+  })));
+  const editor = getNearestEditorFromDOMNode(container.querySelector('[role="textbox"]')!)!;
+  const data = new Map<string, string>();
+  const clipboardData = { files: [], getData: (type: string) => data.get(type) ?? "", setData: (type: string, value: string) => data.set(type, value) };
+  const event = new Event("copy", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: clipboardData });
+  await act(async () => {
+    editor.update(() => $getRoot().select(0, $getRoot().getChildrenSize()), { discrete: true });
+    editor.dispatchCommand(COPY_COMMAND, event as ClipboardEvent);
+  });
+  expect(data.get("application/x-openharness-composer")).toBeTruthy();
+  expect(data.get("text/plain")).toContain("$review");
+  await act(async () => {
+    editor.update(() => $getRoot().select(0, $getRoot().getChildrenSize()), { discrete: true });
+    editor.dispatchCommand(PASTE_COMMAND, event as ClipboardEvent);
+  });
+  expect(editor.getEditorState().read(composerDocumentFromLexical)).toEqual({ version: 1, items });
+
+  data.delete("application/x-openharness-composer");
+  data.set("text/plain", "$review plain");
+  await act(async () => {
+    editor.update(() => $getRoot().select(0, $getRoot().getChildrenSize()), { discrete: true });
+    editor.dispatchCommand(PASTE_COMMAND, event as ClipboardEvent);
+  });
+  expect(editor.getEditorState().read(composerDocumentFromLexical).items).toEqual([{ type: "text", text: "$review plain" }]);
+
+  data.set("application/x-openharness-composer", JSON.stringify({ version: 1, items: [{ type: "skill", name: "review", path: "D:/foreign/SKILL.md" }] }));
+  data.set("text/plain", "$review");
+  await act(async () => {
+    editor.update(() => $getRoot().select(0, $getRoot().getChildrenSize()), { discrete: true });
+    editor.dispatchCommand(PASTE_COMMAND, event as ClipboardEvent);
+  });
+  expect(editor.getEditorState().read(composerDocumentFromLexical).items).toEqual([{ type: "text", text: "$review" }]);
+});
+
+it.each(["body\n", "\nbody", "\n\n"])("keeps empty paragraphs when copying %j", async (text) => {
+  await render({ version: 1, items: [{ type: "text", text }] });
+  const editor = getNearestEditorFromDOMNode(container.querySelector('[role="textbox"]')!)!;
+  const data = new Map<string, string>();
+  const event = new Event("copy", { cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { setData: (key: string, value: string) => data.set(key, value) } });
+  await act(async () => {
+    editor.update(() => $getRoot().select(0, $getRoot().getChildrenSize()), { discrete: true });
+    editor.dispatchCommand(COPY_COMMAND, event as ClipboardEvent);
+  });
+  expect(JSON.parse(data.get("application/x-openharness-composer")!).items).toEqual([{ type: "text", text }]);
+});
 async function render(
   value: ComposerDocument,
   onCommand = async () => {},

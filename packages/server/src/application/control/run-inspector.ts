@@ -99,7 +99,7 @@ export function inspectDurableRun(store: SessionStore, runId: string, includeCon
     includeContent,
     ...(includeContent ? { sensitiveContentWarning: "Content view may contain prompts, model output, tool arguments, tool results, or secrets." } : {}),
     run: includeContent ? run : { ...run, error: run.error ? "[redacted]" : undefined, metadata: redactRecord(run.metadata) },
-    ...(input ? { input: includeContent ? input : { ...input, content: "[redacted]", metadata: redactRecord(input.metadata) } } : {}),
+    ...(input ? { input: includeContent ? input : { ...input, items: [], content: "[redacted]", metadata: redactRecord(input.metadata) } } : {}),
     ...(sourceRecovery ? { sourceRecovery } : {}),
     attempts: attempts.map((row) => includeContent ? row : { ...row, error: row.error ? "[redacted]" : undefined }),
     messages: messages.map((row) => ({ ...row, metadata: includeContent ? row.metadata : redactRecord(row.metadata) })),

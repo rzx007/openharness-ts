@@ -193,6 +193,7 @@ export class SessionRunExecutor {
       // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。
       // 不要让 agent 自己再生成一套 id，否则 SSE 里的 run 和 HTTP 回的 run 会对不上。
       const run = agent.submitMessage(submittedContent, {
+        inputItems: admitted.items,
         signal: workContext.signal,
         delivery: admitted.delivery,
         metadata: admitted.metadata,

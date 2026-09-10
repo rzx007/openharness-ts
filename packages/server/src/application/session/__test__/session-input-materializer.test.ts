@@ -15,6 +15,10 @@ const catalog: SessionInputSkillCatalog = {
 };
 
 describe("materializeSessionInput", () => {
+  it("does not wrap ordinary input in a Skill instruction", () => {
+    expect(materializeSessionInput([{ type: "text", text: "plain follow up" }], catalog).instruction)
+      .toBe("plain follow up");
+  });
   it("keeps readable markers and emits one ordered skill loading instruction", () => {
     const result = materializeSessionInput([
       { type: "text", text: "使用 " },

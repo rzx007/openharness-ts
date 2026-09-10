@@ -52,7 +52,7 @@ export function materializeSessionInput(
   return {
     text,
     skills,
-    instruction: `${prefix}\n\n用户输入：\n${text}`,
+    instruction: skills.length ? `${prefix}\n\n用户输入：\n${text}` : text,
   };
 }
 
