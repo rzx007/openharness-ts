@@ -94,7 +94,9 @@ export async function installLocalNativePlugin(input: InstallLocalNativePluginIn
   await updateInstalledPluginStore(input.storePath ?? getInstalledPluginStorePath(), (store) => {
     const key = installedPluginKey(record);
     const previous = store.plugins[key];
-    store.plugins[key] = previous ? { ...record, installedAt: previous.installedAt } : record;
+    store.plugins[key] = previous
+      ? { ...record, enabled: previous.enabled, installedAt: previous.installedAt }
+      : record;
   });
   return { status: "installed", record, diagnostics: [] };
 }
