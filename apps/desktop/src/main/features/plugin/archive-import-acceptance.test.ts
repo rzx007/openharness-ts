@@ -96,7 +96,7 @@ function createDesktopService(archivePath: string): DesktopPluginService {
   })
   const client = new OpenHarnessClient({
     baseUrl: "http://desktop-archive.test",
-    fetch: (input, init) => routes.request(input, init),
+    fetch: async (input, init) => await routes.request(input, init),
   })
   return new DesktopPluginService({
     chooseArchive: async () => archivePath,

@@ -29,6 +29,7 @@ import type {
 } from "@shared/terminal-types"
 import type { DesktopAgentEnvironment } from "@shared/settings-types"
 
+import { openTerminalWebLink } from "./open-terminal-web-link"
 import { userTerminalCreateInput } from "./user-terminal-create-input"
 import { getXtermTheme } from "./xterm-theme"
 import { resolveTerminalCreateTarget } from "./terminal-runtime-model"
@@ -199,7 +200,7 @@ export function TerminalTool({
     })
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
-    terminal.loadAddon(new WebLinksAddon())
+    terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalWebLink(uri)))
     terminal.open(container)
     terminal.onData((data) => {
       const record = activeRecordRef.current
