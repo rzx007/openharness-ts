@@ -196,7 +196,9 @@ describe("MessageAttachment", () => {
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="重新编辑"]')?.click()
     )
-    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("")
+    const editor = container.querySelector<HTMLElement>('[role="textbox"]')
+    expect(editor).not.toBeNull()
+    expect(editor?.textContent?.trim() ?? "").toBe("")
     expect(container.textContent).toContain("diagram.svg")
     expect(container.querySelector('[aria-label^="移除附件"]')).toBeNull()
     expect(container.querySelector('[aria-label="添加附件"]')).toBeNull()
@@ -206,7 +208,7 @@ describe("MessageAttachment", () => {
         .find((button) => button.textContent?.includes("重新生成"))
         ?.click()
     )
-    expect(onEdit).toHaveBeenCalledWith("")
+    expect(onEdit).toHaveBeenCalledWith({ version: 1, items: [] })
   })
 })
 
