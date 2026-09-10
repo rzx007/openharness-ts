@@ -307,12 +307,12 @@ export function PluginManager({
           <h2 id="plugin-installed-title" className="text-sm font-medium">
             已安装
           </h2>
-          <Button onClick={() => void importArchive()} disabled={busy || !api}>
+          {/* <Button onClick={() => void importArchive()} disabled={busy || !api}>
             {busy ? <Spinner data-icon="inline-start" /> : <Upload data-icon="inline-start" />}
             导入插件
-          </Button>
+          </Button> */}
         </div>
-        <Separator />
+        <Separator className="bg-border/50" />
         {loading ? (
           <div className="flex gap-6 py-2" aria-label="正在加载插件">
             {[1, 2, 3, 4].map((id) => (
@@ -342,80 +342,78 @@ export function PluginManager({
               ))}
           </div>
         ) : (
-          <NoPlugins onImport={() => void importArchive()} disabled={busy || !api} />
+          <NoPlugins />
         )}
       </section>
-      <section className="flex flex-col gap-3" aria-labelledby="plugin-list-title">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="plugin-list-title" className="text-sm font-medium">
-            我的插件
-          </h2>
-          <ToggleGroup
-            value={[filter]}
-            onValueChange={(value) => value[0] && setFilter(value[0])}
-            size="sm"
-            aria-label="插件状态"
-          >
-            <ToggleGroupItem value="all">全部</ToggleGroupItem>
-            <ToggleGroupItem value="enabled">已启用</ToggleGroupItem>
-            <ToggleGroupItem value="attention">需处理</ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-        <Separator />
-        {visiblePlugins.length ? (
-          <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
-            {visiblePlugins.map((plugin) => (
-              <ExtensionRow
-                key={plugin.identity.id}
-                name={displayName(plugin)}
-                description={`${plugin.identity.version} · ${plugin.scope === "managed" ? "由组织管理" : "个人安装"} · ${plugin.enabled ? "已启用" : "已禁用"}`}
-                onClick={() => setDetailId(plugin.identity.id)}
-                action={
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      size="sm"
-                      checked={plugin.enabled}
-                      disabled={busy || plugin.scope === "managed"}
-                      aria-label={`${plugin.enabled ? "禁用" : "启用"} ${displayName(plugin)}`}
-                      onCheckedChange={() => void mutate(plugin)}
-                    />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={<Button variant="ghost" size="icon-sm" />}
-                        aria-label={`${displayName(plugin)} 更多操作`}
-                      >
-                        <Ellipsis />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuGroup>
-                          <DropdownMenuItem onClick={() => setDetailId(plugin.identity.id)}>
-                            查看详情
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={busy || plugin.scope === "managed"}
-                            variant="destructive"
-                            onClick={() =>
-                              setRemoval({ id: plugin.identity.id, name: displayName(plugin) })
-                            }
-                          >
-                            卸载
-                          </DropdownMenuItem>
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                }
-              />
-            ))}
+      {plugins.length ? (
+        <section className="flex flex-col gap-3" aria-labelledby="plugin-list-title">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="plugin-list-title" className="text-sm font-medium">
+              我的插件
+            </h2>
+            <ToggleGroup
+              value={[filter]}
+              onValueChange={(value) => value[0] && setFilter(value[0])}
+              size="sm"
+              aria-label="插件状态"
+            >
+              <ToggleGroupItem value="all">全部</ToggleGroupItem>
+              <ToggleGroupItem value="enabled">已启用</ToggleGroupItem>
+              <ToggleGroupItem value="attention">需处理</ToggleGroupItem>
+            </ToggleGroup>
           </div>
-        ) : (
-          <NoPlugins
-            searched={Boolean(normalizedQuery) || filter !== "all"}
-            onImport={() => void importArchive()}
-            disabled={busy || !api}
-          />
-        )}
-      </section>
+          <Separator />
+          {visiblePlugins.length ? (
+            <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
+              {visiblePlugins.map((plugin) => (
+                <ExtensionRow
+                  key={plugin.identity.id}
+                  name={displayName(plugin)}
+                  description={`${plugin.identity.version} · ${plugin.scope === "managed" ? "由组织管理" : "个人安装"} · ${plugin.enabled ? "已启用" : "已禁用"}`}
+                  onClick={() => setDetailId(plugin.identity.id)}
+                  action={
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        size="sm"
+                        checked={plugin.enabled}
+                        disabled={busy || plugin.scope === "managed"}
+                        aria-label={`${plugin.enabled ? "禁用" : "启用"} ${displayName(plugin)}`}
+                        onCheckedChange={() => void mutate(plugin)}
+                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={<Button variant="ghost" size="icon-sm" />}
+                          aria-label={`${displayName(plugin)} 更多操作`}
+                        >
+                          <Ellipsis />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem onClick={() => setDetailId(plugin.identity.id)}>
+                              查看详情
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={busy || plugin.scope === "managed"}
+                              variant="destructive"
+                              onClick={() =>
+                                setRemoval({ id: plugin.identity.id, name: displayName(plugin) })
+                              }
+                            >
+                              卸载
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <NoPlugins searched={Boolean(normalizedQuery) || filter !== "all"} />
+          )}
+        </section>
+      ) : null}
       <PluginDetailsDialog
         error=""
         plugin={detail}
@@ -568,29 +566,13 @@ function ExtensionRow({
     </div>
   )
 }
-function NoPlugins({
-  onImport,
-  disabled,
-  searched,
-}: {
-  onImport: () => void
-  disabled: boolean
-  searched?: boolean
-}): React.JSX.Element {
+function NoPlugins({ searched }: { searched?: boolean }): React.JSX.Element {
   return (
     <Empty className="py-8">
       <EmptyHeader>
-        <EmptyTitle>{searched ? "没有找到匹配的插件" : "还没有安装插件"}</EmptyTitle>
-        <EmptyDescription>
-          {searched ? "试试其他关键词或切换筛选条件。" : "导入插件，开始扩展你的工具。"}
-        </EmptyDescription>
+        <EmptyTitle>{searched ? "没有找到匹配的插件" : "还没有插件"}</EmptyTitle>
+        {searched ? <EmptyDescription>试试其他关键词或切换筛选条件。</EmptyDescription> : null}
       </EmptyHeader>
-      {!searched ? (
-        <Button variant="outline" disabled={disabled} onClick={onImport}>
-          {disabled ? <Spinner data-icon="inline-start" /> : <Upload data-icon="inline-start" />}
-          导入插件
-        </Button>
-      ) : null}
     </Empty>
   )
 }

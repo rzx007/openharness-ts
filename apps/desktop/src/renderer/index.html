@@ -18,17 +18,13 @@
         margin: 0;
       }
 
-      body,
-      #startup-loading {
-        background: #f4f7f9;
-      }
-
       #startup-loading {
         position: fixed;
         inset: 0;
         z-index: 9999;
         display: grid;
         place-items: center;
+        background: #f4f7f9;
         color: #68747d;
         font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
       }
@@ -77,31 +73,19 @@
       }
 
       @media (prefers-color-scheme: dark) {
-        body,
         #startup-loading {
           background: #20242a;
-        }
-
-        #startup-loading {
           color: #8d969e;
         }
       }
 
-      html.light body,
       html.light #startup-loading {
         background: #f4f7f9;
-      }
-
-      html.light #startup-loading {
         color: #68747d;
       }
 
-      html.dark body,
       html.dark #startup-loading {
         background: #20242a;
-      }
-
-      html.dark #startup-loading {
         color: #8d969e;
       }
 

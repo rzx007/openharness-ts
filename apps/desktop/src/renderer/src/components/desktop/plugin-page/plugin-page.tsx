@@ -118,7 +118,7 @@ function ExtensionManagement({ projectPath }: { projectPath: string }): React.JS
               </h1>
               <p className="text-sm leading-6 text-muted-foreground">{sections[tab].description}</p>
             </header>
-            <InputGroup className="h-10 rounded-full shadow-none">
+            <InputGroup className="h-8 rounded-full shadow-none">
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>

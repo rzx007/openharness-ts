@@ -42,5 +42,8 @@ describe("startup loading document", () => {
     expect(styles).toContain("#f4f7f9")
     expect(styles).toContain("prefers-reduced-motion: reduce")
     expect(styles).toContain("animation: none")
+    expect(styles).not.toContain("html.dark body")
+    expect(styles).not.toContain("html.light body")
+    expect(styles).not.toMatch(/body\s*,\s*#startup-loading/)
   })
 })

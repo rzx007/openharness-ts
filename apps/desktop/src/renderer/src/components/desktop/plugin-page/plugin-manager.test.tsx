@@ -356,4 +356,35 @@ describe("PluginManager archive import", () => {
 
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("alpha@1.0.0")
   })
+
+  it("hides my-plugins and keeps a single empty prompt when nothing is installed", async () => {
+    await render()
+
+    expect(host.textContent).toContain("已安装")
+    expect(host.textContent).toContain("还没有插件")
+    expect(host.textContent).not.toContain("导入本地插件包")
+    expect(host.textContent).not.toContain("我的插件")
+    expect(host.textContent).not.toContain("还没有安装插件")
+    expect(
+      [...host.querySelectorAll("button")].filter((item) => item.textContent?.trim() === "导入插件")
+    ).toHaveLength(1)
+  })
+
+  it("does not flash my-plugins while the snapshot is still loading", async () => {
+    api().snapshot.mockImplementationOnce(() => new Promise(() => undefined))
+    await render()
+
+    expect(host.querySelector('[aria-label="正在加载插件"]')).not.toBeNull()
+    expect(host.textContent).not.toContain("我的插件")
+    expect(host.textContent).not.toContain("还没有插件")
+  })
+
+  it("keeps my-plugins when installed plugins are filtered to an empty list", async () => {
+    api().snapshot.mockResolvedValue(populatedSnapshot)
+    await render({ query: "does-not-exist" })
+
+    expect(host.textContent).toContain("我的插件")
+    expect(host.textContent).toContain("没有找到匹配的插件")
+    expect(host.textContent).not.toContain("还没有插件")
+  })
 })

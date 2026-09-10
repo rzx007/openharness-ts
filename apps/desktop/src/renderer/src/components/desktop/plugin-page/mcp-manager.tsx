@@ -270,7 +270,7 @@ function McpProjectManager({
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
         <ToggleGroup
           aria-label="MCP 状态筛选"
           value={[filter]}

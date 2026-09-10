@@ -134,7 +134,7 @@ export function SkillManager({
       ) : null}
       <section aria-label="已安装技能" className="flex flex-col gap-3">
         <h2 className="text-[15px] font-semibold">已安装</h2>
-        <Separator />
+        <Separator className="bg-border/50" />
         {loading ? (
           <div className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
             {[1, 2, 3, 4, 5, 6].map((id) => (
