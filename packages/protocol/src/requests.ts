@@ -243,6 +243,12 @@ export function parseSessionInputItems(value: unknown): SessionUserInputItem[] {
       }
       return { type: "text", text: item.text };
     }
+    if (item.type === "context") {
+      if (item.kind !== "conversation" || typeof item.id !== "string" || typeof item.displayName !== "string") {
+        throw new ProtocolValidationError(`${field} requires kind, id and displayName`, field);
+      }
+      return { type: "context", kind: "conversation", id: item.id, displayName: item.displayName };
+    }
     if (item.type !== "skill" && item.type !== "mention") {
       throw new ProtocolValidationError(`${field}.type is invalid`, `${field}.type`);
     }

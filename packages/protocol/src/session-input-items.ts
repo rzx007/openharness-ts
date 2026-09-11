@@ -12,6 +12,7 @@ export type SessionUserInputItem =
   | { type: "text"; text: string }
   | { type: "skill"; name: string; path: string; displayName?: string; source?: SkillSource }
   | { type: "mention"; name: string; path: string; displayName?: string }
+  | { type: "context"; kind: "conversation"; id: string; displayName: string }
 
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F-\u009F]/
 const TEXT_CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/
@@ -27,6 +28,15 @@ export function validateSessionUserInputItems(
     if (item.type === "text") {
       assertValidText(item.text)
       textBytes += new TextEncoder().encode(item.text).byteLength
+      continue
+    }
+
+    if (item.type === "context") {
+      if (item.kind !== "conversation") throw new Error("invalid_context_kind")
+      assertValidString(item.id, "id")
+      assertValidString(item.displayName, "displayName")
+      assertMaximumLength(item.id, SESSION_INPUT_LIMITS.maxNameChars, "id")
+      assertMaximumLength(item.displayName, SESSION_INPUT_LIMITS.maxDisplayNameChars, "displayName")
       continue
     }
 
@@ -66,7 +76,7 @@ export function normalizeSessionUserInputItems(
 
 export function sessionUserInputText(items: readonly SessionUserInputItem[]): string {
   return normalizeSessionUserInputItems(items)
-    .map((item) => item.type === "text" ? item.text : `$${item.name}`)
+    .map((item) => item.type === "text" ? item.text : item.type === "context" ? `@${item.displayName}` : `$${item.name}`)
     .join("")
 }
 

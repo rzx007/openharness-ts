@@ -1,7 +1,7 @@
 import { DecoratorNode, type NodeKey, type SerializedLexicalNode } from "lexical"
 import type { SessionUserInputItem } from "@shared/session-types"
 
-type Mention = Extract<SessionUserInputItem, { type: "mention" }>
+type Mention = Extract<SessionUserInputItem, { type: "mention" | "context" }>
 type SerializedMention = SerializedLexicalNode & { item: Mention }
 
 export class ResourceMentionNode extends DecoratorNode<React.JSX.Element> {
@@ -29,7 +29,7 @@ export class ResourceMentionNode extends DecoratorNode<React.JSX.Element> {
     return false
   }
   getTextContent(): string {
-    return `@${this.__item.name}`
+    return `@${this.__item.type === "context" ? this.__item.displayName : this.__item.name}`
   }
   isInline(): boolean {
     return true
@@ -37,7 +37,7 @@ export class ResourceMentionNode extends DecoratorNode<React.JSX.Element> {
   decorate(): React.JSX.Element {
     return (
       <span className="font-medium text-primary">
-        {this.__item.displayName ?? this.__item.name}
+        {this.__item.type === "context" ? this.__item.displayName : this.__item.displayName ?? this.__item.name}
       </span>
     )
   }

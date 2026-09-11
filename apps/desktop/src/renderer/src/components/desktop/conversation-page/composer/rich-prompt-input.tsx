@@ -257,7 +257,7 @@ function ComposerClipboardPlugin({
       const value = selectedComposerDocument(selection)
       event.preventDefault()
       event.clipboardData.setData(COMPOSER_CLIPBOARD_TYPE, JSON.stringify(value))
-      event.clipboardData.setData("text/plain", value.items.map((item) => item.type === "text" ? item.text : `${item.type === "skill" ? "$" : "@"}${item.name}`).join(""))
+      event.clipboardData.setData("text/plain", value.items.map((item) => item.type === "text" ? item.text : item.type === "context" ? `@${item.displayName}` : `${item.type === "skill" ? "$" : "@"}${item.name}`).join(""))
       if (cut) selection.removeText()
       return true
     }
