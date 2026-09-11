@@ -117,6 +117,32 @@ describe("ComposerPicker", () => {
     await act(async () => firstOption?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
     expect(onSelect).toHaveBeenCalledWith(skills[0])
   })
+
+  it("renders category headings and dismisses when clicking outside", async () => {
+    const onDismiss = vi.fn()
+    const items: ComposerPickerItem[] = [
+      { ...skills[0]!, group: "添加" },
+      { ...skills[1]!, group: "历史对话" },
+    ]
+    await act(async () => {
+      root.render(createElement(ComposerPicker, {
+        items,
+        query: "",
+        label: "添加上下文",
+        onSelect: vi.fn(),
+        onDismiss,
+      }))
+    })
+
+    expect(container.textContent).toContain("添加上下文")
+    expect(container.textContent).toContain("添加")
+    expect(container.textContent).toContain("历史对话")
+
+    await act(async () => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+    })
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
 })
 
 describe("pickerItems", () => {

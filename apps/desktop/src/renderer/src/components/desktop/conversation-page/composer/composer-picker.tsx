@@ -176,6 +176,7 @@ export function ComposerPicker({
   const options = useMemo(() => filterPickerItems(items, query), [items, query])
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const pickerRef = useRef<HTMLDivElement | null>(null)
   const activeIndex = Math.min(highlightedIndex, Math.max(options.length - 1, 0))
 
   useEffect(() => setHighlightedIndex(0), [query, options.length])
@@ -185,7 +186,6 @@ export function ComposerPicker({
   }, [activeIndex])
 
   useEffect(() => {
-    if (options.length === 0) return
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "ArrowDown") {
         event.preventDefault()
@@ -193,7 +193,7 @@ export function ComposerPicker({
       } else if (event.key === "ArrowUp") {
         event.preventDefault()
         setHighlightedIndex((current) => (current - 1 + options.length) % options.length)
-      } else if (event.key === "Enter" || event.key === "Tab") {
+      } else if ((event.key === "Enter" || event.key === "Tab") && options.length > 0) {
         event.preventDefault()
         event.stopPropagation()
         onSelect(options[activeIndex]!)
@@ -202,14 +202,22 @@ export function ComposerPicker({
         onDismiss()
       }
     }
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) onDismiss()
+    }
     window.addEventListener("keydown", handleKeyDown, true)
-    return () => window.removeEventListener("keydown", handleKeyDown, true)
+    document.addEventListener("pointerdown", handlePointerDown, true)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true)
+      document.removeEventListener("pointerdown", handlePointerDown, true)
+    }
   }, [activeIndex, onDismiss, onSelect, options])
 
   if (options.length === 0) return null
 
   return (
     <div
+      ref={pickerRef}
       role="listbox"
       aria-label={label}
       className="absolute right-0 bottom-[calc(100%+10px)] left-0 z-40 overflow-hidden rounded-2xl bg-background/95 py-2 shadow-composer ring-1 ring-black/7 backdrop-blur dark:bg-card/95 dark:ring-white/12"
