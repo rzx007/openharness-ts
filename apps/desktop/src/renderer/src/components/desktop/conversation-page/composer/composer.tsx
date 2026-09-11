@@ -102,6 +102,7 @@ export function Composer({
       kind: "context",
       label: "文件和文件夹",
       description: "添加本地文件或文件夹",
+      group: "添加",
       context: { kind: "files" },
     },
     {
@@ -109,6 +110,7 @@ export function Composer({
       kind: "context",
       label: "计划模式",
       description: "切换为只读分析模式",
+      group: "添加",
       context: { kind: "plan" },
     },
     ...conversations
@@ -120,6 +122,7 @@ export function Composer({
         label: session.title.trim() || "未命名对话",
         description: "引用历史对话",
         sourceLabel: "对话",
+        group: "历史对话",
         context: { kind: "conversation", sessionId: session.id, displayName: session.title.trim() || "未命名对话" },
       })),
   ]

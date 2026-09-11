@@ -1,5 +1,5 @@
 import { Box, Command, MessageSquare, Paperclip, ListChecks } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { cn } from "@renderer/lib/utils"
@@ -38,6 +38,7 @@ export interface ComposerPickerItem {
   label: string
   description: string
   sourceLabel?: string
+  group?: string
   skill?: ComposerPickerSkill
   command?: ComposerPickerCommand
   context?:
@@ -214,11 +215,16 @@ export function ComposerPicker({
       className="absolute right-0 bottom-[calc(100%+10px)] left-0 z-40 overflow-hidden rounded-2xl bg-background/95 py-2 shadow-composer ring-1 ring-black/7 backdrop-blur dark:bg-card/95 dark:ring-white/12"
       onWheel={(event) => event.stopPropagation()}
     >
-      <div className="text-ui-caption px-4 pb-1 font-medium text-muted-foreground">{label}</div>
-      <div className="max-h-72 scroll-py-1 scrollbar-thin overflow-y-auto overscroll-contain px-2 pb-1">
+      <div className="px-5 pt-1 pb-2 text-sm font-medium text-muted-foreground">{label}</div>
+      <div className="max-h-80 scroll-py-1 scrollbar-thin overflow-y-auto overscroll-contain px-3 pb-2">
         {options.map((item, index) => (
+          <Fragment key={item.id}>
+            {item.group && item.group !== options[index - 1]?.group ? (
+              <div role="presentation" className="px-2 pt-3 pb-1 text-sm text-muted-foreground">
+                {item.group}
+              </div>
+            ) : null}
           <Button
-            key={item.id}
             ref={(element) => {
               optionRefs.current[index] = element
             }}
@@ -231,7 +237,7 @@ export function ComposerPicker({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(item)}
             className={cn(
-              "h-7.5 w-full justify-start gap-2 rounded-lg px-2 text-left font-normal",
+              "grid h-9 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2 text-left font-normal sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(10rem,1.35fr)_auto]",
               index === activeIndex && "bg-muted text-foreground"
             )}
           >
@@ -248,8 +254,8 @@ export function ComposerPicker({
                 <Box className="size-3.5" />
               )}
             </span>
-            <span className="text-ui-small min-w-0 flex-1 truncate font-medium">{item.label}</span>
-            <span className="hidden min-w-0 flex-[1.35] truncate text-xs text-muted-foreground sm:inline">
+            <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
+            <span className="hidden min-w-0 truncate text-sm text-muted-foreground sm:inline">
               {item.description}
             </span>
             {item.sourceLabel ? (
@@ -258,6 +264,7 @@ export function ComposerPicker({
               </span>
             ) : null}
           </Button>
+          </Fragment>
         ))}
       </div>
     </div>
