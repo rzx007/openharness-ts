@@ -77,6 +77,54 @@ export class SessionGoalService {
     });
   }
 
+  async settleRun(sessionId: string, runId: string): Promise<void> {
+    const run = this.context.store.getRun(runId);
+    const goalId = typeof run?.metadata.goalId === "string" ? run.metadata.goalId : undefined;
+    const runRevision = typeof run?.metadata.goalRevision === "number" ? run.metadata.goalRevision : undefined;
+    if (!run || !goalId || runRevision === undefined) return;
+    const goal = this.context.store.getGoal(goalId);
+    if (!goal || goal.sessionId !== sessionId || goal.revision !== runRevision || goal.status !== "active") return;
+    const assessment = run.metadata.goalAssessment;
+    if (!assessment || typeof assessment !== "object" || Array.isArray(assessment)) {
+      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "paused", reason: "目标回合没有提交有效评估" });
+      return;
+    }
+    const value = assessment as Record<string, unknown>;
+    const evidence = Array.isArray(value.evidence) ? value.evidence.filter((item): item is string => typeof item === "string") : [];
+    if (value.decision === "complete") {
+      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "completed", evidence, reason: null });
+      return;
+    }
+    if (value.decision === "waiting_user" || value.decision === "blocked") {
+      this.context.store.updateGoal(goal.id, {
+        expectedRevision: goal.revision,
+        status: value.decision,
+        evidence,
+        reason: typeof value.reason === "string" ? value.reason : typeof value.nextStep === "string" ? value.nextStep : null,
+      });
+      return;
+    }
+    if (value.decision !== "continue") {
+      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "paused", reason: "目标评估结果无效" });
+      return;
+    }
+    if (goal.autoTurnsUsed >= goal.maxAutoTurns) {
+      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "paused", reason: "目标自动续跑额度已用完" });
+      return;
+    }
+    const continued = this.context.store.updateGoal(goal.id, {
+      expectedRevision: goal.revision,
+      autoTurnsUsed: goal.autoTurnsUsed + 1,
+      evidence,
+      reason: null,
+    });
+    await this.createRevisionRun(
+      continued,
+      `goal-${continued.id}-${continued.revision}-${runId}`,
+      "continuation",
+    );
+  }
+
   private async createRevisionRun(goal: SessionGoal, requestId: string, kind: string): Promise<SessionGoal> {
     await this.context.sessions.admitPrompt(goal.sessionId, {
       id: requestId || randomUUID(),

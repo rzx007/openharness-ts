@@ -59,6 +59,7 @@ export interface SessionRunExecutorContext {
   ) => Promise<void>;
   /** Re-read the cwd catalog before executing renderer-supplied Skill paths. */
   resolveSkillCatalog?(session: SessionRecord): Promise<SessionInputSkillCatalog>;
+  settleGoalRun?(sessionId: string, runId: string): Promise<void>;
 }
 
 export interface ExecuteSessionRunInput {
@@ -92,6 +93,8 @@ export class SessionRunExecutor {
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+      const storedRun = this.context.store.getRun(runId);
+      if (!storedRun) throw new Error(`Session run not found: ${runId}`);
       const hasStructuredContext = admitted.items.some((item) => item.type === "skill" || item.type === "context");
       const hasExplicitSkills = admitted.items.some((item) => item.type === "skill");
       const materialized = hasStructuredContext
@@ -194,6 +197,20 @@ export class SessionRunExecutor {
           materialized,
         );
       }
+      const goalId = typeof storedRun.metadata.goalId === "string" ? storedRun.metadata.goalId : undefined;
+      const goalRevision = typeof storedRun.metadata.goalRevision === "number" ? storedRun.metadata.goalRevision : undefined;
+      if (goalId && goalRevision !== undefined) {
+        const goal = this.context.store.getGoal(goalId);
+        if (!goal || goal.sessionId !== sessionId || goal.revision !== goalRevision || goal.status !== "active") {
+          throw new Error("session_goal_run_is_stale");
+        }
+        const prefix = [
+          "当前运行属于一个持续目标。请推进目标，并在本轮结束前调用 GoalAssessment 提交 continue、complete、waiting_user 或 blocked 建议。",
+          `目标版本：${goal.revision}`,
+          `目标：${goal.objective}`,
+        ].join("\n");
+        submittedContent = prependGoalContext(submittedContent, prefix);
+      }
 
       // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。
       // 不要让 agent 自己再生成一套 id，否则 SSE 里的 run 和 HTTP 回的 run 会对不上。
@@ -218,6 +235,7 @@ export class SessionRunExecutor {
 
       // 只在成功走完之后做记忆/个性化/auto-dream。失败路径不跑，避免半截对话被写进长期记忆。
       await this.context.postRunMaintenance?.run(sessionId, runId, agent);
+      await this.context.settleGoalRun?.(sessionId, runId);
 
       // Run terminal (success): invalidate then rewrite live usage from the same agent
       // before closeIfStale may drop the warm runtime.
@@ -367,6 +385,15 @@ export class SessionRunExecutor {
       }
     }
   }
+}
+
+function prependGoalContext(content: string | ContentBlock[], prefix: string): string | ContentBlock[] {
+  if (typeof content === "string") return `${prefix}\n\n用户输入：\n${content}`;
+  const index = content.findIndex((block) => block.type === "text");
+  if (index < 0) return [{ type: "text", text: `${prefix}\n\n用户输入：\n` }, ...content];
+  return content.map((block, blockIndex) => blockIndex === index && block.type === "text"
+    ? { ...block, text: `${prefix}\n\n用户输入：\n${block.text}` }
+    : block);
 }
 
 async function resolveSkillCatalog(

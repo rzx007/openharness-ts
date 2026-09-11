@@ -133,6 +133,12 @@ export class DaemonAgentEventProjector {
         this.projectUsage(event);
         return;
       case "domain.event":
+        if (event.data.name === "goal.assessment" && event.context.runId) {
+          const run = this.context.store.getRun(event.context.runId);
+          if (run?.metadata.goalId) {
+            this.context.store.updateRun(run.id, { metadata: { goalAssessment: event.data.payload ?? {} } });
+          }
+        }
         if (event.data.name === "context_compaction") {
           const phase = event.data.payload?.phase;
           if (phase === "compact_start" || phase === "compact_end" || phase === "compact_failed") {
