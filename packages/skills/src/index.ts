@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, basename, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
+import { parse as parseYaml } from "yaml";
 import { BUNDLED_SKILLS } from "./bundled.js";
 
 export { BUNDLED_SKILLS } from "./bundled.js";
@@ -233,13 +234,10 @@ export function parseSkillMarkdown(
       }
     }
     if (endIdx > 0) {
-      for (let i = 1; i < endIdx; i++) {
-        const line = lines[i]!;
-        const colon = line.indexOf(":");
-        if (colon < 0) continue;
-        const key = normalizeKey(line.slice(0, colon));
-        const rawVal = line.slice(colon + 1).trim();
-        const val = rawVal.replace(/^['"]|['"]$/g, "");
+      const frontmatter = parseYamlRecord(lines.slice(1, endIdx).join("\n"));
+      for (const [rawKey, rawValue] of Object.entries(frontmatter)) {
+        const key = normalizeKey(rawKey);
+        const val = frontmatterString(rawValue);
         switch (key) {
           case "name":
             if (val) name = val;
@@ -248,10 +246,10 @@ export function parseSkillMarkdown(
             if (val) description = val;
             break;
           case "userinvocable":
-            userInvocable = parseFrontmatterBool(rawVal, true);
+            userInvocable = parseFrontmatterBool(val, true);
             break;
           case "disablemodelinvocation":
-            disableModelInvocation = parseFrontmatterBool(rawVal, false);
+            disableModelInvocation = parseFrontmatterBool(val, false);
             break;
           case "model":
             if (val) model = val;
@@ -299,6 +297,23 @@ export function parseSkillMarkdown(
     commandName,
     displayName,
   };
+}
+
+function parseYamlRecord(source: string): Record<string, unknown> {
+  try {
+    const value = parseYaml(source);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function frontmatterString(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "boolean" || typeof value === "number") return String(value);
+  return "";
 }
 
 /**

@@ -262,6 +262,35 @@ describe("parseSkillMarkdown", () => {
     expect(result.userInvocable).toBe(false);
   });
 
+  it("parses folded multiline YAML descriptions", () => {
+    const md = `---
+name: agent-reach
+description: >
+  MUST USE when user wants to 调研/research/搜索/search/查/找/look up anything
+  on the internet — e.g. 全网调研 X / 帮我调研一下 X / 查一下 X
+user-invocable: true
+---
+# Agent Reach`;
+
+    expect(parseSkillMarkdown("default", md).description).toBe(
+      "MUST USE when user wants to 调研/research/搜索/search/查/找/look up anything on the internet — e.g. 全网调研 X / 帮我调研一下 X / 查一下 X",
+    );
+  });
+
+  it("parses literal multiline YAML descriptions", () => {
+    const md = `---
+name: ai-radar
+description: |
+  雷达Skill（AI Radar）——零API、零Key、零服务器的中文AI资讯查询。
+  触发条件：用户想知道今天 AI 圈有什么。
+---
+# AI Radar`;
+
+    expect(parseSkillMarkdown("default", md).description).toBe(
+      "雷达Skill（AI Radar）——零API、零Key、零服务器的中文AI资讯查询。\n触发条件：用户想知道今天 AI 圈有什么。",
+    );
+  });
+
   it("frontmatter with quoted values", () => {
     const md = '---\nname: "Quoted Name"\ndescription: \'Quoted desc\'\n---\n\nBody.';
     const result = parseSkillMarkdown("default", md);
