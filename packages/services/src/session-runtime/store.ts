@@ -3147,6 +3147,7 @@ export class SessionStore {
   }
 
   createGoal(input: CreateSessionGoalStoreInput): SessionGoal {
+    this.assertCurrentOwner();
     const session = assertSession(this.state, input.sessionId);
     assertMutableSession(session);
     const id = input.id ?? randomUUID();
@@ -3186,6 +3187,7 @@ export class SessionStore {
   }
 
   beginGoalRequest(input: { requestId: string; sessionId: string; fingerprint: string }): SessionGoalRequestRecord {
+    this.assertCurrentOwner();
     const existing = this.getGoalRequest(input.requestId);
     if (existing) {
       if (existing.sessionId !== input.sessionId || existing.fingerprint !== input.fingerprint) throw new Error("session_goal_request_conflict");
@@ -3198,6 +3200,7 @@ export class SessionStore {
   }
 
   settleGoalRequest(requestId: string, input: { status: "pending" | "completed" | "failed"; goalId?: string; result?: Record<string, unknown>; error?: string }): SessionGoalRequestRecord {
+    this.assertCurrentOwner();
     const timestamp = now();
     const result = this.database.prepare(`UPDATE session_goal_request SET status = ?, goal_id = ?, result_json = ?, error = ?, updated_at = ? WHERE request_id = ?`)
       .run(input.status, input.goalId ?? null, input.result ? JSON.stringify(input.result) : null, input.error ?? null, timestamp, requestId);
@@ -3206,6 +3209,7 @@ export class SessionStore {
   }
 
   recordGoalAssessment(input: { goalId: string; revision: number; runId: string; assessment: Record<string, unknown> }): void {
+    this.assertCurrentOwner();
     this.database.prepare(`
       INSERT INTO session_goal_assessment (id, goal_id, revision, run_id, assessment_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -3213,19 +3217,69 @@ export class SessionStore {
     `).run(randomUUID(), input.goalId, input.revision, input.runId, JSON.stringify(input.assessment), now());
   }
 
-  recordGoalContinuation(input: { goalId: string; revision: number; previousRunId: string }): boolean {
+  goalEvidenceSignatures(goalId: string): string[] {
+    const rows = this.database.prepare(`SELECT assessment_json FROM session_goal_assessment WHERE goal_id = ?`).all(goalId) as { assessment_json: string }[];
+    return rows.flatMap((row) => {
+      const value = JSON.parse(row.assessment_json) as { verifiedSignatures?: string[] };
+      return value.verifiedSignatures ?? [];
+    });
+  }
+
+  recordGoalContinuation(input: { goalId: string; revision: number; previousRunId: string; inputId: string; runId: string }): boolean {
+    this.assertCurrentOwner();
     const timestamp = now();
     const result = this.database.prepare(`
       INSERT OR IGNORE INTO session_goal_continuation
-        (id, goal_id, revision, previous_run_id, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'pending', ?, ?)
-    `).run(randomUUID(), input.goalId, input.revision, input.previousRunId, timestamp, timestamp);
+        (id, goal_id, revision, previous_run_id, input_id, run_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(randomUUID(), input.goalId, input.revision, input.previousRunId, input.inputId, input.runId, timestamp, timestamp);
     return result.changes === 1;
   }
 
   pauseActiveGoalsOnStartup(): number {
-    return this.database.prepare(`UPDATE session_goal SET status = 'paused', revision = revision + 1, reason = '应用重启后需要手动继续', updated_at = ? WHERE status = 'active'`)
-      .run(now()).changes;
+    this.assertCurrentOwner();
+    return this.transaction(() => {
+      const rows = this.database.prepare(`SELECT id FROM session_goal WHERE status = 'active'`).all() as { id: string }[];
+      for (const { id } of rows) {
+        const goal = this.getGoal(id)!;
+        this.updateGoal(id, { expectedRevision: goal.revision, status: "paused", currentRunId: null, reason: "应用重启后需要手动继续" });
+      }
+      this.database.prepare(`UPDATE session_goal_continuation SET status = 'cancelled', updated_at = ? WHERE status = 'pending'`).run(now());
+      return rows.length;
+    });
+  }
+
+  markGoalContinuation(runId: string, status: "dispatched" | "cancelled"): void {
+    this.assertCurrentOwner();
+    this.database.prepare(`UPDATE session_goal_continuation SET status = ?, updated_at = ? WHERE run_id = ?`).run(status, now(), runId);
+  }
+
+  finishGoalRun(runId: string): void {
+    this.assertCurrentOwner();
+    const row = this.database.prepare(`SELECT id FROM session_goal WHERE current_run_id = ?`).get(runId) as { id: string } | undefined;
+    if (!row) return;
+    this.database.prepare(`UPDATE session_goal SET current_run_id = NULL, updated_at = ? WHERE id = ?`).run(now(), row.id);
+    const goal = this.getGoal(row.id)!;
+    this.appendEvent({ type: "session.goal.updated", sessionId: goal.sessionId, payload: { goal } });
+  }
+
+  startGoalRun(goalId: string, revision: number, runId: string, automatic: boolean): boolean {
+    this.assertCurrentOwner();
+    return this.transaction(() => {
+      const goal = this.getGoal(goalId);
+      if (!goal || goal.status !== "active" || goal.revision !== revision) return false;
+      const run = this.getRun(runId);
+      if (!run || run.sessionId !== goal.sessionId || (run.status !== "pending" && run.status !== "running")) return false;
+      if (goal.currentRunId === runId) return true;
+      if (automatic && goal.autoTurnsUsed >= goal.maxAutoTurns) {
+        this.updateGoal(goalId, { expectedRevision: revision, status: "paused", reason: "目标自动续跑额度已用完", currentRunId: null });
+        return false;
+      }
+      // Starting a run changes accounting, not the objective revision the run is bound to.
+      this.database.prepare(`UPDATE session_goal SET current_run_id = ?, auto_turns_used = auto_turns_used + ?, updated_at = ? WHERE id = ? AND revision = ?`).run(runId, automatic ? 1 : 0, now(), goalId, revision);
+      this.appendEvent({ type: "session.goal.updated", sessionId: goal.sessionId, payload: { goal: this.getGoal(goalId)! } });
+      return true;
+    });
   }
 
   getGoal(id: string): SessionGoal | undefined {
@@ -3245,6 +3299,7 @@ export class SessionStore {
   }
 
   updateGoal(id: string, input: UpdateSessionGoalStoreInput): SessionGoal {
+    this.assertCurrentOwner();
     const current = this.getGoal(id);
     if (!current) throw new Error(`Session goal not found: ${id}`);
     if (current.revision !== input.expectedRevision) throw new Error("session_goal_revision_conflict");

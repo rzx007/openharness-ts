@@ -59,7 +59,6 @@ export interface SessionRunExecutorContext {
   ) => Promise<void>;
   /** Re-read the cwd catalog before executing renderer-supplied Skill paths. */
   resolveSkillCatalog?(session: SessionRecord): Promise<SessionInputSkillCatalog>;
-  settleGoalRun?(sessionId: string, runId: string): Promise<void>;
 }
 
 export interface ExecuteSessionRunInput {
@@ -200,22 +199,19 @@ export class SessionRunExecutor {
       }
       const goalId = typeof storedRun?.metadata?.goalId === "string" ? storedRun.metadata.goalId : undefined;
       const goalRevision = typeof storedRun?.metadata?.goalRevision === "number" ? storedRun.metadata.goalRevision : undefined;
+      let goalBinding: { goalId: string; revision: number; objective: string } | undefined;
       if (goalId && goalRevision !== undefined) {
         const goal = this.context.store.getGoal(goalId);
         if (!goal || goal.sessionId !== sessionId || goal.revision !== goalRevision || goal.status !== "active") {
           throw new Error("session_goal_run_is_stale");
         }
-        const prefix = [
-          "当前运行属于一个持续目标。请推进目标，并在本轮结束前调用 GoalAssessment 提交 continue、complete、waiting_user 或 blocked 建议。",
-          `目标版本：${goal.revision}`,
-          `目标：${goal.objective}`,
-        ].join("\n");
-        submittedContent = prependGoalContext(submittedContent, prefix);
+        goalBinding = { goalId: goal.id, revision: goal.revision, objective: goal.objective };
       }
 
       // 把 store 里已有的 inputId/runId/traceId 传进去，投影层才能把流式事件对上这条 durable run。
       // 不要让 agent 自己再生成一套 id，否则 SSE 里的 run 和 HTTP 回的 run 会对不上。
       const run = agent.submitMessage(submittedContent, {
+        ...(goalBinding ? { goal: goalBinding } : {}),
         inputItems: admitted.items,
         signal: workContext.signal,
         delivery: admitted.delivery,
@@ -383,29 +379,8 @@ export class SessionRunExecutor {
           });
         }
       }
-      try {
-        await this.context.settleGoalRun?.(sessionId, runId);
-      } catch (error) {
-        this.context.log({
-          level: "error",
-          event: "session.goal.settlement_failed",
-          traceId: this.context.traceIdForRun(runId),
-          sessionId,
-          runId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
     }
   }
-}
-
-function prependGoalContext(content: string | ContentBlock[], prefix: string): string | ContentBlock[] {
-  if (typeof content === "string") return `${prefix}\n\n用户输入：\n${content}`;
-  const index = content.findIndex((block) => block.type === "text");
-  if (index < 0) return [{ type: "text", text: `${prefix}\n\n用户输入：\n` }, ...content];
-  return content.map((block, blockIndex) => blockIndex === index && block.type === "text"
-    ? { ...block, text: `${prefix}\n\n用户输入：\n${block.text}` }
-    : block);
 }
 
 async function resolveSkillCatalog(

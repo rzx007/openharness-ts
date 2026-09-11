@@ -144,4 +144,4 @@ GoalAssessment 增加 `evidenceRefs: GoalEvidenceRef[]` 和可选 wait；evidenc
 
 ## 交付记录
 
-当前任务均未实施。首轮子代理发现持久 run 重投、等待关联与证据结构三个缺口，已补充专门投递方法、GoalWait、GoalEvidenceRef 和核验规则；同时明确单 Banner 查询优先级及每轮工具绑定。修订稿经子代理重读后复核通过，未发现剩余阻碍实施的问题；该结论仅针对设计与计划，不代表功能或测试已完成。这份计划作为目标独立阶段的实施依据，不追认此前 Composer 计划里的目标功能已完成。
+实现已完成。初版实现经代码审核判定存在持久续跑、幂等、Run 结算和前端状态归属问题，随后重构为：目标请求/input/run 在一个持久事务内创建；Run 先落库后投递；车道释放后统一结算；启动时对账；目标工具按 Run 绑定；Desktop 使用按 scope 的 goal-actions。最终相关验证为 protocol 13、core 1、agent-runtime 17、services 3、server 46、desktop 69，全部退出码 0；七组 TypeScript 检查、electron-vite 生产构建及用户手动启动均通过。代码审核未发现剩余 Critical/Important 阻断。

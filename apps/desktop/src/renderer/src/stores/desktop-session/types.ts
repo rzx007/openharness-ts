@@ -8,6 +8,7 @@ import type {
   DesktopWorkspaceMode,
   SessionUserInputItem,
   SessionGoal,
+  DesktopSessionGoalActionInput,
 } from "@shared/session-types"
 import type { DesktopAttachmentSupport } from "@shared/attachment-types"
 import type {
@@ -18,7 +19,7 @@ import type {
 } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import type { StoreApi } from "zustand"
-import type { ComposerDraftState } from "./composer-draft-state"
+import type { ComposerDraftState, DesktopComposerDraft } from "./composer-draft-state"
 import type { ComposerDocument } from "./composer-document"
 import type { ProjectDetailsCoordinator } from "./project-details-coordinator"
 
@@ -123,7 +124,6 @@ export interface ProjectActions {
 }
 
 export interface SessionActions {
-  startGoal: (objective: string, requestId: string, options?: SubmitPromptOptions) => Promise<SessionGoal | null>
   startNewConversation: () => Promise<void>
   selectModel: (model: DesktopModel) => Promise<void>
   selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>
@@ -148,6 +148,34 @@ export interface SessionActions {
     refresh?: boolean
     previousContextWindow?: number
   }) => Promise<void>
+}
+
+export interface GoalComposerState {
+  mode: boolean
+  busy: boolean
+  error: string | null
+  maxAutoTurns: number
+  ordinaryDraft?: DesktopComposerDraft
+  editingGoal?: SessionGoal
+  createdSessionId?: string
+  request?: { fingerprint: string; id: string; actionInput?: DesktopSessionGoalActionInput }
+  dismissedGoalId?: string
+}
+
+export interface GoalActions {
+  setGoalMode: (scope: string, active: boolean) => void
+  setGoalAutoTurns: (scope: string, count: number) => void
+  dismissGoalError: (scope: string) => void
+  dismissGoalBanner: (scope: string, goalId: string) => void
+  refreshGoal: (sessionId: string) => Promise<void>
+  submitGoal: (scope: string) => Promise<void>
+  applyGoalAction: (
+    sessionId: string,
+    input: Pick<
+      DesktopSessionGoalActionInput,
+      "action" | "additionalAutoTurns" | "questionId" | "response"
+    >
+  ) => Promise<void>
 }
 
 export interface PromptActions {
@@ -199,10 +227,13 @@ export interface DesktopSessionState
     BootstrapActions,
     ProjectActions,
     SessionActions,
+    GoalActions,
     PromptActions,
     AttachmentActions,
     QueuedPromptActions {
   composerDraftsByScope: ComposerDraftState["composerDraftsByScope"]
+  goalsBySession: Record<string, SessionGoal | null>
+  goalComposersByScope: Record<string, GoalComposerState>
   loadStatus: LoadStatus
   daemonStatus: DesktopDaemonStatus
   projects: DesktopProject[]

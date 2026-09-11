@@ -3,6 +3,7 @@ import { resolveToolExecution, ToolRegistrationError } from "@openharness/core";
 import type { ExecutionEnvironmentHandle } from "@openharness/environment";
 
 import type { OpenHarnessAgentConfiguration } from "./agent-options.js";
+import { GOAL_ASSESSMENT_TOOL_NAME } from "./goal-assessment-tool.js";
 
 export type ToolLimit =
   { kind: "all" } | { kind: "only"; names: ReadonlySet<string> };
@@ -16,6 +17,9 @@ export function applyConfiguredTools(
   const trustedOverrides = new Set(configuration.trustedToolOverrides ?? []);
   const additionNames = assertUniqueToolNames(additions, "tools");
   const overrideNames = assertUniqueToolNames(overrides, "toolOverrides");
+  if (additionNames.has(GOAL_ASSESSMENT_TOOL_NAME) || overrideNames.has(GOAL_ASSESSMENT_TOOL_NAME)) {
+    throw new ToolRegistrationError("tool_already_registered", `${GOAL_ASSESSMENT_TOOL_NAME} is reserved for durable goal runs`);
+  }
 
   for (const name of trustedOverrides) {
     if (!overrideNames.has(name)) {

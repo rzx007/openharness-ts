@@ -12,6 +12,7 @@ import type {
   PromptActions,
   QueuedPromptActions,
   SessionActions,
+  GoalActions,
 } from "./types"
 
 const initialDaemonStatus: DesktopDaemonStatus = {
@@ -39,12 +40,15 @@ export function createInitialState(): Omit<
   | keyof AttachmentActions
   | keyof ProjectActions
   | keyof SessionActions
+  | keyof GoalActions
   | keyof PromptActions
   | keyof QueuedPromptActions
   | "applySessionUpdate"
 > {
   return {
     loadStatus: "idle" as const,
+    goalsBySession: {},
+    goalComposersByScope: {},
     daemonStatus: createInitialDaemonStatus(),
     projects: [],
     sessions: [],

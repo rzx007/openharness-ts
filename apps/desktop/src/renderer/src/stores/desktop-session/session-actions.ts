@@ -226,28 +226,6 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   }
 
   return {
-    async startGoal(objective, requestId, options) {
-      const state = get()
-      const model = state.selectedModel
-      const provider = state.selectedProvider
-      if (!model || (state.workspaceMode === "project" && !state.selectedProject)) return null
-      const sessionInput: CreateDesktopSessionInput = state.workspaceMode === "project" && state.selectedProject
-        ? { projectId: state.selectedProject.id, cwd: state.selectedProject.path, model, ...(provider ? { provider } : {}), permissionMode: state.selectedPermissionMode }
-        : { model, ...(provider ? { provider } : {}), permissionMode: state.selectedPermissionMode }
-      const session = await window.desktop.sessions.create(sessionInput)
-      set((current) => ({ sessions: upsertSession(current.sessions, session) }))
-      await openPrimarySession(session.id)
-      const goalAttachments = (options?.attachments ?? []).flatMap((attachment) => attachment.assetId ? [{ assetId: attachment.assetId, intent: "auto" as const, displayName: attachment.displayName }] : [])
-      const goal = await window.desktop.sessions.createGoal({ sessionId: session.id, requestId, objective, items: options?.document?.items, attachments: goalAttachments })
-      set((current) => ({
-        composerDraftsByScope: setDraftDocument(
-          { composerDraftsByScope: current.composerDraftsByScope },
-          NEW_CONVERSATION_SCOPE,
-          emptyComposerDocument,
-        ).composerDraftsByScope,
-      }))
-      return goal
-    },
     async startNewConversation() {
       advancePrimaryNavigation()
       await window.desktop.sessions.close()
@@ -335,9 +313,7 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
 
     async updateSessionModel(sessionId, model) {
       const previousContextWindow =
-        get().activeSessionId === sessionId
-          ? get().contextUsageSnapshot?.contextWindow
-          : undefined
+        get().activeSessionId === sessionId ? get().contextUsageSnapshot?.contextWindow : undefined
       const session = await window.desktop.sessions.updateModel({
         sessionId,
         model: model.id,
@@ -758,14 +734,13 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
         const currentSessionRuntime = startedSessionId
           ? currentState.sessionRuntimes[startedSessionId]
           : null
-        const confirmed =
-          Boolean(
-            startedSessionId &&
-            currentSessionRuntime &&
-            (!currentSessionRuntime.pendingPromptSubmissions[promptSubmissionId] ||
-              (currentState.activeSessionId === startedSessionId &&
-                sessionViewContainsInput(currentState.sessionView, promptSubmissionId)))
-          )
+        const confirmed = Boolean(
+          startedSessionId &&
+          currentSessionRuntime &&
+          (!currentSessionRuntime.pendingPromptSubmissions[promptSubmissionId] ||
+            (currentState.activeSessionId === startedSessionId &&
+              sessionViewContainsInput(currentState.sessionView, promptSubmissionId)))
+        )
         set((state) => {
           const ownsNewConversation =
             navigationOwnerGeneration === primaryNavigationGeneration &&
@@ -876,15 +851,16 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   ): void {
     const scope = sessionComposerScope(sessionId)
     set((state) => {
-      const current =
-        state.composerDraftsByScope[scope] ?? { document: emptyComposerDocument, attachments: [] }
+      const current = state.composerDraftsByScope[scope] ?? {
+        document: emptyComposerDocument,
+        attachments: [],
+      }
       const currentDraftIds = new Set(current.attachments.map((attachment) => attachment.draftId))
       return {
         composerDraftsByScope: {
           ...state.composerDraftsByScope,
           [scope]: {
-            document:
-              current.document.items.length === 0 ? submittedDocument : current.document,
+            document: current.document.items.length === 0 ? submittedDocument : current.document,
             attachments: [
               ...submittedAttachments.filter(
                 (attachment) => !currentDraftIds.has(attachment.draftId)
@@ -930,7 +906,9 @@ function sessionViewContainsInput(view: DesktopSessionView | null, inputId: stri
   return Boolean(view?.inputs.some((input) => input.id === inputId))
 }
 
-function hasMeaningfulItems(items: readonly import("@shared/session-types").SessionUserInputItem[]): boolean {
+function hasMeaningfulItems(
+  items: readonly import("@shared/session-types").SessionUserInputItem[]
+): boolean {
   return items.some((item) => item.type !== "text" || item.text.trim().length > 0)
 }
 

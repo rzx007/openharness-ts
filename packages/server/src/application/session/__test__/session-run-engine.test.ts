@@ -641,6 +641,7 @@ function createStore() {
   });
   return {
     transaction: <T>(work: () => T) => work(),
+    getCurrentGoal: vi.fn(() => undefined),
     admitPrompt,
     admitPromptWithRun: vi.fn((input) => {
       const admitted = admitPrompt({ ...input.prompt, delivery: "queue" });

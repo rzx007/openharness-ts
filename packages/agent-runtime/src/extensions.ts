@@ -6,6 +6,7 @@ import type {
   IToolRegistry,
   ToolDefinition,
 } from "@openharness/core";
+import { GOAL_ASSESSMENT_TOOL_NAME } from "./goal-assessment-tool.js";
 import { getSkillsDir } from "@openharness/core";
 import {
   discoverInstalledNativePlugins,
@@ -123,6 +124,7 @@ export function createExtensionToolRegistry(
 ): ExtensionToolRegistry {
   return {
     register(tool) {
+      if (tool.name === GOAL_ASSESSMENT_TOOL_NAME) throw new Error(`${GOAL_ASSESSMENT_TOOL_NAME} is reserved for durable goal runs`);
       registry.register(tool, { kind: "extension" });
       registeredNames?.push(tool.name);
     },

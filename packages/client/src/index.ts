@@ -13,6 +13,7 @@ export {
   OpenHarnessClient,
   streamServerSentEvents,
 } from "./transport/index.js";
+export { parseCreateSessionGoalInput, parseUpdateSessionGoalInput, parseGoalActionInput } from "@openharness/protocol";
 export type {
   AgentEnvironmentCapabilities,
   AttachmentAssetRecord,
@@ -136,6 +137,10 @@ export type {
   SessionStateSnapshot,
   SessionTransformationMessagePartRecord,
   SessionUserInputItem,
+  SessionGoal,
+  CreateSessionGoalInput,
+  UpdateSessionGoalInput,
+  GoalActionInput,
   SessionUsageResponse,
   StartDreamResponse,
   SyncEventUpdate,

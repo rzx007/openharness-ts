@@ -148,7 +148,7 @@ runtimeStatus:
 
 - `packages/plugins/src/installation/`：安装记录、不可变快照、安装前后校验；
 - `packages/plugins/src/load-native-plugin.ts`：Native Plugin 加载和 unsupported 组件诊断；
-- `packages/plugins/src/verify-installed-native-plugin.ts` 或同类文件：Runtime 激活前校验入口；
+- `packages/plugins/src/installation/verify.ts`：Runtime 激活前校验入口；
 - `packages/agent-runtime/src/extensions.ts`：Runtime 组合插件贡献的入口；
 - `packages/agent-runtime/src/native-tools/`：Native Tool 进程启动、调用和失败；
 - `packages/server/src/application/default-services/plugin-service.ts`：Desktop 和 CLI 共用的插件管理应用层；

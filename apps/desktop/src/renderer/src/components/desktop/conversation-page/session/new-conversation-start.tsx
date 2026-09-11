@@ -20,6 +20,8 @@ import {
 } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
 import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
+import { selectGoalObjective } from "@renderer/stores/desktop-session/goal-actions"
+import type { ComposerPickerCommand, ComposerPickerItem } from "../composer/composer-picker"
 import { Composer } from "../composer/composer"
 import type { ComposerSkill } from "../composer/rich-prompt-input"
 import { HeaderIconButton, PickerMenuItem, StartPickerButton } from "../composer/controls"
@@ -44,6 +46,14 @@ export function NewConversationStart({
   selectedPermissionMode,
   operationError,
   skills,
+  commands,
+  onCommand,
+  goalMode = false,
+  onGoalModeChange,
+  goalAutoTurns,
+  onGoalAutoTurnsChange,
+  goalError = null,
+  onDismissGoalError,
   attachments,
   attachmentInteractionEnabled,
   panelOpen,
@@ -82,6 +92,14 @@ export function NewConversationStart({
   selectedPermissionMode: DesktopPermissionMode
   operationError: string | null
   skills: readonly ComposerSkill[]
+  commands?: readonly ComposerPickerItem[]
+  onCommand?: (command: ComposerPickerCommand) => Promise<void>
+  goalMode?: boolean
+  onGoalModeChange?: (active: boolean) => void
+  goalAutoTurns?: number
+  onGoalAutoTurnsChange?: (count: number) => void
+  goalError?: string | null
+  onDismissGoalError?: () => void
   attachments: readonly DesktopAttachmentDraft[]
   attachmentInteractionEnabled: boolean
   panelOpen: boolean
@@ -172,6 +190,7 @@ export function NewConversationStart({
         <div className="relative w-full min-w-0">
           <div className="mx-3 mb-2 space-y-2">
             <ScopedOperationError error={operationError} />
+            <ScopedOperationError error={goalError} onDismiss={onDismissGoalError} />
           </div>
           <div className="mx-3 flex h-10 min-w-0 items-center gap-0.5 overflow-hidden rounded-t-2xl bg-muted-foreground/5 px-2.5 pt-1">
             <div className="min-w-0">
@@ -407,8 +426,16 @@ export function NewConversationStart({
             modelLabel={modelLabel}
             permissionMode={selectedPermissionMode}
             skills={skills}
+            commands={commands}
+            onCommand={onCommand}
+            goalMode={goalMode}
+            onGoalModeChange={onGoalModeChange}
+            goalAutoTurns={goalAutoTurns}
+            onGoalAutoTurnsChange={onGoalAutoTurnsChange}
             canSubmit={Boolean(
-              (draft.items.length > 0 || attachments.length > 0) &&
+              (goalMode
+                ? selectGoalObjective(draft)
+                : draft.items.length > 0 || attachments.length > 0) &&
               areDesktopAttachmentsSendable(attachments) &&
               (selectedProject || workspaceMode === "outside_project")
             )}

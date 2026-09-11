@@ -7,6 +7,7 @@ import {
   patchSessionRuntimeMetadata,
   readSessionRuntimeConfig,
   parseSessionInputItems,
+  parseGoalAssessment,
   type SessionInputRecord,
 } from "@openharness/protocol";
 
@@ -135,8 +136,12 @@ export class DaemonAgentEventProjector {
       case "domain.event":
         if (event.data.name === "goal.assessment" && event.context.runId) {
           const run = this.context.store.getRun(event.context.runId);
-          if (run?.metadata.goalId && (run.status === "pending" || run.status === "running")) {
-            this.context.store.updateRun(run.id, { metadata: { goalAssessment: event.data.payload ?? {} } });
+          const payload = event.data.payload;
+          if (run && run.sessionId === event.context.sessionId && typeof run.metadata.goalId === "string" && typeof run.metadata.goalRevision === "number" && run.status === "running" && !run.metadata.goalSettled && payload?.goalId === run.metadata.goalId && payload?.revision === run.metadata.goalRevision && payload?.runId === run.id) {
+            try {
+              const assessment = parseGoalAssessment(payload, { goalId: run.metadata.goalId, revision: run.metadata.goalRevision, runId: run.id });
+              this.context.store.updateRun(run.id, { metadata: { goalAssessment: assessment } });
+            } catch { /* Invalid or unbound suggestions cannot change the durable goal. */ }
           }
         }
         if (event.data.name === "context_compaction") {

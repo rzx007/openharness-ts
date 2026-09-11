@@ -22,10 +22,10 @@ Context Picker 当前提供：
 - 文件和文件夹：继续调用现有文件选择与附件上传逻辑。
 - 计划模式：复用现有 `plan` permission mode。
 - 历史对话：插入结构化、只读的会话引用。
+- 目标：进入独立目标输入模式；提交后由会话级 Banner 展示和控制状态。
 
 当前不提供：
 
-- 目标
 - 站点
 - 插件、应用和文件聊天搜索（没有稳定数据源前不展示）
 
@@ -42,6 +42,8 @@ Context Picker 当前提供：
 | `composer-attachments.tsx` | 待发送附件的预览、进度、取消、重试和移除 |
 | `composer-file-input.ts` | 拖拽、粘贴和文件输入解析 |
 | `context-usage-control.tsx` | 当前上下文用量入口 |
+| `goal-banner.tsx` | 当前目标状态、详情、暂停/继续、验收和取消入口 |
+| `../../../../stores/desktop-session/goal-actions.ts` | 按会话隔离的目标草稿、请求和状态同步 |
 
 ## 数据模型
 

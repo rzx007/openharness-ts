@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { FrameworkAgentRun } from "./framework-agent-run.js";
 import { AgentEventBus } from "./event-source.js";
+import { ToolRegistry } from "@openharness/core";
 
 it("preserves original structured items in root and steer acceptance events", async () => {
   const observed: unknown[] = [];
@@ -26,5 +27,34 @@ it("preserves original structured items in root and steer acceptance events", as
   expect(observed).toEqual([
     { content: "root instruction", inputItems: items, delivery: "queue" },
     { content: "steer instruction", inputItems: items, delivery: "steer" },
+  ]);
+});
+
+it("scopes the assessment tool and binding to each run of a reused runtime", async () => {
+  const toolRegistry = new ToolRegistry();
+  const observed: unknown[] = [];
+  const runtime = { toolRegistry, queryEngine: { getTotalUsage: () => ({ inputTokens: 0, outputTokens: 0 }) } };
+  for (const goal of [{ goalId: "g1", revision: 1 }, undefined, { goalId: "g2", revision: 3 }]) {
+    const run = new FrameworkAgentRun({
+      agentId: "a", goal, ids: { inputId: `i-${observed.length}`, runId: `r-${observed.length}`, traceId: "t" },
+      content: "work", delivery: "queue", eventBus: new AgentEventBus(() => {}),
+      session: {
+        id: "s", getHistory: () => [],
+        submitMessage: async function* (_: string, options: any) {
+          observed.push({ goal: options.execution.goal, visible: toolRegistry.has("GoalAssessment") });
+          yield { type: "complete", stopReason: "end_turn" };
+        },
+      } as any,
+      runtime: runtime as any,
+      effects: {} as any, children: { cwd: "/repo", createController: () => ({}) } as any,
+      onSettled: () => {},
+    });
+    await run.result;
+    expect(toolRegistry.has("GoalAssessment")).toBe(false);
+  }
+  expect(observed).toEqual([
+    { goal: { goalId: "g1", revision: 1 }, visible: true },
+    { goal: undefined, visible: false },
+    { goal: { goalId: "g2", revision: 3 }, visible: true },
   ]);
 });

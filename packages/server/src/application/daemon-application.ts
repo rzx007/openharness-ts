@@ -272,6 +272,7 @@ export class DaemonApplication implements DurableAgentApplication {
       // 先把这些半截状态结掉，再对外服务，免得窗口以为还在跑。
       recoverProjectionSettlements(store);
       store.interruptActiveRuns(DAEMON_RESTART_RUN_REASON);
+      store.pauseActiveGoalsOnStartup();
       store.terminalizeUnownedInputs(DAEMON_RESTART_INPUT_REASON);
       store.expirePendingPermissionRequests(DAEMON_RESTART_PERMISSION_REASON);
       store.finalizeClosingSessions();
@@ -576,7 +577,6 @@ export class DaemonApplication implements DurableAgentApplication {
         traceIdForRun: (runId) => this.traceIdForRun(runId),
         log: options.log,
         postRunMaintenance,
-        settleGoalRun: (sessionId, runId) => this.goals.settleRun(sessionId, runId),
         attachmentResources: this.attachmentResources,
         attachmentOcrAvailable: true,
         contextUsageCache,
@@ -615,6 +615,7 @@ export class DaemonApplication implements DurableAgentApplication {
        * 4. 提供运行引擎相关的查询和操作接口
        */
       this.runEngine = new SessionRunEngine({
+        settleGoalRun: (sessionId, runId) => this.goals.settleRun(sessionId, runId),
         store,
         attachmentLimits: this.attachments.limits,
         agentPool: this.agentPool,
@@ -686,7 +687,7 @@ export class DaemonApplication implements DurableAgentApplication {
           return (await discoverOpenHarnessExtensions(session.cwd, settings)).skillRegistry;
         },
       });
-      this.goals = new SessionGoalService({ store, sessions: this.sessions, runEngine: this.runEngine });
+      this.goals = new SessionGoalService({ store, sessions: this.sessions, runEngine: this.runEngine, events: this.eventPublisher });
       /**
        * 通道服务：
        * 1. 管理会话的通信通道（如 SSE、WebSocket）

@@ -354,6 +354,14 @@ export class SessionApplicationService {
     }
   }
 
+  async withSessionOperation<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    this.assertReady();
+    const session = this.context.store.getSession(sessionId);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    const lease = this.enterSessionOperation(session);
+    try { return await work(); } finally { lease.release(); }
+  }
+
   async admitPrompt(
     sessionId: string,
     input: AdmitPromptInput,

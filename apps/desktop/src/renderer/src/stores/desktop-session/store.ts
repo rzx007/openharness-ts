@@ -9,6 +9,7 @@ import { createSelectedProjectGitRefreshScheduler } from "./project-git-schedule
 import { createPromptActions } from "./prompt-actions"
 import { createQueuedPromptActions } from "./queued-prompt-actions"
 import { createSessionActions } from "./session-actions"
+import { createGoalActions } from "./goal-actions"
 import { createApplySessionUpdate } from "./session-view-actions"
 import type { DesktopSessionState } from "./types"
 
@@ -35,6 +36,7 @@ export const useDesktopSessionStore = create<DesktopSessionState>((set, get) => 
     ...createBootstrapActions(context),
     ...createProjectActions(context),
     ...createSessionActions(context),
+    ...createGoalActions(context),
     ...createPromptActions(context),
     ...createAttachmentActions(context),
     ...createQueuedPromptActions(context),
@@ -51,6 +53,7 @@ export function attachDesktopSessionEvents(): () => void {
     })
     detachDesktopSessionUpdates = window.desktop.sessions.onUpdated((view) => {
       useDesktopSessionStore.getState().applySessionUpdate(view)
+      void useDesktopSessionStore.getState().refreshGoal(view.session.id)
     })
     if (typeof window.desktop.attachments?.onUploadEvent === "function") {
       detachDesktopAttachmentUploads = window.desktop.attachments.onUploadEvent((event) => {

@@ -22,8 +22,10 @@ import {
 import type { AgentChildManager } from "./child-agent.js";
 import { abortError, serializeError } from "./agent-errors.js";
 import { AgentEventDeliveryError, type AgentEventBus } from "./event-source.js";
+import { createGoalAssessmentTool } from "./goal-assessment-tool.js";
 
 interface FrameworkAgentRunOptions {
+  goal?: { goalId: string; revision: number; objective?: string };
   agentId: string;
   session: AgentSession;
   runtime: RuntimeBundle;
@@ -156,6 +158,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
     };
     const execution: AgentExecutionContext = {
       scope,
+      ...(this.options.goal ? { goal: Object.freeze({ ...this.options.goal }) } : {}),
       effects: this.options.effects,
       children: this.options.children.createController(scope),
       emit: (event) => this.emit(event),
@@ -165,7 +168,12 @@ export class FrameworkAgentRun implements AgentRunHandle {
       },
     };
 
+    let goalToolRegistered = false;
     try {
+      if (execution.goal) {
+        this.options.runtime.toolRegistry.register(createGoalAssessmentTool(), { kind: "runtime", id: "session-goal" });
+        goalToolRegistered = true;
+      }
       await this.emit({
         type: "input.accepted",
         data: {
@@ -220,6 +228,8 @@ export class FrameworkAgentRun implements AgentRunHandle {
         }).catch(() => {});
       }
       throw error;
+    } finally {
+      if (goalToolRegistered) this.options.runtime.toolRegistry.unregister?.("GoalAssessment");
     }
   }
 

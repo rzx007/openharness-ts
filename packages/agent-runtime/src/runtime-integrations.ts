@@ -15,7 +15,6 @@ import type { AgentMemoryRuntime } from "./memory-runtime.js";
 import { createMcpAuthHost } from "./mcp-auth.js";
 import { createRememberTool } from "./remember-tool.js";
 import { getInternalToolRegistry } from "./default-runtime.js";
-import { createGoalAssessmentTool } from "./goal-assessment-tool.js";
 
 export interface InstallRuntimeIntegrationsOptions {
   cwd: string;
@@ -35,9 +34,6 @@ export async function installRuntimeIntegrations(
 ): Promise<() => ReturnType<McpClientManager["getConnections"]>> {
   const { runtime } = options;
   const memory = options.memory;
-  if (!runtime.toolRegistry.has("GoalAssessment")) {
-    runtime.toolRegistry.register(createGoalAssessmentTool(), { kind: "runtime", id: "session-goal" });
-  }
   await configureDiscoveredExtensions(options.discovery, {
     cwd: options.cwd,
     environmentKind: options.executionEnvironment?.info.kind,

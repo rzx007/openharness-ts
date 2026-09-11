@@ -327,6 +327,8 @@ export interface AgentEventSource {
 /** Framework-internal execution capabilities shared with tool packages. */
 export interface AgentExecutionContext {
   readonly scope: AgentRunScope;
+  /** Set by the host for this run, never inferred from prompt text. */
+  readonly goal?: { readonly goalId: string; readonly revision: number; readonly objective?: string };
   readonly effects: AgentEffects;
   readonly children: AgentChildController;
   emit(event: AgentEventInput): Promise<void>;

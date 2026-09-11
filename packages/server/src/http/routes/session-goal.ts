@@ -5,7 +5,10 @@ import { applicationErrorResponse, jsonResponse, readJson } from "../support.js"
 
 export function createSessionGoalRoutes(goals: SessionGoalService): Hono {
   return new Hono()
-    .get("/:sessionId/goal", (c) => jsonResponse({ goal: goals.get(c.req.param("sessionId")) }))
+    .get("/:sessionId/goal", (c) => {
+      try { return jsonResponse({ goal: goals.get(c.req.param("sessionId")) }); }
+      catch (error) { return applicationErrorResponse(error, 400); }
+    })
     .get("/:sessionId/goal-requests/:requestId", (c) => {
       try { return jsonResponse({ request: goals.getRequest(c.req.param("sessionId"), c.req.param("requestId")) }); }
       catch (error) { return applicationErrorResponse(error, 400); }

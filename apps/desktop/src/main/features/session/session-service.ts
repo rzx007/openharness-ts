@@ -12,6 +12,9 @@ import { promisify } from "node:util"
 
 import {
   OpenHarnessClient,
+  parseCreateSessionGoalInput,
+  parseUpdateSessionGoalInput,
+  parseGoalActionInput,
   syncEvents,
   type OpenHarnessClientState,
   type ProjectRecord,
@@ -245,17 +248,31 @@ export class DesktopSessionService {
 
   async createGoal(input: CreateDesktopSessionGoalInput): Promise<SessionGoal> {
     const { sessionId, ...body } = input
-    return await (await this.getClient()).createSessionGoal(requireString(sessionId, "会话 ID"), body)
+    return await (
+      await this.getClient()
+    ).createSessionGoal(requireString(sessionId, "会话 ID"), parseCreateSessionGoalInput(body))
   }
 
   async updateGoal(input: UpdateDesktopSessionGoalInput): Promise<SessionGoal> {
     const { sessionId, goalId, ...body } = input
-    return await (await this.getClient()).updateSessionGoal(requireString(sessionId, "会话 ID"), requireString(goalId, "目标 ID"), body)
+    return await (
+      await this.getClient()
+    ).updateSessionGoal(
+      requireString(sessionId, "会话 ID"),
+      requireString(goalId, "目标 ID"),
+      parseUpdateSessionGoalInput(body)
+    )
   }
 
   async goalAction(input: DesktopSessionGoalActionInput): Promise<SessionGoal> {
     const { sessionId, goalId, ...body } = input
-    return await (await this.getClient()).applySessionGoalAction(requireString(sessionId, "会话 ID"), requireString(goalId, "目标 ID"), body)
+    return await (
+      await this.getClient()
+    ).applySessionGoalAction(
+      requireString(sessionId, "会话 ID"),
+      requireString(goalId, "目标 ID"),
+      parseGoalActionInput(body)
+    )
   }
 
   async checkoutProjectBranch(

@@ -72,6 +72,7 @@ export interface OpenHarnessAgentOptions extends OpenHarnessAgentConfiguration {
 }
 
 export interface OpenHarnessAgentSubmitOptions {
+  goal?: { goalId: string; revision: number; objective?: string };
   signal?: AbortSignal;
   inputItems?: readonly unknown[];
   delivery?: "queue" | "steer";
@@ -215,6 +216,7 @@ class DefaultOpenHarnessAgent implements OpenHarnessAgent {
       externalSignal: options.signal,
       delivery: options.delivery ?? "queue",
       metadata: options.metadata,
+      goal: options.goal,
       onSettled: (result, toolActivity) => {
         if (this.activeRun !== run) return;
         if (result && toolActivity)

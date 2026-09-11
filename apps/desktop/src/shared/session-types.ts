@@ -1,11 +1,27 @@
-import type { SessionInputAttachmentRecord, SessionUserInputItem, SessionGoal, CreateSessionGoalInput, UpdateSessionGoalInput, GoalActionInput } from "@openharness/client"
+import type {
+  SessionInputAttachmentRecord,
+  SessionUserInputItem,
+  CreateSessionGoalInput,
+  UpdateSessionGoalInput,
+  GoalActionInput,
+} from "@openharness/client"
 
 export type { SessionUserInputItem, SessionGoal } from "@openharness/client"
 
-export interface GetDesktopSessionGoalInput { sessionId: string }
-export interface CreateDesktopSessionGoalInput extends CreateSessionGoalInput { sessionId: string }
-export interface UpdateDesktopSessionGoalInput extends UpdateSessionGoalInput { sessionId: string; goalId: string }
-export interface DesktopSessionGoalActionInput extends GoalActionInput { sessionId: string; goalId: string }
+export interface GetDesktopSessionGoalInput {
+  sessionId: string
+}
+export interface CreateDesktopSessionGoalInput extends CreateSessionGoalInput {
+  sessionId: string
+}
+export interface UpdateDesktopSessionGoalInput extends UpdateSessionGoalInput {
+  sessionId: string
+  goalId: string
+}
+export interface DesktopSessionGoalActionInput extends GoalActionInput {
+  sessionId: string
+  goalId: string
+}
 
 import type { DesktopAttachmentSupport, DesktopPromptAttachmentInput } from "./attachment-types"
 
@@ -201,12 +217,7 @@ export interface DesktopProjectDetails {
 
 export type DesktopCommandKind = "session" | "template"
 export type DesktopCommandSelection = "execute" | "submenu" | "insert"
-export type DesktopCommandSource =
-  | "builtin"
-  | "bundled"
-  | "user"
-  | "plugin"
-  | "project"
+export type DesktopCommandSource = "builtin" | "bundled" | "user" | "plugin" | "project"
 
 interface DesktopCommandCatalogEntryBase {
   name: string
@@ -231,8 +242,7 @@ export interface DesktopTemplateCommandCatalogEntry extends DesktopCommandCatalo
 }
 
 export type DesktopCommandCatalogEntry =
-  | DesktopSessionCommandCatalogEntry
-  | DesktopTemplateCommandCatalogEntry
+  DesktopSessionCommandCatalogEntry | DesktopTemplateCommandCatalogEntry
 
 export interface ListDesktopCommandsInput {
   cwd: string

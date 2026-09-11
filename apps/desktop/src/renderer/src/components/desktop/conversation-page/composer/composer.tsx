@@ -7,7 +7,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui
 import { cn } from "@renderer/lib/utils"
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
-import type { DesktopModel, DesktopPermissionMode, DesktopSessionRecord } from "@shared/session-types"
+import type {
+  DesktopModel,
+  DesktopPermissionMode,
+  DesktopSessionRecord,
+} from "@shared/session-types"
 import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 import { ComposerAttachments } from "./composer-attachments"
 import { readComposerDrop } from "./composer-file-input"
@@ -36,6 +40,8 @@ export function Composer({
   activeSessionId = null,
   goalMode = false,
   onGoalModeChange,
+  goalAutoTurns = 20,
+  onGoalAutoTurnsChange,
   className,
   textareaClassName,
   rows = 2,
@@ -73,6 +79,8 @@ export function Composer({
   activeSessionId?: string | null
   goalMode?: boolean
   onGoalModeChange?: (active: boolean) => void
+  goalAutoTurns?: number
+  onGoalAutoTurnsChange?: (count: number) => void
   className?: string
   textareaClassName?: string
   rows?: number
@@ -101,7 +109,7 @@ export function Composer({
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
   const closePicker = (): void => setActivePicker(null)
   const allowSubmit = canSubmit ?? draft.items.length > 0
-  const attachDisabled = attachmentReadOnly
+  const attachDisabled = attachmentReadOnly || sending
   const contextItems: ContextPickerItem[] = [
     {
       id: "context:files",
@@ -133,7 +141,11 @@ export function Composer({
         description: "引用历史对话",
         sourceLabel: "对话",
         group: "历史对话",
-        action: { kind: "conversation", sessionId: session.id, displayName: session.title.trim() || "未命名对话" },
+        action: {
+          kind: "conversation",
+          sessionId: session.id,
+          displayName: session.title.trim() || "未命名对话",
+        },
       })),
   ]
 
@@ -158,7 +170,7 @@ export function Composer({
         event.dataTransfer.dropEffect = "copy"
       }}
       onDrop={(event) => {
-        if (!attachmentInteractionEnabled) return
+        if (!attachmentInteractionEnabled || sending) return
         const files = readComposerDrop(event.dataTransfer.files)
         if (files.length === 0) return
         event.preventDefault()
@@ -170,7 +182,7 @@ export function Composer({
       </label>
       <ComposerAttachments
         attachments={attachments}
-        readOnly={attachmentReadOnly}
+        readOnly={attachmentReadOnly || sending}
         onCancel={(draftId) => onCancelAttachment?.(draftId)}
         onRetry={(draftId) => onRetryAttachment?.(draftId)}
         onRemove={(draftId) => onRemoveAttachment?.(draftId)}
@@ -187,7 +199,7 @@ export function Composer({
         onChange={onDraftChange}
         onSubmit={submit}
         onCommand={onCommand}
-        onPasteFiles={attachmentInteractionEnabled ? onPasteFiles : undefined}
+        onPasteFiles={attachmentInteractionEnabled && !sending ? onPasteFiles : undefined}
         contextItems={contextItems}
         contextPickerRequest={contextPickerRequest}
         contextPickerOpen={contextPickerOpen}
@@ -214,11 +226,36 @@ export function Composer({
           <IconPlus className="size-5" />
         </Button>
         {goalMode ? (
-          <Button type="button" variant="secondary" size="sm" className="ml-1 rounded-full" aria-label="退出目标输入" onClick={() => onGoalModeChange?.(false)}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="ml-1 rounded-full"
+            disabled={sending}
+            aria-label="退出目标输入"
+            onClick={() => onGoalModeChange?.(false)}
+          >
             <X data-icon="inline-start" />
             <Goal className="size-3.5" />
             目标
           </Button>
+        ) : null}
+        {goalMode && onGoalAutoTurnsChange ? (
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            续跑
+            <input
+              aria-label="自动续跑额度"
+              type="number"
+              min={1}
+              max={1000}
+              step={1}
+              value={goalAutoTurns}
+              disabled={sending}
+              onChange={(event) => onGoalAutoTurnsChange(Number(event.target.value))}
+              className="w-12 rounded border px-1"
+            />
+            次
+          </label>
         ) : null}
         <Popover
           open={activePicker === "permission"}
@@ -271,7 +308,7 @@ export function Composer({
           <ContextUsageControl snapshot={contextUsage} onOpen={onOpenContextUsage} />
           <ComposerSendButton
             sending={sending}
-            running={running}
+            running={running && !goalMode}
             disabled={!allowSubmit}
             onInterrupt={onInterrupt}
           />

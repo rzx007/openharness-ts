@@ -65,6 +65,7 @@ export interface SessionRunEngineContext {
   runExecutor: Pick<SessionRunExecutor, "execute">;
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   attachmentLimits?: AttachmentLimits;
+  settleGoalRun?(sessionId: string, runId: string): Promise<void>;
   materializeSteerInput?(
     sessionId: string,
     items: readonly SessionUserInputItem[],
@@ -94,6 +95,42 @@ export class SessionRunEngine {
   >();
 
   constructor(private readonly context: SessionRunEngineContext) {}
+
+  persistGoalRun(sessionId: string, input: AdmitPromptInput) {
+    if (!this.accepting) throw new Error("Session run engine is stopping");
+    if (!this.context.agentPool.configured) throw new Error("请先配置模型，再启动目标");
+    return this.context.store.admitPromptWithRun({
+      prompt: { id: input.id, sessionId, delivery: "queue", items: input.items, attachments: normalizePromptAttachments(input.attachments), metadata: input.metadata },
+      run: { metadata: input.runMetadata },
+    }, this.context.attachmentLimits ? { attachmentLimits: this.context.attachmentLimits } : undefined);
+  }
+
+  dispatchPersistedRun(runId: string): "running" | "queued" | undefined {
+    if (!this.accepting) throw new Error("Session run engine is stopping");
+    const run = this.context.store.getRun(runId);
+    if (!run || !run.inputId) throw new Error(`Session run not found: ${runId}`);
+    if (this.runPromises.has(runId)) return this.activeRunId(run.sessionId) === runId ? "running" : "queued";
+    if (run.status !== "pending") return undefined;
+    return this.enqueueRun(run, run.inputId);
+  }
+
+  hasUserWork(sessionId: string): boolean {
+    return [...this.pendingAdmissions.values()].some((entry) => entry.sessionId === sessionId)
+      || this.context.store.listRuns(sessionId).some((run) => (run.status === "pending" || run.status === "running") && (!run.metadata.goalRunKind || run.metadata.goalRunKind === "user"));
+  }
+
+  cancelGoalRuns(sessionId: string, goalId: string, reason: string, queuedOnly = false): string[] {
+    const ids: string[] = [];
+    for (const run of this.context.store.listRuns(sessionId)) {
+      if (run.metadata.goalId !== goalId || (run.status !== "pending" && run.status !== "running")) continue;
+      if (queuedOnly && (run.metadata.goalRunKind !== "continuation" || this.activeRunId(sessionId) === run.id)) continue;
+      ids.push(run.id);
+      this.interruptRun(sessionId, run.id, reason);
+      if (this.activeRunId(sessionId) !== run.id) this.context.store.updateRun(run.id, { status: "interrupted", error: reason });
+      this.context.store.markGoalContinuation(run.id, "cancelled");
+    }
+    return ids;
+  }
 
   activeRunId(sessionId: string): string | undefined {
     return this.runCoordinator.activeRunId(sessionId);
@@ -357,6 +394,10 @@ export class SessionRunEngine {
   ): Promise<AdmitPromptResult> {
     if (!this.accepting)
       return Promise.reject(new Error("Session run engine is stopping"));
+    if (!input.runMetadata?.goalId) {
+      const goal = this.context.store.getCurrentGoal(sessionId);
+      if (goal?.status === "active") this.cancelGoalRuns(sessionId, goal.id, "用户消息优先", true);
+    }
     if (!input.id) return this.admitPrompt(sessionId, input);
     const attachments = normalizePromptAttachments(input.attachments);
     const delivery =
@@ -588,6 +629,7 @@ export class SessionRunEngine {
     reason?: string,
   ): ReturnType<SessionRunCoordinator["interrupt"]> {
     const before = this.context.events.checkpoint();
+    this.pauseGoalForRun(this.activeRunId(sessionId));
     const result = this.runCoordinator.interrupt(sessionId, reason);
     if (result.interrupted) {
       this.context.store.transaction(() => {
@@ -618,6 +660,7 @@ export class SessionRunEngine {
     reason?: string,
   ): ReturnType<SessionRunCoordinator["interruptRun"]> {
     const before = this.context.events.checkpoint();
+    if (this.activeRunId(sessionId) === runId) this.pauseGoalForRun(runId);
     const result = this.runCoordinator.interruptRun(sessionId, runId, reason);
     if (result.interrupted) {
       this.context.store.transaction(() => {
@@ -677,6 +720,12 @@ export class SessionRunEngine {
     return result;
   }
 
+  private pauseGoalForRun(runId: string | undefined): void {
+    const run = runId ? this.context.store.getRun(runId) : undefined;
+    const goal = typeof run?.metadata.goalId === "string" ? this.context.store.getGoal(run.metadata.goalId) : undefined;
+    if (goal?.status === "active") this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "paused", reason: "用户停止了目标回合" });
+  }
+
   private enqueueRun(
     run: SessionRunRecord,
     inputId: string,
@@ -684,15 +733,45 @@ export class SessionRunEngine {
     const enqueued = this.runCoordinator.enqueue({
       sessionId: run.sessionId,
       runId: run.id,
-      work: (workContext) =>
-        this.context.runExecutor.execute(
+      work: async (workContext) => {
+        // Let enqueue register the promise before execution can settle or be interrupted.
+        await Promise.resolve();
+        const beforeStart = this.context.events.checkpoint();
+        const stored = this.context.store.getRun(run.id)!;
+        const isUserRun = !stored.metadata.goalRunKind || stored.metadata.goalRunKind === "user";
+        if (stored.metadata.goalRunKind === "continuation" && this.hasUserWork(run.sessionId)) {
+          this.context.store.updateRun(run.id, { status: "interrupted", error: "用户消息优先" });
+          this.context.store.markGoalContinuation(run.id, "cancelled");
+          this.context.events.publishSince(beforeStart);
+          return;
+        }
+        const goal = isUserRun ? this.context.store.getCurrentGoal(run.sessionId) :
+          typeof stored.metadata.goalId === "string" ? this.context.store.getGoal(stored.metadata.goalId) : undefined;
+        if (!isUserRun && !goal) {
+          this.context.store.updateRun(run.id, { status: "interrupted", error: "目标已不存在" });
+          this.context.events.publishSince(beforeStart);
+          return;
+        }
+        if (goal && (goal.status === "active" || !isUserRun)) {
+          const revision = isUserRun ? goal.revision : stored.metadata.goalRevision;
+          const before = this.context.events.checkpoint();
+          if (typeof revision !== "number" || !this.context.store.startGoalRun(goal.id, revision, run.id, stored.metadata.goalRunKind === "continuation")) {
+            this.context.store.updateRun(run.id, { status: "interrupted", error: "目标已暂停或版本已变化" });
+            this.context.events.publishSince(before);
+            return;
+          }
+          if (isUserRun) this.context.store.updateRun(run.id, { metadata: { goalId: goal.id, goalRevision: revision, goalRunKind: "user" } });
+          this.context.events.publishSince(before);
+        }
+        await this.context.runExecutor.execute(
           {
             sessionId: run.sessionId,
             inputId,
             runId: run.id,
           },
           workContext,
-        ),
+        );
+      },
       onSteerRejected: (input) =>
         this.enqueueRejectedSteer(run.sessionId, input),
     });
@@ -700,10 +779,12 @@ export class SessionRunEngine {
       .catch(() => {
         // The persisted run state is updated by SessionRunExecutor or interrupt handling.
       })
-      .finally(() => {
+      .finally(async () => {
         if (this.runPromises.get(run.id) === tracked)
           this.runPromises.delete(run.id);
+        await this.context.settleGoalRun?.(run.sessionId, run.id);
       });
+    void tracked.catch(() => {});
     this.runPromises.set(run.id, tracked);
     return enqueued.state;
   }

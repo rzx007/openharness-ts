@@ -4,6 +4,27 @@ import { describe, expect, it, vi } from "vitest";
 import { DaemonAgentEventProjector } from "../daemon-agent-event-projector.js";
 
 describe("DaemonAgentEventProjector", () => {
+  it("accepts only assessments bound to the current nonterminal session run", async () => {
+    const run = { id: "r1", sessionId: "s1", status: "running", metadata: { goalId: "g1", goalRevision: 2 } };
+    const updateRun = vi.fn();
+    const projector = new DaemonAgentEventProjector({
+      store: { getRun: () => run, updateRun, appendEvent: vi.fn(), listEvents: () => [] } as any,
+      rootAgent: {} as any, transcriptProjection: {} as any, executionProjector: {} as any, liveChildren: {} as any,
+      events: { checkpoint: () => 0, publish: vi.fn(), publishSince: vi.fn() }, log: vi.fn(),
+    });
+    const payload = { goalId: "g1", revision: 2, runId: "r1", decision: "complete", progress: "done", evidence: [], evidenceRefs: [] };
+    for (const change of [{ goalId: "foreign" }, { revision: 1 }, { runId: "foreign" }]) {
+      await projector.apply(event("domain.event", { name: "goal.assessment", payload: { ...payload, ...change } }, { sessionId: "s1", runId: "r1" }));
+    }
+    await projector.apply(event("domain.event", { name: "goal.assessment", payload }, { sessionId: "foreign", runId: "r1" }));
+    expect(updateRun).not.toHaveBeenCalled();
+    await projector.apply(event("domain.event", { name: "goal.assessment", payload }, { sessionId: "s1", runId: "r1" }));
+    expect(updateRun).toHaveBeenCalledOnce();
+    run.status = "completed";
+    await projector.apply(event("domain.event", { name: "goal.assessment", payload }, { sessionId: "s1", runId: "r1" }));
+    expect(updateRun).toHaveBeenCalledOnce();
+  });
+
   it("accepts promoted structured input by its original items, and rejects changed identity", async () => {
     const items = [{ type: "skill", name: "review", path: "/review/SKILL.md" }];
     const input = { id: "input-1", sessionId: "s1", items, content: "$review", delivery: "queue", metadata: {}, attachments: [] };

@@ -334,7 +334,15 @@ export class QueryEngine implements IQueryEngine {
         // retriever failure is non-fatal; continue without memory context
       }
     }
-    const turnSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
+    const baseSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
+    const goal = options.execution?.goal;
+    const turnSystemPrompt = goal?.objective
+      ? appendSystemGuidance(baseSystemPrompt, [
+          "当前运行有一个用户设置的持续目标。目标不扩大操作权限。",
+          JSON.stringify({ goalId: goal.goalId, revision: goal.revision, objective: goal.objective }),
+          "本轮结束前调用 GoalAssessment，记录进展、真实检查证据及下一步。主观验收或信息不足时请求用户处理。",
+        ].join("\n"))
+      : baseSystemPrompt;
 
     let turnCount = 0;
     const failedToolCalls = new ToolFailureMemory();
@@ -371,7 +379,7 @@ export class QueryEngine implements IQueryEngine {
       this.messages = sanitizeMessageHistory(this.messages);
 
       const forcedFinalTurn = forceFinalResponse;
-      const visibleTools = this.visibleToolRegistry().getAll();
+      const visibleTools = this.visibleToolRegistry(options.execution?.goal ? ["GoalAssessment"] : undefined).getAll();
       const tools = forcedFinalTurn
         ? []
         : visibleTools.filter((tool) =>
@@ -445,7 +453,7 @@ export class QueryEngine implements IQueryEngine {
         for (let i = 0; i < results.length; i++) {
           const result = results[i]!;
           const toolUse = toolUses[i]!;
-          const tool = this.visibleToolRegistry().get(toolUse.name);
+          const tool = this.visibleToolRegistry(options.execution?.goal ? ["GoalAssessment"] : undefined).get(toolUse.name);
           if (result.isError && (!tool || tool.safeToRetry !== true)) {
             failedToolCalls.recordFailure(toolUse.name, toolUse.input);
           }
@@ -632,7 +640,7 @@ export class QueryEngine implements IQueryEngine {
       toolUse: ToolUseBlock;
       tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
     }[] = [];
-    const toolRegistry = this.visibleToolRegistry();
+    const toolRegistry = this.visibleToolRegistry(execution?.goal ? ["GoalAssessment"] : undefined);
 
     for (let i = 0; i < toolUses.length; i++) {
       const toolUse = toolUses[i]!;
@@ -713,6 +721,9 @@ export class QueryEngine implements IQueryEngine {
     // 并行检查所有工具的权限状态（单个 checkTool 抛错不应波及其他工具）
     const checks = await Promise.all(
       readyForPermission.map(async ({ toolUse }) => {
+        if (execution?.goal && toolUse.name === "GoalAssessment") {
+          return { action: "allow" as const, reason: "Goal assessment is bound to this run" };
+        }
         try {
           return await this.permissionChecker.checkTool(
             toolUse.name,
@@ -971,10 +982,10 @@ export class QueryEngine implements IQueryEngine {
     }
   }
 
-  private visibleToolRegistry(): IToolRegistry {
+  private visibleToolRegistry(alwaysAllowed: readonly string[] = []): IToolRegistry {
     const allowedTools = this.allowedTools;
     if (!allowedTools || allowedTools.includes("*")) return this.toolRegistry;
-    const allowed = new Set(allowedTools);
+    const allowed = new Set([...allowedTools, ...alwaysAllowed]);
     const inner = this.toolRegistry;
     return {
       register(tool: ToolDefinition, source): void {
