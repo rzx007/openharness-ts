@@ -428,6 +428,7 @@ export interface QueryEngineOptions {
   executionEnvironment?: import("@openharness/environment").ExecutionEnvironmentHandle;
   /** Optional per-run trajectory policy factory. False disables the default tracker. */
   trajectoryTrackerFactory?: false | (() => import("../engine/trajectory/tracker").TrajectoryTracker);
+  compactProgressCallback?: import("../engine/compact-service").CompactProgressCallback;
 }
 
 export type RuntimeSandboxState = "off" | "active" | "degraded" | "unavailable";

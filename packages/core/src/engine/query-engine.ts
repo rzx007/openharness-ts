@@ -229,6 +229,7 @@ export class QueryEngine implements IQueryEngine {
         client: toCompactClient(this.apiClient, this.model),
       },
     );
+    this.compactService.setProgressCallback(options.compactProgressCallback);
     this.costTracker = new CostTracker();
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 50;
@@ -352,6 +353,12 @@ export class QueryEngine implements IQueryEngine {
     while (turnCount < this.maxTurns || forceFinalResponse) {
       // 自动压缩消息历史以控制上下文长度
       try {
+        this.compactService.setProgressCallback((event) =>
+          options.execution?.emit({
+            type: "domain.event",
+            data: { name: "context_compaction", payload: event as unknown as Record<string, unknown> },
+          }),
+        );
         this.messages = await this.compactService.autoCompact(
           this.messages,
           "auto",

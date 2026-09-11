@@ -121,11 +121,20 @@ export class SessionMaintenanceService {
     try {
       const agent = await this.context.agentPool.acquireSession(sessionId);
       const before = this.context.events.checkpoint();
-      const compacted = await agent.compact();
+      this.appendCompactionPresentation(sessionId, "started");
+      let compacted: Awaited<ReturnType<typeof agent.compact>>;
+      try {
+        compacted = await agent.compact();
+      } catch (error) {
+        this.appendCompactionPresentation(sessionId, "failed");
+        this.context.events.publishSince(before);
+        throw error;
+      }
       const replaced = this.context.store.replaceTranscript({
         sessionId,
         messages: agentMessagesToTranscript(compacted.history),
       });
+      this.appendCompactionPresentation(sessionId, "completed");
       this.context.events.publishSince(before);
       this.context.contextUsageCache?.invalidate(sessionId);
       try {
@@ -141,6 +150,24 @@ export class SessionMaintenanceService {
     } finally {
       lease.release();
     }
+  }
+
+  private appendCompactionPresentation(
+    sessionId: string,
+    phase: "started" | "completed" | "failed",
+  ): void {
+    const message = this.context.store.createMessage({
+      sessionId,
+      role: "system",
+      metadata: { presentation: { kind: "context_compaction", phase } },
+    });
+    this.context.store.upsertMessagePart({
+      sessionId,
+      messageId: message.id,
+      type: "text",
+      status: "completed",
+      text: phase === "started" ? "正在压缩上下文" : phase === "completed" ? "已压缩上下文" : "上下文压缩失败",
+    });
   }
 
   async rewind(sessionId: string, count: number): Promise<{

@@ -33,6 +33,7 @@ import {
   type ComposerDocument,
 } from "@renderer/stores/desktop-session/composer-document"
 import { ModelSwitchDivider, readModelSwitchPresentation } from "./model-switch-divider"
+import { ContextCompactionDivider, readContextCompactionPresentation } from "./context-compaction-divider"
 
 const collapsibleUserMessageChars = 900
 const collapsibleUserMessageLines = 14
@@ -89,6 +90,8 @@ export function MessageBlock({
   if (message.role === "system") {
     const modelSwitch = readModelSwitchPresentation(message.metadata)
     if (modelSwitch) return <ModelSwitchDivider presentation={modelSwitch} />
+    const compaction = readContextCompactionPresentation(message.metadata)
+    if (compaction) return <ContextCompactionDivider presentation={compaction} />
     const content = parts.map((part) => part.text ?? "").join("")
     return <p className="text-xs whitespace-pre-wrap text-ui-muted">{content}</p>
   }

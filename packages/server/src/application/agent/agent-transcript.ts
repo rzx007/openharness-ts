@@ -93,11 +93,13 @@ function isPresentationOnlyMessage(message: SessionMessageRecord): boolean {
   }
   const value = presentation as Record<string, unknown>;
   return (
-    value.kind === "model_switch" &&
-    typeof value.fromModel === "string" &&
-    Boolean(value.fromModel.trim()) &&
-    typeof value.toModel === "string" &&
-    Boolean(value.toModel.trim())
+    (value.kind === "model_switch" &&
+      typeof value.fromModel === "string" &&
+      Boolean(value.fromModel.trim()) &&
+      typeof value.toModel === "string" &&
+      Boolean(value.toModel.trim())) ||
+    (value.kind === "context_compaction" &&
+      (value.phase === "started" || value.phase === "completed" || value.phase === "failed"))
   );
 }
 

@@ -133,6 +133,24 @@ export class DaemonAgentEventProjector {
         this.projectUsage(event);
         return;
       case "domain.event":
+        if (event.data.name === "context_compaction") {
+          const phase = event.data.payload?.phase;
+          if (phase === "compact_start" || phase === "compact_end" || phase === "compact_failed") {
+            const presentationPhase = phase === "compact_start" ? "started" : phase === "compact_end" ? "completed" : "failed";
+            const message = this.context.store.createMessage({
+              sessionId: event.context.sessionId,
+              role: "system",
+              metadata: { presentation: { kind: "context_compaction", phase: presentationPhase } },
+            });
+            this.context.store.upsertMessagePart({
+              sessionId: event.context.sessionId,
+              messageId: message.id,
+              type: "text",
+              status: "completed",
+              text: presentationPhase === "started" ? "正在压缩上下文" : presentationPhase === "completed" ? "已压缩上下文" : "上下文压缩失败",
+            });
+          }
+        }
         this.appendRuntimeEvent(event, {
           name: event.data.name,
           payload: event.data.payload ?? {},
