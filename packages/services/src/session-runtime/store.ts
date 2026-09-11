@@ -211,6 +211,18 @@ export interface UpdateSessionGoalStoreInput {
   evidence?: string[];
 }
 
+export interface SessionGoalRequestRecord {
+  requestId: string;
+  sessionId: string;
+  fingerprint: string;
+  status: "pending" | "completed" | "failed";
+  goalId?: string;
+  result?: Record<string, unknown>;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ImportingAttachmentRecord extends AttachmentAssetRecord {
   stagingName: string;
 }
@@ -3155,6 +3167,42 @@ export class SessionStore {
     const goal = this.getGoal(id)!;
     this.appendEvent({ type: "session.goal.created", sessionId: input.sessionId, payload: { goal } });
     return goal;
+  }
+
+  getGoalRequest(requestId: string): SessionGoalRequestRecord | undefined {
+    const row = this.database.prepare(`SELECT * FROM session_goal_request WHERE request_id = ?`).get(requestId) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      requestId: String(row.request_id),
+      sessionId: String(row.session_id),
+      fingerprint: String(row.fingerprint),
+      status: String(row.status) as SessionGoalRequestRecord["status"],
+      ...(typeof row.goal_id === "string" ? { goalId: row.goal_id } : {}),
+      ...(typeof row.result_json === "string" ? { result: JSON.parse(row.result_json) as Record<string, unknown> } : {}),
+      ...(typeof row.error === "string" ? { error: row.error } : {}),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  beginGoalRequest(input: { requestId: string; sessionId: string; fingerprint: string }): SessionGoalRequestRecord {
+    const existing = this.getGoalRequest(input.requestId);
+    if (existing) {
+      if (existing.sessionId !== input.sessionId || existing.fingerprint !== input.fingerprint) throw new Error("session_goal_request_conflict");
+      return existing;
+    }
+    const timestamp = now();
+    this.database.prepare(`INSERT INTO session_goal_request (request_id, session_id, fingerprint, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)`)
+      .run(input.requestId, input.sessionId, input.fingerprint, timestamp, timestamp);
+    return this.getGoalRequest(input.requestId)!;
+  }
+
+  settleGoalRequest(requestId: string, input: { status: "pending" | "completed" | "failed"; goalId?: string; result?: Record<string, unknown>; error?: string }): SessionGoalRequestRecord {
+    const timestamp = now();
+    const result = this.database.prepare(`UPDATE session_goal_request SET status = ?, goal_id = ?, result_json = ?, error = ?, updated_at = ? WHERE request_id = ?`)
+      .run(input.status, input.goalId ?? null, input.result ? JSON.stringify(input.result) : null, input.error ?? null, timestamp, requestId);
+    if (result.changes !== 1) throw new Error(`Session goal request not found: ${requestId}`);
+    return this.getGoalRequest(requestId)!;
   }
 
   getGoal(id: string): SessionGoal | undefined {

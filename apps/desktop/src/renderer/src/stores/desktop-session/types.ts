@@ -7,6 +7,7 @@ import type {
   DesktopSessionView,
   DesktopWorkspaceMode,
   SessionUserInputItem,
+  SessionGoal,
 } from "@shared/session-types"
 import type { DesktopAttachmentSupport } from "@shared/attachment-types"
 import type {
@@ -122,6 +123,7 @@ export interface ProjectActions {
 }
 
 export interface SessionActions {
+  startGoal: (objective: string, requestId: string, options?: SubmitPromptOptions) => Promise<SessionGoal | null>
   startNewConversation: () => Promise<void>
   selectModel: (model: DesktopModel) => Promise<void>
   selectPermissionMode: (mode: DesktopPermissionMode) => Promise<void>

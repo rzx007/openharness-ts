@@ -14,6 +14,7 @@ export function createGoalAssessmentTool(): ToolDefinition {
         evidence: { type: "array", items: { type: "string" } },
         nextStep: { type: "string" },
         reason: { type: "string" },
+        question: { type: "string" },
       },
     },
     execution: { domain: "control_plane", supportedEnvironments: ["local", "wsl"] },
@@ -31,6 +32,7 @@ export function createGoalAssessmentTool(): ToolDefinition {
             evidence: input.evidence,
             ...(typeof input.nextStep === "string" ? { nextStep: input.nextStep } : {}),
             ...(typeof input.reason === "string" ? { reason: input.reason } : {}),
+            ...(typeof input.question === "string" ? { question: input.question } : {}),
           },
         },
       });

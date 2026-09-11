@@ -226,6 +226,28 @@ export function createSessionActions(context: SessionActionsContext): SessionAct
   }
 
   return {
+    async startGoal(objective, requestId, options) {
+      const state = get()
+      const model = state.selectedModel
+      const provider = state.selectedProvider
+      if (!model || (state.workspaceMode === "project" && !state.selectedProject)) return null
+      const sessionInput: CreateDesktopSessionInput = state.workspaceMode === "project" && state.selectedProject
+        ? { projectId: state.selectedProject.id, cwd: state.selectedProject.path, model, ...(provider ? { provider } : {}), permissionMode: state.selectedPermissionMode }
+        : { model, ...(provider ? { provider } : {}), permissionMode: state.selectedPermissionMode }
+      const session = await window.desktop.sessions.create(sessionInput)
+      const goalAttachments = (options?.attachments ?? []).flatMap((attachment) => attachment.assetId ? [{ assetId: attachment.assetId, intent: "auto" as const, displayName: attachment.displayName }] : [])
+      const goal = await window.desktop.sessions.createGoal({ sessionId: session.id, requestId, objective, items: options?.document?.items, attachments: goalAttachments })
+      set((current) => ({
+        sessions: upsertSession(current.sessions, session),
+        composerDraftsByScope: setDraftDocument(
+          { composerDraftsByScope: current.composerDraftsByScope },
+          NEW_CONVERSATION_SCOPE,
+          emptyComposerDocument,
+        ).composerDraftsByScope,
+      }))
+      await openPrimarySession(session.id)
+      return goal
+    },
     async startNewConversation() {
       advancePrimaryNavigation()
       await window.desktop.sessions.close()

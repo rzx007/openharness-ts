@@ -77,6 +77,7 @@ function ConversationPane({
   const [goal, setGoal] = useState<SessionGoal | null>(null)
   const [goalBusy, setGoalBusy] = useState(false)
   const ordinaryDraftBeforeGoal = useRef<ComposerDocument | null>(null)
+  const goalRequestId = useRef<string | null>(null)
   const navigate = useNavigate()
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
@@ -99,6 +100,7 @@ function ConversationPane({
   const loadStatus = useDesktopSessionStore((state) => state.loadStatus)
   const daemonStatus = useDesktopSessionStore((state) => state.daemonStatus)
   const startSession = useDesktopSessionStore((state) => state.startSession)
+  const startGoal = useDesktopSessionStore((state) => state.startGoal)
   const sendMessage = useDesktopSessionStore((state) => state.sendMessage)
   const dismissPromptSubmission = useDesktopSessionStore((state) => state.dismissPromptSubmission)
   const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
@@ -148,9 +150,10 @@ function ConversationPane({
   const setDraft = useCallback(
     (next: ComposerDocument): void => {
       setComposerValidationError(null)
+      if (goalMode) goalRequestId.current = null
       setComposerDraftDocument(composerScope, next)
     },
-    [composerScope, setComposerDraftDocument]
+    [composerScope, goalMode, setComposerDraftDocument]
   )
   const sending = hasSession ? activeSessionSending : newConversationSending
   const archived = sessionView?.session.status === "archived"
@@ -163,16 +166,20 @@ function ConversationPane({
     setComposerValidationError(null)
     try {
       if (goalMode) {
-        if (!activeSessionId) throw new Error("请先创建会话，再设置持续目标。")
         setGoalBusy(true)
-        const requestId = globalThis.crypto.randomUUID()
-        const saved = goal && goal.status !== "completed" && goal.status !== "cancelled"
-          ? await window.desktop.sessions.updateGoal({ sessionId: activeSessionId, goalId: goal.id, requestId, expectedRevision: goal.revision, objective: content })
-          : await window.desktop.sessions.createGoal({ sessionId: activeSessionId, requestId, objective: content })
+        const requestId = goalRequestId.current ?? globalThis.crypto.randomUUID()
+        goalRequestId.current = requestId
+        const saved = !activeSessionId
+          ? await startGoal(content, requestId, { document: draft, attachments })
+          : goal && goal.status !== "completed" && goal.status !== "cancelled"
+          ? await window.desktop.sessions.updateGoal({ sessionId: activeSessionId, goalId: goal.id, requestId, expectedRevision: goal.revision, objective: content, items: draft.items, attachments: attachments.flatMap((attachment) => attachment.assetId ? [{ assetId: attachment.assetId, intent: "auto" as const, displayName: attachment.displayName }] : []) })
+          : await window.desktop.sessions.createGoal({ sessionId: activeSessionId, requestId, objective: content, items: draft.items, attachments: attachments.flatMap((attachment) => attachment.assetId ? [{ assetId: attachment.assetId, intent: "auto" as const, displayName: attachment.displayName }] : []) })
+        if (!saved) throw new Error("当前工作区还不能创建目标。")
         setGoal(saved)
         setGoalMode(false)
         setDraft(ordinaryDraftBeforeGoal.current ?? composerDocument([]))
         ordinaryDraftBeforeGoal.current = null
+        goalRequestId.current = null
         return
       }
       if (hasSession) {
@@ -241,6 +248,7 @@ function ConversationPane({
     setGoalMode(false)
     if (ordinaryDraftBeforeGoal.current) setDraft(ordinaryDraftBeforeGoal.current)
     ordinaryDraftBeforeGoal.current = null
+    goalRequestId.current = null
   }
 
   const title = sessionView?.session.title.trim() || "新对话"

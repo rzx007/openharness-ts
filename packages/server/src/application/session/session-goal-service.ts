@@ -23,21 +23,37 @@ export class SessionGoalService {
     return this.context.store.getCurrentGoal(sessionId) ?? null;
   }
 
+  getRequest(sessionId: string, requestId: string) {
+    this.requireSession(sessionId);
+    const request = this.context.store.getGoalRequest(requestId);
+    if (!request || request.sessionId !== sessionId) throw new SessionApplicationError(404, `Goal request not found: ${requestId}`);
+    return request;
+  }
+
   async create(sessionId: string, input: CreateSessionGoalInput): Promise<SessionGoal> {
     this.requireSession(sessionId);
+    const fingerprint = JSON.stringify({ operation: "create", objective: input.objective, maxAutoTurns: input.maxAutoTurns ?? DEFAULT_GOAL_AUTO_TURNS });
+    const request = this.context.store.beginGoalRequest({ requestId: input.requestId, sessionId, fingerprint });
+    if (request.goalId) {
+      const existing = this.context.store.getGoal(request.goalId);
+      if (existing) return existing;
+    }
     const goal = this.context.store.createGoal({
       sessionId,
       objective: input.objective,
       maxAutoTurns: input.maxAutoTurns ?? DEFAULT_GOAL_AUTO_TURNS,
     });
+    this.context.store.settleGoalRequest(input.requestId, { status: "pending", goalId: goal.id });
     try {
       await this.context.sessions.admitPrompt(sessionId, {
         id: input.requestId,
         delivery: "queue",
-        items: [{ type: "text", text: input.objective }],
+        items: input.items?.length ? input.items : [{ type: "text", text: input.objective }],
+        attachments: input.attachments,
         metadata: { goalId: goal.id, goalRevision: goal.revision, goalRunKind: "initial" },
         runMetadata: { goalId: goal.id, goalRevision: goal.revision, goalRunKind: "initial" },
       });
+      this.context.store.settleGoalRequest(input.requestId, { status: "completed", goalId: goal.id, result: { goalId: goal.id } });
       return goal;
     } catch (error) {
       this.context.store.updateGoal(goal.id, {
@@ -45,6 +61,7 @@ export class SessionGoalService {
         status: "paused",
         reason: error instanceof Error ? error.message : String(error),
       });
+      this.context.store.settleGoalRequest(input.requestId, { status: "failed", goalId: goal.id, error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -65,7 +82,7 @@ export class SessionGoalService {
       reason: null,
       wait: null,
     });
-    return await this.createRevisionRun(updated, input.requestId, "edit");
+    return await this.createRevisionRun(updated, input.requestId, "edit", input.items, input.attachments);
   }
 
   async action(sessionId: string, goalId: string, input: GoalActionInput): Promise<SessionGoal> {
@@ -100,7 +117,9 @@ export class SessionGoalService {
     const value = assessment as Record<string, unknown>;
     const evidence = Array.isArray(value.evidence) ? value.evidence.filter((item): item is string => typeof item === "string") : [];
     if (value.decision === "complete") {
-      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "completed", evidence, reason: null });
+      this.context.store.updateGoal(goal.id, evidence.length > 0
+        ? { expectedRevision: goal.revision, status: "completed", evidence, reason: null }
+        : { expectedRevision: goal.revision, status: "waiting_user", reason: "目标缺少可验证完成证据", wait: { kind: "user", questionId: `goal-evidence-${runId}`, question: "请确认目标是否已经完成。" } });
       return;
     }
     if (value.decision === "waiting_user" || value.decision === "blocked") {
@@ -109,11 +128,17 @@ export class SessionGoalService {
         status: value.decision,
         evidence,
         reason: typeof value.reason === "string" ? value.reason : typeof value.nextStep === "string" ? value.nextStep : null,
+        ...(value.decision === "waiting_user" ? { wait: { kind: "user" as const, questionId: `goal-question-${runId}`, question: typeof value.question === "string" ? value.question : "目标需要你的进一步说明。" } } : {}),
       });
       return;
     }
     if (value.decision !== "continue") {
       this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "paused", reason: "目标评估结果无效" });
+      return;
+    }
+    const nextNoProgressCount = evidence.length === 0 ? goal.noProgressCount + 1 : 0;
+    if (nextNoProgressCount >= 3) {
+      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "blocked", noProgressCount: nextNoProgressCount, reason: "连续三个回合没有产生可验证进展" });
       return;
     }
     if (goal.autoTurnsUsed >= goal.maxAutoTurns) {
@@ -123,6 +148,7 @@ export class SessionGoalService {
     const continued = this.context.store.updateGoal(goal.id, {
       expectedRevision: goal.revision,
       autoTurnsUsed: goal.autoTurnsUsed + 1,
+      noProgressCount: nextNoProgressCount,
       evidence,
       reason: null,
     });
@@ -133,11 +159,12 @@ export class SessionGoalService {
     );
   }
 
-  private async createRevisionRun(goal: SessionGoal, requestId: string, kind: string): Promise<SessionGoal> {
+  private async createRevisionRun(goal: SessionGoal, requestId: string, kind: string, items?: import("@openharness/protocol").SessionUserInputItem[], attachments?: import("@openharness/protocol").AdmitPromptAttachmentInput[]): Promise<SessionGoal> {
     await this.context.sessions.admitPrompt(goal.sessionId, {
       id: requestId || randomUUID(),
       delivery: "queue",
-      items: [{ type: "text", text: goal.objective }],
+      items: items?.length ? items : [{ type: "text", text: goal.objective }],
+      attachments,
       metadata: { goalId: goal.id, goalRevision: goal.revision, goalRunKind: kind },
       runMetadata: { goalId: goal.id, goalRevision: goal.revision, goalRunKind: kind },
     });

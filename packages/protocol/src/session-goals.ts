@@ -42,12 +42,16 @@ export interface CreateSessionGoalInput {
   requestId: string
   objective: string
   maxAutoTurns?: number
+  items?: SessionUserInputItem[]
+  attachments?: AdmitPromptAttachmentInput[]
 }
 
 export interface UpdateSessionGoalInput {
   requestId: string
   expectedRevision: number
   objective: string
+  items?: SessionUserInputItem[]
+  attachments?: AdmitPromptAttachmentInput[]
 }
 
 export interface GoalActionInput {
@@ -82,6 +86,8 @@ export function parseCreateSessionGoalInput(value: unknown): CreateSessionGoalIn
     ...(record.maxAutoTurns === undefined
       ? {}
       : { maxAutoTurns: goalPositiveInteger(record.maxAutoTurns, "maxAutoTurns") }),
+    ...(Array.isArray(record.items) ? { items: record.items as SessionUserInputItem[] } : {}),
+    ...(Array.isArray(record.attachments) ? { attachments: record.attachments as AdmitPromptAttachmentInput[] } : {}),
   }
 }
 
@@ -91,6 +97,8 @@ export function parseUpdateSessionGoalInput(value: unknown): UpdateSessionGoalIn
     requestId: requiredGoalString(record.requestId, "requestId", 128),
     expectedRevision: goalNonNegativeInteger(record.expectedRevision, "expectedRevision"),
     objective: requiredGoalString(record.objective, "objective", MAX_GOAL_OBJECTIVE_CHARS),
+    ...(Array.isArray(record.items) ? { items: record.items as SessionUserInputItem[] } : {}),
+    ...(Array.isArray(record.attachments) ? { attachments: record.attachments as AdmitPromptAttachmentInput[] } : {}),
   }
 }
 
@@ -131,3 +139,5 @@ function goalPositiveInteger(value: unknown, field: string): number {
   if (integer < 1 || integer > MAX_GOAL_AUTO_TURNS) throw new Error(`invalid_goal_${field}`)
   return integer
 }
+import type { AdmitPromptAttachmentInput } from "./attachment.js"
+import type { SessionUserInputItem } from "./session-input-items.js"
