@@ -21,6 +21,7 @@ import {
   materializeSessionInput,
   type SessionInputSkillCatalog,
 } from "./session-input-materializer.js";
+import { conversationContextCatalog } from "./session-conversation-context.js";
 import type { ContextUsageCache } from "../context-usage-cache.js";
 import type { SessionContextUsageAgent } from "../assemble-session-context-usage.js";
 
@@ -91,11 +92,15 @@ export class SessionRunExecutor {
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
+      const hasStructuredContext = admitted.items.some((item) => item.type === "skill" || item.type === "context");
       const hasExplicitSkills = admitted.items.some((item) => item.type === "skill");
-      const materialized = hasExplicitSkills
+      const materialized = hasStructuredContext
         ? materializeSessionInput(
             admitted.items,
-            await resolveSkillCatalog(session, this.context.resolveSkillCatalog),
+            hasExplicitSkills
+              ? await resolveSkillCatalog(session, this.context.resolveSkillCatalog)
+              : { resolvePath: () => undefined },
+            conversationContextCatalog(this.context.store, sessionId),
           )
         : undefined;
 

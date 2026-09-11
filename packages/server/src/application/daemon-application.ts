@@ -69,6 +69,7 @@ import { SessionQueryService } from "./session/session-query-service.js";
 import { SessionRunEngine } from "./session/session-run-engine.js";
 import { SessionRunExecutor } from "./session/session-run-executor.js";
 import { materializeSessionInput } from "./session/session-input-materializer.js";
+import { conversationContextCatalog } from "./session/session-conversation-context.js";
 import { SessionPostRunMaintenance } from "./session/session-post-run-maintenance.js";
 import { SessionExecutionProjector } from "./session/session-execution-projector.js";
 import { BackgroundShellService } from "./session/background-shell-service.js";
@@ -621,7 +622,11 @@ export class DaemonApplication implements DurableAgentApplication {
           const settings = await resolveSessionSettings(session.cwd);
           if (!settings) throw new Error("session_input_skill_catalog_unavailable");
           const { skillRegistry } = await discoverOpenHarnessExtensions(session.cwd, settings);
-          return materializeSessionInput(items, skillRegistry).instruction;
+          return materializeSessionInput(
+            items,
+            skillRegistry,
+            conversationContextCatalog(store, sessionId),
+          ).instruction;
         },
       });
       /**

@@ -36,6 +36,7 @@ import {
 import { SessionApplicationError } from "./session-application-error.js";
 import type { ContextUsageCache } from "../context-usage-cache.js";
 import { materializeSessionInput } from "./session-input-materializer.js";
+import { conversationContextCatalog } from "./session-conversation-context.js";
 import type { SessionRunExecutorContext } from "./session-run-executor.js";
 
 export { SessionApplicationError } from "./session-application-error.js";
@@ -401,10 +402,18 @@ export class SessionApplicationService {
     }
     const items = inputItems(input);
     let liveContent = sessionUserInputText(items);
-    if (!hasAttachments && this.context.liveChildren.has(sessionId) && items.some((item) => item.type === "skill")) {
+    if (!hasAttachments && this.context.liveChildren.has(sessionId) && items.some((item) => item.type === "skill" || item.type === "context")) {
       const session = this.context.store.getSession(sessionId);
-      if (!session || !this.context.resolveSkillCatalog) throw new Error("session_input_skill_catalog_unavailable");
-      liveContent = materializeSessionInput(items, await this.context.resolveSkillCatalog(session)).instruction;
+      if (!session) throw new Error(`Session not found: ${sessionId}`);
+      const hasExplicitSkills = items.some((item) => item.type === "skill");
+      if (hasExplicitSkills && !this.context.resolveSkillCatalog) throw new Error("session_input_skill_catalog_unavailable");
+      liveContent = materializeSessionInput(
+        items,
+        hasExplicitSkills
+          ? await this.context.resolveSkillCatalog!(session)
+          : { resolvePath: () => undefined },
+        conversationContextCatalog(this.context.store, sessionId),
+      ).instruction;
     }
     const live = hasAttachments
       ? undefined

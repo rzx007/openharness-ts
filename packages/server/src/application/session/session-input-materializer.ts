@@ -17,10 +17,15 @@ export interface SessionInputSkillCatalog {
   resolvePath(path: string): SessionInputCatalogSkill | undefined;
 }
 
+export interface SessionInputConversationCatalog {
+  resolveConversation(id: string): { id: string; title: string; summary: string } | undefined;
+}
+
 export interface MaterializedSessionInput {
   text: string;
   skills: SessionInputCatalogSkill[];
   instruction: string;
+  conversations: Array<{ id: string; title: string; summary: string }>;
 }
 
 /**
@@ -31,13 +36,25 @@ export interface MaterializedSessionInput {
 export function materializeSessionInput(
   input: readonly SessionUserInputItem[],
   catalog: SessionInputSkillCatalog,
+  conversationCatalog?: SessionInputConversationCatalog,
 ): MaterializedSessionInput {
   const items = normalizeSessionUserInputItems(input);
   const text = sessionUserInputText(items);
   const skills: SessionInputCatalogSkill[] = [];
   const paths = new Set<string>();
+  const conversations: Array<{ id: string; title: string; summary: string }> = [];
+  const conversationIds = new Set<string>();
 
   for (const item of items) {
+    if (item.type === "context") {
+      const conversation = conversationCatalog?.resolveConversation(item.id);
+      if (!conversation) throw new Error("session_input_conversation_not_found");
+      if (!conversationIds.has(conversation.id)) {
+        conversationIds.add(conversation.id);
+        conversations.push(conversation);
+      }
+      continue;
+    }
     if (item.type !== "skill") continue;
     const catalogSkill = catalog.resolvePath(item.path);
     if (!catalogSkill || catalogSkill.name !== item.name) {
@@ -48,12 +65,25 @@ export function materializeSessionInput(
     skills.push(catalogSkill);
   }
 
-  const prefix = skillInstructionPrefix(skills);
+  const prefix = [skillInstructionPrefix(skills), conversationInstructionPrefix(conversations)].filter(Boolean).join("\n\n");
   return {
     text,
     skills,
-    instruction: skills.length ? `${prefix}\n\n用户输入：\n${text}` : text,
+    conversations,
+    instruction: prefix ? `${prefix}\n\n用户输入：\n${text}` : text,
   };
+}
+
+function conversationInstructionPrefix(
+  conversations: readonly { id: string; title: string; summary: string }[],
+): string {
+  if (conversations.length === 0) return "";
+  return [
+    "用户引用了以下历史对话作为只读参考上下文：",
+    ...conversations.map((conversation, index) =>
+      `${index + 1}. ${conversation.title}\n${conversation.summary}`
+    ),
+  ].join("\n");
 }
 
 /** Insert the single structured-skill instruction without disturbing attachments. */
@@ -61,8 +91,11 @@ export function applyMaterializedSessionInput(
   content: string | ContentBlock[],
   materialized: MaterializedSessionInput,
 ): string | ContentBlock[] {
-  if (materialized.skills.length === 0) return content;
-  const prefix = skillInstructionPrefix(materialized.skills);
+  if (materialized.skills.length === 0 && materialized.conversations.length === 0) return content;
+  const prefix = [
+    skillInstructionPrefix(materialized.skills),
+    conversationInstructionPrefix(materialized.conversations),
+  ].filter(Boolean).join("\n\n");
   if (typeof content === "string") return `${prefix}\n\n用户输入：\n${content}`;
   const textIndex = content.findIndex((block) => block.type === "text");
   if (textIndex < 0) {
