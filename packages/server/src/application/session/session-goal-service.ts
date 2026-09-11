@@ -51,9 +51,14 @@ export class SessionGoalService {
 
   async update(sessionId: string, goalId: string, input: UpdateSessionGoalInput): Promise<SessionGoal> {
     const goal = this.requireGoal(sessionId, goalId);
+    const paused = this.context.store.updateGoal(goal.id, {
+      expectedRevision: input.expectedRevision,
+      status: "paused",
+      reason: "正在更新目标",
+    });
     this.context.runEngine.interruptSession(sessionId, "Goal updated");
     const updated = this.context.store.updateGoal(goal.id, {
-      expectedRevision: input.expectedRevision,
+      expectedRevision: paused.revision,
       objective: input.objective,
       status: "active",
       currentRunId: null,
@@ -65,9 +70,6 @@ export class SessionGoalService {
 
   async action(sessionId: string, goalId: string, input: GoalActionInput): Promise<SessionGoal> {
     const goal = this.requireGoal(sessionId, goalId);
-    if (input.action === "pause" || input.action === "cancel") {
-      this.context.runEngine.interruptSession(sessionId, `Goal ${input.action}d`);
-    }
     const updated = this.context.store.updateGoal(goal.id, {
       expectedRevision: input.expectedRevision,
       status: input.action === "cancel" ? "cancelled" : input.action === "pause" ? "paused" : "active",
@@ -75,6 +77,9 @@ export class SessionGoalService {
       reason: null,
       wait: null,
     });
+    if (input.action === "pause" || input.action === "cancel") {
+      this.context.runEngine.interruptSession(sessionId, `Goal ${input.action}d`);
+    }
     return input.action === "resume"
       ? await this.createRevisionRun(updated, input.requestId, "resume")
       : updated;

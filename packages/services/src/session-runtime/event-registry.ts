@@ -180,6 +180,8 @@ export const DEFAULT_DURABLE_EVENT_DEFINITIONS: readonly DurableEventDefinition[
     if (payload.field !== "text" && payload.field !== "reasoning") throw new Error("field must be text or reasoning");
   }),
   sessionDefinition("session.run.created", objectPayload("run")),
+  sessionDefinition("session.goal.created", objectPayload("goal")),
+  sessionDefinition("session.goal.updated", objectPayload("goal")),
   sessionDefinition("session.run.updated", (payload) => {
     objectPayload("run")(payload);
     requireString(payload, "previousStatus");
