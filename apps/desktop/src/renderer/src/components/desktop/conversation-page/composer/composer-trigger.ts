@@ -1,7 +1,7 @@
 export type ComposerTriggerMode = "leading" | "inline"
 
 export interface ComposerTrigger {
-  sigil: "/" | "$"
+  sigil: "/" | "$" | "@"
   query: string
   from: number
   to: number
@@ -24,7 +24,7 @@ export function findComposerTrigger(
 
   const sigilIndex = queryStart - 1
   const sigil = text[sigilIndex]
-  if (sigil !== "/" && sigil !== "$") return null
+  if (sigil !== "/" && sigil !== "$" && sigil !== "@") return null
 
   const preceding = text[sigilIndex - 1]
   if (

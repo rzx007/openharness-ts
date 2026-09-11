@@ -296,11 +296,13 @@ function ComposerPickerPlugin({
   commands,
   onCommand,
   onCommandError,
+  onPickFiles,
 }: {
   skills: readonly ComposerSkill[]
   commands: readonly ComposerPickerItem[]
   onCommand: (command: ComposerPickerCommand) => Promise<void>
   onCommandError: (message: string | null) => void
+  onPickFiles?: () => void
 }): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
@@ -320,7 +322,7 @@ function ComposerPickerPlugin({
   const visible =
     trigger &&
     dismissed !== `${trigger.from}:${trigger.to}:${trigger.query}` &&
-    (trigger.sigil === "$" || trigger.mode === "inline" || trigger.mode === "leading")
+    (trigger.sigil === "@" || trigger.sigil === "$" || trigger.mode === "inline" || trigger.mode === "leading")
   if (!visible) return null
   const skillItems: ComposerPickerItem[] = skills.map((skill) => ({
     id: `skill:${skill.path}`,
@@ -330,20 +332,25 @@ function ComposerPickerPlugin({
     sourceLabel: skill.sourceLabel,
     skill,
   }))
+  const contextItem: ComposerPickerItem = { id: "context:files", kind: "command", label: "文件和文件夹", description: "添加文件或文件夹" }
+  const items = trigger.sigil === "@" ? [contextItem] : pickerItems({
+    trigger,
+    commands: editor.getEditorState().read(() => canExecuteComposerCommand(trigger)) ? commands : [],
+    skills: skillItems,
+  })
   return (
     <ComposerPicker
-      items={pickerItems({
-        trigger,
-        commands: editor.getEditorState().read(() => canExecuteComposerCommand(trigger))
-          ? commands
-          : [],
-        skills: skillItems,
-      })}
+      items={items}
       query=""
       onDismiss={() => setDismissed(`${trigger.from}:${trigger.to}:${trigger.query}`)}
       onSelect={(item) => {
         if (item.skill) {
           insertSkillMention(editor, trigger, item.skill)
+          return
+        }
+        if (trigger.sigil === "@") {
+          removeComposerTrigger(editor, trigger)
+          onPickFiles?.()
           return
         }
         if (item.command) {
@@ -353,6 +360,17 @@ function ComposerPickerPlugin({
       }}
     />
   )
+}
+
+function removeComposerTrigger(editor: LexicalEditor, trigger: ComposerTrigger): void {
+  editor.update(() => {
+    const leaf = textLeaves().find((item) => $isTextNode(item.node) && item.from <= trigger.from && item.to >= trigger.to)
+    if (!leaf || !$isTextNode(leaf.node)) return
+    const start = trigger.from - leaf.from
+    const end = trigger.to - leaf.from
+    const fragments = leaf.node.splitText(start, end)
+    fragments[start === 0 ? 0 : 1]?.remove()
+  }, { discrete: true })
 }
 
 export async function executeComposerCommand(
@@ -517,6 +535,7 @@ export function RichPromptInput({
   onSubmit,
   onCommand = async () => undefined,
   onPasteFiles,
+  onPickFiles,
 }: {
   id: string
   value: ComposerDocument
@@ -530,6 +549,7 @@ export function RichPromptInput({
   onSubmit: () => void
   onCommand?: (command: ComposerPickerCommand) => Promise<void>
   onPasteFiles?: (files: readonly File[]) => void
+  onPickFiles?: () => void
 }): React.JSX.Element {
   const [isComposing, setIsComposing] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -592,6 +612,7 @@ export function RichPromptInput({
           commands={commands}
           onCommand={onCommand}
           onCommandError={setCommandError}
+          onPickFiles={onPickFiles}
         />
         {!isComposing && !disabled ? <SubmitKeyPlugin onSubmit={onSubmit} /> : null}
         {commandError ? (

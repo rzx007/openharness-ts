@@ -119,7 +119,7 @@ export function pickerItems({
   skills,
 }: {
   trigger: {
-    sigil: "/" | "$"
+    sigil: "/" | "$" | "@"
     query: string
     mode: "leading" | "inline"
     from?: number

@@ -143,6 +143,7 @@ export function Composer({
         onSubmit={submit}
         onCommand={onCommand}
         onPasteFiles={attachmentInteractionEnabled ? onPasteFiles : undefined}
+        onPickFiles={attachmentInteractionEnabled ? onPickFiles : undefined}
       />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
         <Button
