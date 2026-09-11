@@ -17,6 +17,7 @@ import { ModelPicker } from "./model-picker"
 import { RichPromptInput } from "./rich-prompt-input"
 import type { ComposerSkill } from "./rich-prompt-input"
 import type { ComposerPickerCommand, ComposerPickerItem } from "./composer-picker"
+import type { ContextPickerItem } from "./context-picker"
 import { resolvePermissionModeLabel } from "../utils"
 
 export function Composer({
@@ -96,34 +97,31 @@ export function Composer({
   const closePicker = (): void => setActivePicker(null)
   const allowSubmit = canSubmit ?? draft.items.length > 0
   const attachDisabled = attachmentReadOnly
-  const contextItems: ComposerPickerItem[] = [
+  const contextItems: ContextPickerItem[] = [
     {
       id: "context:files",
-      kind: "context",
       label: "文件和文件夹",
       description: "添加本地文件或文件夹",
       group: "添加",
-      context: { kind: "files" },
+      action: { kind: "files" },
     },
     {
       id: "context:plan",
-      kind: "context",
       label: "计划模式",
       description: "切换为只读分析模式",
       group: "添加",
-      context: { kind: "plan" },
+      action: { kind: "plan" },
     },
     ...conversations
       .filter((session) => session.id !== activeSessionId && session.status !== "archived")
       .sort((left, right) => right.updatedAt - left.updatedAt)
-      .map((session): ComposerPickerItem => ({
+      .map((session): ContextPickerItem => ({
         id: `context:conversation:${session.id}`,
-        kind: "context",
         label: session.title.trim() || "未命名对话",
         description: "引用历史对话",
         sourceLabel: "对话",
         group: "历史对话",
-        context: { kind: "conversation", sessionId: session.id, displayName: session.title.trim() || "未命名对话" },
+        action: { kind: "conversation", sessionId: session.id, displayName: session.title.trim() || "未命名对话" },
       })),
   ]
 
@@ -181,8 +179,8 @@ export function Composer({
         contextItems={contextItems}
         contextPickerRequest={contextPickerRequest}
         onContextAction={(item) => {
-          if (item.context?.kind === "files") onPickFiles?.()
-          if (item.context?.kind === "plan") onSelectPermissionMode("plan")
+          if (item.action.kind === "files") onPickFiles?.()
+          if (item.action.kind === "plan") onSelectPermissionMode("plan")
         }}
       />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">

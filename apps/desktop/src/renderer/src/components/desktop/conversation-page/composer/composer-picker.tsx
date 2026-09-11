@@ -1,5 +1,5 @@
-import { Box, Command, MessageSquare, Paperclip, ListChecks } from "lucide-react"
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { Box, Command } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
 import { cn } from "@renderer/lib/utils"
@@ -34,17 +34,12 @@ export interface ComposerPickerCommand {
 
 export interface ComposerPickerItem {
   id: string
-  kind: "skill" | "command" | "context"
+  kind: "skill" | "command"
   label: string
   description: string
   sourceLabel?: string
-  group?: string
   skill?: ComposerPickerSkill
   command?: ComposerPickerCommand
-  context?:
-    | { kind: "files" }
-    | { kind: "plan" }
-    | { kind: "conversation"; sessionId: string; displayName: string }
 }
 
 export function toComposerSkills(
@@ -223,16 +218,11 @@ export function ComposerPicker({
       className="absolute right-0 bottom-[calc(100%+10px)] left-0 z-40 overflow-hidden rounded-2xl bg-background/95 py-2 shadow-composer ring-1 ring-black/7 backdrop-blur dark:bg-card/95 dark:ring-white/12"
       onWheel={(event) => event.stopPropagation()}
     >
-      <div className="px-5 pt-1 pb-2 text-sm font-medium text-muted-foreground">{label}</div>
-      <div className="max-h-80 scroll-py-1 scrollbar-thin overflow-y-auto overscroll-contain px-3 pb-2">
+      <div className="px-4 pt-1 pb-1.5 text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="max-h-72 scroll-py-1 scrollbar-thin overflow-y-auto overscroll-contain px-2 pb-1">
         {options.map((item, index) => (
-          <Fragment key={item.id}>
-            {item.group && item.group !== options[index - 1]?.group ? (
-              <div role="presentation" className="px-2 pt-3 pb-1 text-sm text-muted-foreground">
-                {item.group}
-              </div>
-            ) : null}
-            <Button
+          <Button
+            key={item.id}
               ref={(element) => {
                 optionRefs.current[index] = element
               }}
@@ -245,34 +235,27 @@ export function ComposerPicker({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => onSelect(item)}
               className={cn(
-                "grid h-9 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2 text-left font-normal sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(10rem,1.35fr)_auto]",
+              "flex h-9 w-full justify-start gap-2 rounded-lg px-2 text-left font-normal",
                 index === activeIndex && "bg-muted text-foreground"
               )}
             >
               <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
-                {item.context?.kind === "files" ? (
-                  <Paperclip className="size-3.5" />
-                ) : item.context?.kind === "conversation" ? (
-                  <MessageSquare className="size-3.5" />
-                ) : item.context?.kind === "plan" ? (
-                  <ListChecks className="size-3.5" />
-                ) : item.kind === "command" ? (
+              {item.kind === "command" ? (
                   <Command className="size-3.5" />
                 ) : (
                   <Box className="size-3.5" />
                 )}
               </span>
-              <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
-              <span className="hidden min-w-0 truncate text-sm text-muted-foreground sm:inline">
+            <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
+            <span className="min-w-0 truncate text-sm text-muted-foreground">
                 {item.description}
               </span>
               {item.sourceLabel ? (
-                <span className="text-ui-caption shrink-0 text-muted-foreground/65">
+              <span className="ml-auto text-xs shrink-0 text-muted-foreground/65">
                   {item.sourceLabel}
                 </span>
               ) : null}
-            </Button>
-          </Fragment>
+          </Button>
         ))}
       </div>
     </div>

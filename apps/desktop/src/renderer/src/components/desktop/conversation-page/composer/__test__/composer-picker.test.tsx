@@ -10,6 +10,7 @@ import {
   toComposerSkills,
   type ComposerPickerItem,
 } from "../composer-picker"
+import { ContextPicker, type ContextPickerItem } from "../context-picker"
 
 const skills: ComposerPickerItem[] = [
   {
@@ -120,21 +121,20 @@ describe("ComposerPicker", () => {
 
   it("renders category headings and dismisses when clicking outside", async () => {
     const onDismiss = vi.fn()
-    const items: ComposerPickerItem[] = [
-      { ...skills[0]!, group: "添加" },
-      { ...skills[1]!, group: "历史对话" },
+    const items: ContextPickerItem[] = [
+      { id: "files", label: "文件和文件夹", description: "添加本地文件", group: "添加", action: { kind: "files" } },
+      { id: "chat", label: "历史会话", description: "引用历史对话", group: "历史对话", action: { kind: "conversation", sessionId: "s2", displayName: "历史会话" } },
     ]
     await act(async () => {
-      root.render(createElement(ComposerPicker, {
+      root.render(createElement(ContextPicker, {
         items,
         query: "",
-        label: "添加上下文",
         onSelect: vi.fn(),
         onDismiss,
       }))
     })
 
-    expect(container.textContent).toContain("添加上下文")
+    expect(container.querySelector('[aria-label="添加上下文"]')).not.toBeNull()
     expect(container.textContent).toContain("添加")
     expect(container.textContent).toContain("历史对话")
 
