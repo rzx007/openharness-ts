@@ -157,6 +157,14 @@ export const BUILTIN_SESSION_COMMANDS: readonly CommandCatalogEntry[] = [
     requiresEmptyComposer: true,
   },
   {
+    name: "/goal",
+    description: "Set a durable goal for this session",
+    kind: "session",
+    source: "builtin",
+    selection: "execute",
+    requiresEmptyComposer: true,
+  },
+  {
     name: "/remember",
     description: "Extract durable memories from this session",
     kind: "session",

@@ -1,4 +1,4 @@
-import { ChevronDown, Mic, ShieldCheck } from "lucide-react"
+import { ChevronDown, Goal, Mic, ShieldCheck, X } from "lucide-react"
 import { IconPlus } from "@tabler/icons-react"
 import { useState } from "react"
 
@@ -34,6 +34,8 @@ export function Composer({
   commands = [],
   conversations = [],
   activeSessionId = null,
+  goalMode = false,
+  onGoalModeChange,
   className,
   textareaClassName,
   rows = 2,
@@ -69,6 +71,8 @@ export function Composer({
   commands?: readonly ComposerPickerItem[]
   conversations?: readonly DesktopSessionRecord[]
   activeSessionId?: string | null
+  goalMode?: boolean
+  onGoalModeChange?: (active: boolean) => void
   className?: string
   textareaClassName?: string
   rows?: number
@@ -105,6 +109,13 @@ export function Composer({
       description: "添加本地文件或文件夹",
       group: "添加",
       action: { kind: "files" },
+    },
+    {
+      id: "context:goal",
+      label: "目标",
+      description: "设置要持续追求的目标",
+      group: "添加",
+      action: { kind: "goal" },
     },
     {
       id: "context:plan",
@@ -167,7 +178,7 @@ export function Composer({
       <RichPromptInput
         id={id}
         value={draft}
-        placeholder="随心输入"
+        placeholder={goalMode ? "描述你的目标，定义可衡量的成果，以获得最佳效果" : "随心输入"}
         rows={rows}
         disabled={sending}
         skills={skills}
@@ -183,6 +194,7 @@ export function Composer({
         onContextAction={(item) => {
           if (item.action.kind === "files") onPickFiles?.()
           if (item.action.kind === "plan") onSelectPermissionMode("plan")
+          if (item.action.kind === "goal") onGoalModeChange?.(true)
         }}
       />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
@@ -201,6 +213,13 @@ export function Composer({
         >
           <IconPlus className="size-5" />
         </Button>
+        {goalMode ? (
+          <Button type="button" variant="secondary" size="sm" className="ml-1 rounded-full" aria-label="退出目标输入" onClick={() => onGoalModeChange?.(false)}>
+            <X data-icon="inline-start" />
+            <Goal className="size-3.5" />
+            目标
+          </Button>
+        ) : null}
         <Popover
           open={activePicker === "permission"}
           onOpenChange={(open) => setActivePicker(open ? "permission" : null)}

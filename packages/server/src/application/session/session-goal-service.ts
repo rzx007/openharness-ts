@@ -63,18 +63,21 @@ export class SessionGoalService {
     return await this.createRevisionRun(updated, input.requestId, "edit");
   }
 
-  action(sessionId: string, goalId: string, input: GoalActionInput): SessionGoal {
+  async action(sessionId: string, goalId: string, input: GoalActionInput): Promise<SessionGoal> {
     const goal = this.requireGoal(sessionId, goalId);
     if (input.action === "pause" || input.action === "cancel") {
       this.context.runEngine.interruptSession(sessionId, `Goal ${input.action}d`);
     }
-    return this.context.store.updateGoal(goal.id, {
+    const updated = this.context.store.updateGoal(goal.id, {
       expectedRevision: input.expectedRevision,
       status: input.action === "cancel" ? "cancelled" : input.action === "pause" ? "paused" : "active",
       maxAutoTurns: goal.maxAutoTurns + (input.additionalAutoTurns ?? 0),
       reason: null,
       wait: null,
     });
+    return input.action === "resume"
+      ? await this.createRevisionRun(updated, input.requestId, "resume")
+      : updated;
   }
 
   async settleRun(sessionId: string, runId: string): Promise<void> {

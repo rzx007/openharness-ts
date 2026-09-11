@@ -1,6 +1,11 @@
-import type { SessionInputAttachmentRecord, SessionUserInputItem } from "@openharness/client"
+import type { SessionInputAttachmentRecord, SessionUserInputItem, SessionGoal, CreateSessionGoalInput, UpdateSessionGoalInput, GoalActionInput } from "@openharness/client"
 
-export type { SessionUserInputItem } from "@openharness/client"
+export type { SessionUserInputItem, SessionGoal } from "@openharness/client"
+
+export interface GetDesktopSessionGoalInput { sessionId: string }
+export interface CreateDesktopSessionGoalInput extends CreateSessionGoalInput { sessionId: string }
+export interface UpdateDesktopSessionGoalInput extends UpdateSessionGoalInput { sessionId: string; goalId: string }
+export interface DesktopSessionGoalActionInput extends GoalActionInput { sessionId: string; goalId: string }
 
 import type { DesktopAttachmentSupport, DesktopPromptAttachmentInput } from "./attachment-types"
 

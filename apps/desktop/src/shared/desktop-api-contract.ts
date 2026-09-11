@@ -33,6 +33,11 @@ import type {
   SendDesktopPromptInput,
   SetDefaultDesktopModelInput,
   SetDefaultDesktopPermissionModeInput,
+  GetDesktopSessionGoalInput,
+  CreateDesktopSessionGoalInput,
+  UpdateDesktopSessionGoalInput,
+  DesktopSessionGoalActionInput,
+  SessionGoal,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
   GetDesktopContextUsageInput,
@@ -272,6 +277,10 @@ export type DesktopAPI = {
     inspectProject: (path: string) => Promise<DesktopProjectDetails>
     listCommands: (cwd: string) => Promise<DesktopCommandCatalogEntry[]>
     compact: (input: CompactDesktopSessionInput) => Promise<DesktopCompactSessionResult>
+    getGoal: (input: GetDesktopSessionGoalInput) => Promise<SessionGoal | null>
+    createGoal: (input: CreateDesktopSessionGoalInput) => Promise<SessionGoal>
+    updateGoal: (input: UpdateDesktopSessionGoalInput) => Promise<SessionGoal>
+    goalAction: (input: DesktopSessionGoalActionInput) => Promise<SessionGoal>
     renameProject: (input: RenameDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectPinned: (input: PinDesktopProjectInput) => Promise<DesktopProjectDetails["project"]>
     setProjectDefaultShell: (

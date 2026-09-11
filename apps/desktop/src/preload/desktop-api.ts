@@ -250,6 +250,10 @@ export const desktopAPI = {
     listCommands: (cwd: string) => invoke(IpcChannels.sessionListCommands, cwd),
     compact: (input: IpcInvokeMap[typeof IpcChannels.sessionCompact]["args"][0]) =>
       invoke(IpcChannels.sessionCompact, input),
+    getGoal: (input: IpcInvokeMap[typeof IpcChannels.sessionGoalGet]["args"][0]) => invoke(IpcChannels.sessionGoalGet, input),
+    createGoal: (input: IpcInvokeMap[typeof IpcChannels.sessionGoalCreate]["args"][0]) => invoke(IpcChannels.sessionGoalCreate, input),
+    updateGoal: (input: IpcInvokeMap[typeof IpcChannels.sessionGoalUpdate]["args"][0]) => invoke(IpcChannels.sessionGoalUpdate, input),
+    goalAction: (input: IpcInvokeMap[typeof IpcChannels.sessionGoalAction]["args"][0]) => invoke(IpcChannels.sessionGoalAction, input),
     renameProject: (input: IpcInvokeMap[typeof IpcChannels.projectRename]["args"][0]) =>
       invoke(IpcChannels.projectRename, input),
     setProjectPinned: (input: IpcInvokeMap[typeof IpcChannels.projectSetPinned]["args"][0]) =>

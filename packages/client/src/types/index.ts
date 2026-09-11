@@ -32,9 +32,17 @@ import type {
   SessionUserInputItem,
   ListMessagePartsOptions,
   JobSnapshot,
+  SessionGoal,
+  CreateSessionGoalInput,
+  UpdateSessionGoalInput,
+  GoalActionInput,
 } from "@openharness/protocol";
 
 export type {
+  SessionGoal,
+  CreateSessionGoalInput,
+  UpdateSessionGoalInput,
+  GoalActionInput,
   AdmitPromptAttachmentInput,
   AttachmentAssetRecord,
   CreateScheduledTaskInput,

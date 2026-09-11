@@ -1,5 +1,5 @@
 import { Bot, ListFilter, MoreHorizontal, PanelRight, ShieldAlert } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
 import { OpenWithSplitButton } from "@renderer/components/desktop/open-with"
@@ -39,6 +39,8 @@ import {
   selectNewConversationSending,
 } from "@renderer/stores/desktop-session/selectors"
 import { Composer } from "./composer/composer"
+import { GoalBanner } from "./composer/goal-banner"
+import type { SessionGoal } from "@shared/session-types"
 import { PendingPromptQueue } from "./transcript/pending-prompt-queue"
 import { derivePendingHandoffSubmission, mergeOptimisticTranscript } from "./transcript/optimistic-transcript"
 import { toComposerCommands, toComposerSkills, type ComposerPickerCommand } from "./composer/composer-picker"
@@ -71,6 +73,10 @@ function ConversationPane({
     commands: import("@shared/session-types").DesktopCommandCatalogEntry[]
   } | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
+  const [goalMode, setGoalMode] = useState(false)
+  const [goal, setGoal] = useState<SessionGoal | null>(null)
+  const [goalBusy, setGoalBusy] = useState(false)
+  const ordinaryDraftBeforeGoal = useRef<ComposerDocument | null>(null)
   const navigate = useNavigate()
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
@@ -156,14 +162,85 @@ function ConversationPane({
     if ((!content.trim() && attachments.length === 0) || !ready || sending || archived) return
     setComposerValidationError(null)
     try {
+      if (goalMode) {
+        if (!activeSessionId) throw new Error("请先创建会话，再设置持续目标。")
+        setGoalBusy(true)
+        const requestId = globalThis.crypto.randomUUID()
+        const saved = goal && goal.status !== "completed" && goal.status !== "cancelled"
+          ? await window.desktop.sessions.updateGoal({ sessionId: activeSessionId, goalId: goal.id, requestId, expectedRevision: goal.revision, objective: content })
+          : await window.desktop.sessions.createGoal({ sessionId: activeSessionId, requestId, objective: content })
+        setGoal(saved)
+        setGoalMode(false)
+        setDraft(ordinaryDraftBeforeGoal.current ?? composerDocument([]))
+        ordinaryDraftBeforeGoal.current = null
+        return
+      }
       if (hasSession) {
         await sendMessage(content, { document: draft, attachments })
       } else {
         await startSession(content, { document: draft, attachments })
       }
-    } catch {
+    } catch (error) {
+      if (goalMode) setComposerValidationError(error instanceof Error ? error.message : String(error))
       // The store keeps the error and the draft stays available for retry.
+    } finally {
+      setGoalBusy(false)
     }
+  }
+
+  useEffect(() => {
+    setGoalMode(false)
+    if (!activeSessionId) {
+      setGoal(null)
+      return
+    }
+    let cancelled = false
+    void window.desktop.sessions.getGoal({ sessionId: activeSessionId }).then((value) => {
+      if (!cancelled) setGoal(value)
+    }).catch(() => { if (!cancelled) setGoal(null) })
+    return () => { cancelled = true }
+  }, [activeSessionId])
+
+  useEffect(() => {
+    if (!activeSessionId || !goal || goal.status === "completed" || goal.status === "cancelled") return
+    const timer = window.setInterval(() => {
+      void window.desktop.sessions.getGoal({ sessionId: activeSessionId }).then(setGoal).catch(() => {})
+    }, 2_000)
+    return () => window.clearInterval(timer)
+  }, [activeSessionId, goal])
+
+  const applyGoalAction = async (action: "pause" | "resume" | "cancel"): Promise<void> => {
+    if (!activeSessionId || !goal || goalBusy) return
+    setGoalBusy(true)
+    setComposerValidationError(null)
+    try {
+      setGoal(await window.desktop.sessions.goalAction({
+        sessionId: activeSessionId,
+        goalId: goal.id,
+        requestId: globalThis.crypto.randomUUID(),
+        expectedRevision: goal.revision,
+        action,
+      }))
+    } catch (error) {
+      setComposerValidationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setGoalBusy(false)
+    }
+  }
+
+  const changeGoalMode = (active: boolean): void => {
+    if (goalBusy || active === goalMode) return
+    if (active) {
+      ordinaryDraftBeforeGoal.current = draft
+      if (goal && goal.status !== "completed" && goal.status !== "cancelled") {
+        setDraft(composerDocument([{ type: "text", text: goal.objective }]))
+      }
+      setGoalMode(true)
+      return
+    }
+    setGoalMode(false)
+    if (ordinaryDraftBeforeGoal.current) setDraft(ordinaryDraftBeforeGoal.current)
+    ordinaryDraftBeforeGoal.current = null
   }
 
   const title = sessionView?.session.title.trim() || "新对话"
@@ -306,13 +383,17 @@ function ConversationPane({
         setStatusOpen(true)
         return
       }
+      if (command.id === "goal") {
+        changeGoalMode(true)
+        return
+      }
       if (command.id === "skills") {
         await navigate({ to: "/plugins" })
         return
       }
       throw new Error(`Desktop 尚未支持 /${command.id}。`)
     },
-    [activeSessionId, navigate, refreshContextUsage, resyncActiveSessionSnapshot, running]
+    [activeSessionId, changeGoalMode, navigate, refreshContextUsage, resyncActiveSessionSnapshot, running]
   )
 
   return (
@@ -486,6 +567,7 @@ function ConversationPane({
             </div>
           ) : (
             <div className="mx-auto mb-5 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-2">
+              {goal ? <GoalBanner goal={goal} busy={goalBusy} onAction={(action) => void applyGoalAction(action)} /> : null}
               <ScopedOperationError error={composerValidationError ?? activeSessionError} />
               <PendingPromptQueue
                 prompts={pendingPrompts}
@@ -513,7 +595,9 @@ function ConversationPane({
                 )}
                 conversations={sessions}
                 activeSessionId={activeSessionId}
-                canSubmit={canSubmit}
+                goalMode={goalMode}
+                onGoalModeChange={changeGoalMode}
+                canSubmit={goalMode ? Boolean(draftText.trim()) && !goalBusy : canSubmit}
                 contextUsage={contextUsageSnapshot}
                 attachments={attachments}
                 attachmentInteractionEnabled={attachmentSupport.interactionEnabled}

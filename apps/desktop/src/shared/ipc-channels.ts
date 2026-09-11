@@ -29,6 +29,11 @@ import type {
   SetDefaultDesktopPermissionModeInput,
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
+  GetDesktopSessionGoalInput,
+  CreateDesktopSessionGoalInput,
+  UpdateDesktopSessionGoalInput,
+  DesktopSessionGoalActionInput,
+  SessionGoal,
 } from "./session-types"
 import type { DesktopContextUsageSnapshot } from "./context-usage-types"
 import type {
@@ -149,6 +154,10 @@ export const IpcChannels = {
   sessionInspectProject: "session:inspect-project",
   sessionListCommands: "session:list-commands",
   sessionCompact: "session:compact",
+  sessionGoalGet: "session:goal:get",
+  sessionGoalCreate: "session:goal:create",
+  sessionGoalUpdate: "session:goal:update",
+  sessionGoalAction: "session:goal:action",
   projectRename: "project:rename",
   projectSetPinned: "project:set-pinned",
   projectSetDefaultShell: "project:set-default-shell",
@@ -377,6 +386,10 @@ export interface IpcInvokeMap {
     args: [input: CompactDesktopSessionInput]
     result: DesktopCompactSessionResult
   }
+  [IpcChannels.sessionGoalGet]: { args: [input: GetDesktopSessionGoalInput]; result: SessionGoal | null }
+  [IpcChannels.sessionGoalCreate]: { args: [input: CreateDesktopSessionGoalInput]; result: SessionGoal }
+  [IpcChannels.sessionGoalUpdate]: { args: [input: UpdateDesktopSessionGoalInput]; result: SessionGoal }
+  [IpcChannels.sessionGoalAction]: { args: [input: DesktopSessionGoalActionInput]; result: SessionGoal }
   [IpcChannels.projectRename]: {
     args: [input: RenameDesktopProjectInput]
     result: DesktopProjectDetails["project"]

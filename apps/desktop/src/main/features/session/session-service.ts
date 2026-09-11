@@ -71,6 +71,11 @@ import type {
   UpdateDesktopSessionModelInput,
   UpdateDesktopSessionPermissionModeInput,
   GetDesktopContextUsageInput,
+  GetDesktopSessionGoalInput,
+  CreateDesktopSessionGoalInput,
+  UpdateDesktopSessionGoalInput,
+  DesktopSessionGoalActionInput,
+  SessionGoal,
 } from "../../../shared/session-types"
 import { resolveDesktopAttachmentSupport } from "../../../shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "../../../shared/context-usage-types"
@@ -88,7 +93,7 @@ import { reserveSubscriptionSnapshot, SessionSubscriptionRegistry } from "./sess
 const execFileAsync = promisify(execFile)
 
 const primarySubscriptionSlot = "primary"
-const DESKTOP_SESSION_COMMAND_NAMES = new Set(["/compact", "/status", "/skills"])
+const DESKTOP_SESSION_COMMAND_NAMES = new Set(["/compact", "/goal", "/status", "/skills"])
 
 export class DesktopSessionService {
   private clientPromise: Promise<OpenHarnessClient> | null = null
@@ -232,6 +237,25 @@ export class DesktopSessionService {
     const sessionId = requireString(input.sessionId, "会话 ID")
     const result = await (await this.getClient()).compactSession(sessionId)
     return { messageCount: result.messageCount }
+  }
+
+  async getGoal(input: GetDesktopSessionGoalInput): Promise<SessionGoal | null> {
+    return await (await this.getClient()).getSessionGoal(requireString(input.sessionId, "会话 ID"))
+  }
+
+  async createGoal(input: CreateDesktopSessionGoalInput): Promise<SessionGoal> {
+    const { sessionId, ...body } = input
+    return await (await this.getClient()).createSessionGoal(requireString(sessionId, "会话 ID"), body)
+  }
+
+  async updateGoal(input: UpdateDesktopSessionGoalInput): Promise<SessionGoal> {
+    const { sessionId, goalId, ...body } = input
+    return await (await this.getClient()).updateSessionGoal(requireString(sessionId, "会话 ID"), requireString(goalId, "目标 ID"), body)
+  }
+
+  async goalAction(input: DesktopSessionGoalActionInput): Promise<SessionGoal> {
+    const { sessionId, goalId, ...body } = input
+    return await (await this.getClient()).applySessionGoalAction(requireString(sessionId, "会话 ID"), requireString(goalId, "目标 ID"), body)
   }
 
   async checkoutProjectBranch(

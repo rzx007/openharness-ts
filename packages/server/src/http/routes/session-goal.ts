@@ -18,7 +18,7 @@ export function createSessionGoalRoutes(goals: SessionGoalService): Hono {
     })
     .post("/:sessionId/goals/:goalId/actions", async (c) => {
       try {
-        return jsonResponse({ goal: goals.action(c.req.param("sessionId"), c.req.param("goalId"), parseGoalActionInput(await readJson(c))) });
+        return jsonResponse({ goal: await goals.action(c.req.param("sessionId"), c.req.param("goalId"), parseGoalActionInput(await readJson(c))) });
       } catch (error) { return applicationErrorResponse(error, 400); }
     });
 }
