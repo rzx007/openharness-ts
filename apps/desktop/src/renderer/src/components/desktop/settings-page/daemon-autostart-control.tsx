@@ -19,9 +19,18 @@ export function DaemonAutoStartControl(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void refresh()
-    window.addEventListener("focus", refresh)
-    return () => window.removeEventListener("focus", refresh)
+    const run = () => {
+      void refresh()
+    }
+
+    queueMicrotask(run)
+
+    const handleFocus = () => {
+      void refresh()
+    }
+
+    window.addEventListener("focus", handleFocus)
+    return () => window.removeEventListener("focus", handleFocus)
   }, [refresh])
 
   const update = async (enabled: boolean): Promise<void> => {

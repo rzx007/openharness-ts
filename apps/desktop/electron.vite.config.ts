@@ -23,6 +23,12 @@ function copySessionMigrations(): Plugin {
 
 export default defineConfig({
   main: {
+    resolve: {
+      alias: {
+        "@main": resolve("src/main"),
+        "@shared": resolve("src/shared"),
+      },
+    },
     plugins: [copySessionMigrations()],
     build: {
       externalizeDeps: {
