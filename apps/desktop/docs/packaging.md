@@ -12,7 +12,7 @@
 | `devDependencies` | React、Tailwind、图标、workspace 包、electron-vite 等 | 开发期用；渲染进程和主进程 JS 已经打进 `out/` |
 | `electron-builder.yml` 的 `files` | `out/**`、`resources/**`、`package.json` | 不要默认拷整个 `apps/desktop` |
 
-主进程把 `@openharness/server` 等 workspace 包打进 `out/main`。SQLite 迁移文件由 `electron.vite.config.ts` 拷到 `out/main/migrations`。原生模块保持外置，asar 里再解开 `prebuilds` / `build`。
+Desktop 只直接依赖 `@openharness/client` 和 `@openharness/server`。主进程把 server 及其 `core`、`sandbox`、`terminal-node` 等传递实现打进 `out/main`；renderer/preload 不允许导入 server。SQLite 迁移文件仍由 `electron.vite.config.ts` 拷到 `out/main/migrations`。原生模块保持外置，asar 里再解开 `prebuilds` / `build`。
 
 ## 不要把这些加回 `dependencies`
 
@@ -21,6 +21,10 @@
 - Tailwind / lightningcss 的全平台可选二进制。它们是构建工具，不是运行时。
 
 以后主进程如果真的要运行时 `require` 某个 npm 包，再把它放进 `dependencies`，并确认 Vite 没有把它打进 bundle（原生模块用 `externalizeDeps.include`）。
+
+`electron.vite.config.ts` 中保留 `terminal` / `terminal-node` 的 `externalizeDeps.exclude`，是为了打包 server 的传递实现，并不表示 Desktop 可以直接导入它们。`scripts/verify-workspace-boundaries.mjs` 会检查 package.json 和源码导入边界。
+
+当前 migration 仍从 `packages/services` 复制，这是已知的构建期隐藏耦合，本轮依赖收敛不处理。
 
 ## 日常怎么打
 

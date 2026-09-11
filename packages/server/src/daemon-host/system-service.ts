@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+
+/** User-scoped operating-system service manager for a local daemon host. */
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -72,6 +74,10 @@ export class DaemonSystemService {
     this.logsDir = options.logsDir ?? getLogsDir();
     this.uid = options.uid ?? process.getuid?.();
     this.runCommand = options.runCommand ?? runSystemCommand;
+  }
+
+  invocation(): DaemonServiceInvocation {
+    return this.options.invocation;
   }
 
   status(): DaemonSystemServiceStatus {

@@ -1,34 +1,30 @@
 import { dirname } from "node:path"
 
-import { loadSettings, saveSettings } from "@openharness/core"
-import { DaemonSystemService, type DaemonSystemServiceState } from "@openharness/server"
+import {
+  createDaemonAutoStartController,
+  type DaemonAutoStartController,
+} from "@openharness/server/daemon-host"
 import { app } from "electron"
 
-import type { DesktopDaemonAutoStartSnapshot } from "@shared/settings-types"
+import type { DesktopDaemonAutoStartSnapshot } from "../../../shared/settings-types"
 import {
   getDesktopPreferences,
   initializeDesktopInstallIdentity,
   patchDesktopPreferences,
 } from "../settings/desktop-preferences"
 
-type SystemService = Pick<DaemonSystemService, "status" | "install" | "uninstall" | "start">
-
 export interface DaemonAutoStartDependencies {
-  loadSettings: typeof loadSettings
-  saveSettings: typeof saveSettings
   preferences: typeof getDesktopPreferences
   initializeIdentity: typeof initializeDesktopInstallIdentity
   patchPreferences: typeof patchDesktopPreferences
-  systemService: () => SystemService
+  controller: () => DaemonAutoStartController
 }
 
 const defaultDependencies: DaemonAutoStartDependencies = {
-  loadSettings,
-  saveSettings,
   preferences: getDesktopPreferences,
   initializeIdentity: initializeDesktopInstallIdentity,
   patchPreferences: patchDesktopPreferences,
-  systemService: createDesktopDaemonSystemService,
+  controller: createDesktopDaemonAutoStartController,
 }
 
 export class DaemonAutoStartService {
@@ -36,60 +32,31 @@ export class DaemonAutoStartService {
 
   async snapshot(): Promise<DesktopDaemonAutoStartSnapshot> {
     const preferences = this.dependencies.initializeIdentity()
-    const configured = (await this.dependencies.loadSettings()).daemon?.autoStart ?? false
-    const serviceState = this.dependencies.systemService().status().state
-    const enabled = configured && serviceState !== "not-installed"
+    const host = await this.dependencies.controller().snapshot()
     const onboardingState = preferences.daemonOnboardingState ?? "dismissed"
-    if (configured && onboardingState === "pending") {
+    if (host.configured && onboardingState === "pending") {
       this.dependencies.patchPreferences({ daemonOnboardingState: "enabled" })
       return {
-        configured,
-        serviceState,
-        enabled,
+        ...host,
         onboardingState: "enabled",
         showOnboarding: false,
       }
     }
     return {
-      configured,
-      serviceState,
-      enabled,
+      ...host,
       onboardingState,
-      showOnboarding: onboardingState === "pending" && !configured,
+      showOnboarding: onboardingState === "pending" && !host.configured,
     }
   }
 
   async enable(): Promise<DesktopDaemonAutoStartSnapshot> {
-    const previous = await this.dependencies.loadSettings()
-    await this.dependencies.saveSettings({
-      ...previous,
-      daemon: { ...previous.daemon, autoStart: true },
-    })
-    try {
-      const service = this.dependencies.systemService()
-      const state = service.status().state
-      if (state === "not-installed") service.install()
-      else if (state === "stopped") service.start()
-      const verified = service.status().state
-      if (verified === "not-installed" || verified === "stopped") {
-        throw new Error("daemon 系统服务未能启动。")
-      }
-      this.dependencies.patchPreferences({ daemonOnboardingState: "enabled" })
-      return await this.snapshot()
-    } catch (error) {
-      await this.dependencies.saveSettings(previous)
-      throw error
-    }
+    await this.dependencies.controller().enable()
+    this.dependencies.patchPreferences({ daemonOnboardingState: "enabled" })
+    return await this.snapshot()
   }
 
   async disable(): Promise<DesktopDaemonAutoStartSnapshot> {
-    const service = this.dependencies.systemService()
-    service.uninstall()
-    const settings = await this.dependencies.loadSettings()
-    await this.dependencies.saveSettings({
-      ...settings,
-      daemon: { ...settings.daemon, autoStart: false },
-    })
+    await this.dependencies.controller().disable()
     return await this.snapshot()
   }
 
@@ -102,23 +69,16 @@ export class DaemonAutoStartService {
   }
 }
 
-export function createDesktopDaemonSystemService(): DaemonSystemService {
+export function createDesktopDaemonAutoStartController(): DaemonAutoStartController {
   const flag = process.platform === "win32" ? "--daemon-watchdog" : "--daemon-service"
   const args = app.isPackaged ? [flag] : [app.getAppPath(), flag]
-  return new DaemonSystemService({
+  return createDaemonAutoStartController({
     invocation: {
       command: process.execPath,
       args,
       cwd: dirname(process.execPath),
     },
   })
-}
-
-export function isDaemonServiceEnabled(
-  configured: boolean,
-  serviceState: DaemonSystemServiceState
-): boolean {
-  return configured && serviceState !== "not-installed"
 }
 
 export const daemonAutoStartService = new DaemonAutoStartService()

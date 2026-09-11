@@ -34,11 +34,16 @@ describe("buildDesktopSettingsSnapshot", () => {
   })
 
   it("preserves valid notification and desktop preference values", () => {
-    expect(buildDesktopSettingsSnapshot({}, {
-      notificationMode: "always",
-      defaultOpenerId: "  vscode  ",
-      defaultTerminalShellId: "  pwsh  ",
-    })).toMatchObject({
+    expect(
+      buildDesktopSettingsSnapshot(
+        {},
+        {
+          notificationMode: "always",
+          defaultOpenerId: "  vscode  ",
+          defaultTerminalShellId: "  pwsh  ",
+        }
+      )
+    ).toMatchObject({
       notificationMode: "always",
       defaultOpenerId: "vscode",
       defaultTerminalShellId: "pwsh",
@@ -46,11 +51,16 @@ describe("buildDesktopSettingsSnapshot", () => {
   })
 
   it("normalizes unknown or blank preference values", () => {
-    expect(buildDesktopSettingsSnapshot({}, {
-      notificationMode: "chatty",
-      defaultOpenerId: "   ",
-      defaultTerminalShellId: "system",
-    })).toMatchObject({
+    expect(
+      buildDesktopSettingsSnapshot(
+        {},
+        {
+          notificationMode: "chatty",
+          defaultOpenerId: "   ",
+          defaultTerminalShellId: "system",
+        }
+      )
+    ).toMatchObject({
       notificationMode: "when_unfocused",
       defaultOpenerId: null,
       defaultTerminalShellId: null,
@@ -58,71 +68,66 @@ describe("buildDesktopSettingsSnapshot", () => {
   })
 
   it("uses only the explicit agent environment setting", () => {
-    expect(buildDesktopSettingsSnapshot({
-      agentEnvironment: { kind: "wsl" },
-    })).toMatchObject({ agentEnvironment: "wsl" })
-    expect(buildDesktopSettingsSnapshot({
-      agentEnvironment: { kind: "unexpected" },
-    })).toMatchObject({ agentEnvironment: "native" })
+    expect(
+      buildDesktopSettingsSnapshot({
+        agentEnvironment: { kind: "wsl" },
+      })
+    ).toMatchObject({ agentEnvironment: "wsl" })
+    expect(
+      buildDesktopSettingsSnapshot({
+        agentEnvironment: { kind: "unexpected" },
+      })
+    ).toMatchObject({ agentEnvironment: "native" })
   })
 })
 
 describe("DesktopSettingsService.updateAgentEnvironment", () => {
-  it("preflights WSL before saving the global environment", async () => {
-    const calls: string[] = []
+  it("lets the daemon validate WSL before saving the global environment", async () => {
     const patchSettings = vi.fn(async (patch) => {
-      calls.push("patch")
       return patch
     })
+    const capabilities = vi.fn(async () => ({
+      serverVersion: "1",
+      protocol: { version: 2 },
+      features: {},
+      agentEnvironments: { native: true as const, wsl: true },
+    }))
     const service = new DesktopSettingsService({
-      daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      preflightWsl: async () => { calls.push("preflight") },
-      platform: "win32",
+      daemonClient: async () => ({ capabilities, getSettings: vi.fn(), patchSettings }),
+      refreshDaemonClient: async () => ({ capabilities, getSettings: vi.fn(), patchSettings }),
       getPreferences: preferences,
       patchPreferences: vi.fn(),
     })
 
     const result = await service.updateAgentEnvironment({ environment: "wsl" })
 
-    expect(calls).toEqual(["preflight", "patch"])
     expect(patchSettings).toHaveBeenCalledWith({
       agentEnvironment: { kind: "wsl" },
     })
-    expect(result).toMatchObject({ agentEnvironment: "wsl", restartRequired: true, wslSupported: true })
+    expect(result).toMatchObject({
+      agentEnvironment: "wsl",
+      restartRequired: true,
+      wslSupported: true,
+    })
   })
 
-  it("does not save settings when WSL preflight fails", async () => {
-    const patchSettings = vi.fn()
+  it("surfaces a daemon-side WSL validation failure", async () => {
+    const patchSettings = vi.fn(async () => {
+      throw new Error("WSL is not installed on the daemon host")
+    })
+    const capabilities = vi.fn()
     const service = new DesktopSettingsService({
-      daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      preflightWsl: async () => { throw new Error("WSL is not installed") },
-      platform: "win32",
+      daemonClient: async () => ({ capabilities, getSettings: vi.fn(), patchSettings }) as never,
+      refreshDaemonClient: async () =>
+        ({ capabilities, getSettings: vi.fn(), patchSettings }) as never,
       getPreferences: preferences,
       patchPreferences: vi.fn(),
     })
 
-    await expect(service.updateAgentEnvironment({ environment: "wsl" }))
-      .rejects.toThrow("WSL is not installed")
-    expect(patchSettings).not.toHaveBeenCalled()
-  })
-
-  it("rejects WSL on macOS and Linux without probing", async () => {
-    const patchSettings = vi.fn()
-    const preflightWsl = vi.fn(async () => {})
-    const service = new DesktopSettingsService({
-      daemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      refreshDaemonClient: async () => ({ getSettings: vi.fn(), patchSettings }) as any,
-      preflightWsl,
-      platform: "darwin",
-      getPreferences: preferences,
-      patchPreferences: vi.fn(),
-    })
-
-    await expect(service.updateAgentEnvironment({ environment: "wsl" }))
-      .rejects.toThrow("WSL 仅可在 Windows 上使用")
-    expect(preflightWsl).not.toHaveBeenCalled()
-    expect(patchSettings).not.toHaveBeenCalled()
+    await expect(service.updateAgentEnvironment({ environment: "wsl" })).rejects.toThrow(
+      "WSL is not installed on the daemon host"
+    )
+    expect(patchSettings).toHaveBeenCalledOnce()
+    expect(capabilities).not.toHaveBeenCalled()
   })
 })

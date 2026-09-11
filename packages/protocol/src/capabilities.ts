@@ -1,7 +1,4 @@
-import {
-  parseAttachmentLimits,
-  type AttachmentLimits,
-} from "./attachment.js";
+import { parseAttachmentLimits, type AttachmentLimits } from "./attachment.js";
 
 export interface ProtocolVersion {
   version: number;
@@ -12,6 +9,12 @@ export interface ServerCapabilities {
   protocol: ProtocolVersion;
   features: Record<string, number>;
   attachments?: AttachmentTransferCapabilities;
+  agentEnvironments?: AgentEnvironmentCapabilities;
+}
+
+export interface AgentEnvironmentCapabilities {
+  native: true;
+  wsl: boolean;
 }
 
 export type AttachmentUploadMode = "single" | "resumable";
@@ -31,8 +34,10 @@ export interface ProtocolCompatibility {
 }
 
 export function parseServerCapabilities(value: unknown): ServerCapabilities {
-  if (!isRecord(value)) throw new Error("Capabilities response must be an object");
-  if (typeof value.serverVersion !== "string") throw new Error("serverVersion must be a string");
+  if (!isRecord(value))
+    throw new Error("Capabilities response must be an object");
+  if (typeof value.serverVersion !== "string")
+    throw new Error("serverVersion must be a string");
   if (!isRecord(value.protocol)) throw new Error("protocol must be an object");
   const version = positiveInteger(value.protocol.version, "protocol.version");
   if (!isRecord(value.features)) throw new Error("features must be an object");
@@ -41,12 +46,32 @@ export function parseServerCapabilities(value: unknown): ServerCapabilities {
     features[name] = positiveInteger(version, `features.${name}`);
   }
   const attachments = parseAttachmentTransferCapabilities(value.attachments);
+  const agentEnvironments = parseAgentEnvironmentCapabilities(
+    value.agentEnvironments,
+  );
   return {
     serverVersion: value.serverVersion,
     protocol: { version },
     features,
     ...(attachments ? { attachments } : {}),
+    ...(agentEnvironments ? { agentEnvironments } : {}),
   };
+}
+
+function parseAgentEnvironmentCapabilities(
+  value: unknown,
+): AgentEnvironmentCapabilities | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !isRecord(value) ||
+    value.native !== true ||
+    typeof value.wsl !== "boolean"
+  ) {
+    throw new Error(
+      "agentEnvironments must contain native=true and a boolean wsl value",
+    );
+  }
+  return { native: true, wsl: value.wsl };
 }
 
 export function checkProtocolCompatibility(
@@ -71,7 +96,8 @@ export function supportsFeature(
 }
 
 function positiveInteger(value: unknown, field: string): number {
-  if (!Number.isInteger(value) || Number(value) < 1) throw new Error(`${field} must be a positive integer`);
+  if (!Number.isInteger(value) || Number(value) < 1)
+    throw new Error(`${field} must be a positive integer`);
   return Number(value);
 }
 

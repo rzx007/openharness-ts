@@ -18,6 +18,9 @@
       "@openharness/server": [
         "../../packages/server/src/index.ts"
       ],
+      "@openharness/server/daemon-host": [
+        "../../packages/server/src/daemon-host/index.ts"
+      ],
       "@openharness/services": [
         "../../packages/services/src/index.ts"
       ]

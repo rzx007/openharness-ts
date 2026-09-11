@@ -1,4 +1,9 @@
-import { loadSettings, saveSettings } from "@openharness/core";
+import {
+  reconcileDaemonSystemService,
+  saveDaemonAutoStartPreference,
+  shouldStartManagedDaemon,
+  type DaemonAutoStartAction,
+} from "@openharness/server/daemon-host";
 
 import {
   createDaemonSystemService,
@@ -6,7 +11,7 @@ import {
   type DaemonSystemServiceState,
 } from "./daemon-system-service.js";
 
-export type DaemonAutoStartAction = "none" | "installed" | "started" | "uninstalled";
+export type { DaemonAutoStartAction } from "@openharness/server/daemon-host";
 
 export interface DaemonAutoStartReconciliation {
   service: DaemonSystemService;
@@ -15,15 +20,11 @@ export interface DaemonAutoStartReconciliation {
 }
 
 export async function loadDaemonAutoStart(): Promise<boolean> {
-  return (await loadSettings()).daemon?.autoStart ?? false;
+  return await shouldStartManagedDaemon();
 }
 
 export async function saveDaemonAutoStart(autoStart: boolean): Promise<void> {
-  const settings = await loadSettings();
-  await saveSettings({
-    ...settings,
-    daemon: { ...settings.daemon, autoStart },
-  });
+  await saveDaemonAutoStartPreference(autoStart);
 }
 
 export function reconcileDaemonAutoStart(
@@ -32,21 +33,5 @@ export function reconcileDaemonAutoStart(
   serveArgs?: string[],
 ): DaemonAutoStartReconciliation {
   const service = createDaemonSystemService(entry, serveArgs);
-  const state = service.status().state;
-
-  if (!autoStart) {
-    if (state === "not-installed") return { service, state, action: "none" };
-    service.uninstall();
-    return { service, state: "not-installed", action: "uninstalled" };
-  }
-
-  if (state === "not-installed") {
-    service.install();
-    return { service, state: "running", action: "installed" };
-  }
-  if (state === "stopped") {
-    service.start();
-    return { service, state: "running", action: "started" };
-  }
-  return { service, state, action: "none" };
+  return { service, ...reconcileDaemonSystemService(service, autoStart) };
 }

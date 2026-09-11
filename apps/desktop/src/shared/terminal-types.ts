@@ -6,7 +6,7 @@ import type {
   TerminalResizeRequest,
   TerminalSessionInfo,
   TerminalWriteRequest,
-} from "@openharness/terminal"
+} from "@openharness/client"
 
 export type DesktopDetectedTerminalShell = { id: string; label: string }
 

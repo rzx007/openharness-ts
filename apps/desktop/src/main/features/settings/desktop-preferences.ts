@@ -10,7 +10,7 @@ import {
   type DesktopNotificationMode,
   type DesktopDaemonOnboardingState,
   type DesktopInstallIdentity,
-} from "@shared/settings-types"
+} from "../../../shared/settings-types"
 
 export interface DesktopPreferences {
   notificationMode: DesktopNotificationMode

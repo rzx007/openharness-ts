@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import type { DaemonAutoStartSnapshot } from "@openharness/server/daemon-host"
 
 vi.mock("electron", () => ({
   app: { isPackaged: true, getAppPath: () => "D:/app", getPath: () => "D:/data" },
@@ -9,7 +10,11 @@ import { DaemonAutoStartService } from "./daemon-autostart-service"
 function fixture(
   options: { configured?: boolean; state?: "not-installed" | "stopped" | "running" } = {}
 ) {
-  let settings = { daemon: { autoStart: options.configured ?? false } }
+  let host: DaemonAutoStartSnapshot = {
+    configured: options.configured ?? false,
+    serviceState: options.state ?? "not-installed",
+    enabled: (options.configured ?? false) && options.state !== "not-installed",
+  }
   let preferences: {
     notificationMode: "when_unfocused"
     installIdentity: "new"
@@ -19,40 +24,27 @@ function fixture(
     installIdentity: "new" as const,
     daemonOnboardingState: "pending",
   }
-  let state = options.state ?? "not-installed"
-  const install = vi.fn(() => {
-    state = "running"
+  const enable = vi.fn(async () => {
+    host = { configured: true, serviceState: "running", enabled: true }
+    return host
   })
-  const uninstall = vi.fn(() => {
-    state = "not-installed"
-  })
-  const start = vi.fn(() => {
-    state = "running"
+  const disable = vi.fn(async () => {
+    host = { configured: false, serviceState: "not-installed", enabled: false }
+    return host
   })
   const service = new DaemonAutoStartService({
-    loadSettings: vi.fn(async () => settings) as never,
-    saveSettings: vi.fn(async (next) => {
-      settings = next as typeof settings
-    }) as never,
     preferences: vi.fn(() => preferences),
     initializeIdentity: vi.fn(() => preferences),
     patchPreferences: vi.fn((patch) => {
       preferences = { ...preferences, ...patch }
       return preferences
     }),
-    systemService: () => ({
-      status: () => ({ platform: "win32", state }),
-      install,
-      uninstall,
-      start,
-    }),
+    controller: () => ({ snapshot: async () => host, enable, disable }),
   })
   return {
     service,
-    install,
-    uninstall,
-    start,
-    settings: () => settings,
+    enable,
+    disable,
     preferences: () => preferences,
   }
 }
@@ -64,10 +56,9 @@ describe("DaemonAutoStartService", () => {
   })
 
   it("installs the service and completes onboarding", async () => {
-    const { service, install, settings, preferences } = fixture()
+    const { service, enable, preferences } = fixture()
     expect(await service.enable()).toMatchObject({ enabled: true, showOnboarding: false })
-    expect(install).toHaveBeenCalledOnce()
-    expect(settings().daemon.autoStart).toBe(true)
+    expect(enable).toHaveBeenCalledOnce()
     expect(preferences().daemonOnboardingState).toBe("enabled")
   })
 
@@ -75,8 +66,7 @@ describe("DaemonAutoStartService", () => {
     const value = fixture({ configured: true, state: "running" })
     await value.service.enable()
     await value.service.disable()
-    expect(value.uninstall).toHaveBeenCalledOnce()
-    expect(value.settings().daemon.autoStart).toBe(false)
+    expect(value.disable).toHaveBeenCalledOnce()
     expect(value.preferences().daemonOnboardingState).toBe("enabled")
   })
 

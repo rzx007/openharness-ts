@@ -8,6 +8,10 @@
     ".": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"
+    },
+    "./daemon-host": {
+      "import": "./src/daemon-host/index.ts",
+      "types": "./src/daemon-host/index.ts"
     }
   },
   "scripts": {

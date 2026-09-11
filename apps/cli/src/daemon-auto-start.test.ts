@@ -9,9 +9,35 @@ const serviceMock = vi.hoisted(() => ({
   start: vi.fn(),
 }));
 
-vi.mock("@openharness/core", () => ({
-  loadSettings: loadSettingsMock,
-  saveSettings: saveSettingsMock,
+vi.mock("@openharness/server/daemon-host", () => ({
+  shouldStartManagedDaemon: async () =>
+    (await loadSettingsMock()).daemon?.autoStart ?? false,
+  saveDaemonAutoStartPreference: async (autoStart: boolean) => {
+    const settings = await loadSettingsMock();
+    await saveSettingsMock({
+      ...settings,
+      daemon: { ...settings.daemon, autoStart },
+    });
+  },
+  reconcileDaemonSystemService: (
+    service: typeof serviceMock,
+    autoStart: boolean,
+  ) => {
+    const state = service.status().state;
+    if (!autoStart && state !== "not-installed") {
+      service.uninstall();
+      return { state: "not-installed", action: "uninstalled" };
+    }
+    if (autoStart && state === "not-installed") {
+      service.install();
+      return { state: "running", action: "installed" };
+    }
+    if (autoStart && state === "stopped") {
+      service.start();
+      return { state: "running", action: "started" };
+    }
+    return { state, action: "none" };
+  },
 }));
 
 vi.mock("./daemon-system-service.js", () => ({
@@ -27,8 +53,14 @@ import {
 describe("daemon auto-start settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    loadSettingsMock.mockResolvedValue({ model: "m", daemon: { autoStart: false } });
-    serviceMock.status.mockReturnValue({ platform: "win32", state: "not-installed" });
+    loadSettingsMock.mockResolvedValue({
+      model: "m",
+      daemon: { autoStart: false },
+    });
+    serviceMock.status.mockReturnValue({
+      platform: "win32",
+      state: "not-installed",
+    });
   });
 
   it("loads and saves daemon.autoStart without dropping other settings", async () => {
@@ -36,7 +68,10 @@ describe("daemon auto-start settings", () => {
 
     await saveDaemonAutoStart(true);
 
-    expect(saveSettingsMock).toHaveBeenCalledWith({ model: "m", daemon: { autoStart: true } });
+    expect(saveSettingsMock).toHaveBeenCalledWith({
+      model: "m",
+      daemon: { autoStart: true },
+    });
   });
 
   it("installs the system service when automatic startup is enabled", () => {

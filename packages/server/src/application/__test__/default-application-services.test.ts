@@ -141,7 +141,10 @@ describe("default daemon application services", () => {
     };
     const settings = createDefaultSettingsService(ref);
 
-    const result = await settings.patch({ path: "plugins.enabled", value: "false" });
+    const result = await settings.patch({
+      path: "plugins.enabled",
+      value: "false",
+    });
 
     expect(ref.current.plugins.enabled).toBe(false);
     expect(result.restartRuntimes).toBe(true);
@@ -165,21 +168,56 @@ describe("default daemon application services", () => {
     expect(result.restartRuntimes).toBe(true);
   });
 
+  it("validates WSL on the daemon host before saving the setting", async () => {
+    const ref = {
+      current: {
+        model: "m",
+        apiFormat: "anthropic" as const,
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        agentEnvironment: { kind: "native" as const },
+      },
+    };
+    const validate = vi.fn(async () => {
+      throw new Error("WSL unavailable on daemon host");
+    });
+    const settings = createDefaultSettingsService(ref, {
+      agentEnvironment: {
+        capabilities: async () => ({ native: true, wsl: false }),
+        validate,
+      },
+    });
+
+    await expect(
+      settings.patch({ agentEnvironment: { kind: "wsl" } }),
+    ).rejects.toThrow("WSL unavailable on daemon host");
+    expect(ref.current.agentEnvironment).toEqual({ kind: "native" });
+    expect(validate).toHaveBeenCalledWith("wsl");
+  });
+
   it("rejects removed Docker settings before they are persisted", async () => {
     const ref = {
       current: {
-        model: "m", apiFormat: "anthropic" as const, maxTurns: 50,
-        permission: { mode: "default" as const }, agentEnvironment: { kind: "native" as const },
+        model: "m",
+        apiFormat: "anthropic" as const,
+        maxTurns: 50,
+        permission: { mode: "default" as const },
+        agentEnvironment: { kind: "native" as const },
       },
     };
     const settings = createDefaultSettingsService(ref);
 
-    await expect(settings.patch({ sandbox: { backend: "docker" } }))
-      .rejects.toThrow("Unsupported removed runtime setting: sandbox.backend");
-    await expect(settings.patch({ path: "terminal.dockerShell", value: "/bin/sh" }))
-      .rejects.toThrow("Unsupported removed runtime setting: terminal.dockerShell");
-    await expect(settings.patch({ agentEnvironment: { kind: "docker" } }))
-      .rejects.toThrow("agentEnvironment.kind must be native or wsl");
+    await expect(
+      settings.patch({ sandbox: { backend: "docker" } }),
+    ).rejects.toThrow("Unsupported removed runtime setting: sandbox.backend");
+    await expect(
+      settings.patch({ path: "terminal.dockerShell", value: "/bin/sh" }),
+    ).rejects.toThrow(
+      "Unsupported removed runtime setting: terminal.dockerShell",
+    );
+    await expect(
+      settings.patch({ agentEnvironment: { kind: "docker" } }),
+    ).rejects.toThrow("agentEnvironment.kind must be native or wsl");
   });
 
   it("updates work style and requests idle runtime invalidation", async () => {
@@ -199,7 +237,9 @@ describe("default daemon application services", () => {
     expect(ref.current.workStyle).toBe("efficient");
     expect(result.restartRuntimes).toBe(false);
     expect(result.invalidateRuntimes).toBe(true);
-    await expect(settings.patch({ workStyle: "chatty" })).rejects.toThrow("Unknown work style");
+    await expect(settings.patch({ workStyle: "chatty" })).rejects.toThrow(
+      "Unknown work style",
+    );
   });
 
   it("resolves a built-in provider model when patching provider without a model", async () => {
@@ -212,7 +252,10 @@ describe("default daemon application services", () => {
           env: ["DEEPSEEK_API_KEY"],
           api: "https://api.deepseek.com",
           models: {
-            "deepseek-v4-flash": { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+            "deepseek-v4-flash": {
+              id: "deepseek-v4-flash",
+              name: "DeepSeek V4 Flash",
+            },
             "deepseek-v4-flash-vision-exp": {
               id: "deepseek-v4-flash-vision-exp",
               name: "DeepSeek V4 Flash Vision Exp",
@@ -355,11 +398,13 @@ describe("default daemon application services", () => {
       baseUrl: "https://gateway.example/v1",
       apiFormat: "openai",
       apiKey: "secret",
-      models: [{
-        id: "team-model",
-        displayName: "Team Model",
-        imageInputSupport: "native",
-      }],
+      models: [
+        {
+          id: "team-model",
+          displayName: "Team Model",
+          imageInputSupport: "native",
+        },
+      ],
       headers: { " X-Tenant ": " desktop " },
     });
 
@@ -369,11 +414,13 @@ describe("default daemon application services", () => {
         displayName: "Office Gateway",
         baseUrl: "https://gateway.example/v1",
         apiFormat: "openai",
-        models: [{
-          id: "team-model",
-          displayName: "Team Model",
-          imageInputSupport: "native",
-        }],
+        models: [
+          {
+            id: "team-model",
+            displayName: "Team Model",
+            imageInputSupport: "native",
+          },
+        ],
         headers: { "X-Tenant": "desktop" },
       },
     ]);

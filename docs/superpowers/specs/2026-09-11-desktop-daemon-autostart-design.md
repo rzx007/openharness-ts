@@ -67,15 +67,13 @@ Desktop 偏好增加独立的安装身份和引导状态。引导状态使用明
 
 ## 组件边界与数据流
 
-Electron 主进程新增 Desktop daemon 常驻适配层。它调用现有跨平台系统服务实现，统一返回配置值、系统服务安装状态和运行状态。它负责：
+Electron 主进程新增 Desktop daemon 常驻适配层。它组合 `@openharness/server/daemon-host` 的统一 controller 与 Desktop 自己的首次引导状态。server controller 负责配置值、系统服务安装状态、协调与失败恢复；Desktop 适配层负责：
 
-- 查询真实状态；
-- 开启常驻；
-- 关闭常驻；
+- 调用 controller 查询、开启和关闭常驻；
 - 初始化安装身份；
 - 完成或忽略首次引导。
 
-Preload 只向渲染层暴露固定能力：查询状态、开启、关闭和处理首次引导。接口不接受任意命令、可执行文件或路径。
+CLI 与 Desktop 共用 server controller。Preload 只向渲染层暴露固定能力：查询状态、开启、关闭和处理首次引导。接口不接受任意命令、可执行文件或路径。
 
 设置页和侧边栏共用该接口。渲染层只管理加载、提交和错误展示，不自行推断系统服务是否已安装。
 
@@ -113,7 +111,7 @@ Windows、macOS 和 Linux 均复用现有实现：Windows 当前用户计划任�
 
 ## 安全边界
 
-- 系统服务操作只发生在 Electron 主进程。
+- 系统服务操作只通过 CLI/Desktop 主进程调用的 `server/daemon-host` 本地入口发生，不暴露为 HTTP API。
 - 渲染层不能拼接或执行 CLI 命令。
 - 所有操作限定在当前用户范围，不请求管理员或 root 权限。
 - 关闭常驻不删除任何业务数据。

@@ -39,22 +39,56 @@ describe("OpenHarnessClient", () => {
       baseUrl: "http://daemon.test",
       fetch: (async (url, init) => {
         calls.push({ url: String(url), init: init ?? {} });
-        if (String(url).endsWith("/preview")) return jsonResponse({
-          archiveDigest: "a".repeat(64), identity: { id: "dev.example.archive", name: "archive", version: "1" },
-          requestedPermissions: ["process:spawn"], approvalRequired: true, inventory: { tools: 1 }, diagnostics: [],
-        });
-        return jsonResponse({ code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [{ code: "archive_changed" }] }, 409);
+        if (String(url).endsWith("/preview"))
+          return jsonResponse({
+            archiveDigest: "a".repeat(64),
+            identity: {
+              id: "dev.example.archive",
+              name: "archive",
+              version: "1",
+            },
+            requestedPermissions: ["process:spawn"],
+            approvalRequired: true,
+            inventory: { tools: 1 },
+            diagnostics: [],
+          });
+        return jsonResponse(
+          {
+            code: "plugin_archive_changed",
+            message: "Select the archive again",
+            diagnostics: [{ code: "archive_changed" }],
+          },
+          409,
+        );
       }) as typeof fetch,
     });
 
-    await expect((client as any).previewPluginArchive({ cwd: "C:/workspace", archivePath: "C:/archive.zip" })).resolves.toMatchObject({
-      archiveDigest: "a".repeat(64), requestedPermissions: ["process:spawn"], approvalRequired: true,
+    await expect(
+      (client as any).previewPluginArchive({
+        cwd: "C:/workspace",
+        archivePath: "C:/archive.zip",
+      }),
+    ).resolves.toMatchObject({
+      archiveDigest: "a".repeat(64),
+      requestedPermissions: ["process:spawn"],
+      approvalRequired: true,
     });
-    await expect((client as any).installPluginArchive({
-      cwd: "C:/workspace", archivePath: "C:/archive.zip", expectedArchiveDigest: "a".repeat(64), approvedPermissions: ["process:spawn"],
-    })).rejects.toMatchObject({ name: "OpenHarnessApiError", status: 409, body: {
-      code: "plugin_archive_changed", message: "Select the archive again", diagnostics: [{ code: "archive_changed" }],
-    } });
+    await expect(
+      (client as any).installPluginArchive({
+        cwd: "C:/workspace",
+        archivePath: "C:/archive.zip",
+        expectedArchiveDigest: "a".repeat(64),
+        approvedPermissions: ["process:spawn"],
+      }),
+    ).rejects.toMatchObject({
+      name: "OpenHarnessApiError",
+      status: 409,
+      body: {
+        code: "plugin_archive_changed",
+        message: "Select the archive again",
+        diagnostics: [{ code: "archive_changed" }],
+      },
+    });
     expect(calls.map((call) => call.url)).toEqual([
       "http://daemon.test/plugins/archive/preview",
       "http://daemon.test/plugins/archive/install",
@@ -542,6 +576,24 @@ describe("OpenHarnessClient", () => {
       "http://127.0.0.1:3456/capabilities",
       expect.objectContaining({ headers: {} }),
     );
+  });
+
+  it("parses daemon-host execution environment capabilities", async () => {
+    const client = new OpenHarnessClient({
+      baseUrl: "http://127.0.0.1:3456",
+      fetch: vi.fn(async () =>
+        jsonResponse({
+          serverVersion: "0.4.0",
+          protocol: { version: 2 },
+          features: {},
+          agentEnvironments: { native: true, wsl: true },
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(client.capabilities()).resolves.toMatchObject({
+      agentEnvironments: { native: true, wsl: true },
+    });
   });
 
   it("lists commands without a command execution endpoint", async () => {

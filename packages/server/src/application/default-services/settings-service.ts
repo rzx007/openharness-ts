@@ -7,6 +7,7 @@ import {
 } from "@openharness/api";
 
 import type { SettingsService } from "../settings-api.js";
+import type { AgentEnvironmentCapabilities } from "@openharness/protocol";
 import { catalogProviderModelIds } from "./catalog-provider-mapping.js";
 import {
   mergeSettingsPatch,
@@ -41,6 +42,11 @@ const SOFT_RUNTIME_INVALIDATE_KEYS = new Set([
 
 export type SettingsRuntimeImpact = "restart" | "invalidate" | "none";
 
+export interface AgentEnvironmentService {
+  capabilities(): Promise<AgentEnvironmentCapabilities>;
+  validate(kind: "native" | "wsl"): Promise<void>;
+}
+
 export function settingsPatchRuntimeImpact(
   patch: Record<string, unknown>,
 ): SettingsRuntimeImpact {
@@ -63,9 +69,16 @@ export function settingsPatchRuntimeImpact(
 
 export function createDefaultSettingsService(
   ref: DaemonSettingsRef,
+  options: { agentEnvironment?: AgentEnvironmentService } = {},
 ): SettingsService {
   const catalogService = createModelCatalogService();
   return {
+    ...(options.agentEnvironment
+      ? {
+          agentEnvironmentCapabilities: () =>
+            options.agentEnvironment!.capabilities(),
+        }
+      : {}),
     async get() {
       return sanitizeSettings(await readCurrentSettings(ref));
     },
@@ -93,6 +106,10 @@ export function createDefaultSettingsService(
       }
 
       const next = mergeSettingsPatch(ref.current, effectivePatch);
+      const environmentKind = readAgentEnvironmentKind(effectivePatch);
+      if (environmentKind && options.agentEnvironment) {
+        await options.agentEnvironment.validate(environmentKind);
+      }
       if (typeof effectivePatch.provider === "string") {
         next.provider = effectivePatch.provider;
         next.baseUrl = resolveProviderScopedBaseUrl(
@@ -127,25 +144,43 @@ export function createDefaultSettingsService(
   };
 }
 
+function readAgentEnvironmentKind(
+  patch: Record<string, unknown>,
+): "native" | "wsl" | undefined {
+  if (!isRecord(patch.agentEnvironment)) return undefined;
+  const kind = patch.agentEnvironment.kind;
+  return kind === "native" || kind === "wsl" ? kind : undefined;
+}
+
 function assertCurrentEnvironmentPatch(patch: Record<string, unknown>): void {
   const path = typeof patch.path === "string" ? patch.path : undefined;
-  if (path && [
-    "sandbox.backend",
-    "sandbox.docker",
-    "sandbox.runtime",
-    "terminal.dockerShell",
-  ].some((field) => path === field || path.startsWith(`${field}.`))) {
+  if (
+    path &&
+    [
+      "sandbox.backend",
+      "sandbox.docker",
+      "sandbox.runtime",
+      "terminal.dockerShell",
+    ].some((field) => path === field || path.startsWith(`${field}.`))
+  ) {
     throw new Error(`Unsupported removed runtime setting: ${path}`);
   }
   const sandbox = isRecord(patch.sandbox) ? patch.sandbox : undefined;
   for (const field of ["backend", "docker", "runtime"]) {
-    if (sandbox && field in sandbox) throw new Error(`Unsupported removed runtime setting: sandbox.${field}`);
+    if (sandbox && field in sandbox)
+      throw new Error(`Unsupported removed runtime setting: sandbox.${field}`);
   }
   const terminal = isRecord(patch.terminal) ? patch.terminal : undefined;
-  if (terminal && "dockerShell" in terminal) throw new Error("Unsupported removed runtime setting: terminal.dockerShell");
+  if (terminal && "dockerShell" in terminal)
+    throw new Error(
+      "Unsupported removed runtime setting: terminal.dockerShell",
+    );
   if (patch.agentEnvironment !== undefined) {
-    if (!isRecord(patch.agentEnvironment) ||
-      (patch.agentEnvironment.kind !== "native" && patch.agentEnvironment.kind !== "wsl")) {
+    if (
+      !isRecord(patch.agentEnvironment) ||
+      (patch.agentEnvironment.kind !== "native" &&
+        patch.agentEnvironment.kind !== "wsl")
+    ) {
       throw new Error("agentEnvironment.kind must be native or wsl");
     }
   }

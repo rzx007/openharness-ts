@@ -96,7 +96,7 @@ Desktop 删除 `preflightWsl`、`process.platform` 拒绝逻辑和 `@openharness
 
 当前 Desktop 只连接本机 registry 或启动本机内嵌 daemon，所以现有本机预检没有产生跨主机错误。迁移的价值是职责归属正确，并为未来远程 daemon 做准备。
 
-`wslSupported` 长期应由 daemon capability/probe 返回，而不是由 Desktop 的 `process.platform === "win32"` 推断。该能力与 WSL 校验在同一阶段完成。
+`wslSupported` 由 daemon capability/probe 返回，而不是由 Desktop 的 `process.platform === "win32"` 推断。公开 capabilities 使用短时缓存和并发合并，避免每次免认证请求都派生一个 WSL 探测进程；真正保存 WSL 设置前仍执行实时校验。
 
 ## `core` 与 daemon-host 收敛
 

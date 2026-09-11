@@ -122,8 +122,27 @@ describe("Scheduled task routes", () => {
 });
 
 describe("system routes", () => {
+  it("reports execution environments from the daemon settings service", async () => {
+    const app = createSystemRoutes({
+      control: daemonControl(),
+      settingsService: {
+        get: () => ({}),
+        patch: () => ({ settings: {} }),
+        agentEnvironmentCapabilities: async () => ({ native: true, wsl: true }),
+      },
+    });
+
+    const response = await app.request("/capabilities");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      agentEnvironments: { native: true, wsl: true },
+    });
+  });
   it("exposes attachment storage scan and explicit safe maintenance actions", async () => {
-    const scanAttachments = vi.fn(async () => ({ summary: { physicalBytes: 10 }, issues: [] }));
+    const scanAttachments = vi.fn(async () => ({
+      summary: { physicalBytes: 10 },
+      issues: [],
+    }));
     const repairAttachments = vi.fn(async () => ({ expiredLeases: 1 }));
     const gcAttachments = vi.fn(async () => ({ deletedAssets: 2 }));
     const app = createSystemRoutes({
@@ -133,7 +152,9 @@ describe("system routes", () => {
 
     const scan = await app.request("/attachments/storage");
     expect(scan.status).toBe(200);
-    await expect(scan.json()).resolves.toMatchObject({ summary: { physicalBytes: 10 } });
+    await expect(scan.json()).resolves.toMatchObject({
+      summary: { physicalBytes: 10 },
+    });
 
     const repaired = await app.request("/attachments/storage/actions", {
       method: "POST",

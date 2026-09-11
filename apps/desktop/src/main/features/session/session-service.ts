@@ -21,14 +21,14 @@ import {
   type SessionTransformationMessagePartRecord,
   type SyncEventUpdate,
 } from "@openharness/client"
+import { type OpenHarnessHttpServer } from "@openharness/server"
 import {
   clearDaemonRegistry,
   createBearerToken,
   readDaemonRegistry,
   startOpenHarnessDaemon,
   writeDaemonRegistry,
-  type OpenHarnessHttpServer,
-} from "@openharness/server"
+} from "@openharness/server/daemon-host"
 import { app, BrowserWindow, dialog, type OpenDialogOptions, type WebContents } from "electron"
 
 import { IpcEvents } from "../../../shared/ipc-channels"
@@ -1004,7 +1004,11 @@ function requirePromptItems(value: unknown): SessionUserInputItem[] {
     if (record.type === "text" && typeof record.text === "string") {
       return { type: "text", text: record.text }
     }
-    if (record.type === "mention" && typeof record.name === "string" && typeof record.path === "string") {
+    if (
+      record.type === "mention" &&
+      typeof record.name === "string" &&
+      typeof record.path === "string"
+    ) {
       return {
         type: "mention",
         name: record.name,
@@ -1012,7 +1016,11 @@ function requirePromptItems(value: unknown): SessionUserInputItem[] {
         ...(typeof record.displayName === "string" ? { displayName: record.displayName } : {}),
       }
     }
-    if (record.type === "skill" && typeof record.name === "string" && typeof record.path === "string") {
+    if (
+      record.type === "skill" &&
+      typeof record.name === "string" &&
+      typeof record.path === "string"
+    ) {
       const source = record.source
       if (
         source !== undefined &&

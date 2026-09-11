@@ -29,6 +29,30 @@ vi.mock("@openharness/server", () => ({
   clearDaemonRegistry: clearDaemonRegistryMock,
 }));
 
+vi.mock("@openharness/server/daemon-host", () => ({
+  shouldStartManagedDaemon: vi.fn(async () => false),
+  saveDaemonAutoStartPreference: vi.fn(),
+  reconcileDaemonSystemService: (
+    service: typeof systemServiceMock,
+    autoStart: boolean,
+  ) => {
+    const state = service.status().state;
+    if (!autoStart && state !== "not-installed") {
+      service.uninstall();
+      return { state: "not-installed", action: "uninstalled" };
+    }
+    if (autoStart && state === "not-installed") {
+      service.install();
+      return { state: "running", action: "installed" };
+    }
+    if (autoStart && state === "stopped") {
+      service.start();
+      return { state: "running", action: "started" };
+    }
+    return { state, action: "none" };
+  },
+}));
+
 vi.mock("./daemon-lifecycle.js", () => ({
   probeDaemonRegistry: probeDaemonRegistryMock,
   terminateDaemonProcess: terminateDaemonProcessMock,
@@ -72,7 +96,10 @@ describe("ensureLocalDaemon", () => {
     spawnDaemonProcessMock.mockReturnValue(spawned());
     daemonStartupErrorMock.mockReturnValue(new Error("daemon startup failed"));
     terminateDaemonProcessMock.mockReturnValue(true);
-    systemServiceMock.status.mockReturnValue({ platform: "win32", state: "not-installed" });
+    systemServiceMock.status.mockReturnValue({
+      platform: "win32",
+      state: "not-installed",
+    });
   });
 
   it("returns an already-ready daemon without spawning", async () => {
@@ -103,12 +130,13 @@ describe("ensureLocalDaemon", () => {
 
   it("spawns serve and waits for registry when no daemon is registered", async () => {
     const ready = registry({ pid: 456, url: "http://127.0.0.1:5678" });
-    readDaemonRegistryMock
-      .mockReturnValueOnce(null)
-      .mockReturnValueOnce(ready);
+    readDaemonRegistryMock.mockReturnValueOnce(null).mockReturnValueOnce(ready);
     probeDaemonRegistryMock.mockResolvedValue("ready");
 
-    const handle = await ensureLocalDaemon({ cliPath: "cli-entry.js", expectedVersion: "0.1.0" });
+    const handle = await ensureLocalDaemon({
+      cliPath: "cli-entry.js",
+      expectedVersion: "0.1.0",
+    });
 
     expect(clearDaemonRegistryMock).toHaveBeenCalledOnce();
     expect(spawnDaemonProcessMock).toHaveBeenCalledWith("cli-entry.js", [
@@ -119,7 +147,11 @@ describe("ensureLocalDaemon", () => {
       "--port",
       "0",
     ]);
-    expect(handle).toMatchObject({ url: ready.url, token: ready.token, pid: ready.pid });
+    expect(handle).toMatchObject({
+      url: ready.url,
+      token: ready.token,
+      pid: ready.pid,
+    });
     expect(terminateDaemonProcessMock).not.toHaveBeenCalled();
   });
 
@@ -133,7 +165,10 @@ describe("ensureLocalDaemon", () => {
       .mockResolvedValueOnce("stale")
       .mockResolvedValueOnce("ready");
 
-    const handle = await ensureLocalDaemon({ cliPath: "cli-entry.js", expectedVersion: "0.1.0" });
+    const handle = await ensureLocalDaemon({
+      cliPath: "cli-entry.js",
+      expectedVersion: "0.1.0",
+    });
 
     expect(terminateDaemonProcessMock).toHaveBeenCalledWith(stale.pid);
     expect(clearDaemonRegistryMock).toHaveBeenCalledOnce();
@@ -151,7 +186,10 @@ describe("ensureLocalDaemon", () => {
       .mockResolvedValueOnce("unreachable")
       .mockResolvedValueOnce("ready");
 
-    const handle = await ensureLocalDaemon({ cliPath: "cli-entry.js", expectedVersion: "0.1.0" });
+    const handle = await ensureLocalDaemon({
+      cliPath: "cli-entry.js",
+      expectedVersion: "0.1.0",
+    });
 
     expect(terminateDaemonProcessMock).not.toHaveBeenCalled();
     expect(clearDaemonRegistryMock).toHaveBeenCalledOnce();
@@ -164,20 +202,23 @@ describe("ensureLocalDaemon", () => {
     readDaemonRegistryMock.mockReturnValue(null);
     spawnDaemonProcessMock.mockReturnValue(failed);
 
-    await expect(ensureLocalDaemon({
-      cliPath: "cli-entry.js",
-      expectedVersion: "0.1.0",
-    })).rejects.toThrow("daemon startup failed");
+    await expect(
+      ensureLocalDaemon({
+        cliPath: "cli-entry.js",
+        expectedVersion: "0.1.0",
+      }),
+    ).rejects.toThrow("daemon startup failed");
 
     expect(daemonStartupErrorMock).toHaveBeenCalledWith(failed);
   });
 
   it("restarts an installed system service instead of spawning a detached daemon", async () => {
     const ready = registry({ pid: 777 });
-    systemServiceMock.status.mockReturnValue({ platform: "win32", state: "running" });
-    readDaemonRegistryMock
-      .mockReturnValueOnce(null)
-      .mockReturnValue(ready);
+    systemServiceMock.status.mockReturnValue({
+      platform: "win32",
+      state: "running",
+    });
+    readDaemonRegistryMock.mockReturnValueOnce(null).mockReturnValue(ready);
     probeDaemonRegistryMock.mockResolvedValue("ready");
 
     const handle = await ensureLocalDaemon({
@@ -195,10 +236,11 @@ describe("ensureLocalDaemon", () => {
   it("refreshes an installed system service when its daemon build is stale", async () => {
     const stale = registry({ pid: 111, startedAt: 50 });
     const ready = registry({ pid: 888, startedAt: 300 });
-    systemServiceMock.status.mockReturnValue({ platform: "win32", state: "running" });
-    readDaemonRegistryMock
-      .mockReturnValueOnce(stale)
-      .mockReturnValue(ready);
+    systemServiceMock.status.mockReturnValue({
+      platform: "win32",
+      state: "running",
+    });
+    readDaemonRegistryMock.mockReturnValueOnce(stale).mockReturnValue(ready);
     probeDaemonRegistryMock
       .mockResolvedValueOnce("stale")
       .mockResolvedValue("ready");
@@ -234,7 +276,10 @@ describe("ensureLocalDaemon", () => {
 
   it("removes automatic startup when disabled without stopping a ready daemon", async () => {
     const ready = registry({ pid: 1000 });
-    systemServiceMock.status.mockReturnValue({ platform: "win32", state: "running" });
+    systemServiceMock.status.mockReturnValue({
+      platform: "win32",
+      state: "running",
+    });
     readDaemonRegistryMock.mockReturnValue(ready);
     probeDaemonRegistryMock.mockResolvedValue("ready");
 
@@ -252,7 +297,10 @@ describe("ensureLocalDaemon", () => {
   it("starts an on-demand daemon when removing the system service stopped the old one", async () => {
     const oldDaemon = registry({ pid: 1001 });
     const newDaemon = registry({ pid: 1002 });
-    systemServiceMock.status.mockReturnValue({ platform: "linux", state: "running" });
+    systemServiceMock.status.mockReturnValue({
+      platform: "linux",
+      state: "running",
+    });
     readDaemonRegistryMock
       .mockReturnValueOnce(oldDaemon)
       .mockReturnValueOnce(newDaemon);

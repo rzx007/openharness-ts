@@ -9,14 +9,7 @@ export {
 } from "./http/index.js";
 export {
   startOpenHarnessDaemon,
-  DaemonSystemService,
-  serializeWindowsArguments,
   type OpenHarnessDaemonOptions,
-  type DaemonServiceInvocation,
-  type DaemonSystemServiceOptions,
-  type DaemonSystemServiceState,
-  type DaemonSystemServiceStatus,
-  type SystemCommandResult,
 } from "./daemon/index.js";
 export type {
   CreateDaemonAgent,

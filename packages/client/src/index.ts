@@ -14,6 +14,7 @@ export {
   streamServerSentEvents,
 } from "./transport/index.js";
 export type {
+  AgentEnvironmentCapabilities,
   AttachmentAssetRecord,
   ClientProtocolSupport,
   ProtocolCompatibility,

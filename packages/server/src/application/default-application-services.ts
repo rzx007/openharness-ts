@@ -1,6 +1,5 @@
-import type {
-  AgentPersonaService,
-} from "./settings-api.js";
+import type { AgentPersonaService } from "./settings-api.js";
+import { preflightWsl } from "@openharness/sandbox";
 import {
   createDefaultAuthService,
   createDefaultContextService,
@@ -38,7 +37,8 @@ export {
 export function createDefaultAgentPersonaService(): AgentPersonaService {
   return {
     async list() {
-      const { getAllAgentDefinitions } = await import("@openharness/coordinator");
+      const { getAllAgentDefinitions } =
+        await import("@openharness/coordinator");
       const agents = getAllAgentDefinitions([]);
       return {
         agents: agents.map((agent) => ({
@@ -55,7 +55,9 @@ export function createDefaultAgentPersonaService(): AgentPersonaService {
 /** Complete resource-service set installed by the opinionated daemon application. */
 export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
   return {
-    settings: createDefaultSettingsService(ref),
+    settings: createDefaultSettingsService(ref, {
+      agentEnvironment: createDefaultAgentEnvironmentService(),
+    }),
     provider: createDefaultProviderService(ref),
     model: createDefaultModelService(ref),
     memory: createDefaultMemoryService(),
@@ -69,5 +71,32 @@ export function createDefaultApplicationServices(ref: DaemonSettingsRef) {
     agentPersona: createDefaultAgentPersonaService(),
     hooks: createDefaultHooksService(ref),
     git: createDefaultGitService(),
+  };
+}
+
+function createDefaultAgentEnvironmentService() {
+  let cached: { expiresAt: number; wsl: boolean } | undefined;
+  let inFlight: Promise<boolean> | undefined;
+  const probe = async (): Promise<boolean> => {
+    if (process.platform !== "win32") return false;
+    if (cached && cached.expiresAt > Date.now()) return cached.wsl;
+    inFlight ??= preflightWsl().then(
+      () => true,
+      () => false,
+    );
+    const wsl = await inFlight;
+    inFlight = undefined;
+    cached = { expiresAt: Date.now() + 30_000, wsl };
+    return wsl;
+  };
+  return {
+    async capabilities() {
+      return { native: true as const, wsl: await probe() };
+    },
+    async validate(kind: "native" | "wsl") {
+      if (kind === "native") return;
+      await preflightWsl();
+      cached = { expiresAt: Date.now() + 30_000, wsl: true };
+    },
   };
 }

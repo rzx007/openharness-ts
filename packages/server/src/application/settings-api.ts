@@ -4,6 +4,9 @@
  */
 
 export interface SettingsService {
+  agentEnvironmentCapabilities?(): Promise<
+    import("@openharness/protocol").AgentEnvironmentCapabilities
+  >;
   get(): Promise<Record<string, unknown>> | Record<string, unknown>;
   patch(patch: Record<string, unknown>):
     | Promise<{
@@ -290,7 +293,8 @@ export interface PluginService {
   }): Promise<{ message: string; restartRuntimes?: boolean }>;
 }
 
-export type SkillSource = "bundled" | "agent" | "standard" | "project" | "personal";
+export type SkillSource =
+  "bundled" | "agent" | "standard" | "project" | "personal";
 export interface SkillInfo {
   id: string;
   name: string;

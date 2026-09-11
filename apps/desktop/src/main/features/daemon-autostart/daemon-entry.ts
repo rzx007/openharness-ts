@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process"
 
-import { loadSettings } from "@openharness/core"
 import {
   clearDaemonRegistry,
   createBearerToken,
   readDaemonRegistry,
   startOpenHarnessDaemon,
   writeDaemonRegistry,
-} from "@openharness/server"
+  shouldStartManagedDaemon,
+} from "@openharness/server/daemon-host"
 import { app } from "electron"
 
 export type DesktopDaemonMode = "service" | "watchdog"
@@ -21,7 +21,7 @@ export function resolveDesktopDaemonMode(argv: readonly string[]): DesktopDaemon
 export async function runDesktopDaemonEntry(mode: DesktopDaemonMode): Promise<void> {
   if (mode === "watchdog") {
     if (await registeredDaemonHealthy()) return
-    if (!((await loadSettings()).daemon?.autoStart ?? false)) return
+    if (!(await shouldStartManagedDaemon())) return
     const args = app.isPackaged ? ["--daemon-service"] : [app.getAppPath(), "--daemon-service"]
     const child = spawn(process.execPath, args, {
       detached: true,

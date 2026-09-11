@@ -165,9 +165,6 @@ importers:
       '@openharness/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts
-      '@openharness/sandbox':
-        specifier: workspace:*
-        version: link:../../packages/sandbox
       '@openharness/server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -256,21 +253,12 @@ importers:
       '@openharness/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@openharness/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@openharness/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
       '@openharness/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@openharness/terminal':
-        specifier: workspace:*
-        version: link:../../packages/terminal
-      '@openharness/terminal-node':
-        specifier: workspace:*
-        version: link:../../packages/terminal-node
       '@pierre/diffs':
         specifier: ^1.3.5
         version: 1.3.5(@shikijs/themes@4.4.3)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

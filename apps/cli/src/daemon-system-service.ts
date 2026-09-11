@@ -1,4 +1,8 @@
-import { DaemonSystemService } from "@openharness/server";
+import {
+  createDaemonAutoStartController,
+  DaemonSystemService,
+  type DaemonAutoStartController,
+} from "@openharness/server/daemon-host";
 
 import {
   resolveDaemonInvocation,
@@ -13,7 +17,7 @@ export {
   type DaemonSystemServiceState,
   type DaemonSystemServiceStatus,
   type SystemCommandResult,
-} from "@openharness/server";
+} from "@openharness/server/daemon-host";
 
 export interface CreateDaemonSystemServiceOptions extends DaemonInvocationOptions {
   platform?: NodeJS.Platform;
@@ -49,5 +53,24 @@ export function createDaemonSystemService(
     logsDir: options.logsDir,
     uid: options.uid,
     runCommand: options.runCommand,
+  });
+}
+
+export function createCliDaemonAutoStartController(
+  entry: string,
+  serveArgs: string[] = [
+    "serve",
+    "--register",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "0",
+  ],
+  options: CreateDaemonSystemServiceOptions = {},
+): DaemonAutoStartController {
+  const service = createDaemonSystemService(entry, serveArgs, options);
+  return createDaemonAutoStartController({
+    invocation: service.invocation(),
+    createService: () => createDaemonSystemService(entry, serveArgs, options),
   });
 }

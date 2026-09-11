@@ -1,13 +1,13 @@
 import type { WebContents } from "electron"
-import type { OpenHarnessClient } from "@openharness/client"
 import type {
+  OpenHarnessClient,
   TerminalCreateRequest,
   TerminalReadRequest,
   TerminalReadResult,
   TerminalResizeRequest,
   TerminalSessionInfo,
   TerminalWriteRequest,
-} from "@openharness/terminal"
+} from "@openharness/client"
 
 import { IpcEvents } from "../../../shared/ipc-channels"
 import { getDesktopPreferences } from "../settings/desktop-preferences"
@@ -33,7 +33,11 @@ class DesktopTerminalService {
       listDetectedTerminalShells()
     )
     const settings = await desktopSettingsService.snapshot()
-    const next = applyPreferredTerminalShell(input, preferred, settings.agentEnvironment === "native")
+    const next = applyPreferredTerminalShell(
+      input,
+      preferred,
+      settings.agentEnvironment === "native"
+    )
     return await withDaemonRetry((client) => client.createTerminal(next))
   }
 
@@ -98,7 +102,9 @@ class DesktopTerminalService {
 
 export const desktopTerminalService = new DesktopTerminalService()
 
-async function withDaemonRetry<T>(operation: (client: OpenHarnessClient) => Promise<T>): Promise<T> {
+async function withDaemonRetry<T>(
+  operation: (client: OpenHarnessClient) => Promise<T>
+): Promise<T> {
   try {
     return await operation(await desktopSessionService.daemonClient())
   } catch (error) {

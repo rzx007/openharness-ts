@@ -1,10 +1,14 @@
 import { stat } from "node:fs/promises";
 
-import { loadSettings } from "@openharness/core";
-
-import { reconcileDaemonAutoStart } from "./daemon-auto-start.js";
+import {
+  loadDaemonAutoStart,
+  reconcileDaemonAutoStart,
+} from "./daemon-auto-start.js";
 import { VERSION } from "./version.js";
-import { probeDaemonRegistry, terminateDaemonProcess } from "./daemon-lifecycle.js";
+import {
+  probeDaemonRegistry,
+  terminateDaemonProcess,
+} from "./daemon-lifecycle.js";
 import {
   daemonStartupError,
   spawnDaemonProcess,
@@ -43,17 +47,18 @@ export async function ensureLocalDaemon(
     minimumStartedAt: (await stat(cliPath)).mtimeMs,
   };
 
-  const {
-    clearDaemonRegistry,
-    readDaemonRegistry,
-  } = await import("@openharness/server");
+  const { clearDaemonRegistry, readDaemonRegistry } =
+    await import("@openharness/server");
 
   const waitForDaemonRegistry = async (
     spawned: SpawnedDaemonProcess,
   ): Promise<NonNullable<ReturnType<typeof readDaemonRegistry>>> => {
     for (let i = 0; i < 40; i += 1) {
       const registry = readDaemonRegistry();
-      if (registry && await probeDaemonRegistry(registry, daemonProbeOptions) === "ready") {
+      if (
+        registry &&
+        (await probeDaemonRegistry(registry, daemonProbeOptions)) === "ready"
+      ) {
         return registry;
       }
       if (spawned.failure()) throw daemonStartupError(spawned);
@@ -63,10 +68,16 @@ export async function ensureLocalDaemon(
   };
 
   let daemon = readDaemonRegistry();
-  let daemonStatus = daemon ? await probeDaemonRegistry(daemon, daemonProbeOptions) : "unreachable";
-  const autoStart = options.autoStart ?? (await loadSettings()).daemon?.autoStart ?? false;
+  let daemonStatus = daemon
+    ? await probeDaemonRegistry(daemon, daemonProbeOptions)
+    : "unreachable";
+  const autoStart = options.autoStart ?? (await loadDaemonAutoStart());
   const reconciliation = reconcileDaemonAutoStart(cliPath, autoStart);
-  if (daemon && daemonStatus === "ready" && reconciliation.action === "uninstalled") {
+  if (
+    daemon &&
+    daemonStatus === "ready" &&
+    reconciliation.action === "uninstalled"
+  ) {
     daemonStatus = await probeDaemonRegistry(daemon, daemonProbeOptions);
   }
 
@@ -78,17 +89,35 @@ export async function ensureLocalDaemon(
       }
       for (let i = 0; i < 100; i += 1) {
         daemon = readDaemonRegistry();
-        if (daemon && await probeDaemonRegistry(daemon, daemonProbeOptions) === "ready") break;
+        if (
+          daemon &&
+          (await probeDaemonRegistry(daemon, daemonProbeOptions)) === "ready"
+        )
+          break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      if (!daemon || await probeDaemonRegistry(daemon, daemonProbeOptions) !== "ready") {
+      if (
+        !daemon ||
+        (await probeDaemonRegistry(daemon, daemonProbeOptions)) !== "ready"
+      ) {
         const status = reconciliation.service.status();
-        throw new Error(`The OpenHarness daemon system service did not become ready (state: ${status.state})`);
+        throw new Error(
+          `The OpenHarness daemon system service did not become ready (state: ${status.state})`,
+        );
       }
     } else {
-      if (daemon && daemonStatus === "stale") terminateDaemonProcess(daemon.pid);
+      if (daemon && daemonStatus === "stale")
+        terminateDaemonProcess(daemon.pid);
       clearDaemonRegistry();
-      const serveArgs = [cliPath, "serve", "--register", "--host", "127.0.0.1", "--port", "0"];
+      const serveArgs = [
+        cliPath,
+        "serve",
+        "--register",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+      ];
       const spawned = spawnDaemonProcess(serveArgs[0]!, serveArgs.slice(1));
       daemon = await waitForDaemonRegistry(spawned);
     }

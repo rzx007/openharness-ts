@@ -25,6 +25,13 @@ aliases["@openharness/services/executions"] = resolve(
   "executions",
   "index.ts",
 );
+aliases["@openharness/server/daemon-host"] = resolve(
+  packagesDir,
+  "server",
+  "src",
+  "daemon-host",
+  "index.ts",
+);
 
 export default defineConfig({
   test: {
