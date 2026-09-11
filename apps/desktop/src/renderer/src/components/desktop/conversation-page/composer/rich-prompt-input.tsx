@@ -314,6 +314,9 @@ function ComposerPickerPlugin({
       }),
     [editor]
   )
+  useEffect(() => {
+    setTrigger(editor.getEditorState().read(triggerFromEditorState))
+  }, [editor])
   const visible =
     trigger &&
     dismissed !== `${trigger.from}:${trigger.to}:${trigger.query}` &&
@@ -563,6 +566,8 @@ export function RichPromptInput({
               id={id}
               aria-label="输入对话内容"
               aria-multiline="true"
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
               className={cn(
                 "text-ui-small block max-h-44 min-h-18 w-full overflow-y-auto bg-transparent px-4 pt-3 leading-6 break-words whitespace-pre-wrap text-foreground outline-none",
                 "**:text-inherit empty:before:content-none focus-visible:outline-none",
@@ -582,14 +587,12 @@ export function RichPromptInput({
         <HistoryPlugin />
         <ComposerClipboardPlugin onPasteFiles={onPasteFiles} skills={skills} />
         <SyncDraftPlugin value={value} onChange={onChange} />
-        {!isComposing ? (
-          <ComposerPickerPlugin
-            skills={skills}
-            commands={commands}
-            onCommand={onCommand}
-            onCommandError={setCommandError}
-          />
-        ) : null}
+        <ComposerPickerPlugin
+          skills={skills}
+          commands={commands}
+          onCommand={onCommand}
+          onCommandError={setCommandError}
+        />
         {!isComposing && !disabled ? <SubmitKeyPlugin onSubmit={onSubmit} /> : null}
         {commandError ? (
           <p role="alert" className="px-4 text-sm text-destructive">

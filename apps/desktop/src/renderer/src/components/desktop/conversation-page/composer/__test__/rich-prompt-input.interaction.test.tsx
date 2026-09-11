@@ -9,11 +9,13 @@ import {
   $getSelection,
   $isRangeSelection,
   $isTextNode,
+  $isElementNode,
+  $createTextNode,
   getNearestEditorFromDOMNode,
   COPY_COMMAND,
   PASTE_COMMAND,
 } from "lexical"
-import { composerDocumentFromLexical } from "../rich-prompt-input"
+import { composerDocumentFromLexical, triggerFromEditorState } from "../rich-prompt-input"
 import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 
 let container: HTMLDivElement
@@ -109,7 +111,16 @@ it.each(["body\n", "\nbody", "\n\n"])("keeps empty paragraphs when copying %j", 
 async function render(
   value: ComposerDocument,
   onCommand = async () => {},
-  onChange = (_: ComposerDocument) => {}
+  onChange = (_: ComposerDocument) => {},
+  skills = [
+    {
+      name: "review",
+      path: "D:/review/SKILL.md",
+      displayName: "Review",
+      description: "",
+      sourceLabel: "个人",
+    },
+  ]
 ) {
   await act(async () =>
     root.render(
@@ -120,6 +131,7 @@ async function render(
         placeholder: "",
         disabled: false,
         commands: [command],
+        skills,
         onChange,
         onSubmit: () => {},
         onCommand,
@@ -234,6 +246,59 @@ it("selects a Skill in the second paragraph and keeps the caret before the suffi
     { type: "skill", name: "review", path: "D:/review/SKILL.md", displayName: "Review" },
     { type: "text", text: " suffix" },
   ])
+})
+
+it("selects a Skill with Enter without creating a newline", async () => {
+  const onSubmit = vi.fn()
+  await render(
+    { version: 1, items: [{ type: "text", text: "/rev suffix" }] },
+    async () => {},
+    () => {},
+    [
+      {
+        name: "review",
+        path: "D:/review/SKILL.md",
+        displayName: "Review",
+        description: "",
+        sourceLabel: "个人",
+      },
+    ]
+  )
+  const editor = getNearestEditorFromDOMNode(container.querySelector('[role="textbox"]')!)!
+  await act(async () => {
+    editor.update(() => {
+      const node = $getRoot().getFirstDescendant()
+      if ($isTextNode(node)) node.select(4, 4)
+    }, { discrete: true })
+  })
+  expect(editor.getEditorState().read(triggerFromEditorState)).toMatchObject({ sigil: "/", query: "rev" })
+  const option = container.querySelector<HTMLButtonElement>('[role="option"]')
+  expect(option?.textContent).toContain("Review")
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+  })
+  expect(onSubmit).not.toHaveBeenCalled()
+  expect(editor.getEditorState().read(composerDocumentFromLexical).items).toEqual([
+    { type: "skill", name: "review", path: "D:/review/SKILL.md", displayName: "Review" },
+    { type: "text", text: " suffix" },
+  ])
+})
+
+it("shows the Skill picker while IME composition contains slash text", async () => {
+  await render({ version: 1, items: [] })
+  const textbox = container.querySelector<HTMLElement>('[role="textbox"]')!
+  const editor = getNearestEditorFromDOMNode(textbox)!
+  await act(async () => textbox.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })))
+  await act(async () => {
+    editor.update(() => {
+      const paragraph = $getRoot().getFirstChild()
+      const textNode = $createTextNode("/rev")
+      if ($isElementNode(paragraph)) paragraph.append(textNode)
+      textNode.selectEnd()
+    }, { discrete: true })
+  })
+  expect(editor.getEditorState().read(triggerFromEditorState)).toMatchObject({ sigil: "/", query: "rev" })
+  expect(container.querySelector('[role="option"]')?.textContent).toContain("Review")
 })
 
 it("edits the original structured message without flattening Skill or resource references", async () => {

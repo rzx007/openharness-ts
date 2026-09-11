@@ -188,6 +188,7 @@ export function ComposerPicker({
         setHighlightedIndex((current) => (current - 1 + options.length) % options.length)
       } else if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault()
+        event.stopPropagation()
         onSelect(options[activeIndex]!)
       } else if (event.key === "Escape") {
         event.preventDefault()
