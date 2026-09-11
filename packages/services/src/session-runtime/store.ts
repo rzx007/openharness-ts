@@ -68,6 +68,9 @@ import type {
   AttachmentLimits,
   SessionInputAttachmentRecord,
   SessionUserInputItem,
+  SessionGoal,
+  GoalStatus,
+  GoalWait,
 } from "@openharness/protocol";
 import { AttachmentError } from "../attachment/attachment-errors.js";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
@@ -188,6 +191,26 @@ export interface MarkAttachmentReadyInput {
   updatedAt?: number;
 }
 
+export interface CreateSessionGoalStoreInput {
+  id?: string;
+  sessionId: string;
+  objective: string;
+  maxAutoTurns: number;
+}
+
+export interface UpdateSessionGoalStoreInput {
+  expectedRevision: number;
+  objective?: string;
+  status?: GoalStatus;
+  maxAutoTurns?: number;
+  autoTurnsUsed?: number;
+  noProgressCount?: number;
+  currentRunId?: string | null;
+  reason?: string | null;
+  wait?: GoalWait | null;
+  evidence?: string[];
+}
+
 export interface ImportingAttachmentRecord extends AttachmentAssetRecord {
   stagingName: string;
 }
@@ -199,6 +222,27 @@ export class ApplicationOwnerConflictError extends Error {
     );
     this.name = "ApplicationOwnerConflictError";
   }
+}
+
+function sessionGoalFromRow(row: Record<string, unknown>): SessionGoal {
+  const wait = typeof row.wait_json === "string" ? JSON.parse(row.wait_json) as GoalWait : undefined;
+  const evidence = typeof row.evidence_json === "string" ? JSON.parse(row.evidence_json) as string[] : [];
+  return {
+    id: String(row.id),
+    sessionId: String(row.session_id),
+    objective: String(row.objective),
+    revision: Number(row.revision),
+    status: String(row.status) as GoalStatus,
+    maxAutoTurns: Number(row.max_auto_turns),
+    autoTurnsUsed: Number(row.auto_turns_used),
+    noProgressCount: Number(row.no_progress_count),
+    ...(typeof row.current_run_id === "string" ? { currentRunId: row.current_run_id } : {}),
+    ...(typeof row.reason === "string" ? { reason: row.reason } : {}),
+    ...(wait ? { wait } : {}),
+    evidence,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }
 
 export interface RetentionPolicy {
@@ -3088,6 +3132,79 @@ export class SessionStore {
       throw new Error(`Projection settlement not found: ${id}`);
     }
     return this.getProjectionSettlement(id)!;
+  }
+
+  createGoal(input: CreateSessionGoalStoreInput): SessionGoal {
+    const session = assertSession(this.state, input.sessionId);
+    assertMutableSession(session);
+    const id = input.id ?? randomUUID();
+    const timestamp = now();
+    try {
+      this.database.prepare(`
+        INSERT INTO session_goal (
+          id, session_id, objective, revision, status, max_auto_turns,
+          auto_turns_used, no_progress_count, evidence_json, created_at, updated_at
+        ) VALUES (?, ?, ?, 0, 'active', ?, 0, 0, '[]', ?, ?)
+      `).run(id, input.sessionId, input.objective, input.maxAutoTurns, timestamp, timestamp);
+    } catch (error) {
+      if (String(error).includes("session_goal_session_open_unique")) {
+        throw new Error(`Session already has an open goal: ${input.sessionId}`);
+      }
+      throw error;
+    }
+    const goal = this.getGoal(id)!;
+    this.appendEvent({ type: "session.goal.created", sessionId: input.sessionId, payload: { goal } });
+    return goal;
+  }
+
+  getGoal(id: string): SessionGoal | undefined {
+    const row = this.database.prepare(`SELECT * FROM session_goal WHERE id = ?`).get(id);
+    return row ? sessionGoalFromRow(row as Record<string, unknown>) : undefined;
+  }
+
+  getCurrentGoal(sessionId: string): SessionGoal | undefined {
+    const row = this.database.prepare(`
+      SELECT * FROM session_goal
+      WHERE session_id = ?
+      ORDER BY CASE WHEN status IN ('active','waiting_user','blocked','paused') THEN 0 ELSE 1 END,
+               updated_at DESC
+      LIMIT 1
+    `).get(sessionId);
+    return row ? sessionGoalFromRow(row as Record<string, unknown>) : undefined;
+  }
+
+  updateGoal(id: string, input: UpdateSessionGoalStoreInput): SessionGoal {
+    const current = this.getGoal(id);
+    if (!current) throw new Error(`Session goal not found: ${id}`);
+    if (current.revision !== input.expectedRevision) throw new Error("session_goal_revision_conflict");
+    const nextRevision = current.revision + 1;
+    const timestamp = now();
+    const next = {
+      objective: input.objective ?? current.objective,
+      status: input.status ?? current.status,
+      maxAutoTurns: input.maxAutoTurns ?? current.maxAutoTurns,
+      autoTurnsUsed: input.autoTurnsUsed ?? current.autoTurnsUsed,
+      noProgressCount: input.noProgressCount ?? current.noProgressCount,
+      currentRunId: input.currentRunId === undefined ? current.currentRunId : input.currentRunId ?? undefined,
+      reason: input.reason === undefined ? current.reason : input.reason ?? undefined,
+      wait: input.wait === undefined ? current.wait : input.wait ?? undefined,
+      evidence: input.evidence ?? current.evidence,
+    };
+    const result = this.database.prepare(`
+      UPDATE session_goal SET objective = ?, revision = ?, status = ?, max_auto_turns = ?,
+        auto_turns_used = ?, no_progress_count = ?, current_run_id = ?, reason = ?,
+        wait_json = ?, evidence_json = ?, updated_at = ?
+      WHERE id = ? AND revision = ?
+    `).run(
+      next.objective, nextRevision, next.status, next.maxAutoTurns, next.autoTurnsUsed,
+      next.noProgressCount, next.currentRunId ?? null, next.reason ?? null,
+      next.wait ? JSON.stringify(next.wait) : null, JSON.stringify(next.evidence),
+      timestamp, id, input.expectedRevision,
+    );
+    if (result.changes !== 1) throw new Error("session_goal_revision_conflict");
+    const goal = this.getGoal(id)!;
+    this.appendEvent({ type: "session.goal.updated", sessionId: goal.sessionId, payload: { goal } });
+    return goal;
   }
 
   createRun(input: CreateRunInput): SessionRunRecord {

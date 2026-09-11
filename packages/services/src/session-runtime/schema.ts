@@ -248,6 +248,72 @@ export const sessionRuns = sqliteTable(
   ],
 );
 
+export const sessionGoals = sqliteTable(
+  "session_goal",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+    objective: text("objective").notNull(),
+    revision: integer("revision").notNull(),
+    status: text("status").notNull(),
+    maxAutoTurns: integer("max_auto_turns").notNull(),
+    autoTurnsUsed: integer("auto_turns_used").notNull(),
+    noProgressCount: integer("no_progress_count").notNull(),
+    currentRunId: text("current_run_id"),
+    reason: text("reason"),
+    waitJson: text("wait_json"),
+    evidenceJson: text("evidence_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("session_goal_session_updated_idx").on(table.sessionId, table.updatedAt)],
+);
+
+export const sessionGoalRequests = sqliteTable(
+  "session_goal_request",
+  {
+    requestId: text("request_id").primaryKey(),
+    sessionId: text("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    status: text("status").notNull(),
+    goalId: text("goal_id"),
+    resultJson: text("result_json"),
+    error: text("error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("session_goal_request_session_idx").on(table.sessionId, table.updatedAt)],
+);
+
+export const sessionGoalAssessments = sqliteTable(
+  "session_goal_assessment",
+  {
+    id: text("id").primaryKey(),
+    goalId: text("goal_id").notNull().references(() => sessionGoals.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    runId: text("run_id").notNull(),
+    assessmentJson: text("assessment_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("session_goal_assessment_run_unique").on(table.goalId, table.revision, table.runId)],
+);
+
+export const sessionGoalContinuations = sqliteTable(
+  "session_goal_continuation",
+  {
+    id: text("id").primaryKey(),
+    goalId: text("goal_id").notNull().references(() => sessionGoals.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    previousRunId: text("previous_run_id").notNull(),
+    inputId: text("input_id"),
+    runId: text("run_id"),
+    status: text("status").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("session_goal_continuation_previous_unique").on(table.goalId, table.revision, table.previousRunId)],
+);
+
 export const sessionRunAttempts = sqliteTable(
   "session_run_attempt",
   {

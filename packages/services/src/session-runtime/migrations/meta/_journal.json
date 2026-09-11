@@ -19,6 +19,7 @@
     { "idx": 14, "version": "1", "when": 1788048000000, "tag": "0014_session_input_attachments", "breakpoints": true },
     { "idx": 15, "version": "1", "when": 1788134400000, "tag": "0015_attachment_representations", "breakpoints": true },
     { "idx": 16, "version": "1", "when": 1788220800000, "tag": "0016_attachment_lifecycle", "breakpoints": true },
-    { "idx": 17, "version": "1", "when": 1788307200000, "tag": "0017_structured_input_items", "breakpoints": true }
+    { "idx": 17, "version": "1", "when": 1788307200000, "tag": "0017_structured_input_items", "breakpoints": true },
+    { "idx": 18, "version": "1", "when": 1788393600000, "tag": "0018_session_goals", "breakpoints": true }
   ]
 }
