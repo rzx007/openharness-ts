@@ -1906,8 +1906,9 @@ describe("OpenHarnessHttpServer", () => {
           tasks: Array<{ id: string; status: string }>;
           permissions: Array<{ id: string; status: string; decision?: string }>;
         };
-        expect(state.messages).toHaveLength(2);
+        expect(state.messages).toHaveLength(3);
         expect(state.parts[0]?.text).toBe("survived restart");
+        expect(state.parts.some((part) => part.text === "已压缩上下文")).toBe(true);
         expect(
           state.parts.find((part) => part.id === "part-stale")?.status,
         ).toBe("interrupted");
@@ -3577,7 +3578,7 @@ describe("OpenHarnessHttpServer", () => {
           messages: unknown[];
         };
         expect(body.turns).toBe(1);
-        expect(body.removed).toBe(2);
+        expect(body.removed).toBe(3);
         expect(body.messages).toHaveLength(0);
         const events = (await (
           await fetch(`${baseUrl}/events`, { headers: auth(token) })

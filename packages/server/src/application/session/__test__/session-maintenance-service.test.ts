@@ -20,11 +20,27 @@ const session = {
 
 function createMaintenance(agent: Record<string, any>, options: { personalizationUpdater?: (messages: any[]) => number } = {}) {
   const replaced = { messages: [{ id: "persisted-message" }], parts: [{ id: "persisted-part" }] };
+  let presentationSequence = 0;
   const store = {
     getSession: vi.fn(() => session),
     listMessages: vi.fn(() => []),
     listMessageParts: vi.fn(() => []),
     replaceTranscript: vi.fn(() => replaced),
+    createMessage: vi.fn((input) => ({
+      ...input,
+      id: `presentation-message-${++presentationSequence}`,
+      seq: presentationSequence,
+      createdAt: presentationSequence,
+      updatedAt: presentationSequence,
+    })),
+    upsertMessagePart: vi.fn((input) => ({
+      ...input,
+      id: `presentation-part-${presentationSequence}`,
+      seq: presentationSequence,
+      metadata: {},
+      createdAt: presentationSequence,
+      updatedAt: presentationSequence,
+    })),
   };
   const runEngine = {
     hasWork: vi.fn(() => false),
@@ -90,6 +106,7 @@ describe("SessionMaintenanceService", () => {
       expect(store.listInputAttachments(input.id)).toEqual(before);
       expect(store.listMessageParts("s1").map((part) => part.text).filter(Boolean)).toEqual([
         "summary without invented OCR",
+        "已压缩上下文",
       ]);
     } finally {
       store.close();
@@ -105,6 +122,10 @@ describe("SessionMaintenanceService", () => {
 
     expect(compact).toHaveBeenCalledOnce();
     expect(store.replaceTranscript).toHaveBeenCalledWith({ sessionId: "s1", messages: [] });
+    expect(store.upsertMessagePart.mock.calls.map(([part]) => part.text)).toEqual([
+      "正在压缩上下文",
+      "已压缩上下文",
+    ]);
     expect(result).toEqual({ messageCount: 2, ...replaced });
     expect(broadcastSince).toHaveBeenCalledWith(7);
   });
