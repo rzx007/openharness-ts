@@ -1005,6 +1005,19 @@ function requirePromptItems(value: unknown): SessionUserInputItem[] {
       return { type: "text", text: record.text }
     }
     if (
+      record.type === "context" &&
+      record.kind === "conversation" &&
+      typeof record.id === "string" &&
+      typeof record.displayName === "string"
+    ) {
+      return {
+        type: "context",
+        kind: "conversation",
+        id: record.id,
+        displayName: record.displayName,
+      }
+    }
+    if (
       record.type === "mention" &&
       typeof record.name === "string" &&
       typeof record.path === "string"

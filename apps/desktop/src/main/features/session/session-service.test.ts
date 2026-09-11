@@ -91,6 +91,19 @@ describe("resolveDesktopRuntimeSnapshot", () => {
 })
 
 describe("DesktopSessionService.sendPrompt attachments", () => {
+  it("forwards a structured conversation reference", async () => {
+    const admitPrompt = vi.fn(async () => undefined)
+    const service = serviceWithClient({ admitPrompt })
+    const items = [
+      { type: "context" as const, kind: "conversation" as const, id: "session-2", displayName: "技能安装" },
+      { type: "text" as const, text: "继续处理" },
+    ]
+
+    await service.sendPrompt({ id: "input-context", sessionId: "session-1", items, attachments: [] })
+
+    expect(admitPrompt).toHaveBeenCalledWith("session-1", expect.objectContaining({ items }))
+  })
+
   it("forwards ordered structured items without re-parsing a selected skill", async () => {
     const admitPrompt = vi.fn(async () => undefined)
     const service = serviceWithClient({ admitPrompt })
