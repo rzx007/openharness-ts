@@ -8,6 +8,8 @@
 
 TUI、Web、Desktop、Scheduled Tasks 和 Agent 仍然连接同一个主 daemon。
 
+Desktop 的「设置 → 常规 → 后台持续运行」使用同一配置和系统服务。打包后的 Desktop 自身提供无界面的 `--daemon-service` 入口；Windows 计划任务通过 `--daemon-watchdog` 做单次健康检查，macOS 和 Linux 的用户服务直接托管 `--daemon-service`。这些入口不会创建窗口、托盘、桌面宠物或更新器。
+
 ## 配置
 
 ```json
@@ -110,3 +112,4 @@ ensureLocalDaemon
 - 它不负责远程服务器部署；远程部署应使用目标机器自己的进程管理和密钥管理。
 - 它不把 Agent Framework 变成后台服务。Framework 仍可被程序直接创建和关闭。
 - 它不迁移、复制或删除旧用户数据。
+- Desktop 只向真正首次安装的新用户显示一次侧边栏引导；升级用户和保留数据后的重装用户不会看到。选择「暂不开启」后不会再次提醒，仍可随时在设置页开启。

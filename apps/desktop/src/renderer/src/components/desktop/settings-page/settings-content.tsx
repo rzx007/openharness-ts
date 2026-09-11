@@ -26,6 +26,7 @@ import { RuntimeSettingControl } from "./runtime-setting-control"
 import { DefaultOpenerControl } from "./default-opener-control"
 import { DefaultTerminalShellControl } from "./default-terminal-shell-control"
 import { errorMessage } from "./settings-error-message"
+import { DaemonAutoStartControl } from "./daemon-autostart-control"
 import { AppearanceSettings } from "@renderer/components/appearance/appearance-settings"
 import { isDesktopNotificationMode, isDesktopWorkStyle } from "@shared/settings-types"
 import type { DesktopNotificationMode, DesktopWorkStyle } from "@shared/settings-types"
@@ -132,6 +133,12 @@ function GeneralSettings(): React.JSX.Element {
         />
         <Separator />
         <SettingRow
+          title="后台持续运行"
+          description="登录系统后自动启动 daemon，并在异常退出后恢复，让定时任务和后台工作持续执行。"
+          control={<DaemonAutoStartControl />}
+        />
+        <Separator />
+        <SettingRow
           title="默认文件打开目标"
           description="选择打开代码文件和文件夹时使用的应用"
           control={<DefaultOpenerControl />}
@@ -204,9 +211,7 @@ function GeneralSettings(): React.JSX.Element {
             <dt className="text-muted-foreground">版本</dt>
             <dd>{appInfo?.version ?? "正在读取…"}</dd>
             <dt className="text-muted-foreground">运行方式</dt>
-            <dd>
-              {appInfo ? (appInfo.isPackaged ? "桌面安装包" : "开发模式") : "正在读取…"}
-            </dd>
+            <dd>{appInfo ? (appInfo.isPackaged ? "桌面安装包" : "开发模式") : "正在读取…"}</dd>
           </dl>
         </DialogContent>
       </Dialog>

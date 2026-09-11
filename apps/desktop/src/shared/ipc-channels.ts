@@ -90,6 +90,7 @@ import type {
 } from "./skill-types"
 import type {
   DesktopSettingsSnapshot,
+  DesktopDaemonAutoStartSnapshot,
   UpdateDesktopAgentEnvironmentInput,
   UpdateDesktopDefaultOpenerInput,
   UpdateDesktopDefaultTerminalShellInput,
@@ -249,6 +250,10 @@ export const IpcChannels = {
   settingsUpdateAgentEnvironment: "settings:update-agent-environment",
   settingsUpdateDefaultOpener: "settings:update-default-opener",
   settingsUpdateDefaultTerminalShell: "settings:update-default-terminal-shell",
+  daemonAutoStartSnapshot: "daemon-autostart:snapshot",
+  daemonAutoStartEnable: "daemon-autostart:enable",
+  daemonAutoStartDisable: "daemon-autostart:disable",
+  daemonAutoStartDismissOnboarding: "daemon-autostart:dismiss-onboarding",
 } as const
 
 export const IpcEvents = {
@@ -348,6 +353,13 @@ export interface IpcInvokeMap {
   [IpcChannels.settingsUpdateDefaultTerminalShell]: {
     args: [input: UpdateDesktopDefaultTerminalShellInput]
     result: DesktopSettingsSnapshot
+  }
+  [IpcChannels.daemonAutoStartSnapshot]: { args: []; result: DesktopDaemonAutoStartSnapshot }
+  [IpcChannels.daemonAutoStartEnable]: { args: []; result: DesktopDaemonAutoStartSnapshot }
+  [IpcChannels.daemonAutoStartDisable]: { args: []; result: DesktopDaemonAutoStartSnapshot }
+  [IpcChannels.daemonAutoStartDismissOnboarding]: {
+    args: []
+    result: DesktopDaemonAutoStartSnapshot
   }
 
   [IpcChannels.sessionBootstrap]: { args: []; result: DesktopBootstrapData }

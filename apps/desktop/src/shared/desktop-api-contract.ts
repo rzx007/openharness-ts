@@ -98,6 +98,7 @@ import type {
 } from "./skill-types"
 import type {
   DesktopSettingsSnapshot,
+  DesktopDaemonAutoStartSnapshot,
   UpdateDesktopAgentEnvironmentInput,
   UpdateDesktopDefaultOpenerInput,
   UpdateDesktopDefaultTerminalShellInput,
@@ -240,13 +241,21 @@ export type DesktopAPI = {
       input: UpdateDesktopDefaultTerminalShellInput
     ) => Promise<DesktopSettingsSnapshot>
   }
+  daemonAutoStart: {
+    snapshot: () => Promise<DesktopDaemonAutoStartSnapshot>
+    enable: () => Promise<DesktopDaemonAutoStartSnapshot>
+    disable: () => Promise<DesktopDaemonAutoStartSnapshot>
+    dismissOnboarding: () => Promise<DesktopDaemonAutoStartSnapshot>
+  }
   plugins: {
     snapshot: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
     enable: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     disable: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     uninstall: (input: DesktopPluginActionInput) => Promise<DesktopPluginSnapshot>
     reload: (input: DesktopPluginContextInput) => Promise<DesktopPluginSnapshot>
-    importArchive: (input: DesktopPluginArchiveImportInput) => Promise<DesktopPluginArchiveImportResult>
+    importArchive: (
+      input: DesktopPluginArchiveImportInput
+    ) => Promise<DesktopPluginArchiveImportResult>
     confirmArchive: (
       input: DesktopPluginArchiveConfirmInput
     ) => Promise<DesktopPluginArchiveConfirmResult>

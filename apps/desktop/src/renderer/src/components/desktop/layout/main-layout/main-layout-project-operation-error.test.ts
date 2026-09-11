@@ -260,7 +260,7 @@ describe("MainLayout selected project operation error owner", () => {
       })
     )
 
-    expect(container.textContent).toContain("开始使用")
+    expect(container.textContent).not.toContain("开始使用")
     expect(container.querySelector('[aria-label="添加文件"]')).toBeNull()
   })
 
@@ -287,7 +287,7 @@ describe("MainLayout selected project operation error owner", () => {
     expect(container.textContent).toContain(error)
     expect(container.textContent?.split(error)).toHaveLength(2)
     expect(container.textContent).toContain("此会话已归档，只能查看历史内容")
-    expect(container.textContent).toContain("开始使用")
+    expect(container.textContent).not.toContain("开始使用")
   })
 
   it.each([
@@ -313,7 +313,7 @@ describe("MainLayout selected project operation error owner", () => {
     )
 
     expect(container.textContent?.split(error)).toHaveLength(2)
-    expect(container.textContent).toContain("开始使用")
+    expect(container.textContent).not.toContain("开始使用")
     expect(
       container.querySelector(activeSession ? "h1" : "#new-conversation-composer")
     ).not.toBeNull()

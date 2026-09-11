@@ -9,9 +9,19 @@ export {
 } from "./http/index.js";
 export {
   startOpenHarnessDaemon,
+  DaemonSystemService,
+  serializeWindowsArguments,
   type OpenHarnessDaemonOptions,
+  type DaemonServiceInvocation,
+  type DaemonSystemServiceOptions,
+  type DaemonSystemServiceState,
+  type DaemonSystemServiceStatus,
+  type SystemCommandResult,
 } from "./daemon/index.js";
-export type { CreateDaemonAgent, CreateDaemonAgentContext } from "./daemon/index.js";
+export type {
+  CreateDaemonAgent,
+  CreateDaemonAgentContext,
+} from "./daemon/index.js";
 export {
   BUILTIN_SESSION_COMMANDS,
   mergeCommandCatalog,
@@ -23,7 +33,10 @@ export {
   type CommandSource,
   type ListCommandsInput,
 } from "./commands/index.js";
-export { rewindTranscript, type RewindTranscriptResult } from "./session/index.js";
+export {
+  rewindTranscript,
+  type RewindTranscriptResult,
+} from "./session/index.js";
 export {
   ApplicationEventService,
   ChannelApplicationService,

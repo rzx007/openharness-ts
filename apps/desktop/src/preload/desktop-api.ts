@@ -212,6 +212,12 @@ export const desktopAPI = {
       input: IpcInvokeMap[typeof IpcChannels.settingsUpdateDefaultTerminalShell]["args"][0]
     ) => invoke(IpcChannels.settingsUpdateDefaultTerminalShell, input),
   },
+  daemonAutoStart: {
+    snapshot: () => invoke(IpcChannels.daemonAutoStartSnapshot),
+    enable: () => invoke(IpcChannels.daemonAutoStartEnable),
+    disable: () => invoke(IpcChannels.daemonAutoStartDisable),
+    dismissOnboarding: () => invoke(IpcChannels.daemonAutoStartDismissOnboarding),
+  },
   plugins: {
     snapshot: (input: IpcInvokeMap[typeof IpcChannels.pluginSnapshot]["args"][0]) =>
       invoke(IpcChannels.pluginSnapshot, input),

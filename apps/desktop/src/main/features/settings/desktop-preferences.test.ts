@@ -35,6 +35,29 @@ describe("desktop preferences", () => {
     expect(getDesktopPreferences()).toEqual({ notificationMode: "when_unfocused" })
   })
 
+  it("marks an empty user data directory as a new install with pending onboarding", async () => {
+    const { initializeDesktopInstallIdentity } = await import("./desktop-preferences")
+
+    expect(initializeDesktopInstallIdentity()).toMatchObject({
+      installIdentity: "new",
+      daemonOnboardingState: "pending",
+    })
+  })
+
+  it("marks a legacy preferences file as an existing install", async () => {
+    await writeFile(
+      join(userDataPath, "desktop-preferences.json"),
+      JSON.stringify({ notificationMode: "always" }),
+      "utf8"
+    )
+    const { initializeDesktopInstallIdentity } = await import("./desktop-preferences")
+
+    expect(initializeDesktopInstallIdentity()).toMatchObject({
+      installIdentity: "existing",
+      daemonOnboardingState: "dismissed",
+    })
+  })
+
   it("reads a valid notification mode from the desktop preferences file", async () => {
     await writeFile(
       join(userDataPath, "desktop-preferences.json"),

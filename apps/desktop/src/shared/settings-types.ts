@@ -1,6 +1,16 @@
 export type DesktopWorkStyle = "practical" | "efficient"
 export type DesktopNotificationMode = "never" | "when_unfocused" | "always"
 export type DesktopAgentEnvironment = "native" | "wsl"
+export type DesktopDaemonOnboardingState = "pending" | "enabled" | "dismissed"
+export type DesktopInstallIdentity = "new" | "existing"
+
+export interface DesktopDaemonAutoStartSnapshot {
+  configured: boolean
+  serviceState: "not-installed" | "stopped" | "running" | "unknown"
+  enabled: boolean
+  onboardingState: DesktopDaemonOnboardingState
+  showOnboarding: boolean
+}
 
 export interface DesktopSettingsSnapshot {
   workStyle: DesktopWorkStyle

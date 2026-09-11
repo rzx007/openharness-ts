@@ -1,6 +1,7 @@
 import type { IpcContribution } from "../core/ipc/types"
 import { attachmentIpcContribution } from "./attachment/ipc"
 import { clipboardIpcContribution } from "./clipboard/ipc"
+import { daemonAutoStartIpcContribution } from "./daemon-autostart/ipc"
 import { gitIpcContribution } from "./git/ipc"
 import { petIpcContribution } from "./pet/ipc"
 import { pluginIpcContribution } from "./plugin/ipc"
@@ -15,6 +16,7 @@ import { windowControlsIpcContribution } from "./window-controls/ipc"
 import { workspaceIpcContribution } from "./workspace/ipc"
 
 export const allIpcContributions: IpcContribution[] = [
+  daemonAutoStartIpcContribution,
   attachmentIpcContribution,
   windowControlsIpcContribution,
   trayIpcContribution,

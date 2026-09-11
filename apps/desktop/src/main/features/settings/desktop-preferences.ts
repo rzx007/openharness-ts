@@ -8,12 +8,16 @@ import {
   normalizeDefaultOpenerId,
   normalizeDefaultTerminalShellId,
   type DesktopNotificationMode,
-} from "../../../shared/settings-types"
+  type DesktopDaemonOnboardingState,
+  type DesktopInstallIdentity,
+} from "@shared/settings-types"
 
 export interface DesktopPreferences {
   notificationMode: DesktopNotificationMode
   defaultOpenerId?: string
   defaultTerminalShellId?: string
+  installIdentity?: DesktopInstallIdentity
+  daemonOnboardingState?: DesktopDaemonOnboardingState
 }
 
 type DesktopPreferencesPatch = Omit<Partial<DesktopPreferences>, "defaultTerminalShellId"> & {
@@ -38,6 +42,10 @@ export function getDesktopPreferences(): DesktopPreferences {
         : defaults.notificationMode,
       ...(defaultOpenerId ? { defaultOpenerId } : {}),
       ...(defaultTerminalShellId ? { defaultTerminalShellId } : {}),
+      ...(isInstallIdentity(raw.installIdentity) ? { installIdentity: raw.installIdentity } : {}),
+      ...(isOnboardingState(raw.daemonOnboardingState)
+        ? { daemonOnboardingState: raw.daemonOnboardingState }
+        : {}),
     }
   } catch {
     return defaults
@@ -52,10 +60,38 @@ export function patchDesktopPreferences(patch: DesktopPreferencesPatch): Desktop
     notificationMode: next.notificationMode,
     ...(defaultOpenerId ? { defaultOpenerId } : {}),
     ...(defaultTerminalShellId ? { defaultTerminalShellId } : {}),
+    ...(isInstallIdentity(next.installIdentity) ? { installIdentity: next.installIdentity } : {}),
+    ...(isOnboardingState(next.daemonOnboardingState)
+      ? { daemonOnboardingState: next.daemonOnboardingState }
+      : {}),
   }
 
   writeFileSync(getDesktopPreferencesPath(), JSON.stringify(persisted, null, 2), "utf8")
   return persisted
+}
+
+export function initializeDesktopInstallIdentity(): DesktopPreferences {
+  const current = getDesktopPreferences()
+  if (current.installIdentity && current.daemonOnboardingState) return current
+
+  const userData = app.getPath("userData")
+  const existing = [
+    getDesktopPreferencesPath(),
+    join(userData, "desktop-pet.json"),
+    join(userData, "Local Storage", "leveldb"),
+  ].some(existsSync)
+  return patchDesktopPreferences({
+    installIdentity: existing ? "existing" : "new",
+    daemonOnboardingState: existing ? "dismissed" : "pending",
+  })
+}
+
+function isInstallIdentity(value: unknown): value is DesktopInstallIdentity {
+  return value === "new" || value === "existing"
+}
+
+function isOnboardingState(value: unknown): value is DesktopDaemonOnboardingState {
+  return value === "pending" || value === "enabled" || value === "dismissed"
 }
 
 export function getDesktopPreferencesPath(): string {

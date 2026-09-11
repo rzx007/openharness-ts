@@ -1,5 +1,11 @@
 # OpenHarness Desktop
 
+## Daemon 常驻
+
+「设置 → 常规 → 后台持续运行」控制用户级 `daemon.autoStart` 和实际系统服务。开启后，当前用户登录时会启动 daemon，异常退出后由操作系统恢复；关闭不会删除会话或定时任务。
+
+真正首次安装且尚未开启常驻时，侧边栏底部会显示一次「保持后台运行」引导。开启成功或选择「暂不开启」后该区域永久消失；升级安装不会补发引导。安装身份和引导状态保存在 Desktop 的 `desktop-preferences.json`，与 `daemon.autoStart` 分开管理。
+
 Electron + React desktop shell for OpenHarness.
 
 ## Structure

@@ -79,3 +79,17 @@ describe("desktop updater preload bridge", () => {
     )
   })
 })
+
+describe("desktop daemon autostart preload bridge", () => {
+  it("exposes only fixed daemon autostart operations", async () => {
+    await desktopAPI.daemonAutoStart.snapshot()
+    await desktopAPI.daemonAutoStart.enable()
+    await desktopAPI.daemonAutoStart.disable()
+    await desktopAPI.daemonAutoStart.dismissOnboarding()
+
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.daemonAutoStartSnapshot)
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.daemonAutoStartEnable)
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.daemonAutoStartDisable)
+    expect(electron.invoke).toHaveBeenCalledWith(IpcChannels.daemonAutoStartDismissOnboarding)
+  })
+})

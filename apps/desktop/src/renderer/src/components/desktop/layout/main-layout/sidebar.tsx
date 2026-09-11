@@ -1,7 +1,6 @@
 import {
   Archive,
   Bell,
-  CircleDot,
   Clock3,
   FolderClosed,
   FolderOpen,
@@ -62,6 +61,7 @@ import type { DesktopProject, DesktopSessionRecord } from "@shared/session-types
 import { useSessionActionDialogs } from "../../conversation-page/session/session-action-dialogs"
 import { SessionMoreMenu } from "../../conversation-page/session/session-more-menu"
 import { projectMenuItems } from "./project-menu-items"
+import { DaemonAutoStartCard } from "./daemon-autostart-card"
 
 type SidebarProps = {
   open: boolean
@@ -316,16 +316,7 @@ export function Sidebar({
           )}
         </ScrollArea>
 
-        <div className="min-w-0 px-2 py-2">
-          <button
-            type="button"
-            className="flex h-9 w-full items-center rounded-md bg-background px-3 text-left shadow-sm ring-1 ring-black/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <CircleDot className="mr-2 size-4 text-sidebar-muted" />
-            <span className="text-ui-small font-medium">开始使用</span>
-            <span className="ml-auto text-xs text-sidebar-muted">1/3</span>
-          </button>
-        </div>
+        <DaemonAutoStartCard />
 
         <div className="flex min-w-0 items-center justify-between border-t border-sidebar-border/80 px-2 py-2">
           <Button
@@ -440,11 +431,7 @@ type ProjectActions = {
   onRebind: (project: DesktopProject) => void
 }
 
-function handleProjectMenuItem(
-  id: string,
-  project: DesktopProject,
-  actions: ProjectActions
-): void {
+function handleProjectMenuItem(id: string, project: DesktopProject, actions: ProjectActions): void {
   switch (id) {
     case "pin":
       actions.onTogglePin(project)
