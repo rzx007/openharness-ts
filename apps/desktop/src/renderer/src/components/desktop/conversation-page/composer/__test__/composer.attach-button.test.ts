@@ -59,7 +59,14 @@ describe("Composer attach button", () => {
     })
 
     expect(onPickFiles).not.toHaveBeenCalled()
-    expect(container.querySelector('[aria-label="添加上下文"]')).not.toBeNull()
+    expect(container.querySelector('[role="listbox"][aria-label="添加上下文"]')).not.toBeNull()
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+    expect(container.querySelector('[role="listbox"][aria-label="添加上下文"]')).toBeNull()
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
     const files = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
       (item) => item.textContent?.includes("文件和文件夹")
     )

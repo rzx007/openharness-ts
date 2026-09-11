@@ -35,6 +35,7 @@ export function ComposerPickerPlugin({
   commands,
   contextItems,
   contextPickerRequest,
+  contextPickerOpen,
   onContextAction,
   onCommand,
   onCommandError,
@@ -43,6 +44,7 @@ export function ComposerPickerPlugin({
   commands: readonly ComposerPickerItem[]
   contextItems: readonly ContextPickerItem[]
   contextPickerRequest: number
+  contextPickerOpen: boolean
   onContextAction?: (item: ContextPickerItem) => void
   onCommand: (command: ComposerPickerCommand) => Promise<void>
   onCommandError: (message: string | null) => void
@@ -52,8 +54,8 @@ export function ComposerPickerPlugin({
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [manualContextOpen, setManualContextOpen] = useState(false)
   useEffect(() => {
-    if (contextPickerRequest > 0) setManualContextOpen(true)
-  }, [contextPickerRequest])
+    if (contextPickerRequest > 0) setManualContextOpen(contextPickerOpen)
+  }, [contextPickerOpen, contextPickerRequest])
   useEffect(
     () =>
       editor.registerUpdateListener(({ editorState }) => {

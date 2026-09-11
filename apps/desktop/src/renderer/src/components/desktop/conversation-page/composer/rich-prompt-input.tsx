@@ -40,6 +40,7 @@ export function RichPromptInput({
   onPasteFiles,
   contextItems = [],
   contextPickerRequest = 0,
+  contextPickerOpen = false,
   onContextAction,
 }: {
   id: string
@@ -56,6 +57,7 @@ export function RichPromptInput({
   onPasteFiles?: (files: readonly File[]) => void
   contextItems?: readonly ContextPickerItem[]
   contextPickerRequest?: number
+  contextPickerOpen?: boolean
   onContextAction?: (item: ContextPickerItem) => void
 }): React.JSX.Element {
   const [isComposing, setIsComposing] = useState(false)
@@ -120,6 +122,7 @@ export function RichPromptInput({
           commands={commands}
           contextItems={contextItems}
           contextPickerRequest={contextPickerRequest}
+          contextPickerOpen={contextPickerOpen}
           onContextAction={onContextAction}
           onCommand={onCommand}
           onCommandError={setCommandError}

@@ -93,6 +93,7 @@ export function Composer({
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
   const [contextPickerRequest, setContextPickerRequest] = useState(0)
+  const [contextPickerOpen, setContextPickerOpen] = useState(false)
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
   const closePicker = (): void => setActivePicker(null)
   const allowSubmit = canSubmit ?? draft.items.length > 0
@@ -178,6 +179,7 @@ export function Composer({
         onPasteFiles={attachmentInteractionEnabled ? onPasteFiles : undefined}
         contextItems={contextItems}
         contextPickerRequest={contextPickerRequest}
+        contextPickerOpen={contextPickerOpen}
         onContextAction={(item) => {
           if (item.action.kind === "files") onPickFiles?.()
           if (item.action.kind === "plan") onSelectPermissionMode("plan")
@@ -192,7 +194,10 @@ export function Composer({
           aria-label="添加上下文"
           title="添加上下文"
           disabled={attachDisabled}
-          onClick={() => setContextPickerRequest((value) => value + 1)}
+          onClick={() => {
+            setContextPickerOpen((open) => !open)
+            setContextPickerRequest((value) => value + 1)
+          }}
         >
           <IconPlus className="size-5" />
         </Button>
