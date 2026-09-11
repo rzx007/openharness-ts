@@ -232,46 +232,46 @@ export function ComposerPicker({
                 {item.group}
               </div>
             ) : null}
-          <Button
-            ref={(element) => {
-              optionRefs.current[index] = element
-            }}
-            type="button"
-            variant="ghost"
-            role="option"
-            aria-selected={index === activeIndex}
-            title={`${item.label} — ${item.description}`}
-            onMouseEnter={() => setHighlightedIndex(index)}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onSelect(item)}
-            className={cn(
-              "grid h-9 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2 text-left font-normal sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(10rem,1.35fr)_auto]",
-              index === activeIndex && "bg-muted text-foreground"
-            )}
-          >
-            <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
-              {item.context?.kind === "files" ? (
-                <Paperclip className="size-3.5" />
-              ) : item.context?.kind === "conversation" ? (
-                <MessageSquare className="size-3.5" />
-              ) : item.context?.kind === "plan" ? (
-                <ListChecks className="size-3.5" />
-              ) : item.kind === "command" ? (
-                <Command className="size-3.5" />
-              ) : (
-                <Box className="size-3.5" />
+            <Button
+              ref={(element) => {
+                optionRefs.current[index] = element
+              }}
+              type="button"
+              variant="ghost"
+              role="option"
+              aria-selected={index === activeIndex}
+              title={`${item.label} — ${item.description}`}
+              onMouseEnter={() => setHighlightedIndex(index)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onSelect(item)}
+              className={cn(
+                "grid h-9 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2 text-left font-normal sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(10rem,1.35fr)_auto]",
+                index === activeIndex && "bg-muted text-foreground"
               )}
-            </span>
-            <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
-            <span className="hidden min-w-0 truncate text-sm text-muted-foreground sm:inline">
-              {item.description}
-            </span>
-            {item.sourceLabel ? (
-              <span className="text-ui-caption shrink-0 text-muted-foreground/65">
-                {item.sourceLabel}
+            >
+              <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
+                {item.context?.kind === "files" ? (
+                  <Paperclip className="size-3.5" />
+                ) : item.context?.kind === "conversation" ? (
+                  <MessageSquare className="size-3.5" />
+                ) : item.context?.kind === "plan" ? (
+                  <ListChecks className="size-3.5" />
+                ) : item.kind === "command" ? (
+                  <Command className="size-3.5" />
+                ) : (
+                  <Box className="size-3.5" />
+                )}
               </span>
-            ) : null}
-          </Button>
+              <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
+              <span className="hidden min-w-0 truncate text-sm text-muted-foreground sm:inline">
+                {item.description}
+              </span>
+              {item.sourceLabel ? (
+                <span className="text-ui-caption shrink-0 text-muted-foreground/65">
+                  {item.sourceLabel}
+                </span>
+              ) : null}
+            </Button>
           </Fragment>
         ))}
       </div>
