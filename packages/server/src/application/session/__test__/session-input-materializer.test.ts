@@ -62,4 +62,25 @@ describe("materializeSessionInput", () => {
       { type: "skill", name: "writing-plans", path: "/skills/plan/SKILL.md" },
     ], catalog).text).toBe("$writing-plans");
   });
+
+  it("materializes a bounded conversation reference", () => {
+    const result = materializeSessionInput([
+      { type: "context", kind: "conversation", id: "s2", displayName: "登录问题" },
+      { type: "text", text: "继续处理" },
+    ], catalog, {
+      resolveConversation: (id) => id === "s2"
+        ? { id, title: "登录问题", summary: "用户：登录失败\n助手：检查令牌" }
+        : undefined,
+    });
+    expect(result.instruction).toContain("用户引用了以下历史对话作为只读参考上下文")
+    expect(result.instruction).toContain("用户：登录失败")
+    expect(result.text).toBe("@登录问题继续处理")
+  });
+
+  it("rejects a missing conversation reference", () => {
+    expect(() => materializeSessionInput([
+      { type: "context", kind: "conversation", id: "missing", displayName: "已删除会话" },
+    ], catalog, { resolveConversation: () => undefined }))
+      .toThrowError("session_input_conversation_not_found");
+  });
 });

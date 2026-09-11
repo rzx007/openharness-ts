@@ -24,7 +24,7 @@ describe("Composer attach button", () => {
     Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT")
   })
 
-  it("opens the file picker when the plus button is clicked", async () => {
+  it("opens the context picker and then reuses the file picker", async () => {
     const onPickFiles = vi.fn()
 
     await act(async () => {
@@ -49,7 +49,7 @@ describe("Composer attach button", () => {
     })
 
     const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (item) => item.getAttribute("aria-label") === "添加附件"
+      (item) => item.getAttribute("aria-label") === "添加上下文"
     )
     expect(button).not.toBeNull()
     expect(button?.disabled).toBe(false)
@@ -58,12 +58,16 @@ describe("Composer attach button", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     })
 
+    expect(onPickFiles).not.toHaveBeenCalled()
+    expect(container.querySelector('[aria-label="添加上下文"]')).not.toBeNull()
+    const files = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (item) => item.textContent?.includes("文件和文件夹")
+    )
+    await act(async () => files?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
     expect(onPickFiles).toHaveBeenCalledOnce()
-    expect(container.querySelector('[aria-label="添加文件"]')).toBeNull()
-    expect(container.querySelector('[aria-label="添加图片"]')).toBeNull()
   })
 
-  it("disables the plus button when attachment interaction is off", async () => {
+  it("keeps the context button enabled when attachment interaction is off", async () => {
     await act(async () => {
       root.render(
         createElement(Composer, {
@@ -86,8 +90,8 @@ describe("Composer attach button", () => {
     })
 
     const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (item) => item.getAttribute("aria-label") === "添加附件"
+      (item) => item.getAttribute("aria-label") === "添加上下文"
     )
-    expect(button?.disabled).toBe(true)
+    expect(button?.disabled).toBe(false)
   })
 })

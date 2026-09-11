@@ -31,6 +31,12 @@ describe("session input items", () => {
     ])
   })
 
+  it("preserves conversation references in canonical text", () => {
+    const items = [{ type: "context" as const, kind: "conversation" as const, id: "session-2", displayName: "登录问题" }]
+    expect(validateSessionUserInputItems(items)).toEqual(items)
+    expect(sessionUserInputText(items)).toBe("@登录问题")
+  })
+
   it("rejects more than 32 skill items", () => {
     expect(() => validateSessionUserInputItems(
       Array.from({ length: 33 }, (_, index) => ({ type: "skill" as const, name: `s${index}`, path: `D:/s${index}/SKILL.md` }))
