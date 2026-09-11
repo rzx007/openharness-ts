@@ -3223,6 +3223,11 @@ export class SessionStore {
     return result.changes === 1;
   }
 
+  pauseActiveGoalsOnStartup(): number {
+    return this.database.prepare(`UPDATE session_goal SET status = 'paused', revision = revision + 1, reason = '应用重启后需要手动继续', updated_at = ? WHERE status = 'active'`)
+      .run(now()).changes;
+  }
+
   getGoal(id: string): SessionGoal | undefined {
     const row = this.database.prepare(`SELECT * FROM session_goal WHERE id = ?`).get(id);
     return row ? sessionGoalFromRow(row as Record<string, unknown>) : undefined;

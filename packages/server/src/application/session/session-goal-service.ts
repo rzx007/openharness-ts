@@ -16,7 +16,10 @@ export class SessionGoalService {
     store: SessionStore;
     sessions: Pick<SessionApplicationService, "admitPrompt">;
     runEngine: Pick<SessionRunEngine, "interruptSession" | "activeRunId">;
-  }) {}
+    recoverOnStart?: boolean;
+  }) {
+    if (this.context.recoverOnStart !== false) this.context.store.pauseActiveGoalsOnStartup();
+  }
 
   get(sessionId: string): SessionGoal | null {
     this.requireSession(sessionId);
@@ -32,7 +35,7 @@ export class SessionGoalService {
 
   async create(sessionId: string, input: CreateSessionGoalInput): Promise<SessionGoal> {
     this.requireSession(sessionId);
-    const fingerprint = JSON.stringify({ operation: "create", objective: input.objective, maxAutoTurns: input.maxAutoTurns ?? DEFAULT_GOAL_AUTO_TURNS });
+    const fingerprint = JSON.stringify({ operation: "create", objective: input.objective, maxAutoTurns: input.maxAutoTurns ?? DEFAULT_GOAL_AUTO_TURNS, items: input.items ?? [], attachments: input.attachments ?? [] });
     const request = this.context.store.beginGoalRequest({ requestId: input.requestId, sessionId, fingerprint });
     if (request.goalId) {
       const existing = this.context.store.getGoal(request.goalId);
@@ -87,6 +90,12 @@ export class SessionGoalService {
 
   async action(sessionId: string, goalId: string, input: GoalActionInput): Promise<SessionGoal> {
     const goal = this.requireGoal(sessionId, goalId);
+    if (input.action === "resume") {
+      if (goal.status !== "paused") throw new SessionApplicationError(409, `Goal cannot resume from ${goal.status}`);
+      if (goal.autoTurnsUsed >= goal.maxAutoTurns && !input.additionalAutoTurns) {
+        throw new SessionApplicationError(409, "Goal resume requires additional auto turns");
+      }
+    }
     const updated = this.context.store.updateGoal(goal.id, {
       expectedRevision: input.expectedRevision,
       status: input.action === "cancel" ? "cancelled" : input.action === "pause" ? "paused" : "active",
@@ -152,11 +161,16 @@ export class SessionGoalService {
       reason: null,
     });
     if (!this.context.store.recordGoalContinuation({ goalId: continued.id, revision: continued.revision, previousRunId: runId })) return;
-    await this.createRevisionRun(
-      continued,
-      `goal-${continued.id}-${continued.revision}-${runId}`,
-      "continuation",
-    );
+    try {
+      await this.createRevisionRun(continued, `goal-${continued.id}-${continued.revision}-${runId}`, "continuation");
+    } catch (error) {
+      this.context.store.updateGoal(continued.id, {
+        expectedRevision: continued.revision,
+        status: "paused",
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private async createRevisionRun(goal: SessionGoal, requestId: string, kind: string, items?: import("@openharness/protocol").SessionUserInputItem[], attachments?: import("@openharness/protocol").AdmitPromptAttachmentInput[]): Promise<SessionGoal> {
