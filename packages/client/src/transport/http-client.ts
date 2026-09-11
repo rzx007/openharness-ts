@@ -72,6 +72,7 @@ import type {
   AttachmentStorageRepairResult,
   AttachmentStorageReport,
 } from "../types/index.js";
+import type { CreateSessionGoalInput, GoalActionInput, SessionGoal, UpdateSessionGoalInput } from "@openharness/protocol";
 import type {
   JobKind,
   JobReadResult,
@@ -641,6 +642,26 @@ export class OpenHarnessClient {
       `/sessions/${encodeURIComponent(sessionId)}/compact`,
       { method: "POST", signal: options.signal },
     );
+  }
+
+  async getSessionGoal(sessionId: string): Promise<SessionGoal | null> {
+    const response = await this.request<{ goal: SessionGoal | null }>(`/sessions/${encodeURIComponent(sessionId)}/goal`);
+    return response.goal;
+  }
+
+  async createSessionGoal(sessionId: string, input: CreateSessionGoalInput): Promise<SessionGoal> {
+    const response = await this.request<{ goal: SessionGoal }>(`/sessions/${encodeURIComponent(sessionId)}/goals`, { method: "POST", body: input });
+    return response.goal;
+  }
+
+  async updateSessionGoal(sessionId: string, goalId: string, input: UpdateSessionGoalInput): Promise<SessionGoal> {
+    const response = await this.request<{ goal: SessionGoal }>(`/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(goalId)}`, { method: "PATCH", body: input });
+    return response.goal;
+  }
+
+  async applySessionGoalAction(sessionId: string, goalId: string, input: GoalActionInput): Promise<SessionGoal> {
+    const response = await this.request<{ goal: SessionGoal }>(`/sessions/${encodeURIComponent(sessionId)}/goals/${encodeURIComponent(goalId)}/actions`, { method: "POST", body: input });
+    return response.goal;
   }
 
   /** `POST /sessions/:id/rewind` */

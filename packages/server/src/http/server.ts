@@ -58,6 +58,7 @@ import { createProjectRoutes } from "./routes/project.js";
 import { createRunExecutionRoutes } from "./routes/run-execution.js";
 import { createServiceRoutes } from "./routes/service.js";
 import { createSessionRoutes } from "./routes/session.js";
+import { createSessionGoalRoutes } from "./routes/session-goal.js";
 import { createSessionUtilityRoutes } from "./routes/session-utility.js";
 import { createSystemRoutes } from "./routes/system.js";
 import { RequestTraceRegistry } from "./control/request-trace-registry.js";
@@ -404,6 +405,7 @@ export class OpenHarnessHttpServer {
         traces: this.requestTraces,
       }),
     );
+    this.app.route("/sessions", createSessionGoalRoutes(this.application.goals));
     this.app.route(
       "/sessions",
       createRunExecutionRoutes({

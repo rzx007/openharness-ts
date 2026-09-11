@@ -63,6 +63,7 @@ import { DaemonControlService } from "./control/daemon-control-service.js";
 import { DaemonOperationGate } from "./control/daemon-operation-gate.js";
 import { LiveChildAgentDirectory } from "./agent/live-child-agent-directory.js";
 import { SessionApplicationService } from "./session/session-application-service.js";
+import { SessionGoalService } from "./session/session-goal-service.js";
 import { SessionEventPublisher } from "./session/session-event-publisher.js";
 import { SessionMaintenanceService } from "./session/session-maintenance-service.js";
 import { SessionQueryService } from "./session/session-query-service.js";
@@ -138,6 +139,7 @@ export interface DurableAgentApplication {
   readonly store: SessionStore;
   readonly attachments: AttachmentApplicationService;
   readonly sessions: SessionApplicationService;
+  readonly goals: SessionGoalService;
   readonly queries: SessionQueryService;
   readonly permissions: StorePermissionBroker;
   readonly backgroundShells: BackgroundShellService;
@@ -173,6 +175,7 @@ export class DaemonApplication implements DurableAgentApplication {
   readonly permissions: StorePermissionBroker;
   readonly backgroundShells: BackgroundShellService;
   readonly sessions: SessionApplicationService;
+  readonly goals: SessionGoalService;
   readonly maintenance: SessionMaintenanceService;
   readonly queries: SessionQueryService;
   readonly control: DaemonControlService;
@@ -682,6 +685,7 @@ export class DaemonApplication implements DurableAgentApplication {
           return (await discoverOpenHarnessExtensions(session.cwd, settings)).skillRegistry;
         },
       });
+      this.goals = new SessionGoalService({ store, sessions: this.sessions, runEngine: this.runEngine });
       /**
        * 通道服务：
        * 1. 管理会话的通信通道（如 SSE、WebSocket）
