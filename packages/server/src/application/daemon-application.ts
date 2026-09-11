@@ -576,6 +576,7 @@ export class DaemonApplication implements DurableAgentApplication {
         traceIdForRun: (runId) => this.traceIdForRun(runId),
         log: options.log,
         postRunMaintenance,
+        settleGoalRun: (sessionId, runId) => this.goals.settleRun(sessionId, runId),
         attachmentResources: this.attachmentResources,
         attachmentOcrAvailable: true,
         contextUsageCache,
