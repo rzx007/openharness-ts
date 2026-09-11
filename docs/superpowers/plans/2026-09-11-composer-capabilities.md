@@ -16,10 +16,10 @@
 - 修改 `apps/desktop/src/renderer/src/components/desktop/conversation-page/composer/rich-prompt-input.tsx`：接入 `@` Context Picker 和结构化选择结果。
 - 修改 `apps/desktop/src/renderer/src/components/desktop/conversation-page/composer/composer-picker.tsx`：支持分类、搜索和统一键盘交互。
 - 修改 `apps/desktop/src/renderer/src/components/desktop/conversation-page/composer/composer-trigger.ts`：定义 `/`、`$`、`@` 的边界和 IME 行为。
-- 修改 `apps/desktop/src/shared/session-types.ts`：补充上下文项和能力状态类型。
+- 修改 `packages/core/src/types/runtime.ts` 或现有共享协议包：定义跨 Desktop/client/server 共用的上下文项和能力状态类型。
 - 修改 `apps/desktop/src/main` 与 `apps/desktop/src/preload` 相关 IPC：提供上下文目录和选择动作所需数据。
 - 修改 `packages/client/src/commands/session-commands.ts`：复用已有计划模式和命令行为。
-- 修改 `packages/server/src/application/session`：校验并执行上下文项、目标和模式变更。
+- 修改 `packages/server/src/application/session`：校验并执行上下文引用和模式变更。
 - 修改 `packages/server/src/application/agent/daemon-agent-event-projector.ts`：投影能力状态和系统 presentation 消息。
 - 修改 `packages/server/src/application/agent/agent-transcript.ts`：排除 presentation-only 消息。
 - 修改 `apps/desktop/src/renderer/src/components/desktop/conversation-page/message`：展示能力执行和压缩状态。
@@ -31,7 +31,7 @@
 
 - [ ] 编写失败测试：验证 `@`/`+` 上下文项类型、协议不匹配报错和附件拖拽/粘贴不变。
 - [ ] 运行相关 Desktop composer 测试，确认新断言失败。
-- [ ] 在 `session-types.ts` 定义 `DesktopContextItem`、来源、选择动作和状态字段。
+- [ ] 在共享协议包定义 `ContextItem`、来源、选择动作和状态字段。
 - [ ] 为协议不匹配增加明确错误返回，不增加旧 metadata 兼容解析。
 - [ ] 运行 composer、附件和 transcript 测试。
 - [ ] Commit：`feat: define composer context item protocol`
@@ -46,6 +46,9 @@
 - [ ] 将历史定义为参考对话选择，不切换当前会话；目标和站点不在本期范围内。
 - [ ] 将 `+` 从直接文件选择改为打开 Context Picker，文件项再调用 `onPickFiles`。
 - [ ] 让 `@` 使用同一 picker 状态、搜索、高亮、Enter/Tab/Esc 行为。
+- [ ] 选择后删除触发用的 `@` 和查询文本，恢复光标；中间位置保留前后正文，并支持连续添加多个上下文项。
+- [ ] 第一版文件夹仅作为目录引用，不递归上传；超过大小或文件数量限制时明确提示。
+- [ ] 插件、应用和文件聊天搜索仅预留协议，本期没有数据源时不展示、不执行。
 - [ ] 运行相关测试并检查中文输入法组合态。
 - [ ] Commit：`feat: unify at and plus context picker`
 
@@ -67,7 +70,7 @@
 
 - [ ] 编写服务端测试：能力不存在、权限不足、参数错误、超时、取消分别返回稳定错误码。
 - [ ] 编写客户端测试：执行中、成功、失败、取消状态可见并可恢复。
-- [ ] 在服务端增加结构化能力校验和执行入口。
+- [ ] 在服务端增加结构化上下文引用校验和计划模式动作入口；不实现目标或站点执行。
 - [ ] 通过 AgentEventBus 发布 `capability_status` 事件。
 - [ ] 在 projector 中写入事件和 presentation-only 消息。
 - [ ] 在消息组件中展示执行状态，不把状态消息送入模型上下文。
@@ -82,6 +85,7 @@
 - [ ] 增加只读会话搜索接口，返回稳定 ID、标题和摘要。
 - [ ] 发送时由服务端按 ID 读取并裁剪参考内容，设置 token 上限。
 - [ ] 校验会话访问范围，禁止通过客户端伪造内容或跨权限读取。
+- [ ] 当前会话默认不可引用自身；历史会话只读取标题和受限摘要，删除或无权访问时返回错误；引用可在发送前移除。
 - [ ] 运行 session、server、desktop 历史引用测试。
 - [ ] Commit：`feat: add read-only conversation context`
 
@@ -103,7 +107,7 @@
 - `@` 和 `+` 打开同一个 Context Picker。
 - 文件选择、拖拽、粘贴附件全部保持可用。
 - `/`、`$`、计划模式行为符合既有语义和 Codex 对齐规则。
-- 目标能力有真实生命周期，不以静态菜单冒充完成。
+- 目标和站点不在本期验收范围；插件、应用和文件聊天搜索仅在有数据源后另立任务。
 - 能力执行、错误、取消、刷新恢复都有证据。
 - 自动压缩和 `/compact` 都有 metadata 状态消息。
 - 相关测试通过；全量测试若受环境限制，必须明确记录原因。
