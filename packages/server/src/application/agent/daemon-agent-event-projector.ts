@@ -135,7 +135,7 @@ export class DaemonAgentEventProjector {
       case "domain.event":
         if (event.data.name === "goal.assessment" && event.context.runId) {
           const run = this.context.store.getRun(event.context.runId);
-          if (run?.metadata.goalId) {
+          if (run?.metadata.goalId && (run.status === "pending" || run.status === "running")) {
             this.context.store.updateRun(run.id, { metadata: { goalAssessment: event.data.payload ?? {} } });
           }
         }

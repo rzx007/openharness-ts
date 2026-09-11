@@ -93,8 +93,9 @@ export class SessionRunExecutor {
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const admitted = this.context.store.getInput(inputId);
       if (!admitted) throw new Error(`Session input not found: ${inputId}`);
-      const storedRun = this.context.store.getRun(runId);
-      if (!storedRun) throw new Error(`Session run not found: ${runId}`);
+      const storedRun = typeof this.context.store.getRun === "function"
+        ? this.context.store.getRun(runId)
+        : undefined;
       const hasStructuredContext = admitted.items.some((item) => item.type === "skill" || item.type === "context");
       const hasExplicitSkills = admitted.items.some((item) => item.type === "skill");
       const materialized = hasStructuredContext
@@ -197,8 +198,8 @@ export class SessionRunExecutor {
           materialized,
         );
       }
-      const goalId = typeof storedRun.metadata.goalId === "string" ? storedRun.metadata.goalId : undefined;
-      const goalRevision = typeof storedRun.metadata.goalRevision === "number" ? storedRun.metadata.goalRevision : undefined;
+      const goalId = typeof storedRun?.metadata?.goalId === "string" ? storedRun.metadata.goalId : undefined;
+      const goalRevision = typeof storedRun?.metadata?.goalRevision === "number" ? storedRun.metadata.goalRevision : undefined;
       if (goalId && goalRevision !== undefined) {
         const goal = this.context.store.getGoal(goalId);
         if (!goal || goal.sessionId !== sessionId || goal.revision !== goalRevision || goal.status !== "active") {
@@ -235,7 +236,6 @@ export class SessionRunExecutor {
 
       // 只在成功走完之后做记忆/个性化/auto-dream。失败路径不跑，避免半截对话被写进长期记忆。
       await this.context.postRunMaintenance?.run(sessionId, runId, agent);
-      await this.context.settleGoalRun?.(sessionId, runId);
 
       // Run terminal (success): invalidate then rewrite live usage from the same agent
       // before closeIfStale may drop the warm runtime.
@@ -382,6 +382,18 @@ export class SessionRunExecutor {
             error: error instanceof Error ? error.message : String(error),
           });
         }
+      }
+      try {
+        await this.context.settleGoalRun?.(sessionId, runId);
+      } catch (error) {
+        this.context.log({
+          level: "error",
+          event: "session.goal.settlement_failed",
+          traceId: this.context.traceIdForRun(runId),
+          sessionId,
+          runId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }

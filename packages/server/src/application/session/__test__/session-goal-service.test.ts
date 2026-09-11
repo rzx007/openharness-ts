@@ -16,7 +16,7 @@ describe("SessionGoalService", () => {
       const run = store.createRun({ id: "r1", sessionId: "s1", inputId: input.id, metadata: { goalId: goal.id, goalRevision: 0 } })
       store.updateRun(run.id, { metadata: { goalAssessment: { decision: "continue", progress: "完成一部分", evidence: ["检查通过"] } } })
       const admitPrompt = vi.fn(async () => ({ input, run, queue_state: "queued" as const }))
-      const service = new SessionGoalService({ store, sessions: { admitPrompt }, runEngine: { interruptSession: vi.fn() } })
+      const service = new SessionGoalService({ store, sessions: { admitPrompt }, runEngine: { interruptSession: vi.fn(), activeRunId: vi.fn() } })
 
       await service.settleRun("s1", "r1")
 

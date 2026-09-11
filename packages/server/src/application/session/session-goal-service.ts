@@ -15,7 +15,7 @@ export class SessionGoalService {
   constructor(private readonly context: {
     store: SessionStore;
     sessions: Pick<SessionApplicationService, "admitPrompt">;
-    runEngine: Pick<SessionRunEngine, "interruptSession">;
+    runEngine: Pick<SessionRunEngine, "interruptSession" | "activeRunId">;
   }) {}
 
   get(sessionId: string): SessionGoal | null {
@@ -73,7 +73,7 @@ export class SessionGoalService {
       status: "paused",
       reason: "正在更新目标",
     });
-    this.context.runEngine.interruptSession(sessionId, "Goal updated");
+    this.interruptGoalRun(sessionId, goal.id, "Goal updated");
     const updated = this.context.store.updateGoal(goal.id, {
       expectedRevision: paused.revision,
       objective: input.objective,
@@ -95,7 +95,7 @@ export class SessionGoalService {
       wait: null,
     });
     if (input.action === "pause" || input.action === "cancel") {
-      this.context.runEngine.interruptSession(sessionId, `Goal ${input.action}d`);
+      this.interruptGoalRun(sessionId, goal.id, `Goal ${input.action}d`);
     }
     return input.action === "resume"
       ? await this.createRevisionRun(updated, input.requestId, "resume")
@@ -115,11 +115,10 @@ export class SessionGoalService {
       return;
     }
     const value = assessment as Record<string, unknown>;
+    this.context.store.recordGoalAssessment({ goalId: goal.id, revision: goal.revision, runId, assessment: value });
     const evidence = Array.isArray(value.evidence) ? value.evidence.filter((item): item is string => typeof item === "string") : [];
     if (value.decision === "complete") {
-      this.context.store.updateGoal(goal.id, evidence.length > 0
-        ? { expectedRevision: goal.revision, status: "completed", evidence, reason: null }
-        : { expectedRevision: goal.revision, status: "waiting_user", reason: "目标缺少可验证完成证据", wait: { kind: "user", questionId: `goal-evidence-${runId}`, question: "请确认目标是否已经完成。" } });
+      this.context.store.updateGoal(goal.id, { expectedRevision: goal.revision, status: "waiting_user", evidence, reason: "请确认目标是否已经完成", wait: { kind: "user", questionId: `goal-complete-${runId}`, question: "现有证据是否足以确认目标完成？" } });
       return;
     }
     if (value.decision === "waiting_user" || value.decision === "blocked") {
@@ -152,6 +151,7 @@ export class SessionGoalService {
       evidence,
       reason: null,
     });
+    if (!this.context.store.recordGoalContinuation({ goalId: continued.id, revision: continued.revision, previousRunId: runId })) return;
     await this.createRevisionRun(
       continued,
       `goal-${continued.id}-${continued.revision}-${runId}`,
@@ -173,6 +173,13 @@ export class SessionGoalService {
 
   private requireSession(sessionId: string): void {
     if (!this.context.store.getSession(sessionId)) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+  }
+
+  private interruptGoalRun(sessionId: string, goalId: string, reason: string): void {
+    const activeRunId = this.context.runEngine.activeRunId(sessionId);
+    if (!activeRunId) return;
+    const run = this.context.store.getRun(activeRunId);
+    if (run?.metadata.goalId === goalId) this.context.runEngine.interruptSession(sessionId, reason);
   }
 
   private requireGoal(sessionId: string, goalId: string): SessionGoal {

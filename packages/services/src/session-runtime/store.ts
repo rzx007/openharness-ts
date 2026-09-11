@@ -3205,6 +3205,24 @@ export class SessionStore {
     return this.getGoalRequest(requestId)!;
   }
 
+  recordGoalAssessment(input: { goalId: string; revision: number; runId: string; assessment: Record<string, unknown> }): void {
+    this.database.prepare(`
+      INSERT INTO session_goal_assessment (id, goal_id, revision, run_id, assessment_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(goal_id, revision, run_id) DO UPDATE SET assessment_json = excluded.assessment_json
+    `).run(randomUUID(), input.goalId, input.revision, input.runId, JSON.stringify(input.assessment), now());
+  }
+
+  recordGoalContinuation(input: { goalId: string; revision: number; previousRunId: string }): boolean {
+    const timestamp = now();
+    const result = this.database.prepare(`
+      INSERT OR IGNORE INTO session_goal_continuation
+        (id, goal_id, revision, previous_run_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'pending', ?, ?)
+    `).run(randomUUID(), input.goalId, input.revision, input.previousRunId, timestamp, timestamp);
+    return result.changes === 1;
+  }
+
   getGoal(id: string): SessionGoal | undefined {
     const row = this.database.prepare(`SELECT * FROM session_goal WHERE id = ?`).get(id);
     return row ? sessionGoalFromRow(row as Record<string, unknown>) : undefined;

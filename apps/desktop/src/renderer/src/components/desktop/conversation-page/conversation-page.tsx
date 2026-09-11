@@ -78,6 +78,7 @@ function ConversationPane({
   const [goalBusy, setGoalBusy] = useState(false)
   const ordinaryDraftBeforeGoal = useRef<ComposerDocument | null>(null)
   const goalRequestId = useRef<string | null>(null)
+  const startingGoalSession = useRef(false)
   const navigate = useNavigate()
   const activeSessionId = useDesktopSessionStore((state) => state.activeSessionId)
   const sessionView = useDesktopSessionStore((state) => state.sessionView)
@@ -170,7 +171,11 @@ function ConversationPane({
         const requestId = goalRequestId.current ?? globalThis.crypto.randomUUID()
         goalRequestId.current = requestId
         const saved = !activeSessionId
-          ? await startGoal(content, requestId, { document: draft, attachments })
+          ? await (async () => {
+              startingGoalSession.current = true
+              try { return await startGoal(content, requestId, { document: draft, attachments }) }
+              finally { startingGoalSession.current = false }
+            })()
           : goal && goal.status !== "completed" && goal.status !== "cancelled"
           ? await window.desktop.sessions.updateGoal({ sessionId: activeSessionId, goalId: goal.id, requestId, expectedRevision: goal.revision, objective: content, items: draft.items, attachments: attachments.flatMap((attachment) => attachment.assetId ? [{ assetId: attachment.assetId, intent: "auto" as const, displayName: attachment.displayName }] : []) })
           : await window.desktop.sessions.createGoal({ sessionId: activeSessionId, requestId, objective: content, items: draft.items, attachments: attachments.flatMap((attachment) => attachment.assetId ? [{ assetId: attachment.assetId, intent: "auto" as const, displayName: attachment.displayName }] : []) })
@@ -196,7 +201,8 @@ function ConversationPane({
   }
 
   useEffect(() => {
-    setGoalMode(false)
+    if (startingGoalSession.current) startingGoalSession.current = false
+    else setGoalMode(false)
     if (!activeSessionId) {
       setGoal(null)
       return

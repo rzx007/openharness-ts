@@ -18,7 +18,7 @@ export function GoalBanner({ goal, busy, onAction }: { goal: SessionGoal; busy: 
       <span className="shrink-0 font-medium">{labels[goal.status]}</span>
       <span className="min-w-0 flex-1 truncate text-muted-foreground">{goal.objective}</span>
       {goal.status === "active" ? <Button type="button" variant="ghost" size="icon-xs" disabled={busy} aria-label="暂停目标" onClick={() => onAction("pause")}><Pause /></Button> : null}
-      {goal.status === "paused" || goal.status === "blocked" ? <Button type="button" variant="ghost" size="icon-xs" disabled={busy} aria-label="继续目标" onClick={() => onAction("resume")}><Play /></Button> : null}
+      {goal.status === "paused" ? <Button type="button" variant="ghost" size="icon-xs" disabled={busy} aria-label="继续目标" onClick={() => onAction("resume")}><Play /></Button> : null}
       {goal.status !== "completed" && goal.status !== "cancelled" ? <Button type="button" variant="ghost" size="icon-xs" disabled={busy} aria-label="取消目标" onClick={() => onAction("cancel")}><Trash2 /></Button> : null}
     </div>
   )
