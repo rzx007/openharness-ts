@@ -60,6 +60,7 @@ describe("PendingPromptQueue", () => {
     expect(html).toContain("new request")
     expect(html).toContain("发送失败")
     expect(html).toContain("网络连接已断开")
+    expect(html).toContain('aria-label="关闭发送错误"')
   })
 
   it("does not treat the first pending run as queued before it starts running", () => {

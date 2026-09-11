@@ -39,6 +39,14 @@ export function createPromptActions(context: PromptActionsContext): PromptAction
   const { get, set } = context
 
   return {
+    dismissPromptSubmission(inputId) {
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+      replaceRuntime(sessionId, (runtime) => removeOperation({
+        ...runtime,
+        pendingPromptSubmissions: removePendingPromptSubmission(runtime.pendingPromptSubmissions, inputId),
+      }, inputId))
+    },
     async sendMessage(content, options) {
       const document = options?.document ?? composerDocument([{ type: "text", text: content }])
       const items = document.items

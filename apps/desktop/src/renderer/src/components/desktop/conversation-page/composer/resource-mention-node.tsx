@@ -1,4 +1,5 @@
 import { DecoratorNode, type NodeKey, type SerializedLexicalNode } from "lexical"
+import { MessageSquare } from "lucide-react"
 import type { SessionUserInputItem } from "@shared/session-types"
 
 type Mention = Extract<SessionUserInputItem, { type: "mention" | "context" }>
@@ -23,7 +24,9 @@ export class ResourceMentionNode extends DecoratorNode<React.JSX.Element> {
     return { type: "resource-mention", version: 1, item: { ...this.__item } }
   }
   createDOM(): HTMLElement {
-    return document.createElement("span")
+    const element = document.createElement("span")
+    element.className = "inline-flex align-baseline"
+    return element
   }
   updateDOM(): false {
     return false
@@ -35,9 +38,17 @@ export class ResourceMentionNode extends DecoratorNode<React.JSX.Element> {
     return true
   }
   decorate(): React.JSX.Element {
+    if (this.__item.type === "context") {
+      return (
+        <span className="inline-flex items-center gap-1 align-baseline font-medium !text-primary select-none">
+          <MessageSquare className="size-3.5 shrink-0" />
+          <span>{this.__item.displayName}</span>
+        </span>
+      )
+    }
     return (
-      <span className="font-medium text-primary">
-        {this.__item.type === "context" ? this.__item.displayName : this.__item.displayName ?? this.__item.name}
+      <span className="inline-flex items-center align-baseline font-medium text-primary">
+        {this.__item.displayName ?? this.__item.name}
       </span>
     )
   }

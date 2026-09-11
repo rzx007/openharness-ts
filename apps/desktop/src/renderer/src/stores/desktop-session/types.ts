@@ -149,6 +149,7 @@ export interface SessionActions {
 }
 
 export interface PromptActions {
+  dismissPromptSubmission: (inputId: string) => void
   sendMessage: (content: string, options?: SubmitPromptOptions) => Promise<void>
   editLatestMessage: (
     sourceMessageId: string,

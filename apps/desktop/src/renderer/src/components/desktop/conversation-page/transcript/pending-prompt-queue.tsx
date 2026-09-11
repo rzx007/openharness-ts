@@ -33,12 +33,14 @@ export function PendingPromptQueue({
   localSubmissions = [],
   onPromote,
   onCancel,
+  onDismissLocal = () => {},
 }: {
   prompts: PendingPrompt[]
   activeRunId?: string
   localSubmissions?: LocalPendingSubmission[]
   onPromote: (inputId: string, queuedRunId: string) => void
   onCancel: (inputId: string, queuedRunId: string) => void
+  onDismissLocal?: (inputId: string) => void
 }): React.JSX.Element | null {
   const authorityInputIds = new Set(prompts.map(({ input }) => input.id))
   const visibleLocalSubmissions = localSubmissions.filter(
@@ -94,6 +96,18 @@ export function PendingPromptQueue({
                   ? "等待处理"
                   : "发送失败"}
             </span>
+            {visibleLocalSubmission.phase === "failed" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="关闭发送错误"
+                title="关闭"
+                onClick={() => onDismissLocal(visibleLocalSubmission.id)}
+              >
+                <Trash2 />
+              </Button>
+            ) : null}
           </ItemActions>
         </Item>
       ))}

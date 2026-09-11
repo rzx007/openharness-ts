@@ -94,6 +94,7 @@ function ConversationPane({
   const daemonStatus = useDesktopSessionStore((state) => state.daemonStatus)
   const startSession = useDesktopSessionStore((state) => state.startSession)
   const sendMessage = useDesktopSessionStore((state) => state.sendMessage)
+  const dismissPromptSubmission = useDesktopSessionStore((state) => state.dismissPromptSubmission)
   const editLatestMessage = useDesktopSessionStore((state) => state.editLatestMessage)
   const promoteQueuedPrompt = useDesktopSessionStore((state) => state.promoteQueuedPrompt)
   const cancelQueuedPrompt = useDesktopSessionStore((state) => state.cancelQueuedPrompt)
@@ -494,6 +495,7 @@ function ConversationPane({
                   if (activeRun) void promoteQueuedPrompt(inputId, queuedRunId, activeRun.id)
                 }}
                 onCancel={(inputId, queuedRunId) => void cancelQueuedPrompt(inputId, queuedRunId)}
+                onDismissLocal={dismissPromptSubmission}
               />
               <Composer
                 id="message-composer"
