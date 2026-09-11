@@ -8,6 +8,7 @@ const packageJson = JSON.parse(await readFile(join(desktopRoot, "package.json"),
 const builder = await readFile(join(desktopRoot, "electron-builder.yml"), "utf8")
 const viteConfig = await readFile(join(desktopRoot, "electron.vite.config.ts"), "utf8")
 const verifyArtifact = process.argv.includes("--artifact")
+const verifyBuild = process.argv.includes("--build")
 
 const failures = []
 
@@ -47,6 +48,14 @@ if (builder.includes("example.com")) {
 }
 if (!viteConfig.includes('"electron-updater"') || !viteConfig.includes('"electron-log"')) {
   failures.push("electron.vite.config.ts must keep electron-updater and electron-log external")
+}
+
+if (verifyBuild) {
+  try {
+    await access(join(desktopRoot, "out", "main", "host-entry.mjs"))
+  } catch {
+    failures.push("Desktop main build is missing host-entry.mjs")
+  }
 }
 
 if (verifyArtifact) await verifyUpdateArtifacts(failures)

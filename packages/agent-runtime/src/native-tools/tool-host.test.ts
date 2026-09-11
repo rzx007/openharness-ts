@@ -5,6 +5,7 @@ import type { IToolRegistry, ToolDefinition } from "@openharness/core";
 import { loadNativePlugin, validateNativePlugin } from "@openharness/plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateNativePluginTools } from "./activate.js";
+import { buildNativeToolHostEnvironment } from "./tool-host.js";
 
 const roots: string[] = [];
 
@@ -44,6 +45,18 @@ async function loadPlugin(root: string) {
 }
 
 describe("NativeToolHost", () => {
+  it("runs forked tool hosts in Node mode when the parent runtime is Electron", () => {
+    expect(buildNativeToolHostEnvironment({ PATH: "D:/bin" }, "39.2.6")).toEqual({
+      PATH: "D:/bin",
+      OPENHARNESS_NATIVE_TOOL_HOST: "1",
+      ELECTRON_RUN_AS_NODE: "1",
+    });
+    expect(buildNativeToolHostEnvironment({ PATH: "D:/bin" })).toEqual({
+      PATH: "D:/bin",
+      OPENHARNESS_NATIVE_TOOL_HOST: "1",
+    });
+  });
+
   it("provides the documented registration and invocation contexts inside the child", async () => {
     const plugin = await loadPlugin(writePlugin(`
       export function registerTools(registration) {

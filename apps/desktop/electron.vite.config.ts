@@ -17,6 +17,10 @@ function copySessionMigrations(): Plugin {
         resolve(outputDirectory, "migrations"),
         { recursive: true }
       )
+      cpSync(
+        resolve("../../packages/agent-runtime/src/native-tools/host-entry.mjs"),
+        resolve(outputDirectory, "host-entry.mjs")
+      )
     },
   }
 }

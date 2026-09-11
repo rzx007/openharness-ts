@@ -67,7 +67,7 @@ export class NativeToolHost {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       serialization: "advanced",
       // Do not leak daemon API keys or other ambient secrets into third-party code.
-      env: { ...inheritedEnv, OPENHARNESS_NATIVE_TOOL_HOST: "1" },
+      env: buildNativeToolHostEnvironment(inheritedEnv, process.versions.electron),
     });
     this.child = child;
     child.on("message", (message) => this.handleMessage(message));
@@ -287,6 +287,17 @@ export class NativeToolHost {
       }
     }
   }
+}
+
+export function buildNativeToolHostEnvironment(
+  inheritedEnv: NodeJS.ProcessEnv,
+  electronVersion?: string,
+): NodeJS.ProcessEnv {
+  return {
+    ...inheritedEnv,
+    OPENHARNESS_NATIVE_TOOL_HOST: "1",
+    ...(electronVersion ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
 }
 
 function truncateChars(value: string, maxChars: number): string {
