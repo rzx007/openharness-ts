@@ -165,6 +165,9 @@ importers:
       '@openharness/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts
+      '@openharness/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
       '@openharness/server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -253,9 +256,6 @@ importers:
       '@openharness/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@openharness/sandbox':
-        specifier: workspace:*
-        version: link:../../packages/sandbox
       '@openharness/server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -951,12 +951,12 @@ importers:
       '@openharness/output-styles':
         specifier: workspace:*
         version: link:../output-styles
-      '@openharness/plugin-sources':
-        specifier: workspace:*
-        version: link:../plugin-sources
       '@openharness/personalization':
         specifier: workspace:*
         version: link:../personalization
+      '@openharness/plugin-sources':
+        specifier: workspace:*
+        version: link:../plugin-sources
       '@openharness/plugins':
         specifier: workspace:*
         version: link:../plugins
