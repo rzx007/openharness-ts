@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@renderer/components/ui
 import { cn } from "@renderer/lib/utils"
 import type { DesktopAttachmentDraft } from "@shared/attachment-types"
 import type { DesktopContextUsageSnapshot } from "@shared/context-usage-types"
-import type { DesktopModel, DesktopPermissionMode } from "@shared/session-types"
+import type { DesktopModel, DesktopPermissionMode, DesktopSessionRecord } from "@shared/session-types"
 import type { ComposerDocument } from "@renderer/stores/desktop-session/composer-document"
 import { ComposerAttachments } from "./composer-attachments"
 import { readComposerDrop } from "./composer-file-input"
@@ -31,6 +31,8 @@ export function Composer({
   permissionMode,
   skills = [],
   commands = [],
+  conversations = [],
+  activeSessionId = null,
   className,
   textareaClassName,
   rows = 2,
@@ -64,6 +66,8 @@ export function Composer({
   permissionMode: DesktopPermissionMode
   skills?: readonly ComposerSkill[]
   commands?: readonly ComposerPickerItem[]
+  conversations?: readonly DesktopSessionRecord[]
+  activeSessionId?: string | null
   className?: string
   textareaClassName?: string
   rows?: number
@@ -87,10 +91,38 @@ export function Composer({
   onRemoveAttachment?: (draftId: string) => void
 }): React.JSX.Element {
   const [activePicker, setActivePicker] = useState<"model" | "permission" | null>(null)
+  const [contextPickerRequest, setContextPickerRequest] = useState(0)
   const permissionLabel = resolvePermissionModeLabel(permissionMode)
   const closePicker = (): void => setActivePicker(null)
   const allowSubmit = canSubmit ?? draft.items.length > 0
-  const attachDisabled = !attachmentInteractionEnabled || attachmentReadOnly
+  const attachDisabled = attachmentReadOnly
+  const contextItems: ComposerPickerItem[] = [
+    {
+      id: "context:files",
+      kind: "context",
+      label: "文件和文件夹",
+      description: "添加本地文件或文件夹",
+      context: { kind: "files" },
+    },
+    {
+      id: "context:plan",
+      kind: "context",
+      label: "计划模式",
+      description: "切换为只读分析模式",
+      context: { kind: "plan" },
+    },
+    ...conversations
+      .filter((session) => session.id !== activeSessionId && session.status !== "archived")
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .map((session): ComposerPickerItem => ({
+        id: `context:conversation:${session.id}`,
+        kind: "context",
+        label: session.title.trim() || "未命名对话",
+        description: "引用历史对话",
+        sourceLabel: "对话",
+        context: { kind: "conversation", sessionId: session.id, displayName: session.title.trim() || "未命名对话" },
+      })),
+  ]
 
   const submit = (): void => {
     if (sending || !allowSubmit) return
@@ -143,7 +175,12 @@ export function Composer({
         onSubmit={submit}
         onCommand={onCommand}
         onPasteFiles={attachmentInteractionEnabled ? onPasteFiles : undefined}
-        onPickFiles={attachmentInteractionEnabled ? onPickFiles : undefined}
+        contextItems={contextItems}
+        contextPickerRequest={contextPickerRequest}
+        onContextAction={(item) => {
+          if (item.context?.kind === "files") onPickFiles?.()
+          if (item.context?.kind === "plan") onSelectPermissionMode("plan")
+        }}
       />
       <div className="flex h-12 min-w-0 items-center gap-1 px-3 pb-2">
         <Button
@@ -151,10 +188,10 @@ export function Composer({
           variant="outline"
           size="icon"
           className="rounded-full"
-          aria-label="添加附件"
-          title="添加附件"
+          aria-label="添加上下文"
+          title="添加上下文"
           disabled={attachDisabled}
-          onClick={() => onPickFiles?.()}
+          onClick={() => setContextPickerRequest((value) => value + 1)}
         >
           <IconPlus className="size-5" />
         </Button>

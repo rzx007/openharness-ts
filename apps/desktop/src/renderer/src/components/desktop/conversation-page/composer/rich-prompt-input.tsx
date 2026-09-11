@@ -225,6 +225,11 @@ function readStructuredClipboard(raw: string, skills: readonly ComposerSkill[]):
         items.push({ type: "text", text: item.text })
         continue
       }
+      if (item?.type === "context") {
+        if (item.kind !== "conversation" || typeof item.id !== "string" || typeof item.displayName !== "string") return null
+        items.push({ type: "context", kind: "conversation", id: item.id, displayName: item.displayName })
+        continue
+      }
       if ((item?.type !== "skill" && item?.type !== "mention") ||
         typeof item.name !== "string" || typeof item.path !== "string" ||
         (item.displayName !== undefined && typeof item.displayName !== "string")) return null
@@ -294,19 +299,27 @@ function ComposerClipboardPlugin({
 function ComposerPickerPlugin({
   skills,
   commands,
+  contextItems,
+  contextPickerRequest,
+  onContextAction,
   onCommand,
   onCommandError,
-  onPickFiles,
 }: {
   skills: readonly ComposerSkill[]
   commands: readonly ComposerPickerItem[]
+  contextItems: readonly ComposerPickerItem[]
+  contextPickerRequest: number
+  onContextAction?: (item: ComposerPickerItem) => void
   onCommand: (command: ComposerPickerCommand) => Promise<void>
   onCommandError: (message: string | null) => void
-  onPickFiles?: () => void
 }): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
+  const [manualContextOpen, setManualContextOpen] = useState(false)
+  useEffect(() => {
+    if (contextPickerRequest > 0) setManualContextOpen(true)
+  }, [contextPickerRequest])
   useEffect(
     () =>
       editor.registerUpdateListener(({ editorState }) => {
@@ -319,10 +332,11 @@ function ComposerPickerPlugin({
   useEffect(() => {
     setTrigger(editor.getEditorState().read(triggerFromEditorState))
   }, [editor])
-  const visible =
+  const visible = manualContextOpen || (
     trigger &&
     dismissed !== `${trigger.from}:${trigger.to}:${trigger.query}` &&
     (trigger.sigil === "@" || trigger.sigil === "$" || trigger.mode === "inline" || trigger.mode === "leading")
+  )
   if (!visible) return null
   const skillItems: ComposerPickerItem[] = skills.map((skill) => ({
     id: `skill:${skill.path}`,
@@ -332,25 +346,39 @@ function ComposerPickerPlugin({
     sourceLabel: skill.sourceLabel,
     skill,
   }))
-  const contextItem: ComposerPickerItem = { id: "context:files", kind: "command", label: "文件和文件夹", description: "添加文件或文件夹" }
-  const items = trigger.sigil === "@" ? [contextItem] : pickerItems({
-    trigger,
+  const contextMode = manualContextOpen || trigger?.sigil === "@"
+  const items = contextMode ? contextItems : pickerItems({
+    trigger: trigger!,
     commands: editor.getEditorState().read(() => canExecuteComposerCommand(trigger)) ? commands : [],
     skills: skillItems,
   })
   return (
     <ComposerPicker
       items={items}
-      query=""
-      onDismiss={() => setDismissed(`${trigger.from}:${trigger.to}:${trigger.query}`)}
+      label={contextMode ? "添加上下文" : "命令和技能"}
+      query={contextMode ? trigger?.query ?? "" : ""}
+      onDismiss={() => {
+        setManualContextOpen(false)
+        if (trigger) setDismissed(`${trigger.from}:${trigger.to}:${trigger.query}`)
+      }}
       onSelect={(item) => {
         if (item.skill) {
           insertSkillMention(editor, trigger, item.skill)
           return
         }
-        if (trigger.sigil === "@") {
-          removeComposerTrigger(editor, trigger)
-          onPickFiles?.()
+        if (contextMode && item.context) {
+          setManualContextOpen(false)
+          if (item.context.kind === "conversation") {
+            insertContextMention(
+              editor,
+              item.context.sessionId,
+              item.context.displayName,
+              trigger?.sigil === "@" ? trigger : undefined,
+            )
+          } else {
+            if (trigger?.sigil === "@") removeComposerTrigger(editor, trigger)
+            onContextAction?.(item)
+          }
           return
         }
         if (item.command) {
@@ -360,6 +388,39 @@ function ComposerPickerPlugin({
       }}
     />
   )
+}
+
+function insertContextMention(
+  editor: LexicalEditor,
+  id: string,
+  displayName: string,
+  trigger?: ComposerTrigger,
+): void {
+  editor.update(() => {
+    const selection = $getSelection()
+    if (!$isRangeSelection(selection)) return
+    const mention = new ResourceMentionNode({ type: "context", kind: "conversation", id, displayName })
+    if (!trigger) {
+      selection.insertNodes([mention, $createTextNode(" ")])
+      return
+    }
+    const leaf = textLeaves().find(
+      (item) => $isTextNode(item.node) && item.from <= trigger.from && item.to >= trigger.to
+    )
+    if (!leaf || !$isTextNode(leaf.node)) return
+    const start = trigger.from - leaf.from
+    const end = trigger.to - leaf.from
+    const fragments = leaf.node.splitText(start, end)
+    const selectedIndex = start === 0 ? 0 : 1
+    const selected = fragments[selectedIndex]
+    const after = fragments[selectedIndex + 1]
+    if (!selected) return
+    selected.replace(mention)
+    const spacer = after?.getTextContent().startsWith(" ") ? null : $createTextNode(" ")
+    if (spacer) mention.insertAfter(spacer)
+    const caretNode = spacer ?? after
+    if (caretNode && $isTextNode(caretNode)) caretNode.select(1, 1)
+  }, { discrete: true })
 }
 
 function removeComposerTrigger(editor: LexicalEditor, trigger: ComposerTrigger): void {
@@ -535,7 +596,9 @@ export function RichPromptInput({
   onSubmit,
   onCommand = async () => undefined,
   onPasteFiles,
-  onPickFiles,
+  contextItems = [],
+  contextPickerRequest = 0,
+  onContextAction,
 }: {
   id: string
   value: ComposerDocument
@@ -549,7 +612,9 @@ export function RichPromptInput({
   onSubmit: () => void
   onCommand?: (command: ComposerPickerCommand) => Promise<void>
   onPasteFiles?: (files: readonly File[]) => void
-  onPickFiles?: () => void
+  contextItems?: readonly ComposerPickerItem[]
+  contextPickerRequest?: number
+  onContextAction?: (item: ComposerPickerItem) => void
 }): React.JSX.Element {
   const [isComposing, setIsComposing] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -610,9 +675,11 @@ export function RichPromptInput({
         <ComposerPickerPlugin
           skills={skills}
           commands={commands}
+          contextItems={contextItems}
+          contextPickerRequest={contextPickerRequest}
+          onContextAction={onContextAction}
           onCommand={onCommand}
           onCommandError={setCommandError}
-          onPickFiles={onPickFiles}
         />
         {!isComposing && !disabled ? <SubmitKeyPlugin onSubmit={onSubmit} /> : null}
         {commandError ? (

@@ -1,4 +1,4 @@
-import { Box, Command } from "lucide-react"
+import { Box, Command, MessageSquare, Paperclip, ListChecks } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@renderer/components/ui/button"
@@ -34,12 +34,16 @@ export interface ComposerPickerCommand {
 
 export interface ComposerPickerItem {
   id: string
-  kind: "skill" | "command"
+  kind: "skill" | "command" | "context"
   label: string
   description: string
   sourceLabel?: string
   skill?: ComposerPickerSkill
   command?: ComposerPickerCommand
+  context?:
+    | { kind: "files" }
+    | { kind: "plan" }
+    | { kind: "conversation"; sessionId: string; displayName: string }
 }
 
 export function toComposerSkills(
@@ -160,11 +164,13 @@ export function ComposerPicker({
   query,
   onSelect,
   onDismiss,
+  label = "命令和技能",
 }: {
   items: readonly ComposerPickerItem[]
   query: string
   onSelect: (item: ComposerPickerItem) => void
   onDismiss: () => void
+  label?: string
 }): React.JSX.Element | null {
   const options = useMemo(() => filterPickerItems(items, query), [items, query])
   const [highlightedIndex, setHighlightedIndex] = useState(0)
@@ -204,11 +210,11 @@ export function ComposerPicker({
   return (
     <div
       role="listbox"
-      aria-label="命令和技能"
+      aria-label={label}
       className="absolute right-0 bottom-[calc(100%+10px)] left-0 z-40 overflow-hidden rounded-2xl bg-background/95 py-2 shadow-composer ring-1 ring-black/7 backdrop-blur dark:bg-card/95 dark:ring-white/12"
       onWheel={(event) => event.stopPropagation()}
     >
-      <div className="text-ui-caption px-4 pb-1 font-medium text-muted-foreground">命令和技能</div>
+      <div className="text-ui-caption px-4 pb-1 font-medium text-muted-foreground">{label}</div>
       <div className="max-h-72 scroll-py-1 scrollbar-thin overflow-y-auto overscroll-contain px-2 pb-1">
         {options.map((item, index) => (
           <Button
@@ -230,7 +236,13 @@ export function ComposerPicker({
             )}
           >
             <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
-              {item.kind === "command" ? (
+              {item.context?.kind === "files" ? (
+                <Paperclip className="size-3.5" />
+              ) : item.context?.kind === "conversation" ? (
+                <MessageSquare className="size-3.5" />
+              ) : item.context?.kind === "plan" ? (
+                <ListChecks className="size-3.5" />
+              ) : item.kind === "command" ? (
                 <Command className="size-3.5" />
               ) : (
                 <Box className="size-3.5" />

@@ -509,6 +509,8 @@ function ConversationPane({
                 commands={applicationCommands.filter(
                   (item) => item.command?.id !== "compact" || !running
                 )}
+                conversations={sessions}
+                activeSessionId={activeSessionId}
                 canSubmit={canSubmit}
                 contextUsage={contextUsageSnapshot}
                 attachments={attachments}
@@ -533,6 +535,7 @@ function ConversationPane({
                 onSelectPermissionMode={(permissionMode) => {
                   if (activeSessionId)
                     void updateSessionPermissionMode(activeSessionId, permissionMode)
+                  else selectPermissionMode(permissionMode)
                 }}
               />
             </div>
