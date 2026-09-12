@@ -120,13 +120,14 @@ export function createGoalActions({ get, set }: DesktopStoreContext): GoalAction
       updateComposer(scope, { dismissedGoalId: goalId })
     },
     async refreshGoal(sessionId) {
-      if (typeof window.desktop.sessions.getGoal !== "function") return
+      const getGoal = window.desktop?.sessions?.getGoal
+      if (typeof getGoal !== "function") return
       const existing = reads.get(sessionId)
       if (existing) return existing
       const generation = generations.get(sessionId) ?? 0
       const request = (async () => {
         try {
-          const goal = await window.desktop.sessions.getGoal({ sessionId })
+          const goal = await getGoal({ sessionId })
           if ((generations.get(sessionId) ?? 0) === generation) saveGoal(sessionId, goal)
         } catch {
           // Preserve the last known state during reconnect; the next event/read retries.

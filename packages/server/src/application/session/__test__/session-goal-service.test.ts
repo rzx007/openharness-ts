@@ -323,6 +323,36 @@ describe("SessionGoalService durable lifecycle", () => {
     });
   });
 
+  it("blocks only after three consecutive identical blockerKey results", async () => {
+    let turns = 0;
+    const blockers = ["missing-a", "missing-a", "missing-a"];
+    const { service, store, engine } = harness(async (store, runId) => {
+      const blockerKey = blockers[turns++]!;
+      assessment(store, runId, {
+        decision: "blocked",
+        progressAssessment: {
+          kind: "no_progress",
+          summary: `no progress: ${blockerKey}`,
+          blockerKey,
+        },
+        reason: blockerKey,
+      });
+    });
+    const goal = await service.create("s1", {
+      requestId: "blocker-consecutive",
+      objective: "连续同一 blockerKey 阻塞三轮",
+      maxAutoTurns: 5,
+    });
+    await vi.waitFor(() => expect(store.getGoal(goal.id)?.status).toBe("blocked"));
+    await engine.waitForRuns(store.listRuns("s1").map((run) => run.id));
+    expect(store.listRuns("s1")).toHaveLength(3);
+    expect(store.getGoal(goal.id)).toMatchObject({
+      noProgressCount: 3,
+      blockerKey: "missing-a",
+      status: "blocked",
+    });
+  });
+
   it("waits on a verified handle without spending an automatic turn, then resumes once", async () => {
     vi.useFakeTimers();
     try {

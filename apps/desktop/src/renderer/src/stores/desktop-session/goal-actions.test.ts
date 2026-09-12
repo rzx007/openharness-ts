@@ -208,6 +208,12 @@ describe("goal actions", () => {
     expect(useDesktopSessionStore.getState().goalsBySession.s1?.status).toBe("paused")
   })
 
+  it("ignores goal refresh when the desktop bridge is unavailable", async () => {
+    vi.stubGlobal("window", {})
+
+    await expect(useDesktopSessionStore.getState().refreshGoal("s1")).resolves.toBeUndefined()
+  })
+
   it("replays the original action revision after a lost response and newer snapshot", async () => {
     useDesktopSessionStore.setState({ goalsBySession: { s1: goal("s1", { status: "paused" }) } })
     vi.mocked(window.desktop.sessions.goalAction).mockRejectedValueOnce(new Error("lost response"))
