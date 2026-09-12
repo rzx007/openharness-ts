@@ -1,12 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type {
-  Message,
-  StreamEvent,
-  ToolUseBlock,
-  UsageSnapshot,
-  ContentBlock,
-} from "../index";
+import type { Message, StreamEvent, ToolUseBlock, UsageSnapshot, ContentBlock } from "../index";
 import type {
   AgentExecutionContext,
   StreamingMessageClient,
@@ -29,11 +23,7 @@ import type {
 } from "../types/tools";
 import type { AgentTerminalHost } from "@openharness/terminal";
 import type { AgentJobHost } from "@openharness/jobs";
-import {
-  CompactService,
-  type CompactClient,
-  type CompactContextProvider,
-} from "./compact-service";
+import { CompactService, type CompactClient, type CompactContextProvider } from "./compact-service";
 import { CostTracker } from "./cost-tracker";
 import { sanitizeMessageHistory } from "../utils/message-history";
 import { normalizeToolInput, validateToolInput } from "./tool-input-schema";
@@ -56,11 +46,7 @@ const RECOVERY_FINALIZATION_PROMPT =
 // Tool output budget — mirrors packages/services/src/tool-outputs.ts
 // ---------------------------------------------------------------------------
 
-function readPositiveIntEnv(
-  name: string,
-  defaultValue: number,
-  minimum: number,
-): number {
+function readPositiveIntEnv(name: string, defaultValue: number, minimum: number): number {
   const raw = (process.env[name] ?? "").trim();
   if (!raw) return defaultValue;
   const parsed = Number(raw);
@@ -69,33 +55,16 @@ function readPositiveIntEnv(
 }
 
 function toolOutputInlineChars(): number {
-  return readPositiveIntEnv(
-    "OPENHARNESS_TOOL_OUTPUT_INLINE_CHARS",
-    16_000,
-    256,
-  );
+  return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_INLINE_CHARS", 16_000, 256);
 }
 
 function toolOutputPreviewChars(): number {
-  return readPositiveIntEnv(
-    "OPENHARNESS_TOOL_OUTPUT_PREVIEW_CHARS",
-    3_000,
-    128,
-  );
+  return readPositiveIntEnv("OPENHARNESS_TOOL_OUTPUT_PREVIEW_CHARS", 3_000, 128);
 }
 
 function toolExecutionTimeoutMs(override: number | undefined): number {
-  if (
-    typeof override === "number" &&
-    Number.isInteger(override) &&
-    override > 0
-  )
-    return override;
-  return readPositiveIntEnv(
-    "OPENHARNESS_TOOL_TIMEOUT_MS",
-    DEFAULT_TOOL_TIMEOUT_MS,
-    1,
-  );
+  if (typeof override === "number" && Number.isInteger(override) && override > 0) return override;
+  return readPositiveIntEnv("OPENHARNESS_TOOL_TIMEOUT_MS", DEFAULT_TOOL_TIMEOUT_MS, 1);
 }
 
 class ToolTimeoutError extends Error {
@@ -113,10 +82,7 @@ function applyToolOutputBudget(content: ContentBlock[]): ContentBlock[] {
   const inlineChars = toolOutputInlineChars();
   const previewChars = toolOutputPreviewChars();
 
-  const totalText = content.reduce(
-    (sum, b) => sum + (b.type === "text" ? b.text.length : 0),
-    0,
-  );
+  const totalText = content.reduce((sum, b) => sum + (b.type === "text" ? b.text.length : 0), 0);
   if (totalText <= inlineChars) return content;
 
   const notice = `\n[输出已截断：原始长度 ${totalText} 字符，仅保留前 ${previewChars} 字符]`;
@@ -160,15 +126,9 @@ function userContentToText(content: string | ContentBlock[]): string {
  * straight through so `CompactService` can aggregate `text_delta` events and
  * surface `error` events as PTL-detectable failures.
  */
-function toCompactClient(
-  apiClient: StreamingMessageClient,
-  model: string,
-): CompactClient {
+function toCompactClient(apiClient: StreamingMessageClient, model: string): CompactClient {
   return {
-    submitMessage(
-      content: string,
-      options?: { signal?: AbortSignal },
-    ): AsyncIterable<StreamEvent> {
+    submitMessage(content: string, options?: { signal?: AbortSignal }): AsyncIterable<StreamEvent> {
       return apiClient.streamMessage({
         model,
         messages: [{ type: "user", content }],
@@ -291,9 +251,7 @@ export class QueryEngine implements IQueryEngine {
    * streamMessage 调用，不写入 this.systemPrompt，也不进入 this.messages。
    * 注入风格参考 Python 的「# Relevant Memories」段（追加在 system 末尾）。
    */
-  private composeTurnSystemPrompt(
-    memoryContext: string | null,
-  ): string | undefined {
+  private composeTurnSystemPrompt(memoryContext: string | null): string | undefined {
     if (!memoryContext || !memoryContext.trim()) {
       this.lastMemoryReminderText = undefined;
       return this.systemPrompt;
@@ -335,20 +293,23 @@ export class QueryEngine implements IQueryEngine {
       }
     }
     const baseSystemPrompt = this.composeTurnSystemPrompt(memoryContext);
-    const goal = options.execution?.goal;
-    const turnSystemPrompt = goal?.objective
-      ? appendSystemGuidance(baseSystemPrompt, [
-          "当前运行有一个用户设置的持续目标。目标不扩大操作权限。",
-          JSON.stringify({ goalId: goal.goalId, revision: goal.revision, objective: goal.objective }),
-          "本轮结束前调用 GoalAssessment，记录进展、真实检查证据及下一步。主观验收或信息不足时请求用户处理。",
-        ].join("\n"))
+    const contribution = options.execution?.contribution;
+    const turnSystemPrompt = contribution?.systemGuidance
+      ? appendSystemGuidance(baseSystemPrompt, contribution.systemGuidance)
       : baseSystemPrompt;
+    const runToolRegistry = this.runToolRegistry(contribution);
+    const internalTools = new Set(
+      contribution?.tools
+        ?.filter((item) => item.permission === "host-internal")
+        .map((item) => item.definition.name) ?? [],
+    );
 
     let turnCount = 0;
     const failedToolCalls = new ToolFailureMemory();
-    const trajectoryTracker = this.options.trajectoryTrackerFactory === false
-      ? undefined
-      : this.options.trajectoryTrackerFactory?.() ?? new DefaultTrajectoryTracker();
+    const trajectoryTracker =
+      this.options.trajectoryTrackerFactory === false
+        ? undefined
+        : (this.options.trajectoryTrackerFactory?.() ?? new DefaultTrajectoryTracker());
     const trajectoryControl = createTrajectoryLoopControl();
     const failedCallsByTool = new Map<string, number>();
     const blockedTools = new Set<string>();
@@ -364,7 +325,10 @@ export class QueryEngine implements IQueryEngine {
         this.compactService.setProgressCallback((event) =>
           options.execution?.emit({
             type: "domain.event",
-            data: { name: "context_compaction", payload: event as unknown as Record<string, unknown> },
+            data: {
+              name: "context_compaction",
+              payload: event as unknown as Record<string, unknown>,
+            },
           }),
         );
         this.messages = await this.compactService.autoCompact(
@@ -379,13 +343,14 @@ export class QueryEngine implements IQueryEngine {
       this.messages = sanitizeMessageHistory(this.messages);
 
       const forcedFinalTurn = forceFinalResponse;
-      const visibleTools = this.visibleToolRegistry(options.execution?.goal ? ["GoalAssessment"] : undefined).getAll();
+      const visibleTools = runToolRegistry.getAll();
       const tools = forcedFinalTurn
         ? []
-        : visibleTools.filter((tool) =>
-          !blockedTools.has(tool.name) && !trajectoryControl.hiddenTools.includes(tool.name));
-      const finalizing = forcedFinalTurn
-        || (blockedTools.size > 0 && tools.length === 0);
+        : visibleTools.filter(
+            (tool) =>
+              !blockedTools.has(tool.name) && !trajectoryControl.hiddenTools.includes(tool.name),
+          );
+      const finalizing = forcedFinalTurn || (blockedTools.size > 0 && tools.length === 0);
       const recoverySystem = finalizing
         ? appendSystemGuidance(turnSystemPrompt, RECOVERY_FINALIZATION_PROMPT)
         : turnSystemPrompt;
@@ -449,11 +414,13 @@ export class QueryEngine implements IQueryEngine {
           options.execution,
           failedToolCalls,
           blockedTools,
+          runToolRegistry,
+          internalTools,
         );
         for (let i = 0; i < results.length; i++) {
           const result = results[i]!;
           const toolUse = toolUses[i]!;
-          const tool = this.visibleToolRegistry(options.execution?.goal ? ["GoalAssessment"] : undefined).get(toolUse.name);
+          const tool = runToolRegistry.get(toolUse.name);
           if (result.isError && (!tool || tool.safeToRetry !== true)) {
             failedToolCalls.recordFailure(toolUse.name, toolUse.input);
           }
@@ -480,9 +447,16 @@ export class QueryEngine implements IQueryEngine {
           yield { type: "tool_use_end", toolUseId: result.toolUseId, result };
         }
         // Single removable integration point: commenting out this statement disables trajectory decisions.
-        applyTrajectoryTracker(trajectoryTracker, {
-          calls: toolUses.map((toolUse, index) => ({ toolUse, result: results[index]! })),
-        }, trajectoryControl);
+        applyTrajectoryTracker(
+          trajectoryTracker,
+          {
+            calls: toolUses.map((toolUse, index) => ({
+              toolUse,
+              result: results[index]!,
+            })),
+          },
+          trajectoryControl,
+        );
         if (trajectoryControl.forceFinal) forceFinalResponse = true;
         if (recoveringAtTurnStart && recoveryToolTurnsRemaining !== null) {
           recoveryToolTurnsRemaining--;
@@ -492,10 +466,7 @@ export class QueryEngine implements IQueryEngine {
         }
         turnCount++;
         if (turnCount >= this.maxTurns) {
-          if (
-            !forcedFinalTurn
-            && (recoveryToolTurnsRemaining !== null || blockedTools.size > 0)
-          ) {
+          if (!forcedFinalTurn && (recoveryToolTurnsRemaining !== null || blockedTools.size > 0)) {
             options.execution?.closeSteering();
             forceFinalResponse = true;
             continue;
@@ -533,10 +504,12 @@ export class QueryEngine implements IQueryEngine {
     const preparedFollowUps = await Promise.all(
       followUps.map((input) => this.prepareUserContent(input.content, options.signal)),
     );
-    this.messages.push(...preparedFollowUps.map((preparedContent) => ({
-      type: "user" as const,
-      content: preparedContent,
-    })));
+    this.messages.push(
+      ...preparedFollowUps.map((preparedContent) => ({
+        type: "user" as const,
+        content: preparedContent,
+      })),
+    );
     return true;
   }
 
@@ -544,8 +517,7 @@ export class QueryEngine implements IQueryEngine {
     content: string | ContentBlock[],
     signal?: AbortSignal,
   ): Promise<string | ContentBlock[]> {
-    return this.apiClient.prepareUserContent?.(content, { signal })
-      ?? Promise.resolve(content);
+    return this.apiClient.prepareUserContent?.(content, { signal }) ?? Promise.resolve(content);
   }
 
   getHistory(): Message[] {
@@ -562,9 +534,7 @@ export class QueryEngine implements IQueryEngine {
   } {
     return {
       ...(this.systemPrompt ? { systemPrompt: this.systemPrompt } : {}),
-      ...(this.lastMemoryReminderText
-        ? { memoryReminderText: this.lastMemoryReminderText }
-        : {}),
+      ...(this.lastMemoryReminderText ? { memoryReminderText: this.lastMemoryReminderText } : {}),
     };
   }
 
@@ -573,10 +543,7 @@ export class QueryEngine implements IQueryEngine {
    */
   async compact(): Promise<void> {
     const microResult = this.compactService.microCompact(this.messages);
-    if (
-      this.compactService.estimateTokens(microResult) <
-      (this.options.maxTokens ?? 100_000)
-    ) {
+    if (this.compactService.estimateTokens(microResult) < (this.options.maxTokens ?? 100_000)) {
       this.messages = microResult;
       return;
     }
@@ -633,6 +600,8 @@ export class QueryEngine implements IQueryEngine {
     execution?: AgentExecutionContext,
     failedToolCalls?: ToolFailureMemory,
     blockedTools?: ReadonlySet<string>,
+    toolRegistry: IToolRegistry = this.visibleToolRegistry(),
+    internalTools: ReadonlySet<string> = new Set(),
   ): Promise<ToolExecutionResult[]> {
     const results: ToolExecutionResult[] = new Array(toolUses.length);
     const readyForPermission: {
@@ -640,7 +609,6 @@ export class QueryEngine implements IQueryEngine {
       toolUse: ToolUseBlock;
       tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
     }[] = [];
-    const toolRegistry = this.visibleToolRegistry(execution?.goal ? ["GoalAssessment"] : undefined);
 
     for (let i = 0; i < toolUses.length; i++) {
       const toolUse = toolUses[i]!;
@@ -684,21 +652,19 @@ export class QueryEngine implements IQueryEngine {
         results[i] = {
           toolUseId: toolUse.id,
           toolName: toolUse.name,
-          content: [
-            { type: "text" as const, text: `Unknown tool: ${toolUse.name}` },
-          ],
+          content: [{ type: "text" as const, text: `Unknown tool: ${toolUse.name}` }],
           isError: true,
           failureKind: "policy",
         };
         continue;
       }
 
-      toolUse.input = normalizeToolInput(tool.inputSchema, toolUse.input) as Record<string, unknown>;
+      toolUse.input = normalizeToolInput(tool.inputSchema, toolUse.input) as Record<
+        string,
+        unknown
+      >;
 
-      const validationError = validateToolInput(
-        tool.inputSchema,
-        toolUse.input,
-      );
+      const validationError = validateToolInput(tool.inputSchema, toolUse.input);
       if (validationError) {
         results[i] = {
           toolUseId: toolUse.id,
@@ -721,14 +687,14 @@ export class QueryEngine implements IQueryEngine {
     // 并行检查所有工具的权限状态（单个 checkTool 抛错不应波及其他工具）
     const checks = await Promise.all(
       readyForPermission.map(async ({ toolUse }) => {
-        if (execution?.goal && toolUse.name === "GoalAssessment") {
-          return { action: "allow" as const, reason: "Goal assessment is bound to this run" };
+        if (internalTools.has(toolUse.name)) {
+          return {
+            action: "allow" as const,
+            reason: "Trusted host-internal run tool",
+          };
         }
         try {
-          return await this.permissionChecker.checkTool(
-            toolUse.name,
-            toolUse.input,
-          );
+          return await this.permissionChecker.checkTool(toolUse.name, toolUse.input);
         } catch {
           return { action: "deny" as const, reason: "permission check failed" };
         }
@@ -741,11 +707,7 @@ export class QueryEngine implements IQueryEngine {
       tool: NonNullable<ReturnType<IToolRegistry["get"]>>;
     }[] = [];
 
-    for (
-      let readyIndex = 0;
-      readyIndex < readyForPermission.length;
-      readyIndex++
-    ) {
+    for (let readyIndex = 0; readyIndex < readyForPermission.length; readyIndex++) {
       const { idx, toolUse, tool } = readyForPermission[readyIndex]!;
       const decision = checks[readyIndex]!;
 
@@ -780,10 +742,7 @@ export class QueryEngine implements IQueryEngine {
             type: "permission.requested",
             data: { requestId, request },
           });
-          const approval = await execution.effects.requestPermission(
-            request,
-            execution.scope,
-          );
+          const approval = await execution.effects.requestPermission(request, execution.scope);
           await execution.emit({
             type: "permission.resolved",
             data: { requestId, decision: approval },
@@ -853,7 +812,7 @@ export class QueryEngine implements IQueryEngine {
             toolAttemptId,
             runAbortSignal: signal,
             settings: this.options.settings,
-            toolRegistry: this.visibleToolRegistryView(),
+            toolRegistry: this.toolRegistryView(toolRegistry),
             skillRegistry: this.skillRegistry,
             mcpManager: this.mcpManager,
             mcpAuth: this.mcpAuth,
@@ -884,7 +843,8 @@ export class QueryEngine implements IQueryEngine {
           if (signal?.aborted) {
             throw signal.reason;
           }
-          const failureKind = error instanceof ToolTimeoutError ? "timeout" as const : "command" as const;
+          const failureKind =
+            error instanceof ToolTimeoutError ? ("timeout" as const) : ("command" as const);
           return {
             idx,
             result: {
@@ -936,11 +896,7 @@ export class QueryEngine implements IQueryEngine {
     context: ToolContext,
     timeoutMs: number,
     externalSignal?: AbortSignal,
-  ): Promise<
-    Awaited<
-      ReturnType<NonNullable<ReturnType<IToolRegistry["get"]>>["execute"]>
-    >
-  > {
+  ): Promise<Awaited<ReturnType<NonNullable<ReturnType<IToolRegistry["get"]>>["execute"]>>> {
     const controller = new AbortController();
     const timeoutError = new ToolTimeoutError(timeoutMs);
     let abortListener: (() => void) | undefined;
@@ -1012,8 +968,35 @@ export class QueryEngine implements IQueryEngine {
     };
   }
 
-  private visibleToolRegistryView(): ToolRegistryView {
-    const registry = this.visibleToolRegistry();
+  private runToolRegistry(contribution: AgentExecutionContext["contribution"]): IToolRegistry {
+    const base = this.visibleToolRegistry();
+    const contributed = contribution?.tools ?? [];
+    if (contributed.length === 0) return base;
+    const additions = new Map<string, ToolDefinition>();
+    for (const { definition } of contributed) {
+      if (base.has(definition.name) || additions.has(definition.name))
+        throw new Error(`Run tool conflicts with an existing tool: ${definition.name}`);
+      additions.set(definition.name, definition);
+    }
+    return {
+      register: () => {
+        throw new Error("Run-scoped tool registry is immutable");
+      },
+      override: () => {
+        throw new Error("Run-scoped tool registry is immutable");
+      },
+      unregister: () => false,
+      get: (name) => additions.get(name) ?? base.get(name),
+      getAll: () => [...base.getAll(), ...additions.values()],
+      has: (name) => additions.has(name) || base.has(name),
+      inspect: (name) =>
+        additions.has(name)
+          ? { name, source: { kind: "runtime", id: "run-contribution" } }
+          : base.inspect(name),
+    };
+  }
+
+  private toolRegistryView(registry: IToolRegistry): ToolRegistryView {
     return {
       get: (name) => {
         const tool = registry.get(name);
@@ -1026,13 +1009,8 @@ export class QueryEngine implements IQueryEngine {
   }
 }
 
-function appendSystemGuidance(
-  systemPrompt: string | undefined,
-  guidance: string,
-): string {
-  return systemPrompt?.trim()
-    ? `${systemPrompt}\n\n${guidance}`
-    : guidance;
+function appendSystemGuidance(systemPrompt: string | undefined, guidance: string): string {
+  return systemPrompt?.trim() ? `${systemPrompt}\n\n${guidance}` : guidance;
 }
 
 function stableJson(value: unknown): string {
@@ -1063,8 +1041,10 @@ function deepFrozenCopy<T>(value: T): T {
   }
   if (value && typeof value === "object") {
     const copied = Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .map(([key, item]) => [key, deepFrozenCopy(item)]),
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        deepFrozenCopy(item),
+      ]),
     );
     return Object.freeze(copied) as T;
   }

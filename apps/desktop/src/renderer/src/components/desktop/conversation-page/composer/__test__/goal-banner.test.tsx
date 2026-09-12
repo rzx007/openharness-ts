@@ -56,7 +56,7 @@ it("requires an explicit quota increase before resuming an exhausted goal", asyn
   await act(async () => button("继续").click())
   expect(onAction).not.toHaveBeenCalled()
   expect(container.textContent).toContain("测试记录")
-  await act(async () => button("增加额度并继续").click())
+  await act(async () => button("增加次数并继续").click())
   expect(onAction).toHaveBeenCalledWith({ action: "resume", additionalAutoTurns: 20 })
 })
 
@@ -109,4 +109,51 @@ it("offers submit while editing a running goal and disables mode exit during sub
   const busy = document.createElement("div")
   busy.innerHTML = renderToStaticMarkup(createElement(Composer, { ...props, sending: true }))
   expect(busy.querySelector<HTMLButtonElement>('[aria-label="退出目标输入"]')?.disabled).toBe(true)
+})
+
+it("shows requirement status and remaining work in goal details", async () => {
+  await act(async () =>
+    root.render(
+      createElement(GoalBanner, {
+        goal: {
+          ...goal,
+          assessment: {
+            goalId: "g1",
+            revision: 1,
+            runId: "r1",
+            decision: "continue",
+            progress: "完成测试",
+            progressAssessment: { kind: "progress", summary: "测试已通过" },
+            evidence: ["测试记录"],
+            evidenceRefs: [],
+            requirements: [
+              {
+                requirement: "测试通过",
+                source: "目标正文",
+                status: "satisfied",
+                evidenceRefs: [],
+              },
+              {
+                requirement: "补充文档",
+                source: "目标正文",
+                status: "incomplete",
+                evidenceRefs: [],
+              },
+            ],
+            remainingWork: ["补充文档"],
+            nextStep: "补充文档",
+          },
+        } as any,
+        busy: false,
+        stopping: false,
+        onAction: vi.fn(),
+        onEdit: vi.fn(),
+        onDismiss: vi.fn(),
+      })
+    )
+  )
+  await act(async () => button("展开目标详情").click())
+  expect(container.textContent).toContain("测试通过：已满足")
+  expect(container.textContent).toContain("补充文档：未完成")
+  expect(container.textContent).toContain("剩余工作：补充文档")
 })

@@ -7,16 +7,14 @@ describe("DaemonOperationGate", () => {
     const gate = new DaemonOperationGate();
     const shared = gate.enter({ sessionId: "s1", cwd: "/repo" });
 
-    expect(gate.tryEnterBarrier({ kind: "session", sessionId: "s1", cwd: "/repo" }, () => true))
-      .toBeUndefined();
+    expect(gate.tryEnterBarrier({ kind: "session", sessionId: "s1", cwd: "/repo" }, () => true)).toBeUndefined();
     const other = gate.tryEnterBarrier({ kind: "cwd", cwd: "/other" }, () => true)!;
     expect(other).toBeDefined();
     other.release();
     shared.release();
 
     const barrier = gate.tryEnterBarrier({ kind: "cwd", cwd: "/repo" }, () => true)!;
-    expect(() => gate.enter({ sessionId: "s2", cwd: "/repo" }))
-      .toThrow(DaemonOperationUnavailableError);
+    expect(() => gate.enter({ sessionId: "s2", cwd: "/repo" })).toThrow(DaemonOperationUnavailableError);
     expect(() => gate.enter({ sessionId: "s3", cwd: "/other" })).not.toThrow();
     barrier.release();
   });
@@ -25,11 +23,12 @@ describe("DaemonOperationGate", () => {
     const gate = new DaemonOperationGate();
     const lease = gate.enter({ sessionId: "s1", cwd: "/repo" });
     let drained = false;
-    const shutdown = gate.beginShutdown().then(() => { drained = true; });
+    const shutdown = gate.beginShutdown().then(() => {
+      drained = true;
+    });
 
     expect(gate.accepting).toBe(false);
-    expect(() => gate.enter({ sessionId: "s2", cwd: "/repo" }))
-      .toThrowError(/closing/);
+    expect(() => gate.enter({ sessionId: "s2", cwd: "/repo" })).toThrowError(/closing/);
     await Promise.resolve();
     expect(drained).toBe(false);
 
@@ -37,5 +36,26 @@ describe("DaemonOperationGate", () => {
     await shutdown;
     expect(drained).toBe(true);
     gate.markClosed();
+  });
+
+  it("reports which maintenance operation blocks a session and clears it after release", () => {
+    const gate = new DaemonOperationGate();
+    const barrier = gate.tryEnterBarrier({ kind: "session", sessionId: "s1", cwd: "/repo" }, () => true, { operationId: "compact-1", operationName: "压缩上下文", startedAt: 123 })!;
+    try {
+      gate.enter({ sessionId: "s1", cwd: "/repo" });
+      throw new Error("expected maintenance conflict");
+    } catch (error) {
+      expect(error).toMatchObject({
+        reason: "blocked",
+        blocker: {
+          operationId: "compact-1",
+          operationName: "压缩上下文",
+          startedAt: 123,
+        },
+      });
+      expect((error as Error).message).toContain("压缩上下文");
+    }
+    barrier.release();
+    expect(() => gate.enter({ sessionId: "s1", cwd: "/repo" }).release()).not.toThrow();
   });
 });

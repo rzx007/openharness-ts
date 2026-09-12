@@ -29,6 +29,15 @@ export const selectGoalObjective = (document: ComposerDocument): string =>
     .join("")
     .trim()
 
+function goalErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const marker = "Daemon operation is blocked by maintenance:"
+  const index = message.indexOf(marker)
+  if (index < 0) return message
+  const operation = message.slice(index + marker.length).trim()
+  return operation ? `正在${operation}，请稍后重试。` : "系统正在维护，请稍后重试。"
+}
+
 export function createGoalActions({ get, set }: DesktopStoreContext): GoalActions {
   const reads = new Map<string, Promise<void>>()
   const generations = new Map<string, number>()
@@ -141,7 +150,7 @@ export function createGoalActions({ get, set }: DesktopStoreContext): GoalAction
         composer.maxAutoTurns < 1 ||
         composer.maxAutoTurns > 1000
       ) {
-        updateComposer(scope, { error: "自动续跑额度需为 1 到 1000 的整数。" })
+        updateComposer(scope, { error: "自动续跑次数需为 1 到 1000 的整数。" })
         return
       }
       const attachments = attachmentDrafts.flatMap((item) =>
@@ -230,7 +239,7 @@ export function createGoalActions({ get, set }: DesktopStoreContext): GoalAction
         )
           await get().openSession(sessionId)
       } catch (error) {
-        updateComposer(scope, { error: error instanceof Error ? error.message : String(error) })
+        updateComposer(scope, { error: goalErrorMessage(error) })
         if (sessionId) void get().refreshGoal(sessionId)
       } finally {
         updateComposer(scope, { busy: false })
@@ -263,7 +272,7 @@ export function createGoalActions({ get, set }: DesktopStoreContext): GoalAction
         saveGoal(sessionId, saved)
         updateComposer(scope, { request: undefined })
       } catch (error) {
-        updateComposer(scope, { error: error instanceof Error ? error.message : String(error) })
+        updateComposer(scope, { error: goalErrorMessage(error) })
       } finally {
         updateComposer(scope, { busy: false })
         void get().refreshGoal(sessionId)

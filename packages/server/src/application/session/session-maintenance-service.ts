@@ -21,10 +21,7 @@ import type { ContextUsageCache } from "../context-usage-cache.js";
 import type { SessionContextUsageAgent } from "../assemble-session-context-usage.js";
 
 export class SessionMaintenanceError extends ApplicationError {
-  constructor(
-    status: 400 | 404 | 409 | 501,
-    message: string,
-  ) {
+  constructor(status: 400 | 404 | 409 | 501, message: string) {
     super(status, message);
     this.name = "SessionMaintenanceError";
   }
@@ -39,10 +36,7 @@ export interface SessionMaintenanceServiceContext {
   events: Pick<SessionEventPublisher, "checkpoint" | "publishSince">;
   personalizationUpdater?: (messages: SessionMessageLike[]) => number;
   contextUsageCache?: Pick<ContextUsageCache, "invalidate">;
-  refreshContextUsage?: (
-    sessionId: string,
-    agent: SessionContextUsageAgent,
-  ) => Promise<void>;
+  refreshContextUsage?: (sessionId: string, agent: SessionContextUsageAgent) => Promise<void>;
 }
 
 /**
@@ -117,7 +111,12 @@ export class SessionMaintenanceService {
     const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
     this.requireRuntime();
-    const lease = this.acquireSessionBarrier(session.id, session.cwd, "Cannot compact while a run is active");
+    const lease = this.acquireSessionBarrier(
+      session.id,
+      session.cwd,
+      "压缩上下文",
+      "Cannot compact while a run is active",
+    );
     try {
       const agent = await this.context.agentPool.acquireSession(sessionId);
       const before = this.context.events.checkpoint();
@@ -166,11 +165,19 @@ export class SessionMaintenanceService {
       messageId: message.id,
       type: "text",
       status: "completed",
-      text: phase === "started" ? "正在压缩上下文" : phase === "completed" ? "已压缩上下文" : "上下文压缩失败",
+      text:
+        phase === "started"
+          ? "正在压缩上下文"
+          : phase === "completed"
+            ? "已压缩上下文"
+            : "上下文压缩失败",
     });
   }
 
-  async rewind(sessionId: string, count: number): Promise<{
+  async rewind(
+    sessionId: string,
+    count: number,
+  ): Promise<{
     turns: number;
     removed: number;
     messages: ReturnType<SessionStore["replaceTranscript"]>["messages"];
@@ -178,7 +185,12 @@ export class SessionMaintenanceService {
   }> {
     const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
-    const lease = this.acquireSessionBarrier(session.id, session.cwd, "Cannot rewind while a run is active");
+    const lease = this.acquireSessionBarrier(
+      session.id,
+      session.cwd,
+      "回退会话",
+      "Cannot rewind while a run is active",
+    );
     try {
       const rewound = rewindTranscript(
         this.context.store.listMessages(sessionId),
@@ -210,11 +222,18 @@ export class SessionMaintenanceService {
     const session = this.requireSession(sessionId);
     this.rejectLiveChild(sessionId);
     this.requireRuntime();
-    const lease = this.context.operationGate.tryEnterBarrier({ kind: "cwd", cwd: session.cwd }, () =>
-      !this.context.runEngine.hasActiveRunsForCwd(session.cwd) &&
-      !this.context.agentPool.hasActiveWorkForCwd(session.cwd));
+    const lease = this.context.operationGate.tryEnterBarrier(
+      { kind: "cwd", cwd: session.cwd },
+      () =>
+        !this.context.runEngine.hasActiveRunsForCwd(session.cwd) &&
+        !this.context.agentPool.hasActiveWorkForCwd(session.cwd),
+      maintenanceInfo("更新会话记忆"),
+    );
     if (!lease) {
-      throw new SessionMaintenanceError(409, "Cannot remember while session runs are active for this cwd");
+      throw new SessionMaintenanceError(
+        409,
+        "Cannot remember while session runs are active for this cwd",
+      );
     }
     try {
       const agent = await this.context.agentPool.acquireSession(sessionId);
@@ -241,14 +260,26 @@ export class SessionMaintenanceService {
 
   private rejectLiveChild(sessionId: string): void {
     if (this.context.liveChildren.has(sessionId)) {
-      throw new SessionMaintenanceError(409, "Cannot mutate or inspect a child runtime while it is live in its parent agent");
+      throw new SessionMaintenanceError(
+        409,
+        "Cannot mutate or inspect a child runtime while it is live in its parent agent",
+      );
     }
   }
 
-  private acquireSessionBarrier(sessionId: string, cwd: string, message: string): DaemonOperationLease {
-    const lease = this.context.operationGate.tryEnterBarrier({ kind: "session", sessionId, cwd }, () =>
-      !this.context.runEngine.hasWork(sessionId) &&
-      !this.context.agentPool.hasActiveWorkForSession(sessionId));
+  private acquireSessionBarrier(
+    sessionId: string,
+    cwd: string,
+    operationName: string,
+    message: string,
+  ): DaemonOperationLease {
+    const lease = this.context.operationGate.tryEnterBarrier(
+      { kind: "session", sessionId, cwd },
+      () =>
+        !this.context.runEngine.hasWork(sessionId) &&
+        !this.context.agentPool.hasActiveWorkForSession(sessionId),
+      maintenanceInfo(operationName),
+    );
     if (!lease) throw new SessionMaintenanceError(409, message);
     return lease;
   }
@@ -257,7 +288,10 @@ export class SessionMaintenanceService {
     session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
   ): DaemonOperationLease {
     try {
-      return this.context.operationGate.enter({ sessionId: session.id, cwd: session.cwd });
+      return this.context.operationGate.enter({
+        sessionId: session.id,
+        cwd: session.cwd,
+      });
     } catch (error) {
       if (error instanceof DaemonOperationUnavailableError) {
         throw new SessionMaintenanceError(409, error.message);
@@ -278,6 +312,10 @@ export class SessionMaintenanceService {
       // Local personalization is best-effort and must not block the remember flow.
     }
   }
+}
+
+function maintenanceInfo(operationName: string) {
+  return { operationId: randomUUID(), operationName, startedAt: Date.now() };
 }
 
 function transcriptToPersonalizationMessages(
@@ -303,3 +341,4 @@ function transcriptToPersonalizationMessages(
     })
     .filter((message) => message.content.length > 0);
 }
+import { randomUUID } from "node:crypto";

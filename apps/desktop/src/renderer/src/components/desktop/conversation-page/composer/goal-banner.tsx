@@ -128,6 +128,35 @@ export function GoalBanner({
               ))}
             </ul>
           ) : null}
+          {goal.assessment?.requirements?.length ? (
+            <div className="space-y-1 text-xs">
+              <p className="font-medium">完成条件</p>
+              <ul className="space-y-1">
+                {goal.assessment.requirements.map((item, index) => (
+                  <li key={`${item.requirement}-${index}`} className="flex min-w-0 gap-1.5">
+                    <span className="min-w-0 break-words">{item.requirement}</span>
+                    <span className="shrink-0 text-muted-foreground">
+                      ：
+                      {item.status === "satisfied"
+                        ? "已满足"
+                        : item.status === "needs_user"
+                          ? "待验收"
+                          : "未完成"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {goal.assessment?.remainingWork?.length ? (
+            <div className="space-y-1 text-xs text-muted-foreground">
+              {goal.assessment.remainingWork.map((item, index) => (
+                <p key={`${item}-${index}`} className="break-words">
+                  剩余工作：{item}
+                </p>
+              ))}
+            </div>
+          ) : null}
           {!terminal ? (
             <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onEdit}>
               编辑目标
@@ -136,9 +165,9 @@ export function GoalBanner({
           {quotaExhausted && !terminal ? (
             <div className="flex items-center gap-2 text-xs">
               <label>
-                增加额度{" "}
+                增加自动续跑次数{" "}
                 <input
-                  aria-label="增加自动续跑额度"
+                  aria-label="增加自动续跑次数"
                   type="number"
                   min={1}
                   max={1000 - goal.maxAutoTurns}
@@ -157,7 +186,7 @@ export function GoalBanner({
                   disabled={busy || stopping || !validQuota}
                   onClick={resume}
                 >
-                  增加额度并继续
+                  增加次数并继续
                 </Button>
               ) : null}
             </div>
@@ -199,10 +228,10 @@ export function GoalBanner({
             size="sm"
             disabled={busy || !response.trim() || (quotaExhausted && (!expanded || !validQuota))}
           >
-            {quotaExhausted ? "增加额度并答复" : "答复并继续"}
+            {quotaExhausted ? "增加次数并答复" : "答复并继续"}
           </Button>
           {quotaExhausted && !expanded ? (
-            <span className="text-xs">额度已用完，请先展开详情增加额度。</span>
+            <span className="text-xs">自动续跑次数已用完，请先展开详情增加次数。</span>
           ) : null}
           <Button
             type="button"

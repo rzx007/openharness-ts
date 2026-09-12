@@ -36,10 +36,7 @@ import {
   type ApplicationOwnerLease,
 } from "@openharness/services";
 
-import {
-  createDaemonAgentLoader,
-  type CreateDaemonAgent,
-} from "../daemon/daemon-agent.js";
+import { createDaemonAgentLoader, type CreateDaemonAgent } from "../daemon/daemon-agent.js";
 import { ScheduledTaskService } from "../daemon/scheduled-task-service.js";
 import { DaemonJobService } from "../jobs/daemon-job-service.js";
 import type { ObservabilityEvent } from "../shared/observability.js";
@@ -64,6 +61,7 @@ import { DaemonOperationGate } from "./control/daemon-operation-gate.js";
 import { LiveChildAgentDirectory } from "./agent/live-child-agent-directory.js";
 import { SessionApplicationService } from "./session/session-application-service.js";
 import { SessionGoalService } from "./session/session-goal-service.js";
+import { GoalWaitVerifier } from "./session/goal-wait-verifier.js";
 import { SessionEventPublisher } from "./session/session-event-publisher.js";
 import { SessionMaintenanceService } from "./session/session-maintenance-service.js";
 import { SessionQueryService } from "./session/session-query-service.js";
@@ -119,12 +117,8 @@ export interface DaemonApplicationOptions {
   /** Root used for scheduled conversations that intentionally run outside a project. */
   outsideProjectWorkspaceRoot?: string;
   createAgent?: CreateDaemonAgent;
-  createTerminal?(
-    session: SessionRecord,
-  ): ObservableJobProducer<AgentTerminalHost>;
-  createBackgroundShell?(
-    session: SessionRecord,
-  ): ObservableJobProducer<AgentBackgroundShellHost>;
+  createTerminal?(session: SessionRecord): ObservableJobProducer<AgentTerminalHost>;
+  createBackgroundShell?(session: SessionRecord): ObservableJobProducer<AgentBackgroundShellHost>;
   log(event: ObservabilityEvent): void;
   ownerId?: string;
   ownerHeartbeatMs?: number;
@@ -200,8 +194,7 @@ export class DaemonApplication implements DurableAgentApplication {
   private readonly localOcr: LocalOcrService;
   private readonly startupRecovery: Promise<void>;
   private closePromise?: Promise<void>;
-  private readyState: "starting" | "ready" | "failed" | "closing" | "closed" =
-    "starting";
+  private readyState: "starting" | "ready" | "failed" | "closing" | "closed" = "starting";
   private ownerLease: ApplicationOwnerLease;
   private readonly ownerHeartbeat: ReturnType<typeof setInterval>;
 
@@ -213,8 +206,7 @@ export class DaemonApplication implements DurableAgentApplication {
       ownerId: options.ownerId ?? `daemon:${process.pid}:${randomUUID()}`,
       pid: process.pid,
       staleAfterMs: options.ownerStaleAfterMs ?? 30_000,
-      canTakeOver: (current) =>
-        !(options.ownerProcessAlive ?? isProcessAlive)(current.pid),
+      canTakeOver: (current) => !(options.ownerProcessAlive ?? isProcessAlive)(current.pid),
     });
     this.ownerHeartbeat = setInterval(() => {
       try {
@@ -263,9 +255,10 @@ export class DaemonApplication implements DurableAgentApplication {
           findCompleted: (assetId, cacheKey) =>
             store.findCompletedAttachmentRepresentation(assetId, "ocr_text", cacheKey),
           begin: (input) => store.createAttachmentRepresentation(input),
-          complete: (id, output) =>
-            store.completeAttachmentRepresentation(id, output),
-          fail: (id, error) => { store.failAttachmentRepresentation(id, error); },
+          complete: (id, output) => store.completeAttachmentRepresentation(id, output),
+          fail: (id, error) => {
+            store.failAttachmentRepresentation(id, error);
+          },
         },
       });
       // 上次进程可能是被杀掉的：内存里的 Agent/进程都没了，store 里却还挂着 running。
@@ -280,10 +273,8 @@ export class DaemonApplication implements DurableAgentApplication {
       // events：窗口订的 SSE。eventPublisher：各处写完 store 后，把增量广播出去。
       this.events = new ApplicationEventService(store);
       this.eventPublisher = new SessionEventPublisher(store, this.events);
-      this.workflows = new SessionWorkflowRunRepository(
-        store,
-        (previousEventSeq) =>
-          this.eventPublisher.publishSince(previousEventSeq),
+      this.workflows = new SessionWorkflowRunRepository(store, (previousEventSeq) =>
+        this.eventPublisher.publishSince(previousEventSeq),
       );
       this.retention = new ApplicationRetentionService(
         store,
@@ -293,21 +284,21 @@ export class DaemonApplication implements DurableAgentApplication {
           operationGate: this.attachments.operationGate,
         }),
       );
-      const acquireSessionEnvironment = options.executionSurface === "desktop_managed"
-        ? createSessionEnvironmentAcquirer()
-        : undefined;
+      const acquireSessionEnvironment =
+        options.executionSurface === "desktop_managed"
+          ? createSessionEnvironmentAcquirer()
+          : undefined;
       this.terminals = new DaemonTerminalService(store, {
         getSettingsForCwd: async (cwd) =>
           options.getSettingsForCwd
             ? await options.getSettingsForCwd(cwd)
-            : options.getSettings?.() ?? options.settings ?? failMissingSettings(),
+            : (options.getSettings?.() ?? options.settings ?? failMissingSettings()),
         acquireEnvironment: acquireSessionEnvironment,
       });
       this.projects = new ProjectApplicationService(store);
       this.permissions = new StorePermissionBroker({
         store,
-        onChange: (previousEventSeq) =>
-          this.eventPublisher.publishSince(previousEventSeq),
+        onChange: (previousEventSeq) => this.eventPublisher.publishSince(previousEventSeq),
         logger: options.log,
       });
       // transcript：把模型吐出的字/工具块写成消息。
@@ -315,8 +306,7 @@ export class DaemonApplication implements DurableAgentApplication {
       this.transcriptProjection = new SessionTranscriptProjection(store);
       this.executionProjector = new SessionExecutionProjector({
         store,
-        getChildAgentExecutionRegistry: (scope) =>
-          getChildAgentExecutionRegistry(scope),
+        getChildAgentExecutionRegistry: (scope) => getChildAgentExecutionRegistry(scope),
         events: this.eventPublisher,
         traceIdForRun: (runId) => this.traceIdForRun(runId),
         log: options.log,
@@ -324,13 +314,12 @@ export class DaemonApplication implements DurableAgentApplication {
       this.backgroundShells = new BackgroundShellService({
         store,
         executionProjector: this.executionProjector,
-        getDetachedProcessSupervisor: (scope) =>
-          getDetachedProcessSupervisor(scope),
+        getDetachedProcessSupervisor: (scope) => getDetachedProcessSupervisor(scope),
         events: this.eventPublisher,
         getSettingsForCwd: async (cwd) =>
           options.getSettingsForCwd
             ? await options.getSettingsForCwd(cwd)
-            : options.getSettings?.() ?? options.settings ?? failMissingSettings(),
+            : (options.getSettings?.() ?? options.settings ?? failMissingSettings()),
         acquireEnvironment: acquireSessionEnvironment,
       });
       // JobWait / JobList 走这里：终端、后台 shell、子 Agent、workflow 合成一张本会话任务表。
@@ -342,11 +331,10 @@ export class DaemonApplication implements DurableAgentApplication {
         this.workflows,
       );
 
-      const attachmentAuthorizationSessions =
-        createAttachmentAuthorizationSessionResolver({
-          store,
-          liveChildren: this.liveChildren,
-        });
+      const attachmentAuthorizationSessions = createAttachmentAuthorizationSessionResolver({
+        store,
+        liveChildren: this.liveChildren,
+      });
       const attachmentReader = createAttachmentTextReader({
         store,
         attachments: this.attachments,
@@ -383,7 +371,11 @@ export class DaemonApplication implements DurableAgentApplication {
             value: {
               create: async (input) => {
                 const owner = store.getSession(input.sessionId);
-                if (!owner || owner.status === "archived" || !isSessionInTree(store, session.id, owner.id)) {
+                if (
+                  !owner ||
+                  owner.status === "archived" ||
+                  !isSessionInTree(store, session.id, owner.id)
+                ) {
                   throw new Error("Background shell owner session mismatch.");
                 }
                 if (input.cwd !== owner.cwd) throw new Error("Background shell cwd mismatch.");
@@ -424,8 +416,7 @@ export class DaemonApplication implements DurableAgentApplication {
           });
         },
         schedules: {
-          create: async (input) =>
-            this.schedules.createTask({ ...input, createdBy: "agent" }),
+          create: async (input) => this.schedules.createTask({ ...input, createdBy: "agent" }),
           update: async (id, patch) => this.schedules.updateTask(id, patch),
           remove: async (id) => this.schedules.removeTask(id),
           list: async () => this.schedules.listTasks(),
@@ -460,14 +451,11 @@ export class DaemonApplication implements DurableAgentApplication {
           const session = store.getSession(sessionId);
           return session
             ? sessionMemoryToCompactText(
-                getSessionMemoryContent(
-                  getSessionMemoryPath(session.cwd, sessionId),
-                ),
+                getSessionMemoryContent(getSessionMemoryPath(session.cwd, sessionId)),
               )
             : "";
         },
-        isSessionExternallyOwned: (sessionId) =>
-          this.liveChildren.has(sessionId),
+        isSessionExternallyOwned: (sessionId) => this.liveChildren.has(sessionId),
       });
 
       // 一次 prompt 跑完才做：写记忆、个性化、auto-dream。失败的半截对话不写进去。
@@ -489,24 +477,17 @@ export class DaemonApplication implements DurableAgentApplication {
         options.getSettingsForCwd
           ? await options.getSettingsForCwd(cwd)
           : (options.getSettings?.() ?? options.settings);
-      const resolveSessionModelLimits = async (
-        session: SessionRecord,
-        settings: Settings,
-      ) =>
+      const resolveSessionModelLimits = async (session: SessionRecord, settings: Settings) =>
         await resolveSessionModelContextLimits({
           session,
           settings,
-          listProviders: () =>
-            createDefaultModelService({ current: settings }).list(),
+          listProviders: () => createDefaultModelService({ current: settings }).list(),
         });
       const resolveSessionSkillsList = async (cwd: string, settings: Settings) => {
         const { skillRegistry } = await discoverOpenHarnessExtensions(cwd, settings);
         return skillRegistry.modelVisibleList();
       };
-      const refreshContextUsage = async (
-        sessionId: string,
-        agent: SessionContextUsageAgent,
-      ) => {
+      const refreshContextUsage = async (sessionId: string, agent: SessionContextUsageAgent) => {
         const session = store.getSession(sessionId);
         if (!session) return;
         const settings = await resolveSessionSettings(session.cwd);
@@ -564,8 +545,7 @@ export class DaemonApplication implements DurableAgentApplication {
 
       // 车道轮到这条 run 时，真正 submitMessage 的地方。
       const attachmentRouter = new AttachmentCapabilityRouter({
-        resolveReadyContentPath: (assetId) =>
-          this.attachments.resolveReadyContentPath(assetId),
+        resolveReadyContentPath: (assetId) => this.attachments.resolveReadyContentPath(assetId),
         readReadyText: (assetId, readOptions) =>
           this.attachments.readReadyText(assetId, readOptions),
       });
@@ -687,7 +667,16 @@ export class DaemonApplication implements DurableAgentApplication {
           return (await discoverOpenHarnessExtensions(session.cwd, settings)).skillRegistry;
         },
       });
-      this.goals = new SessionGoalService({ store, sessions: this.sessions, runEngine: this.runEngine, events: this.eventPublisher });
+      this.goals = new SessionGoalService({
+        store,
+        sessions: this.sessions,
+        runEngine: this.runEngine,
+        events: this.eventPublisher,
+        waitVerifier: new GoalWaitVerifier({
+          store,
+          liveChildren: this.liveChildren,
+        }),
+      });
       /**
        * 通道服务：
        * 1. 管理会话的通信通道（如 SSE、WebSocket）
@@ -712,22 +701,21 @@ export class DaemonApplication implements DurableAgentApplication {
         // 定时任务不是另一套执行器：到期后也是 admitPrompt，走上面同一条 Agent 车道。
         execute: async (task, scheduledRun) => {
           const projectCwd = task.projectPaths[0];
-          const outsideProject =
-            task.destination === "standalone" && !projectCwd;
+          const outsideProject = task.destination === "standalone" && !projectCwd;
           let executionCwd = outsideProject
             ? await allocateScheduledOutsideProjectWorkspace(
-              options.outsideProjectWorkspaceRoot,
-              scheduledRun.id,
-            )
+                options.outsideProjectWorkspaceRoot,
+                scheduledRun.id,
+              )
             : projectCwd;
           let worktree:
             | {
-              manager: ReturnType<typeof createChildAgentWorktreeManager>;
-              slug: string;
-              path: string;
-              branch: string;
-              created: boolean;
-            }
+                manager: ReturnType<typeof createChildAgentWorktreeManager>;
+                slug: string;
+                path: string;
+                branch: string;
+                created: boolean;
+              }
             | undefined;
           if (task.executionMode === "worktree") {
             if (!projectCwd)
@@ -748,46 +736,31 @@ export class DaemonApplication implements DurableAgentApplication {
               nonce: scheduledRun.id.slice(0, 8),
             });
             const created = await manager.create(slug).catch((error) => {
-              const message =
-                error instanceof Error ? error.message : String(error);
-              throw new Error(
-                `Worktree scheduled execution requires user attention: ${message}`,
-              );
+              const message = error instanceof Error ? error.message : String(error);
+              throw new Error(`Worktree scheduled execution requires user attention: ${message}`);
             });
             worktree = { manager, ...created };
             executionCwd = created.path;
           }
-          let session = task.sessionId
-            ? this.sessions.getSession(task.sessionId)
-            : undefined;
+          let session = task.sessionId ? this.sessions.getSession(task.sessionId) : undefined;
           try {
             if (task.destination === "chat") {
               if (!session)
-                throw new Error(
-                  `Scheduled task chat is unavailable: ${task.sessionId}`,
-                );
+                throw new Error(`Scheduled task chat is unavailable: ${task.sessionId}`);
               if (session.status === "archived") {
-                throw new Error(
-                  "Scheduled task chat is archived and requires user attention",
-                );
+                throw new Error("Scheduled task chat is archived and requires user attention");
               }
             } else {
-              if (!executionCwd)
-                throw new Error("Scheduled task project is unavailable");
+              if (!executionCwd) throw new Error("Scheduled task project is unavailable");
               const settingsCwd = projectCwd ?? executionCwd;
               const settings =
                 (await options.getSettingsForCwd?.(settingsCwd)) ??
                 options.getSettings?.() ??
                 options.settings;
               const model = task.model ?? settings?.model;
-              if (!model)
-                throw new Error("Scheduled task model is unavailable");
-              const permissionMode = scheduledPermissionMode(
-                task.permissionProfile.mode,
-              );
-              const deniedTools = new Set(
-                task.permissionProfile.deniedTools ?? [],
-              );
+              if (!model) throw new Error("Scheduled task model is unavailable");
+              const permissionMode = scheduledPermissionMode(task.permissionProfile.mode);
+              const deniedTools = new Set(task.permissionProfile.deniedTools ?? []);
               if (task.permissionProfile.network === false) {
                 deniedTools.add("WebFetch");
                 deniedTools.add("WebSearch");
@@ -797,21 +770,15 @@ export class DaemonApplication implements DurableAgentApplication {
                 title: `${task.name} · scheduled run`,
                 model,
                 metadata: {
-                  ...(outsideProject
-                    ? { desktop: { workspaceMode: "outside_project" } }
-                    : {}),
+                  ...(outsideProject ? { desktop: { workspaceMode: "outside_project" } } : {}),
                   runtime: {
                     model,
                     permissionMode,
-                    ...(isScheduledEffort(task.effort)
-                      ? { effort: task.effort }
-                      : {}),
+                    ...(isScheduledEffort(task.effort) ? { effort: task.effort } : {}),
                     ...(task.permissionProfile.allowedTools?.length
                       ? { allowedTools: task.permissionProfile.allowedTools }
                       : {}),
-                    ...(deniedTools.size > 0
-                      ? { disallowedTools: [...deniedTools] }
-                      : {}),
+                    ...(deniedTools.size > 0 ? { disallowedTools: [...deniedTools] } : {}),
                   },
                   scheduledTask: {
                     taskId: task.id,
@@ -820,11 +787,11 @@ export class DaemonApplication implements DurableAgentApplication {
                     executionMode: task.executionMode,
                     ...(worktree
                       ? {
-                        worktree: {
-                          path: worktree.path,
-                          branch: worktree.branch,
-                        },
-                      }
+                          worktree: {
+                            path: worktree.path,
+                            branch: worktree.branch,
+                          },
+                        }
                       : {}),
                   },
                 },
@@ -846,16 +813,10 @@ export class DaemonApplication implements DurableAgentApplication {
                 scheduledRunId: scheduledRun.id,
               },
             });
-            if (!admission.run)
-              throw new Error("Scheduled task Agent runtime is unavailable");
-            const result = await this.sessions.awaitRun(
-              session!.id,
-              admission.run.id,
-            );
+            if (!admission.run) throw new Error("Scheduled task Agent runtime is unavailable");
+            const result = await this.sessions.awaitRun(session!.id, admission.run.id);
             if (result.status !== "completed") {
-              throw new Error(
-                result.error ?? `Scheduled Agent run ${result.status}`,
-              );
+              throw new Error(result.error ?? `Scheduled Agent run ${result.status}`);
             }
             return {
               sessionId: session!.id,
@@ -864,14 +825,12 @@ export class DaemonApplication implements DurableAgentApplication {
             };
           } finally {
             if (outsideProject && !session && executionCwd) {
-              await rmdir(executionCwd).catch(() => { });
+              await rmdir(executionCwd).catch(() => {});
             }
             if (worktree?.created) {
-              const hasChanges = await worktree.manager
-                .hasChanges(worktree.slug)
-                .catch(() => true);
+              const hasChanges = await worktree.manager.hasChanges(worktree.slug).catch(() => true);
               if (!hasChanges) {
-                await worktree.manager.remove(worktree.slug).catch(() => { });
+                await worktree.manager.remove(worktree.slug).catch(() => {});
               }
             }
           }
@@ -894,9 +853,9 @@ export class DaemonApplication implements DurableAgentApplication {
        */
       // 构造可以立刻返回；workflow 恢复跑完才算 ready，避免一上来就对半截工作流动手。
       this.startupRecovery = Promise.all([
-          this.attachments.recover(),
-          this.backgroundShells.reconcileActiveTasks(DAEMON_RESTART_TASK_REASON),
-        ])
+        this.attachments.recover(),
+        this.backgroundShells.reconcileActiveTasks(DAEMON_RESTART_TASK_REASON),
+      ])
         .then(() => recoverInterruptedWorkflows({ workflows: this.workflows }))
         .then(
           () => {
@@ -909,7 +868,7 @@ export class DaemonApplication implements DurableAgentApplication {
             throw error;
           },
         );
-      void this.startupRecovery.catch(() => { });
+      void this.startupRecovery.catch(() => {});
     } catch (error) {
       clearInterval(this.ownerHeartbeat);
       store.releaseApplicationOwner(this.ownerLease);
@@ -971,9 +930,7 @@ export class DaemonApplication implements DurableAgentApplication {
       failures.push(error);
     }
     try {
-      const settlementRecovery = recoverProjectionSettlements(
-        this.options.store,
-      );
+      const settlementRecovery = recoverProjectionSettlements(this.options.store);
       if (settlementRecovery.pending > 0) {
         throw new Error(
           `Daemon shutdown left ${settlementRecovery.pending} projection settlement(s) pending`,
@@ -1024,8 +981,7 @@ export class DaemonApplication implements DurableAgentApplication {
     const traceId = normalizeTraceId(run?.metadata.traceId);
     if (traceId) return traceId;
     const generated = randomUUID();
-    if (run)
-      this.options.store.updateRun(runId, { metadata: { traceId: generated } });
+    if (run) this.options.store.updateRun(runId, { metadata: { traceId: generated } });
     return generated;
   }
 }
@@ -1117,9 +1073,7 @@ function scheduledPermissionMode(
   return "default";
 }
 
-function isScheduledEffort(
-  value: string | undefined,
-): value is "low" | "medium" | "high" {
+function isScheduledEffort(value: string | undefined): value is "low" | "medium" | "high" {
   return value === "low" || value === "medium" || value === "high";
 }
 
@@ -1130,16 +1084,10 @@ function scheduledPrompt(task: {
 }): string {
   const context: string[] = [];
   if (task.skillNames.length > 0) {
-    context.push(
-      `Use these task skills when applicable: ${task.skillNames.join(", ")}.`,
-    );
+    context.push(`Use these task skills when applicable: ${task.skillNames.join(", ")}.`);
   }
   if (task.pluginNames.length > 0) {
-    context.push(
-      `Use these connected plugins when applicable: ${task.pluginNames.join(", ")}.`,
-    );
+    context.push(`Use these connected plugins when applicable: ${task.pluginNames.join(", ")}.`);
   }
-  return context.length > 0
-    ? `${task.prompt}\n\n${context.join("\n")}`
-    : task.prompt;
+  return context.length > 0 ? `${task.prompt}\n\n${context.join("\n")}` : task.prompt;
 }

@@ -1,10 +1,4 @@
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const sessions = sqliteTable(
   "session",
@@ -51,9 +45,7 @@ export const projectLocations = sqliteTable(
     boundAt: integer("bound_at").notNull(),
     lastVerifiedAt: integer("last_verified_at"),
   },
-  (table) => [
-    index("project_location_project_idx").on(table.projectId, table.status),
-  ],
+  (table) => [index("project_location_project_idx").on(table.projectId, table.status)],
 );
 
 export const sessionInputs = sqliteTable(
@@ -92,10 +84,7 @@ export const attachmentAssets = sqliteTable(
   },
   (table) => [
     index("attachment_asset_hash_status_idx").on(table.sha256, table.status),
-    index("attachment_asset_status_updated_idx").on(
-      table.status,
-      table.updatedAt,
-    ),
+    index("attachment_asset_status_updated_idx").on(table.status, table.updatedAt),
   ],
 );
 
@@ -103,7 +92,9 @@ export const attachmentRepresentations = sqliteTable(
   "attachment_representation",
   {
     id: text("id").primaryKey(),
-    assetId: text("asset_id").notNull().references(() => attachmentAssets.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => attachmentAssets.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
     status: text("status").notNull(),
     processor: text("processor").notNull(),
@@ -117,7 +108,11 @@ export const attachmentRepresentations = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("attachment_representation_asset_kind_cache_unique").on(table.assetId, table.kind, table.cacheKey),
+    uniqueIndex("attachment_representation_asset_kind_cache_unique").on(
+      table.assetId,
+      table.kind,
+      table.cacheKey,
+    ),
     index("attachment_representation_asset_idx").on(table.assetId, table.createdAt),
   ],
 );
@@ -126,7 +121,9 @@ export const attachmentLeases = sqliteTable(
   "attachment_lease",
   {
     id: text("id").primaryKey(),
-    assetId: text("asset_id").notNull().references(() => attachmentAssets.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => attachmentAssets.id, { onDelete: "cascade" }),
     ownerKind: text("owner_kind").notNull(),
     ownerId: text("owner_id").notNull(),
     createdAt: integer("created_at").notNull(),
@@ -134,7 +131,11 @@ export const attachmentLeases = sqliteTable(
     expiresAt: integer("expires_at").notNull(),
   },
   (table) => [
-    uniqueIndex("attachment_lease_asset_owner_unique").on(table.assetId, table.ownerKind, table.ownerId),
+    uniqueIndex("attachment_lease_asset_owner_unique").on(
+      table.assetId,
+      table.ownerKind,
+      table.ownerId,
+    ),
     index("attachment_lease_expiry_idx").on(table.expiresAt, table.assetId),
   ],
 );
@@ -161,14 +162,8 @@ export const sessionInputAttachments = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
-    uniqueIndex("session_input_attachment_input_seq_unique").on(
-      table.inputId,
-      table.seq,
-    ),
-    uniqueIndex("session_input_attachment_input_asset_unique").on(
-      table.inputId,
-      table.assetId,
-    ),
+    uniqueIndex("session_input_attachment_input_seq_unique").on(table.inputId, table.seq),
+    uniqueIndex("session_input_attachment_input_asset_unique").on(table.inputId, table.assetId),
     index("session_input_attachment_input_seq_idx").on(table.inputId, table.seq),
     index("session_input_attachment_asset_idx").on(table.assetId),
     index("session_input_attachment_session_idx").on(table.sessionId),
@@ -252,13 +247,17 @@ export const sessionGoals = sqliteTable(
   "session_goal",
   {
     id: text("id").primaryKey(),
-    sessionId: text("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
     objective: text("objective").notNull(),
     revision: integer("revision").notNull(),
     status: text("status").notNull(),
     maxAutoTurns: integer("max_auto_turns").notNull(),
     autoTurnsUsed: integer("auto_turns_used").notNull(),
     noProgressCount: integer("no_progress_count").notNull(),
+    blockerKey: text("blocker_key"),
+    lastAssessmentJson: text("last_assessment_json"),
     currentRunId: text("current_run_id"),
     reason: text("reason"),
     waitJson: text("wait_json"),
@@ -273,7 +272,9 @@ export const sessionGoalRequests = sqliteTable(
   "session_goal_request",
   {
     requestId: text("request_id").primaryKey(),
-    sessionId: text("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
     fingerprint: text("fingerprint").notNull(),
     status: text("status").notNull(),
     goalId: text("goal_id"),
@@ -289,20 +290,26 @@ export const sessionGoalAssessments = sqliteTable(
   "session_goal_assessment",
   {
     id: text("id").primaryKey(),
-    goalId: text("goal_id").notNull().references(() => sessionGoals.id, { onDelete: "cascade" }),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => sessionGoals.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull(),
     runId: text("run_id").notNull(),
     assessmentJson: text("assessment_json").notNull(),
     createdAt: integer("created_at").notNull(),
   },
-  (table) => [uniqueIndex("session_goal_assessment_run_unique").on(table.goalId, table.revision, table.runId)],
+  (table) => [
+    uniqueIndex("session_goal_assessment_run_unique").on(table.goalId, table.revision, table.runId),
+  ],
 );
 
 export const sessionGoalContinuations = sqliteTable(
   "session_goal_continuation",
   {
     id: text("id").primaryKey(),
-    goalId: text("goal_id").notNull().references(() => sessionGoals.id, { onDelete: "cascade" }),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => sessionGoals.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull(),
     previousRunId: text("previous_run_id").notNull(),
     inputId: text("input_id"),
@@ -311,7 +318,13 @@ export const sessionGoalContinuations = sqliteTable(
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (table) => [uniqueIndex("session_goal_continuation_previous_unique").on(table.goalId, table.revision, table.previousRunId)],
+  (table) => [
+    uniqueIndex("session_goal_continuation_previous_unique").on(
+      table.goalId,
+      table.revision,
+      table.previousRunId,
+    ),
+  ],
 );
 
 export const sessionRunAttempts = sqliteTable(
@@ -402,43 +415,71 @@ export const channelDeliveries = sqliteTable(
   ],
 );
 
-export const workflowRuns = sqliteTable("workflow_run", {
-  runId: text("run_id").primaryKey(),
-  ownerSessionId: text("owner_session_id").references(() => sessions.id, { onDelete: "set null" }),
-  ownerInputId: text("owner_input_id").references(() => sessionInputs.id, { onDelete: "set null" }),
-  ownerRunId: text("owner_run_id").references(() => sessionRuns.id, { onDelete: "set null" }),
-  status: text("status").notNull(),
-  termination: text("termination"),
-  snapshotJson: text("snapshot_json").notNull(),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-}, (table) => [
-  index("workflow_run_owner_idx").on(table.ownerSessionId, table.updatedAt),
-  index("workflow_run_status_idx").on(table.status, table.updatedAt),
-]);
+export const workflowRuns = sqliteTable(
+  "workflow_run",
+  {
+    runId: text("run_id").primaryKey(),
+    ownerSessionId: text("owner_session_id").references(() => sessions.id, {
+      onDelete: "set null",
+    }),
+    ownerInputId: text("owner_input_id").references(() => sessionInputs.id, {
+      onDelete: "set null",
+    }),
+    ownerRunId: text("owner_run_id").references(() => sessionRuns.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull(),
+    termination: text("termination"),
+    snapshotJson: text("snapshot_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("workflow_run_owner_idx").on(table.ownerSessionId, table.updatedAt),
+    index("workflow_run_status_idx").on(table.status, table.updatedAt),
+  ],
+);
 
-export const workflowTaskAttempts = sqliteTable("workflow_task_attempt", {
-  workflowRunId: text("workflow_run_id").notNull().references(() => workflowRuns.runId, { onDelete: "cascade" }),
-  taskId: text("task_id").notNull(),
-  attempt: integer("attempt").notNull(),
-  status: text("status").notNull(),
-  payloadJson: text("payload_json").notNull(),
-  startedAt: integer("started_at").notNull(),
-  finishedAt: integer("finished_at"),
-}, (table) => [
-  uniqueIndex("workflow_task_attempt_identity").on(table.workflowRunId, table.taskId, table.attempt),
-]);
+export const workflowTaskAttempts = sqliteTable(
+  "workflow_task_attempt",
+  {
+    workflowRunId: text("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.runId, { onDelete: "cascade" }),
+    taskId: text("task_id").notNull(),
+    attempt: integer("attempt").notNull(),
+    status: text("status").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    startedAt: integer("started_at").notNull(),
+    finishedAt: integer("finished_at"),
+  },
+  (table) => [
+    uniqueIndex("workflow_task_attempt_identity").on(
+      table.workflowRunId,
+      table.taskId,
+      table.attempt,
+    ),
+  ],
+);
 
-export const workflowEvents = sqliteTable("workflow_event", {
-  seq: integer("seq").primaryKey({ autoIncrement: true }),
-  workflowRunId: text("workflow_run_id").notNull().references(() => workflowRuns.runId, { onDelete: "cascade" }),
-  type: text("type").notNull(),
-  eventJson: text("event_json").notNull(),
-  createdAt: integer("created_at").notNull(),
-}, (table) => [index("workflow_event_run_seq_idx").on(table.workflowRunId, table.seq)]);
+export const workflowEvents = sqliteTable(
+  "workflow_event",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    workflowRunId: text("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.runId, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    eventJson: text("event_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [index("workflow_event_run_seq_idx").on(table.workflowRunId, table.seq)],
+);
 
 export const workflowExecutionClaims = sqliteTable("workflow_execution_claim", {
-  workflowRunId: text("workflow_run_id").primaryKey().references(() => workflowRuns.runId, { onDelete: "cascade" }),
+  workflowRunId: text("workflow_run_id")
+    .primaryKey()
+    .references(() => workflowRuns.runId, { onDelete: "cascade" }),
   ownerId: text("owner_id").notNull(),
   generation: integer("generation").notNull(),
   claimedAt: integer("claimed_at").notNull(),
@@ -508,9 +549,7 @@ export const permissionRequests = sqliteTable(
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (table) => [
-    index("permission_session_status_idx").on(table.sessionId, table.status),
-  ],
+  (table) => [index("permission_session_status_idx").on(table.sessionId, table.status)],
 );
 
 export const sessionEvents = sqliteTable(
@@ -524,9 +563,7 @@ export const sessionEvents = sqliteTable(
     payloadJson: text("payload_json").notNull(),
     createdAt: integer("created_at").notNull(),
   },
-  (table) => [
-    index("session_event_session_seq_idx").on(table.sessionId, table.seq),
-  ],
+  (table) => [index("session_event_session_seq_idx").on(table.sessionId, table.seq)],
 );
 
 export const sessionEventSequence = sqliteTable("session_event_sequence", {

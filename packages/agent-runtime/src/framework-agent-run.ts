@@ -1,28 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import type {
-  AgentEffects,
-  AgentEventContext,
-  AgentEventInput,
-  AgentExecutionContext,
-  AgentInputReceipt,
-  AgentRunHandle,
-  AgentRunResult,
-  AgentRunScope,
-  AgentSteerInput,
-  ContentBlock,
-  StreamEvent,
-} from "@openharness/core";
-import {
-  AgentRunNotAcceptingInputError,
-  type AgentSession,
-  type RuntimeBundle,
-} from "@openharness/core";
+import type { AgentEffects, AgentEventContext, AgentEventInput, AgentExecutionContext, AgentInputReceipt, AgentRunHandle, AgentRunResult, AgentRunScope, AgentSteerInput, ContentBlock, StreamEvent } from "@openharness/core";
+import { AgentRunNotAcceptingInputError, type AgentSession, type RuntimeBundle } from "@openharness/core";
 
 import type { AgentChildManager } from "./child-agent.js";
 import { abortError, serializeError } from "./agent-errors.js";
 import { AgentEventDeliveryError, type AgentEventBus } from "./event-source.js";
-import { createGoalAssessmentTool } from "./goal-assessment-tool.js";
+import { createGoalRunContribution } from "./goal-extension.js";
 
 interface FrameworkAgentRunOptions {
   goal?: { goalId: string; revision: number; objective?: string };
@@ -43,10 +27,7 @@ interface FrameworkAgentRunOptions {
   externalSignal?: AbortSignal;
   delivery: "queue" | "steer";
   metadata?: Record<string, unknown>;
-  onSettled(
-    result: AgentRunResult | undefined,
-    toolActivity: FrameworkAgentRunToolActivity | undefined,
-  ): void;
+  onSettled(result: AgentRunResult | undefined, toolActivity: FrameworkAgentRunToolActivity | undefined): void;
 }
 
 export interface FrameworkAgentRunToolActivity {
@@ -86,10 +67,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
     this.traceId = options.ids.traceId;
     this.started = this.start.promise;
     if (options.externalSignal) {
-      this.externalAbort = () =>
-        this.controller.abort(
-          options.externalSignal!.reason ?? "Run interrupted",
-        );
+      this.externalAbort = () => this.controller.abort(options.externalSignal!.reason ?? "Run interrupted");
       if (options.externalSignal.aborted) this.externalAbort();
       else
         options.externalSignal.addEventListener("abort", this.externalAbort, {
@@ -107,23 +85,16 @@ export class FrameworkAgentRun implements AgentRunHandle {
         this.active = false;
         this.acceptingInput = false;
         if (this.externalAbort && options.externalSignal) {
-          options.externalSignal.removeEventListener(
-            "abort",
-            this.externalAbort,
-          );
+          options.externalSignal.removeEventListener("abort", this.externalAbort);
         }
-        options.onSettled(
-          completedResult,
-          completedResult ? this.snapshotToolActivity() : undefined,
-        );
+        options.onSettled(completedResult, completedResult ? this.snapshotToolActivity() : undefined);
       });
     void this.started.catch(() => {});
     void this.result.catch(() => {});
   }
 
   async steer(input: AgentSteerInput): Promise<AgentInputReceipt> {
-    if (!this.active || !this.acceptingInput)
-      throw new AgentRunNotAcceptingInputError(this.id);
+    if (!this.active || !this.acceptingInput) throw new AgentRunNotAcceptingInputError(this.id);
     const accepted = {
       ...input,
       id: input.id ?? `input_${randomUUID()}`,
@@ -139,8 +110,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
   }
 
   async interrupt(reason?: string): Promise<void> {
-    if (!this.controller.signal.aborted)
-      this.controller.abort(reason ?? "Run interrupted");
+    if (!this.controller.signal.aborted) this.controller.abort(reason ?? "Run interrupted");
     await this.result.catch(() => {});
   }
 
@@ -158,7 +128,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
     };
     const execution: AgentExecutionContext = {
       scope,
-      ...(this.options.goal ? { goal: Object.freeze({ ...this.options.goal }) } : {}),
+      ...(this.options.goal ? { contribution: createGoalRunContribution(this.options.goal) } : {}),
       effects: this.options.effects,
       children: this.options.children.createController(scope),
       emit: (event) => this.emit(event),
@@ -168,12 +138,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
       },
     };
 
-    let goalToolRegistered = false;
     try {
-      if (execution.goal) {
-        this.options.runtime.toolRegistry.register(createGoalAssessmentTool(), { kind: "runtime", id: "session-goal" });
-        goalToolRegistered = true;
-      }
       await this.emit({
         type: "input.accepted",
         data: {
@@ -189,21 +154,16 @@ export class FrameworkAgentRun implements AgentRunHandle {
         inputId: this.inputId,
         runId: this.id,
       });
-      for await (const event of this.options.session.submitMessage(
-        this.options.content,
-        {
-          signal: this.controller.signal,
-          execution,
-        },
-      )) {
-        if (this.controller.signal.aborted)
-          throw abortError(this.controller.signal);
+      for await (const event of this.options.session.submitMessage(this.options.content, {
+        signal: this.controller.signal,
+        execution,
+      })) {
+        if (this.controller.signal.aborted) throw abortError(this.controller.signal);
         if (event.type === "text_delta") output += event.delta;
         if (event.type === "complete") stopReason = event.stopReason;
         await this.projectStreamEvent(event);
       }
-      if (this.controller.signal.aborted)
-        throw abortError(this.controller.signal);
+      if (this.controller.signal.aborted) throw abortError(this.controller.signal);
       this.acceptingInput = false;
       this.rejectPendingSteers();
       await this.emit({
@@ -228,17 +188,12 @@ export class FrameworkAgentRun implements AgentRunHandle {
         }).catch(() => {});
       }
       throw error;
-    } finally {
-      if (goalToolRegistered) this.options.runtime.toolRegistry.unregister?.("GoalAssessment");
     }
   }
 
-  private async takeSteeredInputs(
-    options: { closeIfEmpty?: boolean } = {},
-  ): Promise<AgentSteerInput[]> {
+  private async takeSteeredInputs(options: { closeIfEmpty?: boolean } = {}): Promise<AgentSteerInput[]> {
     const pending = this.steered.splice(0, 1);
-    if (pending.length === 0 && options.closeIfEmpty)
-      this.acceptingInput = false;
+    if (pending.length === 0 && options.closeIfEmpty) this.acceptingInput = false;
     const inputs: AgentSteerInput[] = [];
     try {
       for (const { input } of pending) {
@@ -284,7 +239,10 @@ export class FrameworkAgentRun implements AgentRunHandle {
     if (event.type === "text_delta") {
       await this.emit({
         type: "output.text.delta",
-        data: { delta: event.delta, ...(event.phase ? { phase: event.phase } : {}) },
+        data: {
+          delta: event.delta,
+          ...(event.phase ? { phase: event.phase } : {}),
+        },
       });
     } else if (event.type === "complete") {
       await this.emit({
@@ -326,10 +284,7 @@ export class FrameworkAgentRun implements AgentRunHandle {
     };
   }
 
-  private async emit(
-    event: AgentEventInput,
-    override: Partial<AgentEventContext> = {},
-  ): Promise<void> {
+  private async emit(event: AgentEventInput, override: Partial<AgentEventContext> = {}): Promise<void> {
     await this.options.eventBus.emit(event, {
       agentId: this.options.agentId,
       sessionId: this.sessionId,

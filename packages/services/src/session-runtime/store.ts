@@ -71,6 +71,7 @@ import type {
   SessionGoal,
   GoalStatus,
   GoalWait,
+  GoalAssessment,
 } from "@openharness/protocol";
 import { AttachmentError } from "../attachment/attachment-errors.js";
 import { formatSessionTitle, isPlaceholderSessionTitle } from "./title.js";
@@ -205,10 +206,12 @@ export interface UpdateSessionGoalStoreInput {
   maxAutoTurns?: number;
   autoTurnsUsed?: number;
   noProgressCount?: number;
+  blockerKey?: string | null;
   currentRunId?: string | null;
   reason?: string | null;
   wait?: GoalWait | null;
   evidence?: string[];
+  assessment?: GoalAssessment | null;
 }
 
 export interface SessionGoalRequestRecord {
@@ -237,8 +240,18 @@ export class ApplicationOwnerConflictError extends Error {
 }
 
 function sessionGoalFromRow(row: Record<string, unknown>): SessionGoal {
-  const wait = typeof row.wait_json === "string" ? JSON.parse(row.wait_json) as GoalWait : undefined;
-  const evidence = typeof row.evidence_json === "string" ? JSON.parse(row.evidence_json) as string[] : [];
+  const wait =
+    typeof row.wait_json === "string"
+      ? (JSON.parse(row.wait_json) as GoalWait)
+      : undefined;
+  const evidence =
+    typeof row.evidence_json === "string"
+      ? (JSON.parse(row.evidence_json) as string[])
+      : [];
+  const assessment =
+    typeof row.last_assessment_json === "string"
+      ? (JSON.parse(row.last_assessment_json) as GoalAssessment)
+      : undefined;
   return {
     id: String(row.id),
     sessionId: String(row.session_id),
@@ -248,10 +261,16 @@ function sessionGoalFromRow(row: Record<string, unknown>): SessionGoal {
     maxAutoTurns: Number(row.max_auto_turns),
     autoTurnsUsed: Number(row.auto_turns_used),
     noProgressCount: Number(row.no_progress_count),
-    ...(typeof row.current_run_id === "string" ? { currentRunId: row.current_run_id } : {}),
+    ...(typeof row.blocker_key === "string"
+      ? { blockerKey: row.blocker_key }
+      : {}),
+    ...(typeof row.current_run_id === "string"
+      ? { currentRunId: row.current_run_id }
+      : {}),
     ...(typeof row.reason === "string" ? { reason: row.reason } : {}),
     ...(wait ? { wait } : {}),
     evidence,
+    ...(assessment ? { assessment } : {}),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -394,13 +413,7 @@ export class SessionStore {
              staging_name = NULL, failure_code = NULL, updated_at = ?
          WHERE id = ? AND status = 'importing'`,
       )
-      .run(
-        input.sha256,
-        input.sizeBytes,
-        input.mediaType,
-        updatedAt,
-        id,
-      );
+      .run(input.sha256, input.sizeBytes, input.mediaType, updatedAt, id);
     if (result.changes !== 1) {
       throw this.attachmentTransitionError(id, "importing");
     }
@@ -439,17 +452,13 @@ export class SessionStore {
   ): AttachmentAssetRecord | undefined {
     const row = this.database
       .prepare(
-        `SELECT * FROM attachment_asset WHERE id = ?${
-          options.includeDeleted ? "" : " AND status != 'deleted'"
-        }`,
+        `SELECT * FROM attachment_asset WHERE id = ?${options.includeDeleted ? "" : " AND status != 'deleted'"}`,
       )
       .get(id) as Record<string, unknown> | undefined;
     return row ? attachmentAssetFromRow(row) : undefined;
   }
 
-  findReadyAttachmentByHash(
-    sha256: string,
-  ): AttachmentAssetRecord | undefined {
+  findReadyAttachmentByHash(sha256: string): AttachmentAssetRecord | undefined {
     const row = this.database
       .prepare(
         `SELECT * FROM attachment_asset
@@ -463,11 +472,11 @@ export class SessionStore {
   listAttachments(
     options: { includeDeleted?: boolean } = {},
   ): AttachmentAssetRecord[] {
-    const rows = this.database.prepare(
-      `SELECT * FROM attachment_asset${
-        options.includeDeleted ? "" : " WHERE status != 'deleted'"
-      } ORDER BY created_at, id`,
-    ).all() as Array<Record<string, unknown>>;
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM attachment_asset${options.includeDeleted ? "" : " WHERE status != 'deleted'"} ORDER BY created_at, id`,
+      )
+      .all() as Array<Record<string, unknown>>;
     return rows.map(attachmentAssetFromRow);
   }
 
@@ -485,22 +494,36 @@ export class SessionStore {
     }));
   }
 
-  createAttachmentRepresentation(input: CreateAttachmentRepresentationInput): AttachmentRepresentationRecord {
+  createAttachmentRepresentation(
+    input: CreateAttachmentRepresentationInput,
+  ): AttachmentRepresentationRecord {
     const createdAt = input.createdAt ?? now();
-    this.database.prepare(
-      `INSERT INTO attachment_representation (
+    this.database
+      .prepare(
+        `INSERT INTO attachment_representation (
         id, asset_id, kind, status, processor, processor_version, cache_key,
         media_type, metadata_json, created_at, updated_at
       ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, '{}', ?, ?)`,
-    ).run(
-      input.id, input.assetId, input.kind, input.processor,
-      input.processorVersion, input.cacheKey, input.mediaType, createdAt, createdAt,
-    );
+      )
+      .run(
+        input.id,
+        input.assetId,
+        input.kind,
+        input.processor,
+        input.processorVersion,
+        input.cacheKey,
+        input.mediaType,
+        createdAt,
+        createdAt,
+      );
     return this.getAttachmentRepresentation(input.id)!;
   }
 
-  getAttachmentRepresentation(id: string): AttachmentRepresentationRecord | undefined {
-    const row = this.database.prepare("SELECT * FROM attachment_representation WHERE id = ?")
+  getAttachmentRepresentation(
+    id: string,
+  ): AttachmentRepresentationRecord | undefined {
+    const row = this.database
+      .prepare("SELECT * FROM attachment_representation WHERE id = ?")
       .get(id) as Record<string, unknown> | undefined;
     return row ? attachmentRepresentationFromRow(row) : undefined;
   }
@@ -508,11 +531,13 @@ export class SessionStore {
   listAttachmentRepresentations(
     assetId: string,
   ): AttachmentRepresentationRecord[] {
-    const rows = this.database.prepare(
-      `SELECT * FROM attachment_representation
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM attachment_representation
        WHERE asset_id = ?
        ORDER BY created_at, id`,
-    ).all(assetId) as Array<Record<string, unknown>>;
+      )
+      .all(assetId) as Array<Record<string, unknown>>;
     return rows.map(attachmentRepresentationFromRow);
   }
 
@@ -522,45 +547,48 @@ export class SessionStore {
     validateLeaseWindow(input.timestamp, input.expiresAt);
     const assetIds = [...new Set(input.assetIds)];
     if (assetIds.length === 0) return [];
-    return this.database.transaction(() => {
-      for (const assetId of assetIds) {
-        const asset = this.getAttachment(assetId);
-        if (asset?.status !== "ready") {
-          throw new AttachmentError(
-            "attachment_not_ready",
-            `Attachment is not ready: ${assetId}`,
-          );
+    return this.database
+      .transaction(() => {
+        for (const assetId of assetIds) {
+          const asset = this.getAttachment(assetId);
+          if (asset?.status !== "ready") {
+            throw new AttachmentError(
+              "attachment_not_ready",
+              `Attachment is not ready: ${assetId}`,
+            );
+          }
         }
-      }
-      const upsert = this.database.prepare(
-        `INSERT INTO attachment_lease (
+        const upsert = this.database.prepare(
+          `INSERT INTO attachment_lease (
           id, asset_id, owner_kind, owner_id, created_at, renewed_at, expires_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(asset_id, owner_kind, owner_id) DO UPDATE SET
           renewed_at = excluded.renewed_at,
           expires_at = excluded.expires_at`,
-      );
-      const find = this.database.prepare(
-        `SELECT * FROM attachment_lease
-         WHERE asset_id = ? AND owner_kind = ? AND owner_id = ?`,
-      );
-      return assetIds.map((assetId) => {
-        upsert.run(
-          randomUUID(),
-          assetId,
-          input.ownerKind,
-          input.ownerId,
-          input.timestamp,
-          input.timestamp,
-          input.expiresAt,
         );
-        return attachmentLeaseFromRow(find.get(
-          assetId,
-          input.ownerKind,
-          input.ownerId,
-        ) as Record<string, unknown>);
-      });
-    }).immediate();
+        const find = this.database.prepare(
+          `SELECT * FROM attachment_lease
+         WHERE asset_id = ? AND owner_kind = ? AND owner_id = ?`,
+        );
+        return assetIds.map((assetId) => {
+          upsert.run(
+            randomUUID(),
+            assetId,
+            input.ownerKind,
+            input.ownerId,
+            input.timestamp,
+            input.timestamp,
+            input.expiresAt,
+          );
+          return attachmentLeaseFromRow(
+            find.get(assetId, input.ownerKind, input.ownerId) as Record<
+              string,
+              unknown
+            >,
+          );
+        });
+      })
+      .immediate();
   }
 
   renewAttachmentLeases(input: {
@@ -570,70 +598,84 @@ export class SessionStore {
     expiresAt: number;
   }): number {
     validateLeaseWindow(input.timestamp, input.expiresAt);
-    return this.database.prepare(
-      `UPDATE attachment_lease
+    return this.database
+      .prepare(
+        `UPDATE attachment_lease
        SET renewed_at = ?, expires_at = ?
        WHERE owner_kind = ? AND owner_id = ? AND expires_at > ?`,
-    ).run(
-      input.timestamp,
-      input.expiresAt,
-      input.ownerKind,
-      input.ownerId,
-      input.timestamp,
-    ).changes;
+      )
+      .run(
+        input.timestamp,
+        input.expiresAt,
+        input.ownerKind,
+        input.ownerId,
+        input.timestamp,
+      ).changes;
   }
 
   releaseAttachmentLeases(
     ownerKind: AttachmentLeaseRecord["ownerKind"],
     ownerId: string,
   ): number {
-    return this.database.prepare(
-      "DELETE FROM attachment_lease WHERE owner_kind = ? AND owner_id = ?",
-    ).run(ownerKind, ownerId).changes;
+    return this.database
+      .prepare(
+        "DELETE FROM attachment_lease WHERE owner_kind = ? AND owner_id = ?",
+      )
+      .run(ownerKind, ownerId).changes;
   }
 
   listActiveAttachmentLeases(timestamp = now()): AttachmentLeaseRecord[] {
-    const rows = this.database.prepare(
-      `SELECT * FROM attachment_lease
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM attachment_lease
        WHERE expires_at > ?
        ORDER BY asset_id, owner_kind, owner_id`,
-    ).all(timestamp) as Array<Record<string, unknown>>;
+      )
+      .all(timestamp) as Array<Record<string, unknown>>;
     return rows.map(attachmentLeaseFromRow);
   }
 
   listAttachmentLeases(): AttachmentLeaseRecord[] {
-    const rows = this.database.prepare(
-      `SELECT * FROM attachment_lease
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM attachment_lease
        ORDER BY asset_id, owner_kind, owner_id`,
-    ).all() as Array<Record<string, unknown>>;
+      )
+      .all() as Array<Record<string, unknown>>;
     return rows.map(attachmentLeaseFromRow);
   }
 
   deleteExpiredAttachmentLeases(timestamp = now()): number {
-    return this.database.prepare(
-      "DELETE FROM attachment_lease WHERE expires_at <= ?",
-    ).run(timestamp).changes;
+    return this.database
+      .prepare("DELETE FROM attachment_lease WHERE expires_at <= ?")
+      .run(timestamp).changes;
   }
 
   purgeDeletedAttachment(
     assetId: string,
     timestamp = now(),
   ): AttachmentAssetRecord | undefined {
-    return this.database.transaction(() => {
-      const asset = this.getAttachment(assetId, { includeDeleted: true });
-      if (asset?.status !== "deleted") return undefined;
-      const references = this.countAttachmentReferences(assetId);
-      if (references > 0) return undefined;
-      const activeLease = this.database.prepare(
-        `SELECT 1 FROM attachment_lease
+    return this.database
+      .transaction(() => {
+        const asset = this.getAttachment(assetId, { includeDeleted: true });
+        if (asset?.status !== "deleted") return undefined;
+        const references = this.countAttachmentReferences(assetId);
+        if (references > 0) return undefined;
+        const activeLease = this.database
+          .prepare(
+            `SELECT 1 FROM attachment_lease
          WHERE asset_id = ? AND expires_at > ? LIMIT 1`,
-      ).get(assetId, timestamp);
-      if (activeLease) return undefined;
-      const result = this.database.prepare(
-        "DELETE FROM attachment_asset WHERE id = ? AND status = 'deleted'",
-      ).run(assetId);
-      return result.changes === 1 ? asset : undefined;
-    }).immediate();
+          )
+          .get(assetId, timestamp);
+        if (activeLease) return undefined;
+        const result = this.database
+          .prepare(
+            "DELETE FROM attachment_asset WHERE id = ? AND status = 'deleted'",
+          )
+          .run(assetId);
+        return result.changes === 1 ? asset : undefined;
+      })
+      .immediate();
   }
 
   findCompletedAttachmentRepresentation(
@@ -641,35 +683,51 @@ export class SessionStore {
     kind: AttachmentRepresentationKind,
     cacheKey: string,
   ): AttachmentRepresentationRecord | undefined {
-    const row = this.database.prepare(
-      `SELECT * FROM attachment_representation
+    const row = this.database
+      .prepare(
+        `SELECT * FROM attachment_representation
        WHERE asset_id = ? AND kind = ? AND cache_key = ? AND status = 'completed'
        LIMIT 1`,
-    ).get(assetId, kind, cacheKey) as Record<string, unknown> | undefined;
+      )
+      .get(assetId, kind, cacheKey) as Record<string, unknown> | undefined;
     return row ? attachmentRepresentationFromRow(row) : undefined;
   }
 
   completeAttachmentRepresentation(
     id: string,
-    input: { text: string; metadata: Record<string, unknown>; updatedAt?: number },
+    input: {
+      text: string;
+      metadata: Record<string, unknown>;
+      updatedAt?: number;
+    },
   ): AttachmentRepresentationRecord {
     const updatedAt = input.updatedAt ?? now();
-    const result = this.database.prepare(
-      `UPDATE attachment_representation
+    const result = this.database
+      .prepare(
+        `UPDATE attachment_representation
        SET status = 'completed', text = ?, error = NULL, metadata_json = ?, updated_at = ?
        WHERE id = ? AND status = 'running'`,
-    ).run(input.text, encode(input.metadata), updatedAt, id);
-    if (result.changes !== 1) throw new Error(`Attachment representation ${id} is not running`);
+      )
+      .run(input.text, encode(input.metadata), updatedAt, id);
+    if (result.changes !== 1)
+      throw new Error(`Attachment representation ${id} is not running`);
     return this.getAttachmentRepresentation(id)!;
   }
 
-  failAttachmentRepresentation(id: string, error: string, updatedAt = now()): AttachmentRepresentationRecord {
-    const result = this.database.prepare(
-      `UPDATE attachment_representation
+  failAttachmentRepresentation(
+    id: string,
+    error: string,
+    updatedAt = now(),
+  ): AttachmentRepresentationRecord {
+    const result = this.database
+      .prepare(
+        `UPDATE attachment_representation
        SET status = 'failed', error = ?, updated_at = ?
        WHERE id = ? AND status = 'running'`,
-    ).run(error, updatedAt, id);
-    if (result.changes !== 1) throw new Error(`Attachment representation ${id} is not running`);
+      )
+      .run(error, updatedAt, id);
+    if (result.changes !== 1)
+      throw new Error(`Attachment representation ${id} is not running`);
     return this.getAttachmentRepresentation(id)!;
   }
 
@@ -698,15 +756,17 @@ export class SessionStore {
     id: string,
     deletedAt = now(),
   ): AttachmentAssetRecord {
-    return this.database.transaction(() => {
-      if (this.countAttachmentReferences(id) > 0) {
-        throw new AttachmentError(
-          "attachment_in_use",
-          "attachment is referenced by a conversation",
-        );
-      }
-      return this.softDeleteAttachment(id, deletedAt);
-    }).immediate();
+    return this.database
+      .transaction(() => {
+        if (this.countAttachmentReferences(id) > 0) {
+          throw new AttachmentError(
+            "attachment_in_use",
+            "attachment is referenced by a conversation",
+          );
+        }
+        return this.softDeleteAttachment(id, deletedAt);
+      })
+      .immediate();
   }
 
   private attachmentTransitionError(id: string, expected: string): Error {
@@ -715,7 +775,9 @@ export class SessionStore {
       ? new Error(
           `Attachment ${id} expected ${expected} status, received ${current.status}`,
         )
-      : new Error(`Attachment ${id} was not found; expected ${expected} status`);
+      : new Error(
+          `Attachment ${id} was not found; expected ${expected} status`,
+        );
   }
 
   private attachmentForTransition(
@@ -1321,9 +1383,7 @@ export class SessionStore {
     for (const [id, input] of Object.entries(this.state.inputs)) {
       if (sessionIdSet.has(input.sessionId)) delete this.state.inputs[id];
     }
-    for (const [id, reference] of Object.entries(
-      this.state.inputAttachments,
-    )) {
+    for (const [id, reference] of Object.entries(this.state.inputAttachments)) {
       if (sessionIdSet.has(reference.sessionId)) {
         delete this.state.inputAttachments[id];
       }
@@ -1949,41 +2009,51 @@ export class SessionStore {
     result: unknown;
     timestamp?: number;
   }): void {
-    this.database.prepare(
-      `INSERT INTO retention_audit (id, policy, result_json, created_at)
+    this.database
+      .prepare(
+        `INSERT INTO retention_audit (id, policy, result_json, created_at)
        VALUES (?, ?, ?, ?)`,
-    ).run(
-      randomUUID(),
-      input.policy,
-      JSON.stringify(input.result),
-      input.timestamp ?? now(),
-    );
+      )
+      .run(
+        randomUUID(),
+        input.policy,
+        JSON.stringify(input.result),
+        input.timestamp ?? now(),
+      );
   }
 
-  latestRetentionAudit(policy: string): {
-    id: string;
-    policy: string;
-    result: unknown;
-    createdAt: number;
-  } | undefined {
-    const row = this.database.prepare(
-      `SELECT id, policy, result_json, created_at
+  latestRetentionAudit(policy: string):
+    | {
+        id: string;
+        policy: string;
+        result: unknown;
+        createdAt: number;
+      }
+    | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, policy, result_json, created_at
        FROM retention_audit
        WHERE policy = ?
        ORDER BY created_at DESC, rowid DESC
        LIMIT 1`,
-    ).get(policy) as {
-      id: string;
-      policy: string;
-      result_json: string;
-      created_at: number;
-    } | undefined;
-    return row ? {
-      id: row.id,
-      policy: row.policy,
-      result: JSON.parse(row.result_json) as unknown,
-      createdAt: row.created_at,
-    } : undefined;
+      )
+      .get(policy) as
+      | {
+          id: string;
+          policy: string;
+          result_json: string;
+          created_at: number;
+        }
+      | undefined;
+    return row
+      ? {
+          id: row.id,
+          policy: row.policy,
+          result: JSON.parse(row.result_json) as unknown,
+          createdAt: row.created_at,
+        }
+      : undefined;
   }
 
   claimWorkflowRun(
@@ -2271,10 +2341,13 @@ export class SessionStore {
       );
     }
     return this.transaction(() => {
-      const admitted = this.admitPrompt({
-        ...input.prompt,
-        delivery: "queue",
-      }, options);
+      const admitted = this.admitPrompt(
+        {
+          ...input.prompt,
+          delivery: "queue",
+        },
+        options,
+      );
       const existingRun = this.findOwningRunByInput(admitted.id);
       if (existingRun) return { input: admitted, run: existingRun };
       const run = this.createRun({
@@ -2361,7 +2434,9 @@ export class SessionStore {
         sourceMessage.sessionId !== input.sessionId ||
         sourceMessage.role !== "user"
       ) {
-        throw new Error("The edit source must be a user message in the session");
+        throw new Error(
+          "The edit source must be a user message in the session",
+        );
       }
       const sourceInput = sourceMessage.inputId
         ? this.state.inputs[sourceMessage.inputId]
@@ -2375,13 +2450,17 @@ export class SessionStore {
           message.sessionId === input.sessionId &&
           message.seq >= sourceMessage.seq,
       );
-      const removedMessageIds = new Set(removedMessages.map((message) => message.id));
+      const removedMessageIds = new Set(
+        removedMessages.map((message) => message.id),
+      );
       const removedInputs = Object.values(this.state.inputs).filter(
         (candidate) =>
           candidate.sessionId === input.sessionId &&
           candidate.seq >= sourceInput.seq,
       );
-      const removedInputIds = new Set(removedInputs.map((candidate) => candidate.id));
+      const removedInputIds = new Set(
+        removedInputs.map((candidate) => candidate.id),
+      );
       const removedRuns = Object.values(this.state.runs).filter(
         (run) =>
           run.sessionId === input.sessionId &&
@@ -2402,7 +2481,9 @@ export class SessionStore {
         this.mutations.messages.delete(message.id);
         this.mutations.deletedMessages.add(message.id);
       }
-      for (const [id, reference] of Object.entries(this.state.inputAttachments)) {
+      for (const [id, reference] of Object.entries(
+        this.state.inputAttachments,
+      )) {
         if (!removedInputIds.has(reference.inputId)) continue;
         delete this.state.inputAttachments[id];
         this.mutations.inputAttachments.delete(id);
@@ -2522,30 +2603,43 @@ export class SessionStore {
             type: part.type,
             status: part.status,
             ...(part.text !== undefined ? { text: part.text } : {}),
-            ...(part.toolUseId !== undefined ? { toolUseId: part.toolUseId } : {}),
+            ...(part.toolUseId !== undefined
+              ? { toolUseId: part.toolUseId }
+              : {}),
             ...(part.toolName !== undefined ? { toolName: part.toolName } : {}),
             ...(part.input !== undefined ? { input: part.input } : {}),
             ...(part.output !== undefined ? { output: part.output } : {}),
             ...(part.isError !== undefined ? { isError: part.isError } : {}),
             ...(part.assetId !== undefined ? { assetId: part.assetId } : {}),
             ...(part.intent !== undefined ? { intent: part.intent } : {}),
-            ...(part.displayName !== undefined ? { displayName: part.displayName } : {}),
-            ...(part.mediaType !== undefined ? { mediaType: part.mediaType } : {}),
-            ...(part.sizeBytes !== undefined ? { sizeBytes: part.sizeBytes } : {}),
+            ...(part.displayName !== undefined
+              ? { displayName: part.displayName }
+              : {}),
+            ...(part.mediaType !== undefined
+              ? { mediaType: part.mediaType }
+              : {}),
+            ...(part.sizeBytes !== undefined
+              ? { sizeBytes: part.sizeBytes }
+              : {}),
             ...(part.kind !== undefined ? { kind: part.kind } : {}),
             ...(part.representationId !== undefined
               ? { representationId: part.representationId }
               : {}),
-            ...(part.processor !== undefined ? { processor: part.processor } : {}),
+            ...(part.processor !== undefined
+              ? { processor: part.processor }
+              : {}),
             ...(part.transformationError !== undefined
               ? { transformationError: part.transformationError }
               : {}),
-            metadata: sourceReferenceId && attachmentReferenceIdMap.has(sourceReferenceId)
-              ? {
-                  ...part.metadata,
-                  inputAttachmentId: attachmentReferenceIdMap.get(sourceReferenceId),
-                }
-              : part.metadata,
+            metadata:
+              sourceReferenceId &&
+              attachmentReferenceIdMap.has(sourceReferenceId)
+                ? {
+                    ...part.metadata,
+                    inputAttachmentId:
+                      attachmentReferenceIdMap.get(sourceReferenceId),
+                  }
+                : part.metadata,
           });
         }
       }
@@ -2581,13 +2675,16 @@ export class SessionStore {
     );
   }
 
-  listSessionInputAttachments(sessionId: string): SessionInputAttachmentRecord[] {
+  listSessionInputAttachments(
+    sessionId: string,
+  ): SessionInputAttachmentRecord[] {
     assertSession(this.state, sessionId);
     return clone(
       Object.values(this.state.inputAttachments)
         .filter((reference) => reference.sessionId === sessionId)
-        .sort((left, right) =>
-          left.createdAt - right.createdAt || left.seq - right.seq,
+        .sort(
+          (left, right) =>
+            left.createdAt - right.createdAt || left.seq - right.seq,
         ),
     );
   }
@@ -2735,7 +2832,9 @@ export class SessionStore {
           ...(partInput.assetId !== undefined
             ? { assetId: partInput.assetId }
             : {}),
-          ...(partInput.intent !== undefined ? { intent: partInput.intent } : {}),
+          ...(partInput.intent !== undefined
+            ? { intent: partInput.intent }
+            : {}),
           ...(partInput.displayName !== undefined
             ? { displayName: partInput.displayName }
             : {}),
@@ -3153,12 +3252,23 @@ export class SessionStore {
     const id = input.id ?? randomUUID();
     const timestamp = now();
     try {
-      this.database.prepare(`
+      this.database
+        .prepare(
+          `
         INSERT INTO session_goal (
           id, session_id, objective, revision, status, max_auto_turns,
           auto_turns_used, no_progress_count, evidence_json, created_at, updated_at
         ) VALUES (?, ?, ?, 0, 'active', ?, 0, 0, '[]', ?, ?)
-      `).run(id, input.sessionId, input.objective, input.maxAutoTurns, timestamp, timestamp);
+      `,
+        )
+        .run(
+          id,
+          input.sessionId,
+          input.objective,
+          input.maxAutoTurns,
+          timestamp,
+          timestamp,
+        );
     } catch (error) {
       if (String(error).includes("session_goal_session_open_unique")) {
         throw new Error(`Session already has an open goal: ${input.sessionId}`);
@@ -3166,12 +3276,18 @@ export class SessionStore {
       throw error;
     }
     const goal = this.getGoal(id)!;
-    this.appendEvent({ type: "session.goal.created", sessionId: input.sessionId, payload: { goal } });
+    this.appendEvent({
+      type: "session.goal.created",
+      sessionId: input.sessionId,
+      payload: { goal },
+    });
     return goal;
   }
 
   getGoalRequest(requestId: string): SessionGoalRequestRecord | undefined {
-    const row = this.database.prepare(`SELECT * FROM session_goal_request WHERE request_id = ?`).get(requestId) as Record<string, unknown> | undefined;
+    const row = this.database
+      .prepare(`SELECT * FROM session_goal_request WHERE request_id = ?`)
+      .get(requestId) as Record<string, unknown> | undefined;
     if (!row) return undefined;
     return {
       requestId: String(row.request_id),
@@ -3179,122 +3295,259 @@ export class SessionStore {
       fingerprint: String(row.fingerprint),
       status: String(row.status) as SessionGoalRequestRecord["status"],
       ...(typeof row.goal_id === "string" ? { goalId: row.goal_id } : {}),
-      ...(typeof row.result_json === "string" ? { result: JSON.parse(row.result_json) as Record<string, unknown> } : {}),
+      ...(typeof row.result_json === "string"
+        ? { result: JSON.parse(row.result_json) as Record<string, unknown> }
+        : {}),
       ...(typeof row.error === "string" ? { error: row.error } : {}),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
     };
   }
 
-  beginGoalRequest(input: { requestId: string; sessionId: string; fingerprint: string }): SessionGoalRequestRecord {
+  beginGoalRequest(input: {
+    requestId: string;
+    sessionId: string;
+    fingerprint: string;
+  }): SessionGoalRequestRecord {
     this.assertCurrentOwner();
     const existing = this.getGoalRequest(input.requestId);
     if (existing) {
-      if (existing.sessionId !== input.sessionId || existing.fingerprint !== input.fingerprint) throw new Error("session_goal_request_conflict");
+      if (
+        existing.sessionId !== input.sessionId ||
+        existing.fingerprint !== input.fingerprint
+      )
+        throw new Error("session_goal_request_conflict");
       return existing;
     }
     const timestamp = now();
-    this.database.prepare(`INSERT INTO session_goal_request (request_id, session_id, fingerprint, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)`)
-      .run(input.requestId, input.sessionId, input.fingerprint, timestamp, timestamp);
+    this.database
+      .prepare(
+        `INSERT INTO session_goal_request (request_id, session_id, fingerprint, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(
+        input.requestId,
+        input.sessionId,
+        input.fingerprint,
+        timestamp,
+        timestamp,
+      );
     return this.getGoalRequest(input.requestId)!;
   }
 
-  settleGoalRequest(requestId: string, input: { status: "pending" | "completed" | "failed"; goalId?: string; result?: Record<string, unknown>; error?: string }): SessionGoalRequestRecord {
+  settleGoalRequest(
+    requestId: string,
+    input: {
+      status: "pending" | "completed" | "failed";
+      goalId?: string;
+      result?: Record<string, unknown>;
+      error?: string;
+    },
+  ): SessionGoalRequestRecord {
     this.assertCurrentOwner();
     const timestamp = now();
-    const result = this.database.prepare(`UPDATE session_goal_request SET status = ?, goal_id = ?, result_json = ?, error = ?, updated_at = ? WHERE request_id = ?`)
-      .run(input.status, input.goalId ?? null, input.result ? JSON.stringify(input.result) : null, input.error ?? null, timestamp, requestId);
-    if (result.changes !== 1) throw new Error(`Session goal request not found: ${requestId}`);
+    const result = this.database
+      .prepare(
+        `UPDATE session_goal_request SET status = ?, goal_id = ?, result_json = ?, error = ?, updated_at = ? WHERE request_id = ?`,
+      )
+      .run(
+        input.status,
+        input.goalId ?? null,
+        input.result ? JSON.stringify(input.result) : null,
+        input.error ?? null,
+        timestamp,
+        requestId,
+      );
+    if (result.changes !== 1)
+      throw new Error(`Session goal request not found: ${requestId}`);
     return this.getGoalRequest(requestId)!;
   }
 
-  recordGoalAssessment(input: { goalId: string; revision: number; runId: string; assessment: Record<string, unknown> }): void {
+  recordGoalAssessment(input: {
+    goalId: string;
+    revision: number;
+    runId: string;
+    assessment: Record<string, unknown>;
+  }): void {
     this.assertCurrentOwner();
-    this.database.prepare(`
+    this.database
+      .prepare(
+        `
       INSERT INTO session_goal_assessment (id, goal_id, revision, run_id, assessment_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(goal_id, revision, run_id) DO UPDATE SET assessment_json = excluded.assessment_json
-    `).run(randomUUID(), input.goalId, input.revision, input.runId, JSON.stringify(input.assessment), now());
+    `,
+      )
+      .run(
+        randomUUID(),
+        input.goalId,
+        input.revision,
+        input.runId,
+        JSON.stringify(input.assessment),
+        now(),
+      );
   }
 
   goalEvidenceSignatures(goalId: string): string[] {
-    const rows = this.database.prepare(`SELECT assessment_json FROM session_goal_assessment WHERE goal_id = ?`).all(goalId) as { assessment_json: string }[];
+    const rows = this.database
+      .prepare(
+        `SELECT assessment_json FROM session_goal_assessment WHERE goal_id = ?`,
+      )
+      .all(goalId) as { assessment_json: string }[];
     return rows.flatMap((row) => {
-      const value = JSON.parse(row.assessment_json) as { verifiedSignatures?: string[] };
+      const value = JSON.parse(row.assessment_json) as {
+        verifiedSignatures?: string[];
+      };
       return value.verifiedSignatures ?? [];
     });
   }
 
-  recordGoalContinuation(input: { goalId: string; revision: number; previousRunId: string; inputId: string; runId: string }): boolean {
+  recordGoalContinuation(input: {
+    goalId: string;
+    revision: number;
+    previousRunId: string;
+    inputId: string;
+    runId: string;
+  }): boolean {
     this.assertCurrentOwner();
     const timestamp = now();
-    const result = this.database.prepare(`
+    const result = this.database
+      .prepare(
+        `
       INSERT OR IGNORE INTO session_goal_continuation
         (id, goal_id, revision, previous_run_id, input_id, run_id, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-    `).run(randomUUID(), input.goalId, input.revision, input.previousRunId, input.inputId, input.runId, timestamp, timestamp);
+    `,
+      )
+      .run(
+        randomUUID(),
+        input.goalId,
+        input.revision,
+        input.previousRunId,
+        input.inputId,
+        input.runId,
+        timestamp,
+        timestamp,
+      );
     return result.changes === 1;
   }
 
   pauseActiveGoalsOnStartup(): number {
     this.assertCurrentOwner();
     return this.transaction(() => {
-      const rows = this.database.prepare(`SELECT id FROM session_goal WHERE status = 'active'`).all() as { id: string }[];
+      const rows = this.database
+        .prepare(`SELECT id FROM session_goal WHERE status = 'active'`)
+        .all() as { id: string }[];
       for (const { id } of rows) {
         const goal = this.getGoal(id)!;
-        this.updateGoal(id, { expectedRevision: goal.revision, status: "paused", currentRunId: null, reason: "应用重启后需要手动继续" });
+        this.updateGoal(id, {
+          expectedRevision: goal.revision,
+          status: "paused",
+          currentRunId: null,
+          reason: "应用重启后需要手动继续",
+        });
       }
-      this.database.prepare(`UPDATE session_goal_continuation SET status = 'cancelled', updated_at = ? WHERE status = 'pending'`).run(now());
+      this.database
+        .prepare(
+          `UPDATE session_goal_continuation SET status = 'cancelled', updated_at = ? WHERE status = 'pending'`,
+        )
+        .run(now());
       return rows.length;
     });
   }
 
-  markGoalContinuation(runId: string, status: "dispatched" | "cancelled"): void {
+  markGoalContinuation(
+    runId: string,
+    status: "dispatched" | "cancelled",
+  ): void {
     this.assertCurrentOwner();
-    this.database.prepare(`UPDATE session_goal_continuation SET status = ?, updated_at = ? WHERE run_id = ?`).run(status, now(), runId);
+    this.database
+      .prepare(
+        `UPDATE session_goal_continuation SET status = ?, updated_at = ? WHERE run_id = ?`,
+      )
+      .run(status, now(), runId);
   }
 
   finishGoalRun(runId: string): void {
     this.assertCurrentOwner();
-    const row = this.database.prepare(`SELECT id FROM session_goal WHERE current_run_id = ?`).get(runId) as { id: string } | undefined;
+    const row = this.database
+      .prepare(`SELECT id FROM session_goal WHERE current_run_id = ?`)
+      .get(runId) as { id: string } | undefined;
     if (!row) return;
-    this.database.prepare(`UPDATE session_goal SET current_run_id = NULL, updated_at = ? WHERE id = ?`).run(now(), row.id);
+    this.database
+      .prepare(
+        `UPDATE session_goal SET current_run_id = NULL, updated_at = ? WHERE id = ?`,
+      )
+      .run(now(), row.id);
     const goal = this.getGoal(row.id)!;
-    this.appendEvent({ type: "session.goal.updated", sessionId: goal.sessionId, payload: { goal } });
+    this.appendEvent({
+      type: "session.goal.updated",
+      sessionId: goal.sessionId,
+      payload: { goal },
+    });
   }
 
-  startGoalRun(goalId: string, revision: number, runId: string, automatic: boolean): boolean {
+  startGoalRun(
+    goalId: string,
+    revision: number,
+    runId: string,
+    automatic: boolean,
+  ): boolean {
     this.assertCurrentOwner();
     return this.transaction(() => {
       const goal = this.getGoal(goalId);
-      if (!goal || goal.status !== "active" || goal.revision !== revision) return false;
+      if (!goal || goal.status !== "active" || goal.revision !== revision)
+        return false;
       const run = this.getRun(runId);
-      if (!run || run.sessionId !== goal.sessionId || (run.status !== "pending" && run.status !== "running")) return false;
+      if (
+        !run ||
+        run.sessionId !== goal.sessionId ||
+        (run.status !== "pending" && run.status !== "running")
+      )
+        return false;
       if (goal.currentRunId === runId) return true;
       if (automatic && goal.autoTurnsUsed >= goal.maxAutoTurns) {
-        this.updateGoal(goalId, { expectedRevision: revision, status: "paused", reason: "目标自动续跑额度已用完", currentRunId: null });
+        this.updateGoal(goalId, {
+          expectedRevision: revision,
+          status: "paused",
+          reason: "目标自动续跑额度已用完",
+          currentRunId: null,
+        });
         return false;
       }
       // Starting a run changes accounting, not the objective revision the run is bound to.
-      this.database.prepare(`UPDATE session_goal SET current_run_id = ?, auto_turns_used = auto_turns_used + ?, updated_at = ? WHERE id = ? AND revision = ?`).run(runId, automatic ? 1 : 0, now(), goalId, revision);
-      this.appendEvent({ type: "session.goal.updated", sessionId: goal.sessionId, payload: { goal: this.getGoal(goalId)! } });
+      this.database
+        .prepare(
+          `UPDATE session_goal SET current_run_id = ?, auto_turns_used = auto_turns_used + ?, updated_at = ? WHERE id = ? AND revision = ?`,
+        )
+        .run(runId, automatic ? 1 : 0, now(), goalId, revision);
+      this.appendEvent({
+        type: "session.goal.updated",
+        sessionId: goal.sessionId,
+        payload: { goal: this.getGoal(goalId)! },
+      });
       return true;
     });
   }
 
   getGoal(id: string): SessionGoal | undefined {
-    const row = this.database.prepare(`SELECT * FROM session_goal WHERE id = ?`).get(id);
+    const row = this.database
+      .prepare(`SELECT * FROM session_goal WHERE id = ?`)
+      .get(id);
     return row ? sessionGoalFromRow(row as Record<string, unknown>) : undefined;
   }
 
   getCurrentGoal(sessionId: string): SessionGoal | undefined {
-    const row = this.database.prepare(`
+    const row = this.database
+      .prepare(
+        `
       SELECT * FROM session_goal
       WHERE session_id = ?
       ORDER BY CASE WHEN status IN ('active','waiting_user','blocked','paused') THEN 0 ELSE 1 END,
                updated_at DESC
       LIMIT 1
-    `).get(sessionId);
+    `,
+      )
+      .get(sessionId);
     return row ? sessionGoalFromRow(row as Record<string, unknown>) : undefined;
   }
 
@@ -3302,7 +3555,8 @@ export class SessionStore {
     this.assertCurrentOwner();
     const current = this.getGoal(id);
     if (!current) throw new Error(`Session goal not found: ${id}`);
-    if (current.revision !== input.expectedRevision) throw new Error("session_goal_revision_conflict");
+    if (current.revision !== input.expectedRevision)
+      throw new Error("session_goal_revision_conflict");
     const nextRevision = current.revision + 1;
     const timestamp = now();
     const next = {
@@ -3311,25 +3565,58 @@ export class SessionStore {
       maxAutoTurns: input.maxAutoTurns ?? current.maxAutoTurns,
       autoTurnsUsed: input.autoTurnsUsed ?? current.autoTurnsUsed,
       noProgressCount: input.noProgressCount ?? current.noProgressCount,
-      currentRunId: input.currentRunId === undefined ? current.currentRunId : input.currentRunId ?? undefined,
-      reason: input.reason === undefined ? current.reason : input.reason ?? undefined,
-      wait: input.wait === undefined ? current.wait : input.wait ?? undefined,
+      blockerKey:
+        input.blockerKey === undefined
+          ? current.blockerKey
+          : (input.blockerKey ?? undefined),
+      currentRunId:
+        input.currentRunId === undefined
+          ? current.currentRunId
+          : (input.currentRunId ?? undefined),
+      reason:
+        input.reason === undefined
+          ? current.reason
+          : (input.reason ?? undefined),
+      wait: input.wait === undefined ? current.wait : (input.wait ?? undefined),
       evidence: input.evidence ?? current.evidence,
+      assessment:
+        input.assessment === undefined
+          ? current.assessment
+          : (input.assessment ?? undefined),
     };
-    const result = this.database.prepare(`
+    const result = this.database
+      .prepare(
+        `
       UPDATE session_goal SET objective = ?, revision = ?, status = ?, max_auto_turns = ?,
-        auto_turns_used = ?, no_progress_count = ?, current_run_id = ?, reason = ?,
-        wait_json = ?, evidence_json = ?, updated_at = ?
+        auto_turns_used = ?, no_progress_count = ?, blocker_key = ?, current_run_id = ?, reason = ?,
+        wait_json = ?, evidence_json = ?, last_assessment_json = ?, updated_at = ?
       WHERE id = ? AND revision = ?
-    `).run(
-      next.objective, nextRevision, next.status, next.maxAutoTurns, next.autoTurnsUsed,
-      next.noProgressCount, next.currentRunId ?? null, next.reason ?? null,
-      next.wait ? JSON.stringify(next.wait) : null, JSON.stringify(next.evidence),
-      timestamp, id, input.expectedRevision,
-    );
+    `,
+      )
+      .run(
+        next.objective,
+        nextRevision,
+        next.status,
+        next.maxAutoTurns,
+        next.autoTurnsUsed,
+        next.noProgressCount,
+        next.blockerKey ?? null,
+        next.currentRunId ?? null,
+        next.reason ?? null,
+        next.wait ? JSON.stringify(next.wait) : null,
+        JSON.stringify(next.evidence),
+        next.assessment ? JSON.stringify(next.assessment) : null,
+        timestamp,
+        id,
+        input.expectedRevision,
+      );
     if (result.changes !== 1) throw new Error("session_goal_revision_conflict");
     const goal = this.getGoal(id)!;
-    this.appendEvent({ type: "session.goal.updated", sessionId: goal.sessionId, payload: { goal } });
+    this.appendEvent({
+      type: "session.goal.updated",
+      sessionId: goal.sessionId,
+      payload: { goal },
+    });
     return goal;
   }
 
@@ -4231,9 +4518,7 @@ export class SessionStore {
       state.inputs[input.id] = input;
     }
     for (const row of this.database
-      .prepare(
-        "SELECT * FROM session_input_attachment ORDER BY input_id, seq",
-      )
+      .prepare("SELECT * FROM session_input_attachment ORDER BY input_id, seq")
       .all() as Array<Record<string, unknown>>) {
       const reference: SessionInputAttachmentRecord = {
         id: row.id as string,
@@ -4288,13 +4573,22 @@ export class SessionStore {
         ...(row.is_error !== null ? { isError: Boolean(row.is_error) } : {}),
         ...(row.asset_id ? { assetId: row.asset_id as string } : {}),
         ...(row.attachment_intent
-          ? { intent: row.attachment_intent as SessionMessagePartRecord["intent"] }
+          ? {
+              intent:
+                row.attachment_intent as SessionMessagePartRecord["intent"],
+            }
           : {}),
-        ...(row.display_name ? { displayName: row.display_name as string } : {}),
+        ...(row.display_name
+          ? { displayName: row.display_name as string }
+          : {}),
         ...(row.media_type ? { mediaType: row.media_type as string } : {}),
-        ...(row.size_bytes !== null ? { sizeBytes: row.size_bytes as number } : {}),
+        ...(row.size_bytes !== null
+          ? { sizeBytes: row.size_bytes as number }
+          : {}),
         ...(row.transformation_kind
-          ? { kind: row.transformation_kind as SessionMessagePartRecord["kind"] }
+          ? {
+              kind: row.transformation_kind as SessionMessagePartRecord["kind"],
+            }
           : {}),
         ...(row.representation_id
           ? { representationId: row.representation_id as string }
@@ -4508,9 +4802,13 @@ export class SessionStore {
       "DELETE FROM session_run_attempt WHERE id = ?",
     );
     for (const id of this.mutations.deletedAttempts) deleteAttempt.run(id);
-    const deleteRun = this.database.prepare("DELETE FROM session_run WHERE id = ?");
+    const deleteRun = this.database.prepare(
+      "DELETE FROM session_run WHERE id = ?",
+    );
     for (const id of this.mutations.deletedRuns) deleteRun.run(id);
-    const deleteInput = this.database.prepare("DELETE FROM session_input WHERE id = ?");
+    const deleteInput = this.database.prepare(
+      "DELETE FROM session_input WHERE id = ?",
+    );
     for (const id of this.mutations.deletedInputs) deleteInput.run(id);
 
     const upsertSession = this.database.prepare(`
@@ -4833,14 +5131,19 @@ export class SessionStore {
   }
 }
 
-function normalizeInputItems(input: StoreAdmitPromptInput): SessionUserInputItem[] {
-  if (input.items !== undefined) return normalizeSessionUserInputItems(input.items);
+function normalizeInputItems(
+  input: StoreAdmitPromptInput,
+): SessionUserInputItem[] {
+  if (input.items !== undefined)
+    return normalizeSessionUserInputItems(input.items);
   return normalizeSessionUserInputItems(
     input.content === undefined ? [] : [{ type: "text", text: input.content }],
   );
 }
 
-function hydrateInput(row: Record<string, unknown>): Pick<SessionInputRecord, "items" | "content"> {
+function hydrateInput(
+  row: Record<string, unknown>,
+): Pick<SessionInputRecord, "items" | "content"> {
   if (row.items_json === null || row.items_json === undefined) {
     throw new LegacySessionInputError();
   }
@@ -4897,7 +5200,9 @@ function attachmentAssetFromRow(
   });
 }
 
-function attachmentRepresentationFromRow(row: Record<string, unknown>): AttachmentRepresentationRecord {
+function attachmentRepresentationFromRow(
+  row: Record<string, unknown>,
+): AttachmentRepresentationRecord {
   return {
     id: String(row.id),
     assetId: String(row.asset_id),
@@ -4907,15 +5212,21 @@ function attachmentRepresentationFromRow(row: Record<string, unknown>): Attachme
     processorVersion: String(row.processor_version),
     cacheKey: String(row.cache_key),
     mediaType: String(row.media_type),
-    ...(row.text !== null && row.text !== undefined ? { text: String(row.text) } : {}),
-    ...(row.error !== null && row.error !== undefined ? { error: String(row.error) } : {}),
+    ...(row.text !== null && row.text !== undefined
+      ? { text: String(row.text) }
+      : {}),
+    ...(row.error !== null && row.error !== undefined
+      ? { error: String(row.error) }
+      : {}),
     metadata: decode(String(row.metadata_json)),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
 }
 
-function attachmentLeaseFromRow(row: Record<string, unknown>): AttachmentLeaseRecord {
+function attachmentLeaseFromRow(
+  row: Record<string, unknown>,
+): AttachmentLeaseRecord {
   return {
     id: String(row.id),
     assetId: String(row.asset_id),

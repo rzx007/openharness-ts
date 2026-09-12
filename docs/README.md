@@ -132,6 +132,7 @@
 - [Product Surface Integration](./product-surface-integration.md)：各种上层产品共同使用 Application 的规则。
 - [输入框能力需求](./composer-capabilities-requirements.md)：`@`、`+`、Slash、Skill、附件与上下文选择的当前契约。
 - [会话目标设计](./session-goals-design.md)：目标输入、持久状态、自动续跑、验收与恢复规则。
+- [Goal 实现复盘](./session-goals-retrospective.md)：Codex 开源实现对照、当前缺口与调整顺序。
 - [TUI Flow](./tui-flow.md)：TUI 怎样连接 daemon 和渲染运行状态。
 - [Desktop Agent Message Rendering](./desktop-agent-message-rendering.md)：Desktop 消息和文件变更展示。
 - [Desktop Terminal PTY](./desktop-terminal-pty-design.md)：Desktop 终端、PTY、IPC 和 Native/WSL 环境跟随。

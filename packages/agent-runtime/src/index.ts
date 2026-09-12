@@ -1,7 +1,4 @@
-export {
-  AgentChildBudgetExceededError,
-  AgentRunNotAcceptingInputError,
-} from "@openharness/core";
+export { AgentChildBudgetExceededError, AgentRunNotAcceptingInputError } from "@openharness/core";
 export {
   AgentOperationConflictError,
   type AgentCompactResult,
@@ -12,13 +9,8 @@ export {
   type OpenHarnessAgentState,
   type OpenHarnessAgentSubmitOptions,
 } from "./agent.js";
-export {
-  createDefaultNodeAgent,
-} from "./default-agent.js";
-export {
-  createCompactContextProvider,
-  type CompactContextSources,
-} from "./compact-context.js";
+export { createDefaultNodeAgent } from "./default-agent.js";
+export { createCompactContextProvider, type CompactContextSources } from "./compact-context.js";
 export type {
   AgentCapabilityOverrides,
   AgentEffectOverrides,
@@ -47,15 +39,10 @@ export {
   type AgentKernelRuntimeContext,
 } from "./kernel.js";
 export type { AgentRememberResult } from "./memory-runtime.js";
-export {
-  createRememberTool,
-  type RememberToolOptions,
-} from "./remember-tool.js";
-export type {
-  OpenHarnessAgentExtension,
-  OpenHarnessExtensionContext,
-} from "./extensions.js";
+export { createRememberTool, type RememberToolOptions } from "./remember-tool.js";
+export type { OpenHarnessAgentExtension, OpenHarnessExtensionContext } from "./extensions.js";
 export { discoverOpenHarnessExtensions } from "./extensions.js";
+export { createGoalRunContribution, type GoalRunBinding } from "./goal-extension.js";
 export {
   activateNativePluginTools,
   type NativeToolActivationResult,
@@ -70,10 +57,7 @@ export {
   getNativeToolRuntimeSnapshot,
   type NativeToolRuntimeSnapshot,
 } from "./native-tools/status.js";
-export type {
-  AgentChildEnvironmentLease,
-  AgentChildEnvironmentProvider,
-} from "./child-agent.js";
+export type { AgentChildEnvironmentLease, AgentChildEnvironmentProvider } from "./child-agent.js";
 export {
   buildChildAgentWorktreeSlug,
   computeChildAgentWorktreeBaseDir,

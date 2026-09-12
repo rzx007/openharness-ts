@@ -42,10 +42,7 @@ export type {
   ToolExecutionSpec,
 } from "./types/tools";
 
-export type {
-  StreamingMessageClient,
-  StreamMessageParams,
-} from "./types/client";
+export type { StreamingMessageClient, StreamMessageParams } from "./types/client";
 
 export type {
   PermissionMode,
@@ -114,6 +111,8 @@ export type {
   AgentEventSource,
   AgentEventSubscription,
   AgentExecutionContext,
+  AgentRunContribution,
+  AgentRunToolContribution,
   AgentInputReceipt,
   AgentPermissionDecision,
   AgentPermissionRequest,
@@ -146,11 +145,7 @@ export {
 } from "./agent-session";
 
 export { QueryEngine, MaxTurnsExceeded } from "./engine/query-engine";
-export {
-  ToolRegistry,
-  ToolRegistrationError,
-  resolveToolExecution,
-} from "./engine/tool-registry";
+export { ToolRegistry, ToolRegistrationError, resolveToolExecution } from "./engine/tool-registry";
 export { RuntimeBuilder } from "./engine/runtime-builder";
 export {
   CompactService,

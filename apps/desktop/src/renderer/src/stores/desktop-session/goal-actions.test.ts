@@ -122,22 +122,37 @@ describe("goal actions", () => {
     expect(selectDraftAttachments(useDesktopSessionStore.getState(), scope)).toEqual([])
   })
 
+  it("shows the maintenance operation while preserving the goal draft", async () => {
+    const scope = NEW_CONVERSATION_SCOPE
+    draft(scope, "目标正文", [attachment()])
+    useDesktopSessionStore.getState().setGoalMode(scope, true)
+    vi.mocked(window.desktop.sessions.createGoal).mockRejectedValueOnce(
+      new Error("OpenHarnessApiError: Daemon operation is blocked by maintenance: 压缩上下文")
+    )
+    await useDesktopSessionStore.getState().submitGoal(scope)
+    expect(useDesktopSessionStore.getState().goalComposersByScope[scope]?.error).toBe(
+      "正在压缩上下文，请稍后重试。"
+    )
+    expect(
+      selectComposerDocumentText(selectDraftDocument(useDesktopSessionStore.getState(), scope))
+    ).toBe("目标正文")
+    expect(selectDraftAttachments(useDesktopSessionStore.getState(), scope)).toHaveLength(1)
+  })
+
   it("preserves ordinary attachment upload results while goal editing uses a separate draft", async () => {
     const scope = sessionComposerScope("s1")
     draft(scope, "原草稿", [{ ...attachment(), status: "uploading", assetId: undefined }])
     useDesktopSessionStore.setState({ goalsBySession: { s1: goal() } })
     useDesktopSessionStore.getState().setGoalMode(scope, true)
-    useDesktopSessionStore
-      .getState()
-      .applyAttachmentUploadEvent({
-        type: "success",
-        draftId: "a1",
-        taskId: "a1",
-        assetId: "uploaded",
-        displayName: "a1.png",
-        mediaType: "image/png",
-        sizeBytes: 1,
-      })
+    useDesktopSessionStore.getState().applyAttachmentUploadEvent({
+      type: "success",
+      draftId: "a1",
+      taskId: "a1",
+      assetId: "uploaded",
+      displayName: "a1.png",
+      mediaType: "image/png",
+      sizeBytes: 1,
+    })
     await useDesktopSessionStore.getState().submitGoal(scope)
     expect(window.desktop.sessions.updateGoal).toHaveBeenCalledWith(
       expect.objectContaining({ attachments: [] })

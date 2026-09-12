@@ -27,12 +27,7 @@ import {
   type DaemonOperationGate,
   type DaemonOperationLease,
 } from "../control/daemon-operation-gate.js";
-import {
-  isRecord,
-  jsonEqual,
-  runtimeSessionMetadataChanged,
-  withoutTraceId,
-} from "../support.js";
+import { isRecord, jsonEqual, runtimeSessionMetadataChanged, withoutTraceId } from "../support.js";
 import { SessionApplicationError } from "./session-application-error.js";
 import type { ContextUsageCache } from "../context-usage-cache.js";
 import { materializeSessionInput } from "./session-input-materializer.js";
@@ -75,7 +70,10 @@ export interface EditLatestPromptCommand {
   traceId: string;
 }
 
-function inputItems(input: { items?: readonly SessionUserInputItem[]; content?: string }): SessionUserInputItem[] {
+function inputItems(input: {
+  items?: readonly SessionUserInputItem[];
+  content?: string;
+}): SessionUserInputItem[] {
   return input.items ? [...input.items] : [{ type: "text", text: input.content ?? "" }];
 }
 
@@ -117,8 +115,7 @@ export class SessionApplicationService {
     this.assertReady();
     const before = this.context.events.checkpoint();
     const runtime = readRuntimeMetadata(input.metadata ?? {});
-    const model =
-      typeof runtime.model === "string" ? runtime.model : input.model;
+    const model = typeof runtime.model === "string" ? runtime.model : input.model;
     const session = this.context.store.createSession({
       ...input,
       model,
@@ -146,27 +143,20 @@ export class SessionApplicationService {
   ): ReturnType<SessionStore["createSession"]> {
     this.assertReady();
     const source = this.context.store.getSession(sessionId);
-    if (!source)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!source) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
 
     const before = this.context.events.checkpoint();
     const metadata = forkSessionMetadata(source.metadata, {
       sourceSessionId: source.id,
-      ...(input.beforeMessageId
-        ? { beforeMessageId: input.beforeMessageId }
-        : {}),
+      ...(input.beforeMessageId ? { beforeMessageId: input.beforeMessageId } : {}),
       ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
     });
     let fork;
     try {
       fork = this.context.store.forkSessionWithHistory({
         sourceSessionId: source.id,
-        ...(input.beforeMessageId
-          ? { beforeMessageId: input.beforeMessageId }
-          : {}),
-        ...(input.afterMessageId
-          ? { afterMessageId: input.afterMessageId }
-          : {}),
+        ...(input.beforeMessageId ? { beforeMessageId: input.beforeMessageId } : {}),
+        ...(input.afterMessageId ? { afterMessageId: input.afterMessageId } : {}),
         session: {
           parentId: source.id,
           ...(source.projectId ? { projectId: source.projectId } : {}),
@@ -194,16 +184,12 @@ export class SessionApplicationService {
   ): Promise<AdmitPromptResult> {
     this.assertReady();
     const session = this.context.store.getSession(sessionId);
-    if (!session)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const items = inputItems(input);
     const content = sessionUserInputText(items).trim();
     const attachments = normalizePromptAttachments(input.attachments);
     if (!content && attachments.length === 0) {
-      throw new SessionApplicationError(
-        400,
-        "content or attachments are required",
-      );
+      throw new SessionApplicationError(400, "content or attachments are required");
     }
     const lease = this.enterSessionOperation(session);
     try {
@@ -227,10 +213,7 @@ export class SessionApplicationService {
           edit?.kind !== "latest_prompt" ||
           edit.sourceMessageId !== input.sourceMessageId
         ) {
-          throw new SessionApplicationError(
-            409,
-            `Prompt id is already used: ${input.id}`,
-          );
+          throw new SessionApplicationError(409, `Prompt id is already used: ${input.id}`);
         }
         return promptResult(this.context.store, existingInput);
       }
@@ -241,19 +224,13 @@ export class SessionApplicationService {
         );
       }
       if (this.context.liveChildren.has(sessionId)) {
-        throw new SessionApplicationError(
-          409,
-          "Editing a live child session is not supported",
-        );
+        throw new SessionApplicationError(409, "Editing a live child session is not supported");
       }
       const latestUserMessage = [...this.context.store.listMessages(sessionId)]
         .reverse()
         .find((message) => message.role === "user");
       if (!latestUserMessage) {
-        throw new SessionApplicationError(
-          409,
-          "No user prompt is available to edit",
-        );
+        throw new SessionApplicationError(409, "No user prompt is available to edit");
       }
       if (latestUserMessage.id !== input.sourceMessageId) {
         throw new SessionApplicationError(
@@ -262,23 +239,19 @@ export class SessionApplicationService {
         );
       }
       await this.context.agentPool.close(sessionId);
-      return this.context.runEngine.replaceLatestPrompt(
-        sessionId,
-        latestUserMessage.id,
-        {
-          id: input.id,
-          items,
-          attachments,
-          traceId: input.traceId,
-          metadata: {
-            ...(input.metadata ?? {}),
-            edit: {
-              kind: "latest_prompt",
-              sourceMessageId: latestUserMessage.id,
-            },
+      return this.context.runEngine.replaceLatestPrompt(sessionId, latestUserMessage.id, {
+        id: input.id,
+        items,
+        attachments,
+        traceId: input.traceId,
+        metadata: {
+          ...(input.metadata ?? {}),
+          edit: {
+            kind: "latest_prompt",
+            sourceMessageId: latestUserMessage.id,
           },
         },
-      );
+      });
     } finally {
       lease.release();
     }
@@ -298,8 +271,7 @@ export class SessionApplicationService {
       metadata && runtimeSessionMetadataChanged(existing.metadata, metadata);
     const runtimeConfigurationChanged = Boolean(
       runtimeMetadataChanged ||
-      (input.agent !== undefined &&
-        (input.agent ?? undefined) !== existing.agent),
+      (input.agent !== undefined && (input.agent ?? undefined) !== existing.agent),
     );
     const lease = runtimeConfigurationChanged
       ? this.acquireSessionMutation(
@@ -342,8 +314,7 @@ export class SessionApplicationService {
         });
         return updated;
       });
-      if (runtimeConfigurationChanged)
-        await this.context.agentPool.close(sessionId);
+      if (runtimeConfigurationChanged) await this.context.agentPool.close(sessionId);
       if (modelChanged) {
         this.context.contextUsageCache?.invalidate(sessionId);
       }
@@ -359,17 +330,17 @@ export class SessionApplicationService {
     const session = this.context.store.getSession(sessionId);
     if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const lease = this.enterSessionOperation(session);
-    try { return await work(); } finally { lease.release(); }
+    try {
+      return await work();
+    } finally {
+      lease.release();
+    }
   }
 
-  async admitPrompt(
-    sessionId: string,
-    input: AdmitPromptInput,
-  ): Promise<AdmitPromptResult> {
+  async admitPrompt(sessionId: string, input: AdmitPromptInput): Promise<AdmitPromptResult> {
     this.assertReady();
     const session = this.context.store.getSession(sessionId);
-    if (!session)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const lease = this.enterSessionOperation(session);
     try {
       return await this.admitPromptWork(sessionId, input);
@@ -395,26 +366,25 @@ export class SessionApplicationService {
           existing.sessionId !== sessionId ||
           !jsonEqual(inputItems(existing), inputItems(input)) ||
           existing.delivery !== delivery ||
-          !jsonEqual(
-            withoutTraceId(existing.metadata),
-            withoutTraceId(metadata),
-          )
+          !jsonEqual(withoutTraceId(existing.metadata), withoutTraceId(metadata))
         ) {
-          throw new SessionApplicationError(
-            409,
-            `Prompt id is already used: ${input.id}`,
-          );
+          throw new SessionApplicationError(409, `Prompt id is already used: ${input.id}`);
         }
         return promptResult(this.context.store, existing);
       }
     }
     const items = inputItems(input);
     let liveContent = sessionUserInputText(items);
-    if (!hasAttachments && this.context.liveChildren.has(sessionId) && items.some((item) => item.type === "skill" || item.type === "context")) {
+    if (
+      !hasAttachments &&
+      this.context.liveChildren.has(sessionId) &&
+      items.some((item) => item.type === "skill" || item.type === "context")
+    ) {
       const session = this.context.store.getSession(sessionId);
       if (!session) throw new Error(`Session not found: ${sessionId}`);
       const hasExplicitSkills = items.some((item) => item.type === "skill");
-      if (hasExplicitSkills && !this.context.resolveSkillCatalog) throw new Error("session_input_skill_catalog_unavailable");
+      if (hasExplicitSkills && !this.context.resolveSkillCatalog)
+        throw new Error("session_input_skill_catalog_unavailable");
       liveContent = materializeSessionInput(
         items,
         hasExplicitSkills
@@ -466,16 +436,11 @@ export class SessionApplicationService {
       return {
         input: admitted,
         run,
-        ...(run.status === "running"
-          ? { queue_state: "running" as const }
-          : {}),
+        ...(run.status === "running" ? { queue_state: "running" as const } : {}),
         ...(run.status === "pending" ? { queue_state: "queued" as const } : {}),
       };
     }
-    return await this.context.runEngine.admitPromptAndMaybeRun(
-      sessionId,
-      input,
-    );
+    return await this.context.runEngine.admitPromptAndMaybeRun(sessionId, input);
   }
 
   async resumeRun(
@@ -485,8 +450,7 @@ export class SessionApplicationService {
   ): Promise<ResumeSessionRunResult> {
     this.assertReady();
     const session = this.context.store.getSession(sessionId);
-    if (!session)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const lease = this.enterSessionOperation(session);
     try {
       const sourceRun = this.context.store.getRun(runId);
@@ -494,28 +458,17 @@ export class SessionApplicationService {
         throw new SessionApplicationError(404, "Interrupted run not found");
       }
       if (sourceRun.status !== "interrupted") {
-        throw new SessionApplicationError(
-          409,
-          "Only interrupted runs can be resumed",
-        );
+        throw new SessionApplicationError(409, "Only interrupted runs can be resumed");
       }
       if (!sourceRun.inputId) {
-        throw new SessionApplicationError(
-          409,
-          "This interrupted run has no prompt to replay",
-        );
+        throw new SessionApplicationError(409, "This interrupted run has no prompt to replay");
       }
       const sourceInput = this.context.store.getInput(sourceRun.inputId);
       if (!sourceInput || sourceInput.sessionId !== sessionId) {
-        throw new SessionApplicationError(
-          409,
-          "The original prompt is unavailable",
-        );
+        throw new SessionApplicationError(409, "The original prompt is unavailable");
       }
 
-      const requestedRecovery = input.id
-        ? this.context.store.getRun(input.id)
-        : undefined;
+      const requestedRecovery = input.id ? this.context.store.getRun(input.id) : undefined;
       if (requestedRecovery) {
         const requestedLink = isRecord(requestedRecovery.metadata.recovery)
           ? requestedRecovery.metadata.recovery
@@ -543,12 +496,8 @@ export class SessionApplicationService {
         return {
           input: sourceInput,
           run: existingRecovery,
-          ...(existingRecovery.status === "running"
-            ? { queue_state: "running" as const }
-            : {}),
-          ...(existingRecovery.status === "pending"
-            ? { queue_state: "queued" as const }
-            : {}),
+          ...(existingRecovery.status === "running" ? { queue_state: "running" as const } : {}),
+          ...(existingRecovery.status === "pending" ? { queue_state: "queued" as const } : {}),
           source_run: sourceRun,
         };
       }
@@ -559,10 +508,7 @@ export class SessionApplicationService {
         );
       }
       if (!this.hasRuntime) {
-        throw new SessionApplicationError(
-          409,
-          "Session runtime is unavailable",
-        );
+        throw new SessionApplicationError(409, "Session runtime is unavailable");
       }
       if (this.context.runEngine.hasWork(sessionId)) {
         throw new SessionApplicationError(
@@ -604,33 +550,25 @@ export class SessionApplicationService {
     expectedRunId?: string,
   ): Promise<ReturnType<SessionRunEngine["interruptSession"]>> {
     this.assertReady();
-    if (expectedRunId)
-      return this.context.runEngine.interruptRun(sessionId, expectedRunId);
+    if (expectedRunId) return this.context.runEngine.interruptRun(sessionId, expectedRunId);
     const lane = this.context.runEngine.interruptSession(sessionId);
     const targets = [sessionId, ...this.descendantSessionIds(sessionId)];
     const childInterrupted = (
       await Promise.all(
-        targets.map((target) =>
-          this.context.liveChildren.interrupt(target, "Session interrupted"),
-        ),
+        targets.map((target) => this.context.liveChildren.interrupt(target, "Session interrupted")),
       )
     ).some(Boolean);
-    return childInterrupted && !lane.interrupted
-      ? { ...lane, interrupted: true }
-      : lane;
+    return childInterrupted && !lane.interrupted ? { ...lane, interrupted: true } : lane;
   }
 
   async promoteQueuedPrompt(
     sessionId: string,
     inputId: string,
     command: PromoteQueuedPromptCommand,
-  ): Promise<
-    NonNullable<Awaited<ReturnType<SessionRunEngine["promoteQueuedRun"]>>>
-  > {
+  ): Promise<NonNullable<Awaited<ReturnType<SessionRunEngine["promoteQueuedRun"]>>>> {
     this.assertReady();
     const session = this.context.store.getSession(sessionId);
-    if (!session)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const lease = this.enterSessionOperation(session);
     try {
       const input = this.context.store.getInput(inputId);
@@ -645,10 +583,7 @@ export class SessionApplicationService {
         );
       }
       if (!queuedRun || queuedRun.sessionId !== sessionId) {
-        throw new SessionApplicationError(
-          404,
-          `Session run not found: ${command.queuedRunId}`,
-        );
+        throw new SessionApplicationError(404, `Session run not found: ${command.queuedRunId}`);
       }
       const promotion = isRecord(queuedRun.metadata.promotion)
         ? queuedRun.metadata.promotion
@@ -678,10 +613,7 @@ export class SessionApplicationService {
           "The selected prompt is no longer waiting in the queue",
         );
       }
-      if (
-        this.context.runEngine.activeRunId(sessionId) !==
-        command.expectedActiveRunId
-      ) {
+      if (this.context.runEngine.activeRunId(sessionId) !== command.expectedActiveRunId) {
         throw new SessionApplicationError(
           409,
           "The active run changed before the prompt could be promoted",
@@ -715,8 +647,7 @@ export class SessionApplicationService {
   }> {
     this.assertReady();
     const session = this.context.store.getSession(sessionId);
-    if (!session)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!session) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const lease = this.enterSessionOperation(session);
     try {
       const input = this.context.store.getInput(inputId);
@@ -725,18 +656,12 @@ export class SessionApplicationService {
         throw new SessionApplicationError(404, `Prompt not found: ${inputId}`);
       }
       if (!run || run.sessionId !== sessionId || run.inputId !== inputId) {
-        throw new SessionApplicationError(
-          404,
-          `Queued run not found: ${command.queuedRunId}`,
-        );
+        throw new SessionApplicationError(404, `Queued run not found: ${command.queuedRunId}`);
       }
       const cancellation = isRecord(run.metadata.cancellation)
         ? run.metadata.cancellation
         : undefined;
-      if (
-        run.status === "interrupted" &&
-        cancellation?.kind === "user_cancelled_pending"
-      ) {
+      if (run.status === "interrupted" && cancellation?.kind === "user_cancelled_pending") {
         return { input, run };
       }
       if (run.status !== "pending") {
@@ -773,34 +698,22 @@ export class SessionApplicationService {
     }
   }
 
-  async awaitRun(
-    sessionId: string,
-    runId: string,
-  ): Promise<AwaitSessionRunResult> {
+  async awaitRun(sessionId: string, runId: string): Promise<AwaitSessionRunResult> {
     return await this.context.runEngine.awaitRun(sessionId, runId);
   }
 
   async closeRuntime(sessionId: string): Promise<void> {
     this.assertReady();
-    if (
-      await this.context.liveChildren.interrupt(
-        sessionId,
-        "Session runtime closed",
-      )
-    )
-      return;
+    if (await this.context.liveChildren.interrupt(sessionId, "Session runtime closed")) return;
     await this.context.agentPool.close(sessionId);
   }
 
-  async archiveSessionTree(
-    sessionId: string,
-  ): Promise<ReturnType<SessionStore["archiveSession"]>> {
+  async archiveSessionTree(sessionId: string): Promise<ReturnType<SessionStore["archiveSession"]>> {
     this.assertReady();
     const existing = this.archivePromises.get(sessionId);
     if (existing) return await existing;
     const archive = this.archiveSessionTreeWork(sessionId).finally(() => {
-      if (this.archivePromises.get(sessionId) === archive)
-        this.archivePromises.delete(sessionId);
+      if (this.archivePromises.get(sessionId) === archive) this.archivePromises.delete(sessionId);
     });
     this.archivePromises.set(sessionId, archive);
     return await archive;
@@ -809,26 +722,23 @@ export class SessionApplicationService {
   async deleteSessionTree(sessionId: string): Promise<string[]> {
     this.assertReady();
     const current = this.context.store.getSession(sessionId);
-    if (!current)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!current) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     const lease = this.context.operationGate.tryEnterBarrier(
       { kind: "session", sessionId, cwd: current.cwd },
       () => true,
+      {
+        operationId: randomUUID(),
+        operationName: "删除会话",
+        startedAt: Date.now(),
+      },
     );
-    if (!lease)
-      throw new SessionApplicationError(
-        409,
-        "Session is busy with another operation",
-      );
+    if (!lease) throw new SessionApplicationError(409, "Session is busy with another operation");
     try {
       if (current.status !== "archived" && current.status !== "closing") {
         this.context.store.beginArchive(sessionId);
       }
       const interrupted = this.context.runEngine.interruptSession(sessionId);
-      const liveInterrupt = this.context.liveChildren.interrupt(
-        sessionId,
-        "Session deleted",
-      );
+      const liveInterrupt = this.context.liveChildren.interrupt(sessionId, "Session deleted");
       const children = this.context.store.listChildSessions(sessionId, {
         includeArchived: true,
       });
@@ -836,16 +746,12 @@ export class SessionApplicationService {
       const deletedChildIds: string[] = [];
       for (const child of children)
         deletedChildIds.push(...(await this.deleteSessionTree(child.id)));
-      const interruptedRunIds = [
-        interrupted.activeRunId,
-        ...interrupted.queuedRunIds,
-      ].filter((runId): runId is string => !!runId);
+      const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds].filter(
+        (runId): runId is string => !!runId,
+      );
       await this.context.runEngine.waitForRuns(interruptedRunIds);
       await this.context.agentPool.close(sessionId);
-      return [
-        ...deletedChildIds,
-        ...this.context.store.deleteSessionTree(sessionId),
-      ];
+      return [...deletedChildIds, ...this.context.store.deleteSessionTree(sessionId)];
     } finally {
       lease.release();
     }
@@ -856,36 +762,32 @@ export class SessionApplicationService {
   ): Promise<ReturnType<SessionStore["archiveSession"]>> {
     const beforeClosing = this.context.events.checkpoint();
     const current = this.context.store.getSession(sessionId);
-    if (!current)
-      throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
+    if (!current) throw new SessionApplicationError(404, `Session not found: ${sessionId}`);
     if (current.status === "archived") return current;
     const lease = this.context.operationGate.tryEnterBarrier(
       { kind: "session", sessionId, cwd: current.cwd },
       () => true,
+      {
+        operationId: randomUUID(),
+        operationName: "归档会话",
+        startedAt: Date.now(),
+      },
     );
-    if (!lease)
-      throw new SessionApplicationError(
-        409,
-        "Session is busy with another operation",
-      );
+    if (!lease) throw new SessionApplicationError(409, "Session is busy with another operation");
     try {
       this.context.store.beginArchive(sessionId);
       this.context.events.publishSince(beforeClosing);
       const interrupted = this.context.runEngine.interruptSession(sessionId);
-      const liveInterrupt = this.context.liveChildren.interrupt(
-        sessionId,
-        "Session archived",
-      );
+      const liveInterrupt = this.context.liveChildren.interrupt(sessionId, "Session archived");
 
       // Closing the parent first makes the descendant snapshot stable: the
       // event projector rejects child.created for closing sessions.
       const children = this.context.store.listChildSessions(sessionId);
       await liveInterrupt;
       for (const child of children) await this.archiveSessionTree(child.id);
-      const interruptedRunIds = [
-        interrupted.activeRunId,
-        ...interrupted.queuedRunIds,
-      ].filter((runId): runId is string => !!runId);
+      const interruptedRunIds = [interrupted.activeRunId, ...interrupted.queuedRunIds].filter(
+        (runId): runId is string => !!runId,
+      );
       await this.context.runEngine.waitForRuns(interruptedRunIds);
       await this.context.agentPool.close(sessionId);
       const before = this.context.events.checkpoint();
@@ -898,10 +800,7 @@ export class SessionApplicationService {
   }
 
   private enterSessionOperation(
-    session: Pick<
-      NonNullable<ReturnType<SessionStore["getSession"]>>,
-      "id" | "cwd"
-    >,
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
   ): DaemonOperationLease {
     try {
       return this.context.operationGate.enter({
@@ -917,10 +816,7 @@ export class SessionApplicationService {
   }
 
   private acquireSessionMutation(
-    session: Pick<
-      NonNullable<ReturnType<SessionStore["getSession"]>>,
-      "id" | "cwd"
-    >,
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
     message: string,
   ): DaemonOperationLease {
     const lease = this.context.operationGate.tryEnterBarrier(
@@ -929,16 +825,18 @@ export class SessionApplicationService {
         !this.context.liveChildren.has(session.id) &&
         !this.context.runEngine.hasWork(session.id) &&
         !this.context.agentPool.hasActiveWorkForSession(session.id),
+      {
+        operationId: randomUUID(),
+        operationName: message,
+        startedAt: Date.now(),
+      },
     );
     if (!lease) throw new SessionApplicationError(409, message);
     return lease;
   }
 
   private warmWhenAdmitted(
-    session: Pick<
-      NonNullable<ReturnType<SessionStore["getSession"]>>,
-      "id" | "cwd"
-    >,
+    session: Pick<NonNullable<ReturnType<SessionStore["getSession"]>>, "id" | "cwd">,
   ): void {
     let lease: DaemonOperationLease;
     try {
@@ -1015,3 +913,4 @@ function promptResult(
     ...(run?.status === "pending" ? { queue_state: "queued" as const } : {}),
   };
 }
+import { randomUUID } from "node:crypto";

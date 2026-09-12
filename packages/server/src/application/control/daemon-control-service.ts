@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SessionStore } from "@openharness/services";
 
 import type { HookInfo } from "../settings-api.js";
@@ -45,17 +46,20 @@ export class DaemonControlService {
     const sessions = this.context.store.listSessions({ includeArchived: true });
     const runs = sessions.flatMap((session) => this.context.store.listRuns(session.id));
     const tasks = sessions.flatMap((session) => this.context.store.listSessionTasks(session.id));
-    const workflows = typeof this.context.store.listWorkflowRuns === "function"
-      ? this.context.store.listWorkflowRuns()
-      : [];
+    const workflows =
+      typeof this.context.store.listWorkflowRuns === "function"
+        ? this.context.store.listWorkflowRuns()
+        : [];
     const permissions = this.context.store.listPermissionRequests();
     const projectionSettlements = this.context.store.listProjectionSettlements();
-    const attempts = typeof this.context.store.listRunAttempts === "function"
-      ? runs.flatMap((run) => this.context.store.listRunAttempts(run.id))
-      : [];
-    const parts = typeof this.context.store.listMessageParts === "function"
-      ? sessions.flatMap((session) => this.context.store.listMessageParts(session.id))
-      : [];
+    const attempts =
+      typeof this.context.store.listRunAttempts === "function"
+        ? runs.flatMap((run) => this.context.store.listRunAttempts(run.id))
+        : [];
+    const parts =
+      typeof this.context.store.listMessageParts === "function"
+        ? sessions.flatMap((session) => this.context.store.listMessageParts(session.id))
+        : [];
     const activeRunCount = sessions.filter(
       (session) => this.context.runEngine.activeRunId(session.id) !== undefined,
     ).length;
@@ -70,8 +74,14 @@ export class DaemonControlService {
       sessions: { total: sessions.length, byStatus: countByStatus(sessions) },
       runs: { total: runs.length, byStatus: countByStatus(runs) },
       tasks: { total: tasks.length, byStatus: countByStatus(tasks) },
-      workflows: { total: workflows.length, byStatus: countByStatus(workflows) },
-      permissions: { total: permissions.length, byStatus: countByStatus(permissions) },
+      workflows: {
+        total: workflows.length,
+        byStatus: countByStatus(workflows),
+      },
+      permissions: {
+        total: permissions.length,
+        byStatus: countByStatus(permissions),
+      },
       projectionSettlements: {
         total: projectionSettlements.length,
         pending: projectionSettlements.filter(
@@ -107,15 +117,34 @@ export class DaemonControlService {
   }
 
   hasActiveRunsForCwd(cwd: string): boolean {
-    return this.context.runEngine.hasActiveRunsForCwd(cwd) || this.context.agentPool.hasActiveWorkForCwd(cwd);
+    return (
+      this.context.runEngine.hasActiveRunsForCwd(cwd) ||
+      this.context.agentPool.hasActiveWorkForCwd(cwd)
+    );
   }
 
   acquireGlobalMutation(): DaemonOperationLease | undefined {
-    return this.context.operationGate.tryEnterBarrier({ kind: "global" }, () => !this.hasAnyActiveRuns());
+    return this.context.operationGate.tryEnterBarrier(
+      { kind: "global" },
+      () => !this.hasAnyActiveRuns(),
+      {
+        operationId: randomUUID(),
+        operationName: "全局运行时维护",
+        startedAt: Date.now(),
+      },
+    );
   }
 
   acquireCwdMutation(cwd: string): DaemonOperationLease | undefined {
-    return this.context.operationGate.tryEnterBarrier({ kind: "cwd", cwd }, () => !this.hasActiveRunsForCwd(cwd));
+    return this.context.operationGate.tryEnterBarrier(
+      { kind: "cwd", cwd },
+      () => !this.hasActiveRunsForCwd(cwd),
+      {
+        operationId: randomUUID(),
+        operationName: "工作区运行时维护",
+        startedAt: Date.now(),
+      },
+    );
   }
 
   async closeAllRuntimes(): Promise<void> {
@@ -155,7 +184,10 @@ export class DaemonControlService {
   async inspectRuntimeHooks(sessionId: string): Promise<HookInfo[]> {
     const session = this.context.store.getSession(sessionId);
     if (!session) return [];
-    const lease = this.context.operationGate.enter({ sessionId, cwd: session.cwd });
+    const lease = this.context.operationGate.enter({
+      sessionId,
+      cwd: session.cwd,
+    });
     try {
       const agent = await this.context.agentPool.acquireSession(sessionId);
       return agent.inspect().hooks.map((hook) => ({ ...hook, origin: "runtime" as const }));

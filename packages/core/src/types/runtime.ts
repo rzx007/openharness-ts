@@ -1,9 +1,5 @@
 import type { StreamingMessageClient } from "./client";
-import type {
-  AgentBackgroundShellHost,
-  McpAuthHost,
-  ToolRegistry,
-} from "./tools";
+import type { AgentBackgroundShellHost, McpAuthHost, ToolRegistry } from "./tools";
 import type { PermissionChecker } from "./permissions";
 import type { HookExecutor } from "./hooks";
 import type { ContentBlock, Message } from "./messages";
@@ -66,14 +62,7 @@ export interface AgentScheduledTask extends AgentScheduledTaskInput {
 export interface AgentScheduledRun {
   id: string;
   taskId: string;
-  status:
-    | "queued"
-    | "running"
-    | "succeeded"
-    | "failed"
-    | "interrupted"
-    | "needs_attention"
-    | "skipped";
+  status: "queued" | "running" | "succeeded" | "failed" | "interrupted" | "needs_attention" | "skipped";
   summary?: string;
   error?: string;
   sessionId?: string;
@@ -106,10 +95,7 @@ export interface AgentEffectContext {
 }
 
 export interface AgentEffects {
-  requestPermission(
-    input: AgentPermissionRequest,
-    context: AgentEffectContext,
-  ): Promise<AgentPermissionDecision>;
+  requestPermission(input: AgentPermissionRequest, context: AgentEffectContext): Promise<AgentPermissionDecision>;
 }
 
 export interface AgentChildSpawnInput {
@@ -198,10 +184,7 @@ export interface AgentChildInvocation {
 export interface AgentChildController {
   hasChildAgent(invocationId: string): boolean;
   spawnChildAgent(input: AgentChildSpawnInput): Promise<AgentChildInvocation>;
-  sendChildInput(
-    invocationId: string,
-    input: AgentChildInput,
-  ): Promise<AgentInputReceipt>;
+  sendChildInput(invocationId: string, input: AgentChildInput): Promise<AgentInputReceipt>;
   interruptChildAgent(invocationId: string, reason?: string): Promise<void>;
   awaitChildAgent(invocationId: string): Promise<AgentChildResult>;
 }
@@ -254,7 +237,13 @@ export type AgentEventInput =
       type: "run.interrupted";
       data: { error: AgentSerializedError; output?: string };
     }
-  | { type: "output.text.delta"; data: { delta: string; phase?: import("./messages").AssistantMessagePhase } }
+  | {
+      type: "output.text.delta";
+      data: {
+        delta: string;
+        phase?: import("./messages").AssistantMessagePhase;
+      };
+    }
   | { type: "output.turn.completed"; data: { stopReason: string } }
   | {
       type: "tool.started";
@@ -324,17 +313,25 @@ export interface AgentEventSource {
   subscribe(listener: AgentEventListener): AgentEventSubscription;
 }
 
+export interface AgentRunToolContribution {
+  readonly definition: import("./tools").ToolDefinition;
+  readonly permission: "host-internal";
+}
+
+export interface AgentRunContribution {
+  readonly systemGuidance?: string;
+  readonly tools?: readonly AgentRunToolContribution[];
+}
+
 /** Framework-internal execution capabilities shared with tool packages. */
 export interface AgentExecutionContext {
   readonly scope: AgentRunScope;
-  /** Set by the host for this run, never inferred from prompt text. */
-  readonly goal?: { readonly goalId: string; readonly revision: number; readonly objective?: string };
+  /** Trusted, run-scoped capabilities supplied by the host. */
+  readonly contribution?: AgentRunContribution;
   readonly effects: AgentEffects;
   readonly children: AgentChildController;
   emit(event: AgentEventInput): Promise<void>;
-  takeSteeredInputs(options?: {
-    closeIfEmpty?: boolean;
-  }): Promise<AgentChildInput[]>;
+  takeSteeredInputs(options?: { closeIfEmpty?: boolean }): Promise<AgentChildInput[]>;
   closeSteering(): void;
 }
 
@@ -361,8 +358,7 @@ export interface AgentRunHandle {
 export interface AgentChildHandle {
   readonly id: string;
   readonly sessionId: string;
-  readonly state:
-    "starting" | "running" | "idle" | "suspended" | "closing" | "closed";
+  readonly state: "starting" | "running" | "idle" | "suspended" | "closing" | "closed";
   readonly result: Promise<AgentChildResult>;
   send(input: AgentChildInput): Promise<AgentInputReceipt>;
   interrupt(reason?: string): Promise<void>;
@@ -467,10 +463,7 @@ export class RuntimeBundle {
     this.queryEngine.setApiClient(newClient);
   }
 
-  addCleanup(
-    cleanup: () => Promise<void> | void,
-    cleanupSync?: () => void,
-  ): void {
+  addCleanup(cleanup: () => Promise<void> | void, cleanupSync?: () => void): void {
     this.cleanupCallbacks.push(cleanup);
     if (cleanupSync) this.syncCleanupCallbacks.push(cleanupSync);
   }
