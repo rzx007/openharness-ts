@@ -246,8 +246,8 @@ export function ComposerPicker({
                   <Box className="size-3.5" />
                 )}
               </span>
-            <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
-            <span className="min-w-0 truncate text-sm text-muted-foreground">
+            <span className="min-w-0 max-w-[42%] shrink-0 truncate text-sm font-medium">{item.label}</span>
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                 {item.description}
               </span>
               {item.sourceLabel ? (
